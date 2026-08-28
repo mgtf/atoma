@@ -282,7 +282,8 @@ describe('ProjectService — roles, IDOR and slug identity', () => {
     const created = await svc.createProject(jsonReq(payload('501')), alice) as { projectId: string };
     start.mockRejectedValue(
       new ProjectRunConfigurationError(
-        'project runs require exactly one of ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN'
+        'project runs require an anthropic credential: ANTHROPIC_API_KEY on the host, or this ' +
+          "organisation's own anthropic provider key"
       )
     );
     await expect(

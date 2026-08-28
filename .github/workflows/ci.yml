@@ -3,6 +3,8 @@ name: CI
 on:
   push:
   pull_request:
+  # The browser smoke below is MANUAL only. See its job for why.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -38,8 +40,15 @@ jobs:
     # place to read the pipeline's health. `translate` isolates locales, and
     # the commit step below runs ALWAYS: surviving blanks are reported in the
     # summary, never dropped with the runner, and a later push retries them.
-    # Only `check` failing (placeholder corruption) leaves the catalog
-    # uncommitted and turns the job red.
+    #
+    # `check` failing turns the job RED but does NOT hold the commit back —
+    # both steps are `always()`, deliberately, because a runner that dies with
+    # paid translations on its disk is the incident this pipeline exists to
+    # avoid. The comment here used to claim the opposite (2026-08-27, 2.6);
+    # what keeps the pair honest is that translate and check now share ONE
+    # blank predicate (`scripts/i18n-predicates.mjs`), so translate cannot write a
+    # value check refuses — the shape that made this job red FOREVER, since no
+    # later pass could see it to repair it.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -54,9 +63,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # invalidate-staged compares against HEAD, and translate must see the
-          # locale files as committed.
-          fetch-depth: 2
+          # FULL history, because `invalidate-range` below compares en.json
+          # against the commit this push started from — which is `HEAD^` only
+          # when the push carried exactly one commit. A depth of 2 would make
+          # every batched push silently skip the invalidation for all but its
+          # last commit, which is the failure this step exists to prevent.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v7
         with:
@@ -64,6 +76,17 @@ jobs:
           cache: npm
 
       # No npm ci: the i18n script is dependency-free (node:fs, node:child_process).
+
+      # SEMANTIC DRIFT, replayed server-side (2026-08-27, 2.7). An EN value
+      # rewritten without touching its placeholders is invisible to both steps
+      # below — they compare placeholder signatures, and a reworded sentence
+      # keeps its own. The pre-commit hook was the only guard, and it is skipped
+      # when CI=true (scripts/husky-install.mjs), bypassed by --no-verify, and
+      # absent from the GitHub web editor. Same invalidation code as the hook,
+      # different trigger: a push range instead of the index.
+      - name: Blank translations whose EN source changed meaning
+        run: node scripts/i18n.mjs invalidate-range --since=${{ github.event.before }}
+
       - name: Blank placeholder-drifted values
         run: node scripts/i18n.mjs fix-drift --apply
 
@@ -99,18 +122,55 @@ jobs:
             git commit -m "chore(i18n): auto-translate missing locale values [skip ci]"
             # A push may land on main during the ~30 min translate window;
             # rebasing onto it beats failing the job over a fast-forward race.
+            #
+            # ABORT BEFORE RETRYING (2026-08-27, 3.10): a rebase that stops on
+            # a conflict leaves the tree mid-rebase, and the next `pull
+            # --rebase` refuses outright — so attempts 2 and 3 could only fail,
+            # whatever the state of main. The abort restores a clean HEAD so a
+            # retry is a real second chance; a genuine content conflict still
+            # exhausts the loop and exits 1, which is the honest outcome.
             for attempt in 1 2 3; do
               if git -c user.name="atoma-i18n-bot" -c user.email="actions@github.com" \
                   pull --rebase --autostash origin "${{ github.ref_name }}" && \
                  git push origin "HEAD:${{ github.ref_name }}"; then
                 exit 0
               fi
+              git rebase --abort 2>/dev/null || true
               echo "push rejected (attempt $attempt); rebasing and retrying…"
               sleep $((attempt * 10))
             done
             echo "could not land the translation commit after 3 attempts" >&2
             exit 1
           fi
+
+  viz-smoke:
+    name: Browser smoke (manual)
+    # MANUAL ONLY, and best-effort. `viz:smoke` left `release:check` on
+    # 2026-08-24 because on CI's CPU rasteriser it measured 2023–3433ms per
+    # frame against ~17ms on a developer machine: it failed on its own timing
+    # rather than on the change under test, three CI-only flakes in one day.
+    # That decision stands — this job does not re-arm it. What it adds is a
+    # button: since 03de3f7 the only automatic guard on the client bundle
+    # boundary is a source scan (`tests/viz-client-bundle-boundary.test.ts`),
+    # and being able to ask for the behavioural proof from a PR page costs
+    # nothing while nobody asks (2026-08-27, 3.6).
+    #
+    # `continue-on-error` is the honest setting: a red run here is evidence to
+    # read, not a verdict, because the runner is the wrong machine to measure
+    # frame time on. The real proof stays `npm run viz:smoke` on real hardware
+    # before shipping a viz change.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - run: npm run viz:smoke
 
   worker:
     name: Fresh worker image

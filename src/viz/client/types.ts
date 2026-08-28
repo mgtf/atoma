@@ -298,6 +298,14 @@ export interface VizAccountModels {
   /** Historical closed list, kept so older clients still render chips. */
   choices: string[];
   catalog: VizLlmCatalogEntry[];
+  /**
+   * Whether the deployment declared an Ollama endpoint (OLLAMA_BASE_URL).
+   * Ollama runs on the OPERATOR's infrastructure — orgs pick its models,
+   * never its destination — so absent declaration the picker greys the
+   * family. Optional so an older server payload reads as "unknown", which
+   * renders as available rather than falsely refusing.
+   */
+  ollamaAvailable?: boolean;
 }
 
 /** One provider family the server offers for tier/model selection. */
@@ -326,6 +334,8 @@ export interface VizOrgModels {
   catalog: VizLlmCatalogEntry[];
   choices: string[];
   operatorDefaults: { l1: string; l2: string; l3: string };
+  /** See VizAccountModels.ollamaAvailable. */
+  ollamaAvailable?: boolean;
 }
 
 /**

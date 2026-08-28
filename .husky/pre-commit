@@ -3,17 +3,52 @@
 node scripts/i18n.mjs invalidate-staged || exit 1
 
 # Lint staged files only (added/copied/modified), so unstaged worktree changes
-# are never swept in. --fix then verify, and re-stage exactly what was already
-# staged to pick up fixes.
+# are never swept in.
 FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx|mjs|cjs|js)$' | grep -v '^dist/' | tr '\n' ' ')
 
 if [ -n "$FILES" ]; then
-  echo "Linting staged files…"
-  npx eslint $FILES --fix
-  RESULT=$?
-  if [ $RESULT -ne 0 ]; then
+  # PARTIALLY STAGED FILES ARE NOT OURS TO WRITE. `eslint --fix` edits the
+  # WORKTREE, and `git add <file>` then stages the whole thing — so for a file
+  # staged with `git add -p`, the hunks deliberately left out were swept into
+  # the commit anyway (2026-08-27, 2.8). That contradicted this hook's own
+  # promise and the root rule "preserve unrelated dirty-worktree changes".
+  #
+  # So the two sets are handled differently: a fully staged file is fixed and
+  # re-staged (index and worktree already agree, nothing can be swept in), and
+  # a partially staged one is only VERIFIED — never written, never staged.
+  PARTIAL=$(git diff --name-only -- $FILES | tr '\n' ' ')
+  FULL=""
+  for f in $FILES; do
+    case " $PARTIAL " in
+      *" $f "*) ;;
+      *) FULL="$FULL $f" ;;
+    esac
+  done
+
+  STATUS=0
+  if [ -n "$FULL" ]; then
+    echo "Linting staged files…"
+    npx eslint $FULL --fix || STATUS=1
+    if [ $STATUS -eq 0 ]; then
+      git add $FULL
+    fi
+  fi
+
+  if [ -n "$PARTIAL" ] && [ $STATUS -eq 0 ]; then
+    # Honest about what this proves: eslint reads the worktree, which for a
+    # partially staged file is NOT the content being committed. It is still
+    # worth running — it is the same code the author is working on — but the
+    # hook says so rather than implying it checked the commit.
+    echo "Linting partially staged files (worktree copy, not re-staged):$PARTIAL"
+    npx eslint $PARTIAL || STATUS=1
+    if [ $STATUS -ne 0 ]; then
+      echo "✗ Partially staged file(s) fail linting. The hook did not auto-fix them,"
+      echo "  because writing them would stage hunks you left out on purpose."
+    fi
+  fi
+
+  if [ $STATUS -ne 0 ]; then
     echo "✗ Linting failed. Fix the issues before committing."
     exit 1
   fi
-  git add $FILES
 fi

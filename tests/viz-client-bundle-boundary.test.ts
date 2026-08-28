@@ -26,6 +26,8 @@ import * as runUtils from '../src/viz/client/run-utils.js';
  */
 
 const CLIENT_PREFIX = join('src', 'viz', 'client') + '/';
+// The suite runs from the repository root (vitest's cwd), like the scan below.
+const REPO_ROOT = process.cwd();
 
 function sourceFiles(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
@@ -71,6 +73,31 @@ describe('the Vite bundle boundary', () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+
+  it('keeps every root module out of the dev proxy prefixes it matches by', () => {
+    // 2026-08-27, finding 3.7. The dev server proxies by PREFIX (`/api`,
+    // `/auth`, `/webhooks`), and Vite serves root modules at `/<name>.ts`, so a
+    // root file whose name starts with a proxied prefix is swallowed by the
+    // proxy and 404s in dev only — the failure `cae2bfa` fixed by renaming
+    // `api-*.ts`. Nothing mechanical stopped the next one.
+    const config = readFileSync(resolve(REPO_ROOT, 'vite.config.ts'), 'utf8');
+    const prefixes = [...config.matchAll(/'(\/[a-z]+)':\s*`http/g)].map((match) => match[1]!);
+    // The list is read from the config, not restated here: a fourth proxy
+    // entry must extend this guard by existing, not by being remembered.
+    expect(prefixes).toContain('/api');
+    expect(prefixes.length).toBeGreaterThanOrEqual(3);
+    const clientRoots = ['client', 'client-gl'].flatMap((name) => {
+      const dir = resolve(REPO_ROOT, 'src', 'viz', name);
+      return readdirSync(dir, { withFileTypes: true })
+        .filter((entry) => entry.isFile())
+        .map((entry) => `${name}/${entry.name}`);
+    });
+    const swallowed = clientRoots.filter((file) => {
+      const base = file.slice(file.indexOf('/') + 1);
+      return prefixes.some((prefix) => base.startsWith(prefix.slice(1)));
+    });
+    expect(swallowed).toEqual([]);
   });
 
   it('keeps ONE definition of the live predicates behind both import paths', () => {

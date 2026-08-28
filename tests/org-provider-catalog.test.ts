@@ -1,5 +1,10 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createSecretKey } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
+
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 import {
   decryptBoundSecret,
   encryptBoundSecret,
@@ -80,6 +85,25 @@ describe('operator encryption-key parsing', () => {
     expect(() => secretEncryptionKeyFromText('short')).toThrow(/32 bytes/);
     expect(isValidSecretKeyId('key-2026-08')).toBe(true);
     expect(isValidSecretKeyId('../escape')).toBe(false);
+  });
+
+  it('says out loud, where an operator sets it, what the passphrase form costs', () => {
+    // 2026-08-27, finding 3.4. The passphrase form is a bare SHA-256 with no
+    // stretching — a deliberate trade so a small deployment is not pushed into
+    // inventing a weak "random" string, argued in `secretCrypto.ts`. What was
+    // missing is the disclosure at the place the operator actually chooses:
+    // a dictionary passphrase plus a copy of the SQLite file unwraps every
+    // organisation's provider keys. Grep-level on purpose — the defect was an
+    // absence of prose, and nothing behavioural can observe prose.
+    const example = readFileSync(join(REPO_ROOT, '.env.example'), 'utf8');
+    // Sliced from the section heading, so the disclosure has to sit WITH the
+    // variable rather than anywhere in the file.
+    const section = example.slice(example.indexOf('Organisation BYO provider keys'));
+    expect(section).toMatch(/plain SHA-256 of the text, with no stretching/);
+    expect(section).toMatch(/dictionary against a memorable one/);
+    // And it points at the form that does not have the weakness.
+    expect(section).toMatch(/openssl rand -hex 32/);
+    expect(section).toContain('ATOMA_SECRET_ENCRYPTION_KEY');
   });
 });
 

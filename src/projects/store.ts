@@ -452,6 +452,24 @@ export function hasProjectTables(dbPath: string): boolean {
   }
 }
 
+/**
+ * `CREATE INDEX` that REPORTS its refusal instead of throwing.
+ *
+ * Every index applied at open time is a constraint imposed on rows that
+ * already exist, so "this store cannot satisfy it" is an expected answer, not
+ * an exception: a deployment whose store predates the constraint must still
+ * OPEN. The reason comes back so the caller can choose what to fall back to,
+ * and tell the operator what it fell back from.
+ */
+function createIndexOrReason(db: Database.Database, sql: string): string | null {
+  try {
+    db.exec(sql);
+    return null;
+  } catch (error) {
+    return String(error);
+  }
+}
+
 export class ProjectStore {
   private readonly db: Database.Database;
   private readonly closeOnClose: boolean;
@@ -479,7 +497,8 @@ export class ProjectStore {
       if (!publicationColumns.includes('base_sha')) {
         this.db.exec('ALTER TABLE project_publications ADD COLUMN base_sha TEXT');
       }
-      // ONE PROJECT PER REPOSITORY, per organisation. Nothing forbade two
+      // ONE PROJECT PER REPOSITORY, per organisation, COMPARED THE WAY GITHUB
+      // COMPARES IT. Nothing forbade two
       // projects naming the same repository, and since publication became
       // incremental the second one only finds out AFTER it has run and spent:
       // its first publish reads a branch this project does not own and is
@@ -490,16 +509,42 @@ export class ProjectStore {
       // Guarded: a store that already holds a duplicate pair cannot create it,
       // and failing to OPEN would be far worse than failing to enforce. The
       // operator is told, loudly, which pair to resolve.
-      try {
-        this.db.exec(
+      //
+      // FOLDED, and under a NEW NAME. The first version of this index compared
+      // BINARY, so `acme/Site` and `acme/site` were two rows here and one
+      // repository at GitHub: the collision walked straight back onto the
+      // publish path this index exists to clear (2026-08-27, 2.5). The client
+      // has always known better — `parseRepository` folds case before comparing
+      // an identity — and the alphabet GitHub allows in an owner or a
+      // repository name is ASCII, exactly what SQLite's `lower()` folds.
+      //
+      // The new name is load-bearing: `CREATE UNIQUE INDEX IF NOT EXISTS`
+      // matches by NAME, so reusing the old one would leave every migrated
+      // store on the binary index while claiming to have migrated. The binary
+      // index is dropped only AFTER the folded one exists, so no step leaves a
+      // store less protected than it opened, and a store already holding a
+      // case-variant pair — the one that needs this most — keeps the binary
+      // index and is told which pair to resolve.
+      const folded = createIndexOrReason(
+        this.db,
+        `CREATE UNIQUE INDEX IF NOT EXISTS projects_org_repository_target_ci_idx
+           ON projects(org_id, lower(repository_target_owner), lower(repository_target_name))`
+      );
+      if (folded === null) {
+        this.db.exec('DROP INDEX IF EXISTS projects_org_repository_target_idx');
+      } else {
+        const binary = createIndexOrReason(
+          this.db,
           `CREATE UNIQUE INDEX IF NOT EXISTS projects_org_repository_target_idx
              ON projects(org_id, repository_target_owner, repository_target_name)`
         );
-      } catch (error) {
         process.stderr.write(
-          `[atoma projects] cannot enforce one project per repository: ${String(error)}\n` +
-            '[atoma projects] two projects in one organisation name the same repository; ' +
-            'resolve the duplicate and reopen the store to enforce it\n'
+          `[atoma projects] cannot enforce one project per repository case-insensitively: ${folded}\n` +
+            '[atoma projects] two projects in one organisation name the same repository up to case; ' +
+            'resolve the duplicate and reopen the store to enforce it\n' +
+            (binary === null
+              ? '[atoma projects] exact duplicates are still refused meanwhile\n'
+              : `[atoma projects] exact duplicates are NOT refused either: ${binary}\n`)
         );
       }
     }
@@ -521,62 +566,90 @@ export class ProjectStore {
     const principalId = principalIdSchema.parse(input.principalId);
     const projectId = projectIdSchema.parse(input.projectId ?? randomUUID());
     const project = createProjectInputSchema.parse(input.project);
-    // THE SLUG SPEAKS FIRST: it is the project's own identity, and a caller who
-    // reused it wants to hear that, not a fact about a repository. Explicit
-    // rather than caught from a UNIQUE violation's message, because parsing a
-    // driver's prose to learn which constraint fired is the brittleness this
-    // codebase keeps removing elsewhere.
-    const slugTaken = this.db
-      .prepare('SELECT project_id FROM projects WHERE org_id = ? AND slug = ? LIMIT 1')
-      .get(orgId, project.slug) as { project_id: string } | undefined;
-    if (slugTaken) {
-      throw new ProjectStateConflict(
-        `a project with the slug ${project.slug} already exists in this organisation`
-      );
-    }
-    // Then the repository. The unique index below is the guarantee, but a raw
-    // constraint violation says nothing an operator can act on, and the whole
-    // point is to move this refusal off the publish path — where it costs a
-    // run — and onto creation, where it costs a retyped flag.
-    const taken = this.db
-      .prepare(
-        `SELECT slug FROM projects
-          WHERE org_id = ? AND repository_target_owner = ? AND repository_target_name = ?
-          LIMIT 1`
-      )
-      .get(orgId, project.repositoryTarget.owner, project.repositoryTarget.name) as
-      | { slug: string }
-      | undefined;
-    if (taken) {
-      throw new ProjectStateConflict(
-        `project ${taken.slug} already publishes to ${project.repositoryTarget.owner}/${project.repositoryTarget.name}; one repository belongs to one project`
-      );
-    }
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `INSERT INTO projects (
-           project_id, org_id, created_by_principal_id, name, slug, initial_prompt, family,
-           status, github_installation_id, repository_target_owner, repository_target_name,
-           repository_visibility, repository_status, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, 'pending', ?, ?)`
-      )
-      .run(
-        projectId,
-        orgId,
-        principalId,
-        project.name,
-        project.slug,
-        project.initialPrompt,
-        project.family,
-        project.repositoryTarget.installationId,
-        project.repositoryTarget.owner,
-        project.repositoryTarget.name,
-        project.repositoryTarget.visibility,
-        now,
-        now
-      );
-    return this.getProject(orgId, projectId)!;
+    // ONE WRITE TRANSACTION, NOT THREE STATEMENTS (2026-08-27, 3.5). Both
+    // checks below read rows the INSERT then depends on, and this store file
+    // has more than one writer: `POST /api/projects` and `projects create` are
+    // separate processes over one path. Outside a transaction the loser of that
+    // race passed both checks and met the unique index only at INSERT time, so
+    // the 409 that names the holder reached the caller as a driver's UNIQUE
+    // prose instead — and on the folded EXPRESSION index that prose names the
+    // INDEX, not the columns, which no backstop in this repo recognises.
+    // `BEGIN IMMEDIATE` (better-sqlite3's `.immediate`) takes the write lock
+    // BEFORE the first read, so the checks and the INSERT are one decision
+    // against every other writer on the machine; `busy_timeout = 5000` above
+    // makes the loser wait rather than fail.
+    const transact = this.db.transaction((): Project => {
+      // THE SLUG SPEAKS FIRST: it is the project's own identity, and a caller who
+      // reused it wants to hear that, not a fact about a repository. Explicit
+      // rather than caught from a UNIQUE violation's message, because parsing a
+      // driver's prose to learn which constraint fired is the brittleness this
+      // codebase keeps removing elsewhere.
+      const slugTaken = this.db
+        .prepare('SELECT project_id FROM projects WHERE org_id = ? AND slug = ? LIMIT 1')
+        .get(orgId, project.slug) as { project_id: string } | undefined;
+      if (slugTaken) {
+        throw new ProjectStateConflict(
+          `a project with the slug ${project.slug} already exists in this organisation`
+        );
+      }
+      // Then the repository. The unique index below is the guarantee, but a raw
+      // constraint violation says nothing an operator can act on, and the whole
+      // point is to move this refusal off the publish path — where it costs a
+      // run — and onto creation, where it costs a retyped flag.
+      //
+      // FOLDED, like the index and like GitHub: `acme/Site` and `acme/site` are
+      // one repository, and comparing them binary here is what let the second
+      // project be created and then fail permanently at its first publish.
+      const taken = this.db
+        .prepare(
+          `SELECT slug, repository_target_owner AS owner, repository_target_name AS name
+             FROM projects
+            WHERE org_id = ?
+              AND lower(repository_target_owner) = lower(?)
+              AND lower(repository_target_name) = lower(?)
+            LIMIT 1`
+        )
+        .get(orgId, project.repositoryTarget.owner, project.repositoryTarget.name) as
+        | { slug: string; owner: string; name: string }
+        | undefined;
+      if (taken) {
+        // The HOLDER's spelling, not the caller's. They differ now that the
+        // comparison folds, and echoing the caller's back would name a
+        // repository the holding project does not actually publish to.
+        throw new ProjectStateConflict(
+          `project ${taken.slug} already publishes to ${taken.owner}/${taken.name}; one repository belongs to one project`
+        );
+      }
+      const now = new Date().toISOString();
+      this.db
+        .prepare(
+          `INSERT INTO projects (
+             project_id, org_id, created_by_principal_id, name, slug, initial_prompt, family,
+             status, github_installation_id, repository_target_owner, repository_target_name,
+             repository_visibility, repository_status, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, 'pending', ?, ?)`
+        )
+        .run(
+          projectId,
+          orgId,
+          principalId,
+          project.name,
+          project.slug,
+          project.initialPrompt,
+          project.family,
+          project.repositoryTarget.installationId,
+          project.repositoryTarget.owner,
+          project.repositoryTarget.name,
+          project.repositoryTarget.visibility,
+          now,
+          now
+        );
+        return this.getProject(orgId, projectId)!;
+    });
+    // `.immediate` and not the default deferred transaction: a deferred one
+    // takes the write lock at the INSERT, which is after both reads and
+    // therefore exactly the window this closes.
+    return transact.immediate();
   }
 
   getProject(orgIdInput: string, projectIdInput: string): Project | null {

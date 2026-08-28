@@ -150,6 +150,14 @@ globalThis.addEventListener('notificationclick', (event) => {
         type: 'window',
         includeUncontrolled: true,
       });
+      // FOCUS, WITHOUT NAVIGATING. Reviewed 2026-08-27 (3.8) and left as is:
+      // `src/viz/push/router.ts` is the only producer of a payload and it
+      // hardcodes `url: '/'`, so an already-open tab is ALREADY at the target
+      // and navigating it would only throw away whatever the viewer had on
+      // screen — a run selected, a filter typed, a form half filled. Making
+      // this a deep link needs two things that do not exist yet: a payload
+      // that names a run, and client-side routing able to open one from a URL.
+      // Neither is worth inventing here; when they land, navigate then.
       for (const client of windows) {
         if (typeof client.focus === 'function') {
           await client.focus();

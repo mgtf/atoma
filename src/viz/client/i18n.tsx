@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { localeDirection, type Locale } from '../../contracts/locales.js';
-import { STORAGE_KEY, detectLocale, translate } from './i18n-catalog.js';
+import { type Locale } from '../../contracts/locales.js';
+import { STORAGE_KEY, applyDocumentLocale, detectLocale, translate } from './i18n-catalog.js';
 
 interface I18nValue {
   locale: Locale;
@@ -13,15 +13,15 @@ const I18nContext = createContext<I18nValue | null>(null);
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [locale, updateLocale] = useState<Locale>(detectLocale);
   useEffect(() => {
-    document.documentElement.lang = locale;
-    document.documentElement.dir = localeDirection(locale);
+    applyDocumentLocale(locale);
   }, [locale]);
   const value = useMemo<I18nValue>(() => ({
     locale,
     setLocale: (next) => {
       updateLocale(next);
-      document.documentElement.lang = next;
-      document.documentElement.dir = localeDirection(next);
+      // Eagerly as well as through the effect: the document must not lag one
+      // paint behind the switch the user just made.
+      applyDocumentLocale(next);
       try { localStorage.setItem(STORAGE_KEY, next); } catch { /* optional */ }
     },
     t: (key, vars) => translate(locale, key, vars),

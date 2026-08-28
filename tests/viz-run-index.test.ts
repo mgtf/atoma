@@ -1,9 +1,14 @@
-import { mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MAX_TRACE_BYTES } from '../src/contracts/traceFields.js';
-import { sortRunIndex, summarizeTraceFile, TRACE_HEADER_KEYS } from '../src/viz/runIndex.js';
+import {
+  readBoundedRunFile,
+  sortRunIndex,
+  summarizeTraceFile,
+  TRACE_HEADER_KEYS,
+} from '../src/viz/runIndex.js';
 
 let root: string | undefined;
 
@@ -97,6 +102,39 @@ describe('viz run index is bounded', () => {
     );
     expect(statSync(file).size).toBeGreaterThan(524_288);
     expect(summarizeTraceFile(file)).toMatchObject({ id: 'ok', calls: 41, costUsd: 1.1002 });
+  });
+
+  it('refuses a file past the shared ceiling without reading it', () => {
+    // The ceiling is one number for the whole corpus (MAX_TRACE_BYTES, 32 MiB,
+    // src/contracts/traceFields.ts); what differs is the disposition over it.
+    // Sparse: the point is the SIZE the reader stats, not 33 MiB of real bytes.
+    root = mkdtempSync(join(tmpdir(), 'atoma-run-index-'));
+    const file = join(root, 'huge.json');
+    writeFileSync(file, '{"id":"a","label":"a","startedAt":"2026-08-23T00:00:00.000Z"}');
+    truncateSync(file, 33 * 1024 * 1024);
+    const read = readBoundedRunFile(file);
+    expect(read.ok).toBe(false);
+    expect(read.ok === false && read.reason).toBe('overCeiling');
+    // And the list reader's own disposition over that refusal is unchanged:
+    // skip the row rather than fail the listing.
+    expect(summarizeTraceFile(file)).toBeNull();
+  });
+
+  it('separates "past the ceiling" from "unreadable", because callers answer them differently', () => {
+    root = mkdtempSync(join(tmpdir(), 'atoma-run-index-'));
+    const absent = readBoundedRunFile(join(root, 'nope.json'));
+    expect(absent.ok === false && absent.reason).toBe('unreadable');
+    const dir = join(root, 'dir.json');
+    mkdirSync(dir);
+    expect(readBoundedRunFile(dir)).toEqual({ ok: false, reason: 'unreadable' });
+    const real = join(root, 'real.json');
+    writeFileSync(real, '{"id":"a"}');
+    const link = join(root, 'link.json');
+    symlinkSync(real, link);
+    // A symlink is refused rather than followed OUT of the corpus.
+    expect(readBoundedRunFile(link)).toEqual({ ok: false, reason: 'unreadable' });
+    const ok = readBoundedRunFile(real);
+    expect(ok.ok && ok.bytes.toString('utf8')).toBe('{"id":"a"}');
   });
 
   it('refuses a symlink and a directory without reading them', () => {

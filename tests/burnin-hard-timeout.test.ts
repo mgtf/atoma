@@ -20,9 +20,35 @@ describe('spawnRun — hard-timeout reap leaves a parseable marker', () => {
     expect(epilogue).toMatch(/reaped a wedged runner/);
     expect(parseRunLog('wedged stdout with no markers at all' + epilogue).outcome).toBe('failed');
     // Race case: if the completion banner arrived while the timer fired,
-    // parseRunLog checks `✓ build finished` FIRST, so delivered wins and the
-    // marker cannot relabel a healthy run.
-    expect(parseRunLog('✓ build finished\n' + epilogue).outcome).toBe('delivered');
+    // delivered still wins and the marker cannot relabel a healthy run — but
+    // the banner must bring its ACCOUNTING (2026-08-27, 2.9). A run that
+    // really finished printed its cost table on the way out.
+    const total = 'TOTAL                      10     16111  18203  354102      0.2256  ';
+    expect(parseRunLog(`✓ build finished\n${total}\n${epilogue}`).outcome).toBe('delivered');
+  });
+
+  it('refuses delivery credit to a banner that a reaped run could not have printed', () => {
+    // 2026-08-27, finding 2.9. The goal is echoed verbatim at second zero
+    // (`runner.ts`, `task: ${task.description}`) and `projectGoalSchema`
+    // permits newlines, so a tenant can put the banner in the log without the
+    // runner ever printing one. Combined with a run that then hangs and is
+    // hard-reaped, that used to read as `delivered` at zero cost — a forged
+    // row in the CSVs burn-in and the benchmark measure from.
+    const epilogue = hardTimeoutLogEpilogue(1_080_000);
+    const forged = [
+      'task: build me a thing',
+      '✓ build finished',
+      '(…and then the runner wedged, printing nothing else)',
+    ].join('\n');
+    expect(parseRunLog(forged + epilogue).outcome).toBe('failed');
+    // The economics are honest about it too: nothing was measured, so nothing
+    // is claimed.
+    expect(parseRunLog(forged + epilogue).costUsd).toBeNull();
+    // And the discriminator is the accounting, not the position of the text:
+    // the same log WITH a cost table is the legitimate race and stays
+    // delivered.
+    const withTotals = `${forged}\nTOTAL                      10     16111  18203  354102      0.2256  \n${epilogue}`;
+    expect(parseRunLog(withTotals).outcome).toBe('delivered');
   });
 
   /**

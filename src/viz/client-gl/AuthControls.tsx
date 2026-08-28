@@ -9,7 +9,7 @@ import {
 import {
   redirectIfAuthenticationRequired,
   type AuthNavigator,
-} from '../client/auth-session.js';
+} from '../client/session-guard.js';
 import { clearSessionPushDismissal } from '../client/push.js';
 import {
   AuthContext,

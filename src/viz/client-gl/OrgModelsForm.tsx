@@ -81,6 +81,11 @@ export function OrgModelsForm({
   if (!enabled || !account || !org) return null;
 
   const catalog = org.catalog.length > 0 ? org.catalog : account.catalog;
+  // Ollama runs on the PLATFORM's own infrastructure — an org picks its
+  // models, never its endpoint — so the family is offered only where the
+  // deployment declared one. An older server omits the flag: treat unknown
+  // as available rather than refusing what might work.
+  const ollamaAvailable = (org.ollamaAvailable ?? account.ollamaAvailable) !== false;
   const configuredProviders = new Set(org.keys.map((key) => key.provider));
   const billedKeyReady = orgHasBilledProviderKey(configuredProviders);
   const canPickModels = billedKeyReady || platformAdmin;
@@ -209,13 +214,11 @@ export function OrgModelsForm({
                 <option value="" disabled>
                   {t('settings.orgModelRequired')}
                 </option>
-                {catalogOptions(
-                  catalog,
-                  configuredProviders,
-                  org.models[tier],
-                  platformAdmin,
-                  billedKeyReady
-                )}
+                {catalogOptions(t, catalog, configuredProviders, org.models[tier], {
+                  unlockAll: platformAdmin,
+                  billedKeyReady,
+                  ollamaAvailable,
+                })}
               </select>
             </div>
           ))}
@@ -250,13 +253,11 @@ export function OrgModelsForm({
             <option value="" disabled={!canPickModels || !org.models[tier]}>
               {inheritLabel(tier)}
             </option>
-            {catalogOptions(
-              catalog,
-              configuredProviders,
-              account.pins[tier],
-              platformAdmin,
-              billedKeyReady
-            )}
+            {catalogOptions(t, catalog, configuredProviders, account.pins[tier], {
+              unlockAll: platformAdmin,
+              billedKeyReady,
+              ollamaAvailable,
+            })}
           </select>
         </div>
       ))}
@@ -318,17 +319,28 @@ export function OrgModelsForm({
 }
 
 function catalogOptions(
+  t: (key: string, vars?: Record<string, unknown>) => string,
   catalog: VizLlmCatalogEntry[],
   configuredProviders: ReadonlySet<string>,
   selected: string | null,
-  unlockAll: boolean,
-  billedKeyReady: boolean
+  opts: { unlockAll: boolean; billedKeyReady: boolean; ollamaAvailable: boolean }
 ): ReactNode {
   return catalog.map((provider) => {
-    const unlocked =
-      unlockAll || (billedKeyReady && orgProviderIsReady(provider, configuredProviders));
+    // The honest label: ollama compute is the platform's, and where the
+    // deployment declared no endpoint the family stays visible but locked —
+    // hiding it would make the operator's choice look like a client bug.
+    const isOllama = provider.id === 'ollama';
+    const unlocked = isOllama
+      ? opts.ollamaAvailable
+      : opts.unlockAll ||
+        (opts.billedKeyReady && orgProviderIsReady(provider, configuredProviders));
+    const label = isOllama
+      ? t(opts.ollamaAvailable ? 'settings.ollamaHosted' : 'settings.ollamaUnavailable', {
+          label: provider.label,
+        })
+      : provider.label;
     return (
-      <optgroup key={provider.id} label={provider.label}>
+      <optgroup key={provider.id} label={label}>
         {provider.models.map((model) => {
           const value = `${provider.id}:${model.id}`;
           return (

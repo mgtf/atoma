@@ -174,10 +174,107 @@ describe('project run environment', () => {
       ...base,
       hostEnv: { ANTHROPIC_API_KEY: 'key', ATOMA_MODEL_L2: 'codex:gpt-5' },
     })).toThrow(/cannot be routed/);
+    // A bearer token is refused outright on the platform path: nothing in the
+    // product can supply one (the org key store is keyed by catalogue
+    // provider, and anthropic's credential is ANTHROPIC_API_KEY), and a
+    // token refreshed from a login profile would expire inside a long run.
     expect(() => projectRunEnvironment({
       ...base,
       hostEnv: { ANTHROPIC_API_KEY: 'key', ANTHROPIC_AUTH_TOKEN: 'token' },
-    })).toThrow(/exactly one/);
+    })).toThrow(/do not accept ANTHROPIC_AUTH_TOKEN/);
+    expect(() => projectRunEnvironment({
+      ...base,
+      hostEnv: { ANTHROPIC_AUTH_TOKEN: 'token' },
+    })).toThrow(/do not accept ANTHROPIC_AUTH_TOKEN/);
+  });
+
+  it('runs BYO-only: the org anthropic key is a per-run credential, and it beats the host', () => {
+    // A deployment may carry NO platform key at all. The org's own encrypted
+    // key is the credential, so the run must start — it used to be refused
+    // before the environment was ever built, which made the whole BYO-only
+    // shape unreachable.
+    const base = {
+      dbPath: '/control/atoma.db',
+      workspacePath: '/control/workspace',
+      runsPath: '/control/runs',
+      skillsPath: '/control/skills',
+      runId: '3c584a3c-933d-4488-ac44-4cdcc8e66f31',
+      artifactManifestPath: '/control/manifest.json',
+    };
+    const byoOnly = projectRunEnvironment({
+      ...base,
+      hostEnv: { PATH: '/bin' },
+      orgProviderKeys: { anthropic: 'sk-org-anthropic' },
+    });
+    expect(byoOnly['ANTHROPIC_API_KEY']).toBe('sk-org-anthropic');
+    expect(byoOnly['ANTHROPIC_AUTH_TOKEN']).toBeUndefined();
+    // And an anthropic tier pin is now routable on that deployment: the
+    // credential check reads the org key, not only the host env.
+    const pinned = projectRunEnvironment({
+      ...base,
+      hostEnv: { PATH: '/bin' },
+      orgProviderKeys: { anthropic: 'sk-org-anthropic' },
+      tierModels: { l1: 'anthropic:claude-haiku-4-5-20251001', l2: null, l3: null },
+    });
+    expect(pinned['ATOMA_MODEL_L1']).toBe('anthropic:claude-haiku-4-5-20251001');
+    // BYO beats a host key of the same shape: the org brought its own, it
+    // pays with its own.
+    const overHostKey = projectRunEnvironment({
+      ...base,
+      hostEnv: { PATH: '/bin', ANTHROPIC_API_KEY: 'host-key' },
+      orgProviderKeys: { anthropic: 'sk-org-anthropic' },
+    });
+    expect(overHostKey['ANTHROPIC_API_KEY']).toBe('sk-org-anthropic');
+    // A BYO key goes to its OWN issuer: a host gateway URL (the shape Z.ai's
+    // own Claude Code instructions use) must not carry a tenant's key to a
+    // third party the org never consented to.
+    const hostGateway = { PATH: '/bin', ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic' };
+    const orgKeyBehindGateway = projectRunEnvironment({
+      ...base,
+      hostEnv: { ...hostGateway, ANTHROPIC_API_KEY: 'host-key' },
+      orgProviderKeys: { anthropic: 'sk-org-anthropic' },
+    });
+    expect(orgKeyBehindGateway['ANTHROPIC_API_KEY']).toBe('sk-org-anthropic');
+    expect(orgKeyBehindGateway['ANTHROPIC_BASE_URL']).toBeUndefined();
+    // The host's own credential still reaches the host's own gateway.
+    const hostKeyBehindGateway = projectRunEnvironment({
+      ...base,
+      hostEnv: { ...hostGateway, ANTHROPIC_API_KEY: 'host-key' },
+    });
+    expect(hostKeyBehindGateway['ANTHROPIC_BASE_URL']).toBe('https://api.z.ai/api/anthropic');
+    // No host key and no org key is still a refusal, and the message names
+    // both ways out.
+    expect(() => projectRunEnvironment({ ...base, hostEnv: { PATH: '/bin' } })).toThrow(
+      /anthropic credential/
+    );
+  });
+
+  it('forwards only the provider keys this run can actually reach', () => {
+    // 2026-08-27, 3.1. Every configured org key rode into every run, referenced
+    // or not. CHILD_ENV_ALLOWLIST already keeps them out of tool subprocesses,
+    // so this narrows the RUNNER's own memory and /proc surface, not a hole.
+    const base = {
+      dbPath: '/control/atoma.db',
+      workspacePath: '/control/workspace',
+      runsPath: '/control/runs',
+      skillsPath: '/control/skills',
+      runId: '3c584a3c-933d-4488-ac44-4cdcc8e66f31',
+      artifactManifestPath: '/control/manifest.json',
+      hostEnv: { PATH: '/bin', ANTHROPIC_API_KEY: 'host-key' },
+      orgProviderKeys: { anthropic: 'sk-org-anthropic', zai: 'sk-zai-org' },
+    };
+    // No tier names zai: its key stays out of the child.
+    const unreferenced = projectRunEnvironment(base);
+    expect(unreferenced['ZAI_API_KEY']).toBeUndefined();
+    // The base transport is always referenced — an unpinned tier routes there.
+    expect(unreferenced['ANTHROPIC_API_KEY']).toBe('sk-org-anthropic');
+
+    const referenced = projectRunEnvironment({
+      ...base,
+      tierModels: { l1: 'zai:glm-4.5-air', l2: null, l3: null },
+    });
+    expect(referenced['ZAI_API_KEY']).toBe('sk-zai-org');
+    expect(referenced['ATOMA_MODEL_L1']).toBe('zai:glm-4.5-air');
   });
 
   it('opens the subscription transport for a platform admin ONLY, and forwards no credential', () => {
@@ -224,6 +321,22 @@ describe('project run environment', () => {
         subscriptionTransport: { principalId: 'admin-1' },
       })
     ).not.toThrow();
+    // THE ORG'S KEYS ARE WITHHELD TOO. Injected, a tier pinned to zai or
+    // anthropic would bill the ORGANISATION while the journal records
+    // `run.host_subscription` — the audit row would name the wrong payer.
+    const withOrgKeys = projectRunEnvironment({
+      ...base,
+      hostEnv: { ATOMA_LLM: 'claude-cli', ANTHROPIC_API_KEY: 'stale-host-key' },
+      subscriptionTransport: { principalId: 'admin-1' },
+      orgProviderKeys: { anthropic: 'sk-org-anthropic', zai: 'sk-zai-org' },
+      tierModels: { l1: 'zai:glm-4.5-air', l2: 'anthropic:claude-sonnet-5', l3: null },
+    });
+    expect(withOrgKeys['ZAI_API_KEY']).toBeUndefined();
+    expect(withOrgKeys['ANTHROPIC_API_KEY']).toBeUndefined();
+    // And the pins those keys would have unlocked are dropped with them, so
+    // nothing reaches the router without its credential.
+    expect(withOrgKeys['ATOMA_MODEL_L1']).toBeUndefined();
+    expect(withOrgKeys['ATOMA_MODEL_L2']).toBeUndefined();
     // A grant does not turn every provider into a subscription transport.
     expect(() =>
       projectRunEnvironment({
@@ -274,13 +387,26 @@ describe('project run environment', () => {
       ...base,
       hostEnv: { ANTHROPIC_API_KEY: 'key', ATOMA_MODEL_L2: 'codex:gpt-5' },
     })).toThrow(/cannot be routed/);
-    // An OLLAMA selector is now routable: self-hosted, no credential to
-    // bring, and its tag passes through to the router untouched.
-    const ollamaPin = projectRunEnvironment({
+    // An OLLAMA selector is routable ONLY where the deployment declared its
+    // endpoint. "The host has an Ollama" is a fact only the operator can
+    // assert — assuming the default localhost is exactly what detonates on a
+    // host without one — so an undeclared pin falls through to the level
+    // beneath it, like any provider whose credential nobody brought.
+    const ollamaUndeclared = projectRunEnvironment({
       ...base,
       tierModels: { l1: 'ollama:qwen3:8b', l2: null, l3: null },
     });
+    expect(ollamaUndeclared['ATOMA_MODEL_L1']).toBe('claude-haiku-4-5-20251001');
+    expect(ollamaUndeclared['OLLAMA_BASE_URL']).toBeUndefined();
+    const ollamaPin = projectRunEnvironment({
+      ...base,
+      hostEnv: { ...base.hostEnv, OLLAMA_BASE_URL: 'http://gpu-box:11434' },
+      tierModels: { l1: 'ollama:qwen3:8b', l2: null, l3: null },
+    });
     expect(ollamaPin['ATOMA_MODEL_L1']).toBe('ollama:qwen3:8b');
+    // And the endpoint crosses with the pin, so the child talks to the
+    // operator's Ollama rather than to a presumed localhost.
+    expect(ollamaPin['OLLAMA_BASE_URL']).toBe('http://gpu-box:11434');
   });
 
   it('resolves the three-level precedence: account > org > operator', () => {

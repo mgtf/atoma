@@ -5,6 +5,7 @@ import { createInstance } from 'i18next';
 import {
   DEFAULT_LOCALE,
   isLocale,
+  localeDirection,
   twoFormPluralKey,
   type Locale,
 } from '../../contracts/locales.js';
@@ -82,3 +83,24 @@ export function createTranslator(catalogs: Record<Locale, Record<string, string>
 }
 
 export const translate = createTranslator(I18N_CATALOGS);
+
+/**
+ * EVERYTHING THE DOCUMENT ITSELF SAYS IN A LANGUAGE, in one place.
+ *
+ * `lang`, `dir` and the tab title are the same decision made three times, and
+ * they were made in four hand-written copies — `i18n.tsx` twice, `GpuApp.tsx`,
+ * and the GL store's `setLocale` — of which not one wrote the title. So the
+ * tab said "Atoma — run visualizer" in every language, product copy outside a
+ * catalog in a client that declares itself entirely catalogued (2026-08-27,
+ * 3.13). Adding it to one of the four would have been a fifth thing to keep in
+ * step; this is the one thing they all call.
+ *
+ * Guarded for `document`, because the GL store is imported by tests and by the
+ * push router that run with no DOM at all.
+ */
+export function applyDocumentLocale(locale: Locale): void {
+  if (typeof document === 'undefined') return;
+  document.documentElement.lang = locale;
+  document.documentElement.dir = localeDirection(locale);
+  document.title = translate(locale, 'app.documentTitle');
+}

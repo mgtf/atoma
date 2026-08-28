@@ -213,6 +213,11 @@ separately billed `OPENAI_API_KEY`. The full contract is in
 
 - Preserve unrelated dirty-worktree changes and new files. CI proves a clean
   checkout, so every required source/test must be tracked before claiming a fix.
+  The pre-commit hook obeys this too: a PARTIALLY staged file is verified but
+  never `--fix`ed or re-staged, because `git add <file>` takes the whole file
+  and would commit the hunks you left out (2026-08-27). Same rule for the
+  locale catalogs it blanks — one carrying its own unstaged edits is written
+  but not staged.
 - Never edit `src/` while a burn-in batch is running: the harness launches
   source-level processes per task and would mix code generations.
 - A burn-in batch needs the machine to itself. Do not run heavy tests, builds,

@@ -26,7 +26,7 @@ import {
 } from '../auth/secretEncryption.js';
 import { isSubscriptionTransport, ProjectRunCoordinator } from '../projects/coordinator.js';
 import { GitHubPublisher } from '../projects/publisher.js';
-import { ProjectStore } from '../projects/store.js';
+import { ProjectStateConflict, ProjectStore } from '../projects/store.js';
 import { GitHubStore } from '../github/store.js';
 import { GitHubAppClient } from '../github/client.js';
 import { snapshotGitHubAppConfig } from '../github/config.js';
@@ -212,11 +212,18 @@ function createProject(
       project: parsed.data,
     });
   } catch (error) {
+    // The store names the identity that collided — slug or repository — and
+    // both are the same refusal here. It used to be recognised by matching the
+    // driver's own UNIQUE prose for the slug alone, which said nothing about a
+    // repository collision and, on the folded expression index, names the INDEX
+    // rather than the columns (2026-08-27, 3.5). The typed conflict is the
+    // contract; the prose match stays as a backstop for the slug index only.
+    if (error instanceof ProjectStateConflict) fail(safeTerminal(error.message));
     if (
       error instanceof Error &&
-      /UNIQUE constraint failed: projects\.org_id, projects\.slug/.test(error.message)
+      /UNIQUE constraint failed: projects\./.test(error.message)
     ) {
-      fail(`a project with slug "${safeTerminal(slug)}" already exists in this organisation`);
+      fail(`a project identity in this organisation is already taken (${safeTerminal(slug)})`);
     }
     throw error;
   }

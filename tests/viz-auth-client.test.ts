@@ -13,7 +13,7 @@ import {
   loginBounceParams,
   providerLoginHref,
   redirectIfAuthenticationRequired,
-} from '../src/viz/client/auth-session.js';
+} from '../src/viz/client/session-guard.js';
 import { AuthControls } from '../src/viz/client-gl/AuthControls.js';
 import { useAuthController } from '../src/viz/client-gl/session-controller.js';
 import { useGpuStore } from '../src/viz/client-gl/store.js';

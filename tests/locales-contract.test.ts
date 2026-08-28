@@ -13,6 +13,11 @@ import {
   translate,
 } from '../src/viz/client/i18n-catalog.js';
 import { PUSH_LOCALES, PUSH_ROUTES } from '../src/viz/push/routes.js';
+// THE SAME predicates the pipeline gates on. `scripts/i18n.mjs` dispatches at
+// module scope, so it cannot be imported here — which is why these two rules
+// were hand-copied into this file and drifted (2026-08-27, 2.6 and 3.12). They
+// live in `i18n-rules.mjs` now, and this suite reads them rather than a copy.
+import { isBlankValue, placeholdersMatch } from '../scripts/i18n-predicates.mjs';
 
 /**
  * ONE LIST OF LANGUAGES, and everything that fans out over languages is held
@@ -126,15 +131,43 @@ describe('the locale pipeline invariants', () => {
       if (locale === DEFAULT_LOCALE) continue;
       for (const [key, enValue] of Object.entries(I18N_CATALOGS.en)) {
         const value = I18N_CATALOGS[locale][key];
-        if (value === undefined || value === '') continue; // awaiting translation
-        const signature = (copy: string) =>
-          (copy.match(/\{\{\s*\w+\s*\}\}/g) ?? []).sort().join('|');
-        if (signature(enValue) !== signature(value)) {
-          failures.push(`${locale}.${key}: "${signature(enValue)}" vs "${signature(value)}"`);
+        if (isBlankValue(value)) continue; // awaiting translation
+        if (!placeholdersMatch(enValue, value)) {
+          failures.push(`${locale}.${key}: placeholder drift against EN`);
         }
       }
     }
     expect(failures).toEqual([]);
+  });
+
+  it('treats blank, empty and whitespace-only as ONE state, so nothing can be written past the gate', () => {
+    // 2026-08-27, finding 2.6. `translate` accepted `value.length > 0` while
+    // `check` demanded `value.trim()`: a whitespace-only value was written,
+    // committed under the pinned `always()` commit step, and then invisible to
+    // `missingKeys` AND `fix-drift` — a red job no pass could repair. One
+    // predicate now, and this is the assertion that keeps it one.
+    expect(isBlankValue(undefined)).toBe(true);
+    expect(isBlankValue('')).toBe(true);
+    expect(isBlankValue('   ')).toBe(true);
+    expect(isBlankValue('\n\t')).toBe(true);
+    expect(isBlankValue('Bonjour')).toBe(false);
+  });
+
+  it('sees the interpolations i18next actually acts on, not only the bare form', () => {
+    // 2026-08-27, finding 3.12: the old signature regex matched `{{name}}`
+    // alone, so a formatted count or a nested $t() scored "" on BOTH sides and
+    // a translation that dropped it compared equal to one that kept it.
+    expect(placeholdersMatch('{{count, number}} runs', '{{count, number}} exécutions')).toBe(true);
+    expect(placeholdersMatch('{{count, number}} runs', 'des exécutions')).toBe(false);
+    expect(placeholdersMatch('see $t(app.name)', 'voir $t(app.name)')).toBe(true);
+    expect(placeholdersMatch('see $t(app.name)', 'voir le produit')).toBe(false);
+    expect(placeholdersMatch('{{- raw}} here', '{{- raw}} ici')).toBe(true);
+    // i18next trims inside the braces, so these ARE the same interpolation:
+    // reporting drift between them was a false positive.
+    expect(placeholdersMatch('{{name}}', '{{ name }}')).toBe(true);
+    // And the bare form still behaves exactly as it did.
+    expect(placeholdersMatch('hi {{name}}', 'salut {{name}}')).toBe(true);
+    expect(placeholdersMatch('hi {{name}}', 'salut {{nom}}')).toBe(false);
   });
 
   it('an empty target value falls back to EN through i18next, never to the key', () => {

@@ -4,12 +4,17 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, render } from '@testing-library/react';
 import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AtomaCursor } from '../src/viz/client-gl/AtomaCursor.js';
+// FROM THE MODULE THAT OWNS THEM. `AtomaCursor.tsx` used to re-export these
+// beside the component, which is the fast-refresh boundary 0d268a7 / aee4790 /
+// 5e1b0ec establish for this subtree — a component file exports the component
+// and nothing else. This test was the re-export's only consumer
+// (2026-08-27, 3.15).
 import {
   ATOMA_CURSOR_HOTSPOT,
   ATOMA_CURSOR_PATH,
-  AtomaCursor,
-} from '../src/viz/client-gl/AtomaCursor.js';
-import { atomaCursorPoints } from '../src/viz/client-gl/pointer-cursor.js';
+  atomaCursorPoints,
+} from '../src/viz/client-gl/pointer-cursor.js';
 import {
   hidePointerLight,
   hideTrackedPointer,

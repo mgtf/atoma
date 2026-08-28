@@ -401,6 +401,30 @@ describe('full-GL minimal DOM bridge', () => {
     }
   });
 
+  it('veils Scene Tuning with the rest — it sits exactly where the account menu opens', () => {
+    // 2026-08-27, 2.10. The window is `position: fixed; z-index: 8` and its
+    // default corner is the top-right, which is where the Pixi account menu
+    // anchors: it painted over the menu and kept its sliders clickable above
+    // it — the failure 4ab40b4 / 01ed50c closed everywhere else.
+    useGpuStore.setState({ tuningPanelOpen: true, accountMenuOpen: true });
+    render(createElement(SceneTuningPanel));
+    const panel = screen.getByLabelText('Scene tuning');
+    expect(panel).toHaveAttribute('inert');
+    expect(panel).toHaveClass('gpu-overlays-veiled');
+    // The clip is expressed in the element's own box, so the panel must
+    // restate its dragged origin or the hole lands somewhere else entirely.
+    expect(panel.style.getPropertyValue('--gpu-overlay-left')).toMatch(/^\d+px$/);
+    expect(panel.style.getPropertyValue('--gpu-overlay-top')).toMatch(/^\d+px$/);
+    expect(panel.style.getPropertyValue('--gpu-overlay-left')).toBe(`${panel.style.left}`);
+
+    cleanup();
+    useGpuStore.setState({ tuningPanelOpen: true, accountMenuOpen: false, localeMenuOpen: false });
+    render(createElement(SceneTuningPanel));
+    const restored = screen.getByLabelText('Scene tuning');
+    expect(restored).not.toHaveAttribute('inert');
+    expect(restored).not.toHaveClass('gpu-overlays-veiled');
+  });
+
   it('restores interactive view overlays once both overlay menus are closed', () => {
     for (const view of ['runs', 'projects', 'settings'] as const) {
       cleanup();

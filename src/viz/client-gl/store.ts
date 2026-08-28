@@ -3,7 +3,8 @@ import {
   DEFAULT_REPOSITORY_VISIBILITY,
   type RepositoryVisibility,
 } from '../../contracts/projects.js';
-import { isLocale, localeDirection, type Locale } from '../../contracts/locales.js';
+import { isLocale, type Locale } from '../../contracts/locales.js';
+import { applyDocumentLocale } from '../client/i18n-catalog.js';
 import type { EventFilters } from '../client/run-utils.js';
 import type { SceneCameraMode } from './scene-camera.js';
 
@@ -440,10 +441,9 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
     } catch {
       // Local storage is optional.
     }
-    if (typeof document !== 'undefined') {
-      document.documentElement.lang = locale;
-      document.documentElement.dir = localeDirection(locale);
-    }
+    // ONE writer for lang, dir and the tab title — it guards `document` itself,
+    // because this store is imported where there is none.
+    applyDocumentLocale(locale);
     set({ locale, localeMenuOpen: false });
   },
   selectRun: (selectedRunId) =>

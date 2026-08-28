@@ -23,7 +23,10 @@ the gate (`--no-sentinel`, `--sentinel-interval`, `--cost-alert`, or
 NO browser check is in `release:check` any more — `viz:smoke`, `viz:smoke:gc`
 and the mark-turn film all need a real Chrome (and, for GC, a real WebGPU
 adapter), which CI does not have. Run `viz:smoke` on a real machine before
-shipping a viz change; the root file records why it left CI.
+shipping a viz change; the root file records why it left CI. CI carries it as a
+MANUAL `workflow_dispatch` job (`viz-smoke`, `continue-on-error`): a button to
+ask for the behavioural proof from a PR page, never a gate, because the runner
+is the wrong machine to measure frame time on.
 `npm run viz`, `doctor:dev` and `auth:dev` fill unset keys from checkout `.env`
 so a local GitHub-gated visualizer does not need a shell export. Compiled
 `viz:serve` does not load `.env`: production injects the process environment.
@@ -159,6 +162,26 @@ npm run viz:mark-turn:analyze
   can be stamped onto a later counter. Empty-delta identity comparisons ignore
   projection-only fields such as the rank derived from a stored numeric tier;
   otherwise every raw poll looks changed and rebuilds the GPU scene.
+- EVERY DOM overlay over the canvas takes the veil: `inert`, the
+  `.gpu-overlays-veiled` class, and its own `--gpu-overlay-left/top` so the
+  menu hole is punched in its own box. Scene Tuning was the one exception and
+  it was the worst place for one — `position: fixed; z-index: 8`, defaulting to
+  the top-right corner the Pixi account menu anchors to (2026-08-27, 2.10). It
+  is DRAGGED, so it restates that origin inline where CSS-positioned overlays
+  restate it in the stylesheet.
+- `GpuRenderer.destroy()` nulls `this.snapshot` FIRST. Two end-of-transition
+  `requestAnimationFrame`s re-render behind an identity guard on that field,
+  and nothing else in teardown makes them false.
+- EVERY read of the run corpus goes through `readBoundedRunFile`
+  (`runIndex.ts`), under the one `MAX_TRACE_BYTES` ceiling
+  ([src/contracts](../contracts/AGENTS.md)). A trace has no cap in the
+  pipeline and `/api/runs/:id` is polled ~1×/s per live tab, so an unbounded
+  read there materialised an arbitrary document per second per client. Over
+  the ceiling the detail route answers 413 — reusing the status this codebase
+  gives an oversized request body, told apart by its `error` string, because
+  404 would make an existing trace look deleted. The delta still parses the
+  whole document once per poll: a cache keyed on mtime, or a streaming
+  projection of `events`, is REGISTERED, not built.
 - The runs timeline reads NEWEST FIRST and is framed by two bookend rows
   (run ended / run started) that carry the verdict. Bookends are view rows:
   the view publishes `rowOffset` on the timeline viewport and overlays add it,
@@ -187,7 +210,7 @@ npm run viz:mark-turn:analyze
   `causticDetail` sharpens the three primary folds and fades the asymmetric
   fourth fold, while `causticDispersion` opens or closes the traced wavelength
   band around its measured positions.
-- The UI is `i18next` catalog-backed, including accessibility, crash and developer copy. Use flat `<key>_one` / `<key>_other` entries and call `<key>` with numeric `count`; never select suffixes or write `run(s)` / `entry(ies)`. Split multiple counts into independently pluralised fragments. The catalogs are JSON (`client/locales/*.json`), not TS literals: `en.json` is the source of truth, a blank or missing target value means "awaiting translation" (renders the EN fallback). Agents write EN only — never `fr.json` or any other target; the pre-commit hook blanks target values whose EN source changed and CI on main translates every target (`npm run i18n`, `scripts/i18n.mjs`). CI TRANSLATION IS ONE JOB OF THE `CI` WORKFLOW, not a separate workflow: one runner, one queue, no self-re-triggering push loop. Translation pins `gpt-5.6-sol`: local runs reuse `codex login` (ChatGPT Plus/Pro), while CI needs the separately billed `OPENAI_API_KEY`. A non-empty translation must carry exactly its EN `{{placeholder}}` signature (tests + `i18n check`); `i18n sync --locale=<code>` is an operator path without an API key, not an agent fill-in. TRANSLATION ISOLATES LOCALES: `translate` writes each catalog as its locale finishes, a failing language ends only itself — a sibling's success is never discarded (2026-08-27: ten `{}` catalogs after a zh failure). A REJECTED key gets one isolated retry, then survives as blank without failing the run; exit 1 is for HARD failures only, and CI's translate step is `continue-on-error` with check/commit running `always()`, so paid work can never again be dropped with the runner (same day: 712 ar strings written to disk, then skipped before the commit step). `tests/i18n-pipeline.test.ts` pins the behaviour with a fake `codex` binary and the workflow's shape.
+- The UI is `i18next` catalog-backed, including accessibility, crash and developer copy. Use flat `<key>_one` / `<key>_other` entries and call `<key>` with numeric `count`; never select suffixes or write `run(s)` / `entry(ies)`. Split multiple counts into independently pluralised fragments. The catalogs are JSON (`client/locales/*.json`), not TS literals: `en.json` is the source of truth, a blank or missing target value means "awaiting translation" (renders the EN fallback). Agents write EN only — never `fr.json` or any other target; the pre-commit hook blanks target values whose EN source changed and CI on main translates every target (`npm run i18n`, `scripts/i18n.mjs`). CI TRANSLATION IS ONE JOB OF THE `CI` WORKFLOW, not a separate workflow: one runner, one queue, no self-re-triggering push loop. Translation pins `gpt-5.6-sol`: local runs reuse `codex login` (ChatGPT Plus/Pro), while CI needs the separately billed `OPENAI_API_KEY`. A non-empty translation must carry exactly its EN `{{placeholder}}` signature (tests + `i18n check`); `i18n sync --locale=<code>` is an operator path without an API key, not an agent fill-in. TRANSLATION ISOLATES LOCALES: `translate` writes each catalog as its locale finishes, a failing language ends only itself — a sibling's success is never discarded (2026-08-27: ten `{}` catalogs after a zh failure). A REJECTED key gets one isolated retry, then survives as blank without failing the run; exit 1 is for HARD failures only, and CI's translate step is `continue-on-error` with check/commit running `always()`, so paid work can never again be dropped with the runner (same day: 712 ar strings written to disk, then skipped before the commit step). `tests/i18n-pipeline.test.ts` pins the behaviour with a fake `codex` binary and the workflow's shape. BLANK IS ONE PREDICATE, and so is the placeholder signature: both live in `scripts/i18n-predicates.mjs`, imported by the script and by `tests/locales-contract.test.ts`, because `translate` accepting `value.length > 0` where `check` demanded `value.trim()` wrote a whitespace-only value that no later pass could see — a permanently red job (2026-08-27). SEMANTIC DRIFT — a reworded EN value that keeps its placeholders — is invisible to `check` and `fix-drift` alike, so CI replays the hook's invalidation over the pushed range (`i18n invalidate-range --since=<sha>`, same code as `invalidate-staged`): the hook is skipped under `CI=true`, bypassed by `--no-verify`, and absent from the web editor.
 - Push keeps a separate server catalog (never import the React catalog) but uses the same rules. English push copy is the explicit fallback until a target has reviewed copy; operator announcements are translated into every supported locale before sending.
 - PWA/service-worker registration is production-default and dev-opt-in
   (`ATOMA_VIZ_SW_DEV=1` → `__ATOMA_SW_DEV__`). `serviceWorkerRegistrationAllowed()`

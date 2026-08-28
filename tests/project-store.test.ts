@@ -740,7 +740,12 @@ describe('ProjectStore — the live-run reader the sentinel uses', () => {
  * creation, where it costs a retyped flag.
  */
 describe('a repository belongs to one project', () => {
-  function projectTargeting(owner: Actor, slug: string, repository: string) {
+  function projectTargeting(
+    owner: Actor,
+    slug: string,
+    repository: string,
+    account = 'atoma-test'
+  ) {
     return store.createProject({
       orgId: owner.orgId,
       principalId: owner.principalId,
@@ -749,7 +754,7 @@ describe('a repository belongs to one project', () => {
         slug,
         repositoryTarget: {
           installationId: '12345',
-          owner: 'atoma-test',
+          owner: account,
           name: repository,
           visibility: 'private',
         },
@@ -764,6 +769,87 @@ describe('a repository belongs to one project', () => {
     expect(() => projectTargeting(alice, 'third', 'shared-repo')).toThrow(
       /project first already publishes to atoma-test\/shared-repo/
     );
+  });
+
+  it('folds case, because GitHub does and the second project would only learn at publish', () => {
+    // 2026-08-27, 2.5. `acme/Site` and `acme/site` are ONE repository there.
+    // Binary comparison here created both, and the collision this refusal
+    // exists to move onto creation walked back onto the publish path as a
+    // permanent GitHubDivergenceError — after the run and the spend.
+    const alice = actor('Alice');
+    projectTargeting(alice, 'first', 'Weather-Lab');
+    expect(() => projectTargeting(alice, 'second', 'weather-lab')).toThrow(ProjectStateConflict);
+    expect(() => projectTargeting(alice, 'third', 'WEATHER-LAB')).toThrow(
+      /project first already publishes to atoma-test\/Weather-Lab/
+    );
+    // The OWNER folds too: a GitHub App login retyped in another case is the
+    // same account.
+    expect(() => projectTargeting(alice, 'fourth', 'Weather-Lab', 'Atoma-Test')).toThrow(
+      ProjectStateConflict
+    );
+    // And the row keeps the spelling the tenant typed: it is what
+    // `ensureRepository` asks GitHub to create, so lowering it would silently
+    // rename their repository to settle an index.
+    expect(store.getProject(alice.orgId, projectTargeting(alice, 'fifth', 'Other-Repo').projectId)
+      ?.repositoryTarget.name).toBe('Other-Repo');
+  });
+
+  it('enforces the fold in the schema too, not only in the check', () => {
+    const alice = actor('Alice');
+    projectTargeting(alice, 'held', 'Cased-Repo');
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO projects (
+             project_id, org_id, created_by_principal_id, name, slug, initial_prompt, family,
+             status, github_installation_id, repository_target_owner, repository_target_name,
+             repository_visibility, repository_status, created_at, updated_at
+           ) VALUES (?, ?, ?, 'x', 'sneaky-case', '', 'build', 'active', '12345', 'ATOMA-TEST',
+                     'cased-repo', 'private', 'pending', '2026-08-23T00:00:00.000Z',
+                     '2026-08-23T00:00:00.000Z')`
+        )
+        .run(randomUUID(), alice.orgId, alice.principalId)
+    ).toThrow(/UNIQUE/i);
+  });
+
+  it('keeps refusing exact duplicates on a store that can only take the binary index', () => {
+    // The degraded path is the interesting one: a store holding a CASE-VARIANT
+    // pair cannot take the folded index — and it is the store that needs it
+    // most — so it must not come back with NO index at all.
+    const alice = actor('Alice');
+    projectTargeting(alice, 'legacy-cased', 'Was-Cased');
+    db.exec('DROP INDEX IF EXISTS projects_org_repository_target_ci_idx');
+    db.exec('DROP INDEX IF EXISTS projects_org_repository_target_idx');
+    db.prepare(
+      `INSERT INTO projects (
+         project_id, org_id, created_by_principal_id, name, slug, initial_prompt, family,
+         status, github_installation_id, repository_target_owner, repository_target_name,
+         repository_visibility, repository_status, created_at, updated_at
+       ) VALUES (?, ?, ?, 'x', 'legacy-lower', '', 'build', 'active', '12345', 'atoma-test',
+                 'was-cased', 'private', 'pending', '2026-08-23T00:00:00.000Z',
+                 '2026-08-23T00:00:00.000Z')`
+    ).run(randomUUID(), alice.orgId, alice.principalId);
+    const warned = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    try {
+      expect(() => new ProjectStore(db)).not.toThrow();
+      expect(warned.mock.calls.flat().join(' ')).toMatch(/exact duplicates are still refused/);
+    } finally {
+      warned.mockRestore();
+    }
+    // Proof, not just prose: the binary index is really there.
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO projects (
+             project_id, org_id, created_by_principal_id, name, slug, initial_prompt, family,
+             status, github_installation_id, repository_target_owner, repository_target_name,
+             repository_visibility, repository_status, created_at, updated_at
+           ) VALUES (?, ?, ?, 'x', 'exact-dup', '', 'build', 'active', '12345', 'atoma-test',
+                     'was-cased', 'private', 'pending', '2026-08-23T00:00:00.000Z',
+                     '2026-08-23T00:00:00.000Z')`
+        )
+        .run(randomUUID(), alice.orgId, alice.principalId)
+    ).toThrow(/UNIQUE/i);
   });
 
   it('allows a different repository, and the same one in another organisation', () => {
@@ -798,8 +884,11 @@ describe('a repository belongs to one project', () => {
   it('still OPENS a store that already holds a duplicate, loudly', () => {
     const alice = actor('Alice');
     projectTargeting(alice, 'legacy-one', 'was-shared');
-    // A store written before the index existed: drop it, insert the duplicate,
-    // then reopen. Failing to OPEN would be far worse than failing to enforce.
+    // A store written before the index existed: drop BOTH names — the folded
+    // index this build creates and the binary one it supersedes — insert the
+    // duplicate, then reopen. Failing to OPEN would be far worse than failing
+    // to enforce.
+    db.exec('DROP INDEX IF EXISTS projects_org_repository_target_ci_idx');
     db.exec('DROP INDEX IF EXISTS projects_org_repository_target_idx');
     db.prepare(
       `INSERT INTO projects (
@@ -814,6 +903,9 @@ describe('a repository belongs to one project', () => {
     try {
       expect(() => new ProjectStore(db)).not.toThrow();
       expect(warned.mock.calls.flat().join(' ')).toMatch(/cannot enforce one project per repository/);
+      // This pair is an EXACT duplicate, so neither index can be created and
+      // the operator is told exactly that rather than left to assume.
+      expect(warned.mock.calls.flat().join(' ')).toMatch(/exact duplicates are NOT refused either/);
     } finally {
       warned.mockRestore();
     }

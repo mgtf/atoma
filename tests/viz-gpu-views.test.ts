@@ -1332,6 +1332,26 @@ describe('the nav rail', () => {
     expect(css).toMatch(/\.gpu-project-form\s*\{[\s\S]*?--gpu-overlay-top:\s*104px/);
   });
 
+  it('breaks the end-of-transition identity guard BEFORE tearing the app down', () => {
+    // 2026-08-27, 3.14. Two transition completions re-render from a
+    // `requestAnimationFrame` guarded only by `this.snapshot === <the snapshot
+    // they started with>`. `destroy()` never touched that field, so a frame
+    // scheduled just before teardown ran `renderScene` on a destroyed
+    // Application — one frame wide, and reachable on every HMR reload.
+    const renderer = new GpuRenderer();
+    const internals = renderer as unknown as {
+      initialized: boolean;
+      snapshot: unknown;
+    };
+    internals.initialized = true;
+    internals.snapshot = { marker: 'the snapshot a pending frame is holding' };
+    // The rest of teardown needs a real Application, which this renderer has
+    // no business owning in a unit test — so it throws, and that is the point:
+    // the guard must already be false by then, whatever happens after.
+    expect(() => renderer.destroy()).toThrow();
+    expect(internals.snapshot).toBeNull();
+  });
+
   it('projects nested hit targets through the rail, pane and scroll transforms', () => {
     const renderer = new GpuRenderer();
     const stage = new Container();

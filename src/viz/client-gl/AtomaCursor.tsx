@@ -10,8 +10,6 @@ import {
   ATOMA_CURSOR_PATH,
 } from './pointer-cursor.js';
 
-export { ATOMA_CURSOR_HOTSPOT, ATOMA_CURSOR_PATH };
-
 const FINE_POINTER_QUERY = '(any-hover: hover) and (any-pointer: fine)';
 const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
 const FORCED_COLORS_QUERY = '(forced-colors: active)';

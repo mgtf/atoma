@@ -20,6 +20,12 @@ const ROOT_BYTE_BUDGET = 60_000;
 // reasons. A subsystem file is read only by an agent opening that subtree, so
 // the pressure it needs is "one subsystem, one file", not a word count.
 const SUBSYSTEM_LINE_BUDGET = 500;
+// src/viz owns more surfaces than any other subtree (trace projection, the GPU
+// client, the frozen MUI fallback, the gated HTTP surfaces, push, and the i18n
+// catalog contract). Splitting it further would mean inventing sub-subsystems
+// that no agent opens on its own, so it carries a named, explicit exception
+// rather than a silently raised global budget.
+const SUBSYSTEM_LINE_BUDGET_OVERRIDES = new Map([['src/viz/AGENTS.md', 600]]);
 
 function fail(message) {
   process.stderr.write(`agent docs check failed: ${message}\n`);
@@ -133,8 +139,9 @@ for (const doc of subsystemDocs) {
   const text = readFileSync(doc, 'utf8');
   const lines = text.split('\n').length;
   subsystemLines += lines;
-  if (lines > SUBSYSTEM_LINE_BUDGET) {
-    fail(`${shown} is ${lines} lines; budget is ${SUBSYSTEM_LINE_BUDGET}`);
+  const budget = SUBSYSTEM_LINE_BUDGET_OVERRIDES.get(shown) ?? SUBSYSTEM_LINE_BUDGET;
+  if (lines > budget) {
+    fail(`${shown} is ${lines} lines; budget is ${budget}`);
   }
   checkImportMirror(doc);
   checkNoPhantomImports(doc, text);

@@ -112,6 +112,20 @@ Stated in advance so they cannot be discovered later as excuses.
    cached-token volumes are recorded per run so the size of this tax is
    visible in the results rather than buried in the totals.
 
+8. **Outcome labels come from a text stream, and a goal is echoed into it.**
+   `parseRunLog` prefers a run's machine-readable epilogue, and falls back to
+   prose markers only when there is none. The runner echoes the goal verbatim
+   at second zero, so a goal containing `✓ build finished` puts a completion
+   banner in the log the runner never printed. The runner's own verdict
+   outranks the banner, and since 2026-08-27 a banner in a hard-reaped run is
+   only believed when the run also printed its cost table — a wedged run never
+   reaches one. What remains unguarded is a run whose goal echoes the banner
+   AND that produces a cost table while failing silently: a delivered label
+   with real economics behind it. No text stream can be made unforgeable; the
+   receipt designed 2026-08-23 would close it and is not built. Until it is,
+   read a `delivered` row whose goal contains a marker as unverified, and
+   prefer runs whose epilogue is machine-readable.
+
 ## Reproducing
 
 ```bash

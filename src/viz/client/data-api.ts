@@ -21,7 +21,7 @@ import type {
   VizProjectRun,
   VizRun,
 } from './types.js';
-import { redirectIfAuthenticationRequired } from './auth-session.js';
+import { redirectIfAuthenticationRequired } from './session-guard.js';
 
 export async function fetchJson<T>(path: string): Promise<T> {
   const response = await fetch(path);

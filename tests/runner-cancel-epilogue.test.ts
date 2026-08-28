@@ -196,8 +196,15 @@ describe('the prose fallback fails closed', () => {
     // banner falsifies that premise and must win — conflating this marker with
     // the runner's `⏱ TIMEOUT after` is what broke the first version of the
     // ordering fix.
+    //
+    // NARROWED 2026-08-27 (2.9): the banner wins WITH its accounting. A run
+    // that really delivered printed its cost table on the way out, and the
+    // shape without one is exactly the forgery — an echoed goal in a run that
+    // then wedged. The table is what tells the two apart.
+    const totals = 'TOTAL                      10     16111  18203  354102      0.2256  ';
     const reaped = hardTimeoutLogEpilogue(1_080_000);
-    expect(parseRunLog(`${banner}\n${reaped}`).outcome).toBe('delivered');
+    expect(parseRunLog(`${banner}\n${totals}\n${reaped}`).outcome).toBe('delivered');
+    expect(parseRunLog(`${banner}\n${reaped}`).outcome).toBe('failed');
     expect(parseRunLog(`wedged, no markers${reaped}`).outcome).toBe('failed');
   });
 

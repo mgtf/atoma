@@ -323,6 +323,51 @@ ces deux commits fermaient.
 
 ## Statut
 
+### Fermetures — 2026-08-28
+
+Tous les points de la revue sont traités. `npm run check` et `npm run build`
+sont verts (236 fichiers de test, 2 831 tests). Chaque correctif porte sa
+régression, exerçant le chemin de production qui a échoué et traversant la même
+frontière que le défaut (process, HTTP, git, index SQLite).
+
+| # | Fermeture |
+|---|---|
+| 1.1 | `?? undefined` au site d'appel `overlayMenuClip` |
+| 1.2 | budget par fichier : `src/viz/AGENTS.md` à 600 lignes, exception nommée |
+| 2.1 | la clé anthropic de l'org est un credential per-run ; l'org gagne sur l'hôte, `ANTHROPIC_BASE_URL` ne suit pas une clé BYO ; bearer refusé (voir 3.2) |
+| 2.2 | `usableOrgKeys = {}` sur un run subscription, AVANT la résolution des tiers, donc les pins qu'elles débloquaient tombent avec elles |
+| 2.3 | pin `ollama:*` honoré seulement si l'hôte déclare `OLLAMA_BASE_URL` (forwardé) ; UI grisée et libellée « platform-hosted » |
+| 2.4 | `readBoundedRunFile` partagé ; `/api/runs/:id` répond 413 au-delà du plafond, parse par poll déclaré non résolu |
+| 2.5 | index unique sur `lower(owner)/lower(name)` sous un nouveau nom, colonnes intactes, dégradation vers l'index binaire |
+| 2.6 | `isBlankValue` partagé entre `translate` et `check` (`scripts/i18n-rules.mjs`) ; commentaire CI corrigé |
+| 2.7 | `i18n invalidate-range --since=<sha>` en CI, même code que le hook, sur toute la plage poussée |
+| 2.8 | le hook ne `--fix` ni ne re-stage un fichier partiellement stagé ; idem pour un catalogue porteur d'édits non stagés |
+| 2.9 | une bannière dans un run hard-reapé n'est crue qu'avec sa comptabilité ; dette de mesure inscrite au protocole |
+| 2.10 | Scene Tuning prend le voile (`inert`, `.gpu-overlays-veiled`, `--gpu-overlay-*` inline) |
+| 3.1 | seules les clés des providers référencés par les pins résolus traversent |
+| 3.2 | sans objet : le bearer ne peut plus atteindre l'enfant (2.1) |
+| 3.3 | parcours process-level `org:member` : lecture 200, écritures 403 |
+| 3.4 | le coût de la forme passphrase est dit dans `.env.example`, épinglé par un test |
+| 3.5 | `createProject` en une transaction `BEGIN IMMEDIATE` ; backstop CLI typé |
+| 3.6 | job `viz-smoke` en `workflow_dispatch`, `continue-on-error` — un bouton, pas une porte |
+| 3.7 | garde sur les préfixes du proxy Vite — qui a trouvé un cas vivant, `client/auth-session.ts`, renommé |
+| 3.8 | DÉCLINÉ, motivé dans `sw.js` : le seul producteur de payload fixe `url: '/'`, naviguer jetterait l'état de l'onglet |
+| 3.9 | `runs/index.json` sous le même plafond |
+| 3.10 | `git rebase --abort` avant chaque nouvelle tentative de push |
+| 3.11 | le retry couvre un batch entièrement rejeté |
+| 3.12 | signature de placeholders élargie (`{{count, number}}`, `$t(...)`, `{{- raw}}`) |
+| 3.13 | `applyDocumentLocale` écrit `lang`, `dir` ET le titre depuis le catalogue — une seule copie au lieu de quatre |
+| 3.14 | `destroy()` annule `this.snapshot` d'abord |
+| 3.15 | ré-export mort supprimé ; le test importe le module propriétaire |
+
+§4 : `tests/sandbox-security.test.ts` #7c passe sur la machine de référence,
+ce qui confirme l'artefact d'environnement distant.
+
+Le `viz:smoke` navigateur reste à jouer sur une machine réelle avant de
+livrer — la fenêtre touche le client GL.
+
+### À la date de la revue
+
 Consigné le jour de la revue. Aucun correctif appliqué dans ce commit — la
 branche porte le document seul. Ordre de fermeture suggéré : 1.1 + 1.2
 (deux lignes, débloquent `check`/`release:check`), puis 2.1 + 2.2 (même

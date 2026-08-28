@@ -83,7 +83,11 @@ export const LLM_PROVIDER_CATALOG: readonly LlmProviderEntry[] = [
     id: 'anthropic',
     label: 'Anthropic',
     credentialEnvVar: 'ANTHROPIC_API_KEY',
-    configurableEnvVars: ['ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL'],
+    // ANTHROPIC_AUTH_TOKEN is deliberately absent: the bearer slot has no
+    // place to be supplied from in this product, and project runs refuse it
+    // (see src/projects/AGENTS.md). Local operator runs still honour it
+    // through the SDK's own chain in src/run/auth.ts.
+    configurableEnvVars: ['ANTHROPIC_BASE_URL'],
     suggestive: false,
     models: ANTHROPIC_MODELS,
   },

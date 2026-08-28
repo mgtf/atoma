@@ -8,6 +8,7 @@ import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../src/viz/client/App.js';
 import { I18nProvider } from '../src/viz/client/i18n.js';
+import { applyDocumentLocale, translate } from '../src/viz/client/i18n-catalog.js';
 import { theme } from '../src/viz/client/theme.js';
 
 vi.mock('../src/viz/client/burnin-chart.js', () => ({
@@ -289,5 +290,27 @@ describe('the React visualizer shell', () => {
     expect(refreshedPaths).toContain('/api/runs');
     expect(refreshedPaths).toContain('/api/runs/run-1');
     expect(refreshedPaths.some((path) => path.startsWith('/api/registry'))).toBe(false);
+  });
+});
+
+describe('the document itself speaks the viewer\'s language', () => {
+  it('writes lang, dir and the TAB TITLE from one place, in the viewer\'s language', () => {
+    // 2026-08-27, finding 3.13. The tab said "Atoma — run visualizer" in every
+    // language: product copy outside the catalog, in a client that declares
+    // itself entirely catalogued. Four hand-written copies set `lang` and
+    // `dir` and none of them set the title, so adding it to one would have
+    // made a fifth thing to keep in step.
+    const root = document.documentElement;
+    applyDocumentLocale('fr');
+    expect(root.lang).toBe('fr');
+    expect(root.dir).toBe('ltr');
+    expect(document.title).toBe(translate('fr', 'app.documentTitle'));
+    // RTL is the case `dir` exists for, and the title follows the locale too.
+    applyDocumentLocale('ar');
+    expect(root.dir).toBe('rtl');
+    expect(document.title).toBe(translate('ar', 'app.documentTitle'));
+    // Back to the source of truth.
+    applyDocumentLocale('en');
+    expect(document.title).toBe('Atoma — run visualizer');
   });
 });

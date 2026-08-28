@@ -1031,6 +1031,68 @@ describe('viz auth gate (process level)', () => {
     expect(body.watch).toMatchObject({ armed: false, reason: 'disabled' });
   });
 
+  it('lets an org member READ the BYO surfaces and refuses every write with 403', async () => {
+    // 2026-08-27, finding 3.3. The role ladder on `/api/org/models` and
+    // `/api/org/provider-keys` is the most sensitive surface of that window —
+    // it decides who can spend an organisation's money — and the only
+    // process-level walk over it ran as `org:owner`, so the refusal half was
+    // never executed. Members READ the defaults on purpose: their own Settings
+    // must show what they inherit.
+    const instance = tempInstance();
+    const invitation = 'M'.repeat(43);
+    createInvitation(instance.dbPath, invitation, 'org:member');
+    const provider = await startFakeProvider({ port: await freePort(), subject: 7788, displayName: 'Member' });
+    const port = await freePort();
+    const base = `http://127.0.0.1:${port}`;
+    const running = startViz(
+      [...instance.args, '--port', String(port)],
+      { ...providerEnv(provider, base), ATOMA_SECRET_ENCRYPTION_KEY: 'k'.repeat(64) }
+    );
+    await waitReady(running, `${base}/auth/whoami`);
+
+    const jar = new CookieJar();
+    const login = await fetchWithJar(jar, `${base}/auth/login?provider=github&invite=${invitation}`);
+    expect(login.status).toBe(200);
+    const cookie = { cookie: jar.header(base)! };
+    expect(await (await fetch(`${base}/auth/whoami`, { headers: cookie })).json()).toMatchObject({
+      authenticated: true,
+      role: 'org:member',
+    });
+
+    // READ: allowed, and never carrying key material.
+    const read = await fetch(`${base}/api/org/models`, { headers: cookie });
+    expect(read.status).toBe(200);
+    const readBody = await read.json() as { keys: Array<{ provider: string }>; models: unknown };
+    expect(Array.isArray(readBody.keys)).toBe(true);
+    const keysRead = await fetch(`${base}/api/org/provider-keys`, { headers: cookie });
+    expect(keysRead.status).toBe(200);
+
+    // WRITE: refused, on every verb of both surfaces.
+    const json = { ...cookie, 'content-type': 'application/json', origin: base };
+    const savedModels = await fetch(`${base}/api/org/models`, {
+      method: 'PUT',
+      headers: json,
+      body: JSON.stringify({ models: { l1: 'anthropic:claude-haiku-4-5', l2: null, l3: null } }),
+    });
+    expect(savedModels.status).toBe(403);
+    const savedKey = await fetch(`${base}/api/org/provider-keys/zai`, {
+      method: 'PUT',
+      headers: json,
+      body: JSON.stringify({ key: `sk-test-${'z'.repeat(24)}` }),
+    });
+    expect(savedKey.status).toBe(403);
+    const deletedKey = await fetch(`${base}/api/org/provider-keys/zai`, {
+      method: 'DELETE',
+      headers: json,
+    });
+    expect(deletedKey.status).toBe(403);
+
+    // And nothing was written by the refusals.
+    const after = await fetch(`${base}/api/org/models`, { headers: cookie });
+    expect((await after.json() as { keys: unknown[] }).keys).toHaveLength(0);
+
+  }, 30_000);
+
   it('completes invited login, ignores hostile forwarded headers, and revokes on POST logout', async () => {
     const instance = tempInstance();
     const invitation = 'A'.repeat(43);

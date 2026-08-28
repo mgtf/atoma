@@ -1218,6 +1218,13 @@ export class GpuRenderer {
 
   destroy() {
     if (!this.initialized) return;
+    // BREAK THE IDENTITY GUARD FIRST. Two end-of-transition callbacks re-render
+    // from a `requestAnimationFrame` guarded only by `this.snapshot ===
+    // <the snapshot they started with>` — a guard `destroy()` did not touch,
+    // so a frame scheduled just before teardown ran `renderScene` on a
+    // destroyed Application (2026-08-27, 3.14). One frame wide, and reachable
+    // every HMR reload. Nulling it here is what makes those guards false.
+    this.snapshot = null;
     this.cameraFrameUnsubscribe?.();
     this.cameraFrameUnsubscribe = null;
     this.cameraFramePanels = [];
@@ -1645,7 +1652,7 @@ export class GpuRenderer {
     drawLocaleMenu(this, snapshot, width, layoutHeight, localeAnchor);
     publishOverlayMenuClip(
       overlayMenuClip(snapshot, width, layoutHeight, {
-        account: focusRail?.profile,
+        account: focusRail?.profile ?? undefined,
         locale: localeAnchor,
       })
     );

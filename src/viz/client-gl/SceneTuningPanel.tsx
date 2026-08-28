@@ -3,6 +3,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import {
@@ -52,6 +53,14 @@ export function SceneTuningPanel() {
     [locale]
   );
   const open = useGpuStore((state) => state.tuningPanelOpen);
+  // THE SAME VEIL EVERY OTHER DOM OVERLAY GETS. This window is `position:
+  // fixed; z-index: 8` and its default corner is the top-right — exactly where
+  // the Pixi account menu anchors — so while a chrome menu is open it painted
+  // OVER the menu and kept its sliders clickable above it: the failure mode
+  // 4ab40b4 and 01ed50c closed for every other overlay and missed here
+  // (2026-08-27, 2.10). Read from the store rather than threaded through
+  // GpuApp because this panel takes no props at all.
+  const veiled = useGpuStore((state) => state.accountMenuOpen || state.localeMenuOpen);
   const panelRef = useRef<HTMLElement>(null);
   const drag = useRef<{ offsetX: number; offsetY: number } | null>(null);
   const [position, setPosition] = useState(initialPosition);
@@ -110,9 +119,21 @@ export function SceneTuningPanel() {
   return (
     <aside
       ref={panelRef}
-      className="gpu-panel-skin gpu-scene-tuning"
+      className={`gpu-panel-skin gpu-scene-tuning${veiled ? ' gpu-overlays-veiled' : ''}`}
       aria-label={t('tuning.title')}
-      style={{ left: position.x, top: position.y }}
+      inert={veiled}
+      // The clip is expressed in the element's OWN box, so every veiled
+      // overlay restates its origin. The others do it in CSS because their
+      // position is CSS; this one is dragged, so its origin is state and the
+      // variables are inline for the same reason `left`/`top` are.
+      style={
+        {
+          left: position.x,
+          top: position.y,
+          '--gpu-overlay-left': `${position.x}px`,
+          '--gpu-overlay-top': `${position.y}px`,
+        } as CSSProperties
+      }
     >
       <header
         className="gpu-scene-tuning__header"

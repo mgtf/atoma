@@ -108,17 +108,11 @@ export function parseRunLog(log: string): RunStats {
   const runnerFailed = /--- run failed ---|⏱ TIMEOUT after/.test(log);
   const completed = /✓ build finished/.test(log);
   const harnessReaped = /--- hard timeout ---/.test(log);
-  const outcome: RunStats['outcome'] = runnerFailed
-    ? 'failed'
-    : completed
-      ? 'delivered'
-      : harnessReaped
-        ? 'failed'
-        : 'error';
 
   let costUsd: number | null = null;
   let llmCalls: number | null = null;
   // Last TOTAL row wins (a failed run prints one table only; delivered runs too).
+  // READ BEFORE the outcome is decided, because it is evidence about it.
   for (const line of log.split('\n')) {
     if (!/^TOTAL\s/.test(line.trim())) continue;
     const cols = line.trim().split(/\s{2,}/);
@@ -127,6 +121,29 @@ export function parseRunLog(log: string): RunStats {
     if (Number.isFinite(calls)) llmCalls = calls;
     if (Number.isFinite(cost)) costUsd = cost;
   }
+
+  // A BANNER THAT OUTLIVED A REAP MUST BRING ITS ACCOUNTING. Ranking the reap
+  // marker below the banner is right for the case it was written for: a
+  // delivered run keeps a server alive on purpose and the harness terminates
+  // it, so the marker would otherwise relabel a healthy run. But it made the
+  // OTHER case free (2026-08-27, 2.9): a goal echoing `✓ build finished` at
+  // second zero, in a run that then hung and was hard-reaped, read as
+  // `delivered` with no cost at all — a forged row in the very CSVs the
+  // benchmark measures from.
+  //
+  // The two are told apart by evidence rather than by rank: a run that really
+  // finished printed its cost table, and a hung one never got there. So when
+  // both markers are present and NO accounting is, the banner is unsupported
+  // and the reap stands. Not a new mechanism — the same text, read for what it
+  // implies. The receipt designed 2026-08-23 stays unbuilt (COOLING-OFF).
+  const bannerUnsupported = completed && harnessReaped && costUsd === null && llmCalls === null;
+  const outcome: RunStats['outcome'] = runnerFailed
+    ? 'failed'
+    : completed && !bannerUnsupported
+      ? 'delivered'
+      : harnessReaped
+        ? 'failed'
+        : 'error';
 
   const opusCalls = modelCalls(log, /claude-opus/);
   const sonnetCalls = modelCalls(log, /claude-sonnet/);

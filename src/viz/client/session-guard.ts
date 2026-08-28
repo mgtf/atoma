@@ -1,3 +1,9 @@
+// NAME CONSTRAINED BY THE DEV PROXY. This was `auth-session.ts`, and the Vite
+// dev server proxies `/auth` by PREFIX — so as a root module of the MUI client
+// it was requested at `/auth-session.ts`, swallowed by the proxy, and 404'd in
+// dev only. Same failure `cae2bfa` fixed by renaming `api-*.ts`; the guard in
+// `tests/viz-client-bundle-boundary.test.ts` now refuses the whole class
+// (2026-08-27, 3.7).
 /** Server-owned no-JS fallback selector; provider hrefs are built on it. */
 export const AUTH_LOGIN_PATH = '/auth/login';
 

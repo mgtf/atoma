@@ -6,9 +6,9 @@ import {
   useState,
 } from 'react';
 import { projectSlugFromName } from '../../contracts/projects.js';
-import { isLocale, localeDirection } from '../../contracts/locales.js';
-import { translate } from '../client/i18n-catalog.js';
-import { loginBounceParams, providerLoginHref } from '../client/auth-session.js';
+import { isLocale } from '../../contracts/locales.js';
+import { applyDocumentLocale, translate } from '../client/i18n-catalog.js';
+import { loginBounceParams, providerLoginHref } from '../client/session-guard.js';
 import { isIndexEntryLive } from '../client/run-utils.js';
 import {
   dismissPushPrompt,
@@ -91,8 +91,7 @@ export function GpuApp() {
   const locale = useGpuStore((snapshot) => snapshot.locale);
   const entered = useGpuStore((snapshot) => snapshot.entered);
   useEffect(() => {
-    document.documentElement.lang = locale;
-    document.documentElement.dir = localeDirection(locale);
+    applyDocumentLocale(locale);
   }, [locale]);
   const t = useCallback(
     (key: string, vars?: Record<string, unknown>) => translate(locale, key, vars),
@@ -129,7 +128,7 @@ function GpuAppContent({
   // ?authNotice=<code> names a login failure to display, ?invite=<token>
   // must ride every provider link so the invitation admits the account the
   // visitor signs in with. Parsing and href building are the unit-tested
-  // helpers in auth-session.ts.
+  // helpers in session-guard.ts.
   const loginParams = useMemo(() => loginBounceParams(window.location.search), []);
   const loginHref = useCallback(
     (providerId: string) => providerLoginHref(providerId, loginParams.invite),

@@ -11,8 +11,10 @@
  *
  * Commands:
  *   check              verify target catalogs, non-empty EN values, matching
- *                      {{placeholder}} signatures, and no EN keys missing from
- *                      fr. Exit 1 with a report on any violation. Runs in CI
+ *                      placeholder signatures, and no TARGET key absent from
+ *                      en.json. An EN key a target lacks is NOT a problem — it
+ *                      is a blank awaiting translation, and it is counted as
+ *                      one. Exit 1 with a report on any violation. Runs in CI
  *                      after translate; deliberately NOT part of `npm run
  *                      check`, because a blank fr value awaiting CI
  *                      translation is a normal state on a developer machine.
@@ -29,7 +31,10 @@
  *                      locale's successes (the 2026-08-27 incident: a zh
  *                      batch failure left ten `{}` catalogs uncommitted).
  *                      A key the model returns with placeholder drift gets
- *                      ONE isolated retry, then a named summary. Exit 1 only
+ *                      ONE isolated retry — including when the whole batch
+ *                      drifted — then a named summary. Blank is one predicate
+ *                      shared with `check` (`i18n-predicates.mjs`), so nothing this
+ *                      writes can fail the gate that runs after it. Exit 1 only
  *                      on HARD locale failures (provider down, unreadable
  *                      batch); surviving rejects stay blank on disk — they
  *                      commit with everything else and retry next run, so
@@ -37,6 +42,13 @@
  *                      CI's translate step is `continue-on-error` and the
  *                      check/commit steps run `always()`: the catalog write
  *                      path cannot be skipped by an exit code again.
+ *   invalidate-range [--since=<ref>]
+ *                      the SAME invalidation as `invalidate-staged`, keyed on a
+ *                      push range instead of the index, for CI. Semantic drift
+ *                      keeps its placeholder signature, so nothing else in the
+ *                      pipeline can see it; the hook that used to be the only
+ *                      guard is skipped under CI=true and bypassed by
+ *                      --no-verify or the web editor.
  *   invalidate-staged  pre-commit helper. When a staged en.json has VALUE
  *                      changes (not additions), blank the same target keys
  *                      and re-stage it, so the next translate run re-does
@@ -55,6 +67,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import path, { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { isBlankValue, placeholderSignature, placeholdersMatch } from './i18n-predicates.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
@@ -100,12 +113,16 @@ function usage() {
       '  node scripts/i18n.mjs fix-drift [--apply] [--locale=<code>]\n' +
       '  node scripts/i18n.mjs translate [--dry] [--locale=<code>]\n' +
       '  node scripts/i18n.mjs invalidate-staged\n' +
+      '  node scripts/i18n.mjs invalidate-range [--since=<ref>]\n' +
       '  node scripts/i18n.mjs sync [--locale=<code>]\n'
   );
   process.exit(1);
 }
 
-if (!command || !['check', 'fix-drift', 'translate', 'invalidate-staged', 'sync'].includes(command)) {
+if (
+  !command ||
+  !['check', 'fix-drift', 'translate', 'invalidate-staged', 'invalidate-range', 'sync'].includes(command)
+) {
   usage();
 }
 
@@ -130,16 +147,6 @@ function resolvePath(relativePath) {
   return path.resolve(REPO_ROOT, relativePath);
 }
 
-/** The sorted set of `{{name}}` interpolations in a value, blanks included. */
-function placeholderSignature(value) {
-  if (typeof value !== 'string') return '';
-  const matches = value.match(/\{\{\s*\w+\s*\}\}/g);
-  return matches ? matches.slice().sort().join('|') : '';
-}
-
-function placeholdersMatch(en, fr) {
-  return placeholderSignature(en) === placeholderSignature(fr);
-}
 
 // ---------- check ------------------------------------------------------------
 
@@ -168,7 +175,11 @@ function runCheck() {
         blanks += 1;
         continue;
       }
-      if (typeof value !== 'string' || !value.trim()) {
+      if (isBlankValue(value)) {
+        // Still a PROBLEM, not a blank: nothing in the pipeline writes this
+        // shape any more (2026-08-27, 2.6), so one on disk was hand-authored
+        // and says so. `missingKeys` now sees it too, which is what makes it
+        // repairable instead of permanent.
         problems.push(`${locale}.${key}: value is not a non-empty string`);
       } else if (!placeholdersMatch(enValue, value)) {
         problems.push(`${locale}.${key}: placeholder drift (EN "${placeholderSignature(enValue)}" vs target "${placeholderSignature(value)}")`);
@@ -197,7 +208,7 @@ function runFixDrift() {
     const target = readCatalog(targetPath(locale));
     if (!target) continue;
     const drift = Object.entries(en)
-      .filter(([key, value]) => target[key] !== '' && target[key] !== undefined && !placeholdersMatch(value, target[key]))
+      .filter(([key, value]) => !isBlankValue(target[key]) && !placeholdersMatch(value, target[key]))
       .map(([key]) => key);
     const orphans = Object.keys(target).filter((key) => !(key in en));
     changes += drift.length + orphans.length;
@@ -456,11 +467,14 @@ async function callOpenAi(systemPrompt, payload, attempt = 1) {
   return { text, usage: data.usage, model: data.model || model };
 }
 
+/**
+ * What `translate` must fill. A whitespace-only value counts as missing
+ * (2026-08-27, 2.6): it used to be invisible here AND to `fix-drift`, so once
+ * one was written it survived every pass and left the i18n job red until a
+ * human edited the catalog by hand.
+ */
 function missingKeys(en, fr) {
-  return Object.keys(en).filter((key) => {
-    const value = fr[key];
-    return value === undefined || value === '';
-  });
+  return Object.keys(en).filter((key) => isBlankValue(fr[key]));
 }
 
 async function runTranslate() {
@@ -540,10 +554,13 @@ async function runTranslate() {
       const sliceRejected = [];
       for (const key of slice) {
         const value = parsed[key];
-        if (typeof value === 'string' && value.length > 0 && placeholdersMatch(en[key], value)) {
+        // `!isBlankValue`, not `.length > 0`: the same predicate `check` uses.
+        // The two disagreed, and a model answering " " passed here and failed
+        // there — written, committed under `always()`, never repaired.
+        if (!isBlankValue(value) && placeholdersMatch(en[key], value)) {
           translated[key] = value;
           got += 1;
-        } else if (typeof value === 'string' && value.length > 0) {
+        } else if (!isBlankValue(value)) {
           process.stderr.write(`\n    rejected ${target.locale}.${key} (placeholder drift in model output)\n`);
           sliceRejected.push(key);
         }
@@ -553,7 +570,13 @@ async function runTranslate() {
       // {{token}} in or dropped it — showing the failure mode fixes it). One
       // pass only: if the retry also drifts, the key is reported and left for
       // the next run rather than burning more quota.
-      if (sliceRejected.length > 0 && sliceRejected.length < slice.length) {
+      //
+      // NO `sliceRejected.length < slice.length` guard (2026-08-27, 3.11): it
+      // skipped the retry exactly when EVERY key of the batch drifted, which
+      // for ATOMA_I18N_BATCH=1 is every single rejection there can be — the
+      // one case the file's own doc promised was covered. Cost of removing it
+      // is at most one extra call per wholly-rejected batch, still one pass.
+      if (sliceRejected.length > 0) {
         process.stdout.write(`    retry ${target.locale}: ${sliceRejected.length} key(s) alone… `);
         try {
           const retryResult = await call(
@@ -564,10 +587,7 @@ async function runTranslate() {
           let retried = 0;
           for (const key of sliceRejected) {
             const value = retryParsed[key];
-            if (
-              typeof value === 'string' && value.length > 0 &&
-              placeholdersMatch(en[key], value)
-            ) {
+            if (!isBlankValue(value) && placeholdersMatch(en[key], value)) {
               translated[key] = value;
               got += 1;
               retried += 1;
@@ -620,6 +640,76 @@ function runGit(command) {
   return execSync(command, { encoding: 'utf8', cwd: REPO_ROOT }).trim();
 }
 
+/**
+ * WHICH EN VALUES CHANGED MEANING. Keys present in both versions whose string
+ * value differs — a rename or a deletion is not this mechanism's business
+ * (`check` and `fix-drift` own orphans), and a NEW key needs no invalidation
+ * because it has no stale translation behind it.
+ */
+function changedEnValues(before, after) {
+  return Object.keys(after).filter(
+    (key) =>
+      key in before &&
+      typeof after[key] === 'string' &&
+      typeof before[key] === 'string' &&
+      before[key] !== after[key]
+  );
+}
+
+/**
+ * Blank the counterparts of `changed` in every target catalog and write them.
+ * Returns the locales it touched. `stage` re-stages what it wrote, which only
+ * the pre-commit trigger wants: in CI the commit step stages the whole locale
+ * directory anyway.
+ */
+function blankChangedCounterparts(changed, { stage }) {
+  const touched = [];
+  const skipped = [];
+  for (const locale of TARGET_LOCALES) {
+    const path = targetPath(locale);
+    const target = readCatalog(path);
+    if (!target) continue;
+    // A catalog carrying its OWN unstaged edits is not ours to stage: `git add`
+    // takes the whole file, so the author's other changes would ride into this
+    // commit (2026-08-27, 2.8 — same class as the eslint half of the hook).
+    // The blanking still happens on disk, and the CI replay
+    // (`invalidate-range`) is the backstop if it never gets committed.
+    const dirty = stage && worktreeDiffersFromIndex(path);
+    const before = JSON.stringify(target);
+    for (const key of changed) {
+      if (key in target && !isBlankValue(target[key])) target[key] = '';
+    }
+    if (JSON.stringify(target) === before) continue;
+    writeCatalog(path, target);
+    if (stage && !dirty) runGit(`git add "${path}"`);
+    if (dirty) skipped.push(path);
+    else touched.push(locale);
+  }
+  for (const path of skipped) {
+    process.stdout.write(
+      `[i18n] blanked stale values in ${path} but did NOT stage it: it carries unstaged ` +
+        'changes of its own. Stage it yourself, or CI will invalidate them on push.\n'
+    );
+  }
+  return touched;
+}
+
+/**
+ * Does the worktree copy differ from what is staged? `git diff --name-only`
+ * with no `--cached` is exactly the unstaged half, and it answers with a path
+ * or with nothing — deliberately NOT `status --porcelain`, whose answer is
+ * positional and whose leading space `runGit`'s trim would eat.
+ */
+function worktreeDiffersFromIndex(path) {
+  try {
+    return runGit(`git diff --name-only -- "${path}"`).trim().length > 0;
+  } catch {
+    // No git, or a path git will not answer about: assume it is ours to stage,
+    // which is the behaviour this guard narrows, not the one it replaces.
+    return false;
+  }
+}
+
 function runInvalidateStaged() {
   const staged = runGit('git diff --cached --name-only').split('\n').filter(Boolean);
   if (!staged.includes(EN_PATH)) return; // nothing to do, exit 0
@@ -633,31 +723,79 @@ function runInvalidateStaged() {
     return; // initial commit or unreadable HEAD — a no-op, not a failure
   }
 
-  const changed = Object.keys(stagedEn).filter(
-    (key) =>
-      key in head &&
-      typeof stagedEn[key] === 'string' &&
-      typeof head[key] === 'string' &&
-      stagedEn[key] !== head[key]
-  );
+  const changed = changedEnValues(head, stagedEn);
   if (changed.length === 0) return;
-
-  const restaged = [];
-  for (const locale of TARGET_LOCALES) {
-    const path = targetPath(locale);
-    const target = readCatalog(path);
-    if (!target) continue;
-    const before = JSON.stringify(target);
-    for (const key of changed) {
-      if (key in target && target[key] !== '') target[key] = '';
-    }
-    if (JSON.stringify(target) === before) continue;
-    writeCatalog(path, target);
-    runGit(`git add "${path}"`);
-    restaged.push(locale);
-  }
+  const restaged = blankChangedCounterparts(changed, { stage: true });
   if (restaged.length === 0) return;
   process.stdout.write(`[i18n] ${changed.length} EN value change(s) — blanked ${restaged.join(', ')} counterpart(s), re-staged. CI will re-translate.\n`);
+  for (const key of changed) process.stdout.write(`  - ${key}\n`);
+}
+
+/**
+ * THE SAME INVALIDATION, TRIGGERED BY A PUSH INSTEAD OF A COMMIT.
+ *
+ * Semantic drift — an EN value rewritten without touching its placeholders —
+ * is invisible to `check` and to `fix-drift` by construction: both compare
+ * placeholder signatures, and a reworded sentence keeps its own. The pre-commit
+ * hook was the ONLY thing that caught it, and it is skipped whenever
+ * `CI === 'true'` (`scripts/husky-install.mjs`, the realistic case for a remote
+ * agent session), bypassed by `--no-verify`, and absent from GitHub's web
+ * editor. An en.json edit made any of those ways left twelve translations
+ * saying the old thing, indefinitely (2026-08-27, 2.7).
+ *
+ * Deliberately NOT a second definition of invalidation: same
+ * `changedEnValues` + `blankChangedCounterparts` as the hook, different
+ * trigger. It does not stage — CI's commit step stages the locale directory.
+ *
+ * RESIDUAL HOLE, stated rather than papered over: the range is what the push
+ * carried (`--since=<sha>`, falling back to `HEAD^`). The i18n job runs with
+ * `cancel-in-progress`, so if push P1 rewrites EN and P2 lands before P1's job
+ * reaches this step, P1's run is cancelled and P2's range does not include it.
+ * Closing that needs state about the last range actually processed, which is a
+ * new mechanism; the hook remains the first line of defence.
+ */
+function runInvalidateRange() {
+  const requested = flags.find((flag) => flag.startsWith('--since='))?.slice('--since='.length);
+  const candidates = [requested, 'HEAD^'].filter(Boolean);
+  let before = null;
+  for (const candidate of candidates) {
+    try {
+      // A force push or a first push gives an all-zero sha, and a shallow
+      // clone may simply not have the object: both mean "no baseline here".
+      if (/^0+$/.test(candidate)) continue;
+      before = JSON.parse(runGit(`git show ${candidate}:${EN_PATH}`));
+      process.stdout.write(`invalidate-range: comparing en.json against ${candidate}\n`);
+      break;
+    } catch {
+      continue;
+    }
+  }
+  if (!before) {
+    process.stdout.write('invalidate-range: no readable baseline for en.json — nothing to invalidate.\n');
+    return;
+  }
+  const after = readCatalog(EN_PATH);
+  if (!after) {
+    process.stderr.write(`ERROR: missing ${EN_PATH}\n`);
+    process.exit(1);
+  }
+  const changed = changedEnValues(before, after);
+  if (changed.length === 0) {
+    process.stdout.write('invalidate-range: no EN value changed in this range.\n');
+    return;
+  }
+  const touched = blankChangedCounterparts(changed, { stage: false });
+  if (touched.length === 0) {
+    process.stdout.write(
+      `invalidate-range: ${changed.length} EN value change(s), every counterpart already blank ` +
+        '(the pre-commit hook did its job).\n'
+    );
+    return;
+  }
+  process.stdout.write(
+    `invalidate-range: ${changed.length} EN value change(s) — blanked ${touched.join(', ')} ` +
+      'counterpart(s). translate will refill them below.\n'
+  );
   for (const key of changed) process.stdout.write(`  - ${key}\n`);
 }
 
@@ -733,6 +871,7 @@ const runners = {
   'fix-drift': runFixDrift,
   translate: runTranslate,
   'invalidate-staged': runInvalidateStaged,
+  'invalidate-range': runInvalidateRange,
   sync: runSync,
 };
 await runners[command]();

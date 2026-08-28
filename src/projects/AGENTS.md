@@ -24,7 +24,27 @@ Neighbours:
 ## The subscription-transport door
 
 - A project run normally requires `ATOMA_LLM=anthropic` plus exactly one
-  per-run credential. A machine-bound transport (`claude-cli`, and its bare
+  per-run credential: the host's `ANTHROPIC_API_KEY`, or the organisation's
+  OWN anthropic provider key. A BYO-only deployment carrying no platform key
+  at all is therefore a supported shape, and an org key WINS over a host one.
+- `ANTHROPIC_AUTH_TOKEN` is REFUSED here, not ignored. No tenant can supply
+  one (the org key store is keyed by catalogue provider, and anthropic's
+  credential variable is `ANTHROPIC_API_KEY`), and a bearer is refreshed from
+  a login profile the run child cannot read — a frozen env snapshot would
+  expire mid-run. Operator LOCAL runs keep it, where the SDK reads the live
+  profile ([src/run](../run/AGENTS.md)).
+- An `ollama:*` pin is honoured only where the HOST declared its endpoint:
+  `OLLAMA_BASE_URL` is forwarded on every branch (self-hosted selects no
+  payer), and without it the pin falls through like a keyless provider —
+  presuming localhost is exactly what detonates. The endpoint is the
+  operator's infrastructure: an org picks ollama models, never an ollama
+  destination (a tenant URL would be SSRF from the platform's own process).
+- A BYO key is forwarded WITHOUT the host's `ANTHROPIC_BASE_URL`. That
+  variable points the anthropic transport at a gateway, and a tenant's key
+  belongs to its own issuer — the host's gateway applies to the host's own
+  credential only. Z.ai is reached through `ZAI_API_KEY`/`ZAI_BASE_URL`
+  instead, which is also what lets one run split tiers across both
+  providers. A machine-bound transport (`claude-cli`, and its bare
   `claude` alias) binds to the HOST's own login session, so it spends that
   subscription and cannot honour a supplied credential — for a tenant that
   would be one account billing another.
@@ -42,6 +62,13 @@ Neighbours:
   cannot use one, and a stale exported key only confuses provider
   precedence), normalises `ATOMA_LLM` to `claude-cli`, and does not relax
   isolation: `ATOMA_CONTAINER` and `ATOMA_REQUIRE_ISOLATION` stay on.
+- NO credential includes the ORGANISATION's own keys. A subscription run
+  spends the host subscription and nothing else: injected, an org key would
+  let a tier pinned to `anthropic:*`/`zai:*` bill the organisation while the
+  journal records `run.host_subscription`, and the audit row would name the
+  wrong payer. The keys are withheld before tier resolution, not only at
+  injection, so the pins they would have unlocked are dropped with them
+  rather than reaching the router without a credential.
 - Every such run is journaled as `run.host_subscription` (severity
   `security`, never pushed). The coordinator emits no audit row itself — it
   calls `onSubscriptionTransport` and the caller journals, so there is one
@@ -94,6 +121,21 @@ Neighbours:
 - A `ready` repository is not re-derived: its receipt on the row IS its
   identity. Calling GitHub again would fail the terminal `ready` CAS, which is
   what made a retry-after-failed-commit impossible.
+- ONE PROJECT PER REPOSITORY, per organisation, and the comparison FOLDS CASE
+  because GitHub does. `acme/Site` and `acme/site` are one repository there and
+  were two rows here, so the collision that creation-time refusal exists to
+  catch came back at the second project's first publish as a permanent
+  `GitHubDivergenceError`, after the run and the spend. The unique index is on
+  `lower(owner)`/`lower(name)` under its own name; the COLUMNS keep the
+  spelling the tenant typed, because that spelling is what `ensureRepository`
+  asks GitHub to create. A store already holding such a pair cannot take that
+  index — and needs it most — so it keeps the binary one, is told which pair to
+  resolve, and still OPENS.
+- Creating a project is ONE `BEGIN IMMEDIATE` transaction: both identity checks
+  and the INSERT. Two processes write this file (the route and the CLI), and
+  outside a transaction the loser of that race met the index instead of the
+  typed conflict, so the caller got a driver's UNIQUE prose naming an index
+  rather than a 409 naming the holder.
 - HTTP 422 from repository creation is NOT proof the name is taken — an
   account can also refuse to create a repository of that visibility, and
   `GitHubApiError` carries no body to tell them apart. Say what is known.

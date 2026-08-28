@@ -5,7 +5,7 @@ import { basename, extname, relative, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { SkillRegistry } from '../skills/registry.js';
-import { sortRunIndex, summarizeTraceFile } from './runIndex.js';
+import { readBoundedRunFile, sortRunIndex, summarizeTraceFile } from './runIndex.js';
 import type { VizRunIndexEntry } from './trace.js';
 import { openStoreHandle, skillsDirPath, storeDbPath } from '../core/stores.js';
 import { LEDGER_TABLE_DDL, readLedgerTail } from '../core/ledger.js';
@@ -995,9 +995,21 @@ function sendJson(res: import('node:http').ServerResponse, code: number, obj: un
 function listOperatorRunIndex(): VizRunIndexEntry[] {
   if (!existsSync(RUNS_DIR)) return [];
   const indexFile = join(RUNS_DIR, 'index.json');
-  if (existsSync(indexFile)) {
+  // The index is read under the SAME ceiling as the traces it points at
+  // (2026-08-27 review, 3.9): nothing prunes it — one row per run for the life
+  // of the checkout — so this was the last operator path able to materialise an
+  // unbounded document per request.
+  //
+  // Over the ceiling falls through to the directory scan below, the fallback
+  // this code already had for a torn index. That trade is stated rather than
+  // pretended away: the scan reads far MORE bytes in total, but one bounded
+  // file at a time, so the peak this fix exists to bound is the one that
+  // improves. An index that large also means a run corpus that large, where a
+  // wrong-but-cheap empty list would be the worse answer.
+  const index = readBoundedRunFile(indexFile);
+  if (index.ok) {
     try {
-      const parsed: unknown = JSON.parse(readFileSync(indexFile, 'utf8'));
+      const parsed: unknown = JSON.parse(index.bytes.toString('utf8'));
       if (Array.isArray(parsed)) {
         return parsed.filter(
           (entry): entry is VizRunIndexEntry =>
@@ -2062,6 +2074,10 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           defaults: operatorTierDefaults(process.env),
           choices: TIER_MODEL_CHOICES,
           catalog: LLM_PROVIDER_CATALOG,
+          // Whether THIS deployment declared an Ollama endpoint. An ollama
+          // pin without one falls through at run time, so the picker greys
+          // the family instead of offering a dormant choice.
+          ollamaAvailable: Boolean(process.env['OLLAMA_BASE_URL']?.trim()),
         });
         return;
       }
@@ -2105,6 +2121,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           defaults: operatorTierDefaults(process.env),
           choices: TIER_MODEL_CHOICES,
           catalog: LLM_PROVIDER_CATALOG,
+          ollamaAvailable: Boolean(process.env['OLLAMA_BASE_URL']?.trim()),
         });
       } catch {
         sendJson(res, 400, { error: 'each tier must be null or one of the offered models' });
@@ -2134,6 +2151,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
             catalog: LLM_PROVIDER_CATALOG,
             choices: TIER_MODEL_CHOICES,
             operatorDefaults: operatorTierDefaults(process.env),
+            ollamaAvailable: Boolean(process.env['OLLAMA_BASE_URL']?.trim()),
           });
           return;
         }
@@ -2870,7 +2888,29 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       sendJson(res, 404, { error: 'not found' });
       return;
     }
-    const body = readFileSync(file);
+    // BOUNDED, like every other reader of this corpus (2026-08-27 review, 2.4).
+    // A trace has no cap in the pipeline and this route is polled ~1×/s per
+    // live client and per tab, so the unbounded read let one long-running
+    // tenant run materialise an arbitrary document in the server process every
+    // second, multiplied by the open tabs.
+    //
+    // 413 for the refusal, KNOWINGLY reusing the status this codebase gives to
+    // an oversized REQUEST body (`src/projects/service.ts`, `src/github/http.ts`
+    // and the bounded readers above). There is no response-side size code in
+    // HTTP; the alternatives lie harder — 404 makes an existing trace
+    // indistinguishable from a deleted one, and 500 calls a policy an error.
+    // The distinct `error` string is what tells the two 413s apart.
+    const read = readBoundedRunFile(file);
+    if (!read.ok) {
+      if (read.reason === 'overCeiling') {
+        sendJson(res, 413, { error: 'run trace exceeds the read ceiling' });
+        return;
+      }
+      // Unlinked, replaced, or no longer a regular file since it resolved.
+      sendJson(res, 404, { error: 'not found' });
+      return;
+    }
+    const body = read.bytes;
     // DELTA MODE (?after=<n>): the live poll re-fetched the WHOLE run every
     // second, so a long run re-shipped a growing payload ~60×/minute to
     // learn about a handful of new events. With `after`, the response
@@ -2879,6 +2919,14 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
     // slice starts. Absent the param the full run is served byte-for-byte
     // as before — first load, non-live runs, and any other consumer are
     // untouched.
+    //
+    // The ceiling above is what bounds the parse below: the delta still
+    // materialises the whole document ONCE PER POLL, because slicing `events`
+    // needs it. Removing that needs a server-side cache keyed on the trace's
+    // mtime, or a streaming projection of the events array — and
+    // `contracts/traceFields.ts` cannot return a document by construction, so
+    // neither exists today. Both are new mechanisms; COOLING-OFF puts their
+    // design outside the session that measured this one. Registered, not built.
     const afterRaw = url.searchParams.get('after');
     if (afterRaw !== null) {
       const after = Number(afterRaw);
