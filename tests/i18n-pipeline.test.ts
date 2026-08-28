@@ -412,6 +412,21 @@ describe('the translation job is one step of CI', () => {
     expect(i18nJob).toContain('fetch-depth: 0');
   });
 
+  it('translates the branch tip and queues concurrent runs instead of cancelling', () => {
+    const i18nJob = workflow.slice(workflow.indexOf('  i18n:'), workflow.indexOf('  worker:'));
+    // 2026-08-28, run 33130929613: checked out at the trigger sha, the job
+    // could not see the translation commit a re-run had landed 31 seconds
+    // earlier, re-translated six already-filled catalogs (paid twice), and
+    // produced a commit that could never rebase past main — same lines,
+    // different model output — so the push retry loop exhausted every time.
+    // The job's subject is the BRANCH's catalogs, so it checks out the tip:
+    expect(i18nJob).toContain('ref: ${{ github.ref_name }}');
+    // Queueing is what makes the tip checkout sufficient — the running job
+    // lands its commit before the next one reads the tip — and cancelling an
+    // in-flight translate could drop paid work besides.
+    expect(i18nJob).toContain('cancel-in-progress: false');
+  });
+
   it('the standalone self-pushing i18n workflow is gone', () => {
     expect(existsSync(join(REPO_ROOT, '.github', 'workflows', 'i18n.yml'))).toBe(false);
   });

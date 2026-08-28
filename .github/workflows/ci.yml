@@ -59,10 +59,25 @@ jobs:
       # Run-level group instead of the workflow's branch group: two pushes to
       # main may safely overlap elsewhere, but never two translation commits.
       group: i18n-translate-${{ github.ref }}
-      cancel-in-progress: true
+      # QUEUE, never cancel (2026-08-28, run 33130929613): cancelling an
+      # in-flight translate can drop paid work, and the dying job's always()
+      # commit step can still push WHILE the newer job is already checked out,
+      # recreating the stale-tree race the tip checkout below closes. Letting
+      # the running job land and starting the next from the tip is lossless.
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v7
         with:
+          # The BRANCH TIP, not the pushed sha (2026-08-28, run 33130929613):
+          # this job's subject is the branch's catalogs, so a translation
+          # commit landed between the push and this job starting must be
+          # visible here. Checked out at the trigger sha, this job once
+          # re-translated 6 already-filled catalogs (paid twice) and produced
+          # a commit that could never rebase past the one on main — same
+          # lines, different model output — so the push loop below exhausted.
+          # `invalidate-range` stays correct: it compares en.json at `--since`
+          # against the WORKING TREE, and a newer tree only widens the range.
+          ref: ${{ github.ref_name }}
           # FULL history, because `invalidate-range` below compares en.json
           # against the commit this push started from — which is `HEAD^` only
           # when the push carried exactly one commit. A depth of 2 would make
