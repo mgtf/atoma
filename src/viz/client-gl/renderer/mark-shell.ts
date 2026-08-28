@@ -168,9 +168,6 @@ export const MARK_SHELL_UNIFORMS = [
   // sphere of this size, so the ghost on a wall matches the real filament
   // instead of staying a point-light needle.
   { name: 'uCoreRadius', type: 'f32' },
-  // Local UV of the cursor in the 28×28 box. The shader turns it into a camera
-  // ray and intersects that ray with each facet plane.
-  { name: 'uLampUv', type: 'vec2<f32>' },
   // Scene reflection. 1 when a Pixi env capture is bound; 0 on the header
   // mark and during the interior backdrop pass (shared shader).
   { name: 'uEnvOn', type: 'f32' },
@@ -249,7 +246,6 @@ const uniformValues: Record<
   uLocalSize: () => ATOMA_MARK_LOCAL_SIZE,
   uBackdropTexel: () => new Float32Array([0, 0]),
   uCoreRadius: () => ATOMA_MARK_CORE_RADIUS / ATOMA_MARK_PROJECTION_SCALE,
-  uLampUv: () => new Float32Array([0.5, 0.5]),
   uEnvOn: () => 0,
   uEnvJump: () => 0.42,
   uPointerClip: () => new Float32Array([0, 0, 0, 0.018]),
@@ -286,7 +282,6 @@ export interface MarkShell {
     beadVisible?: boolean;
     lamp?: {
       position: readonly [number, number, number];
-      uv: readonly [number, number];
       on: number;
     };
     pointerClip?: {
@@ -492,7 +487,6 @@ export function createMarkShell(): MarkShell | null {
     uBend: number;
     uMaxBend: number;
     uLamp: Float32Array;
-    uLampUv: Float32Array;
     uEnvOn: number;
     uPointerClip: Float32Array;
   };
@@ -605,8 +599,6 @@ export function createMarkShell(): MarkShell | null {
         uniforms.uLamp[1] = lamp.position[1];
         uniforms.uLamp[2] = lamp.position[2];
         uniforms.uLamp[3] = lampOn;
-        uniforms.uLampUv[0] = lamp.uv[0];
-        uniforms.uLampUv[1] = lamp.uv[1];
       } else {
         uniforms.uLamp[3] = 0;
       }

@@ -197,6 +197,12 @@ npm run viz:mark-turn:analyze
 - The brand mark is a single all-diamond Pixi crystal with an archived inactive
   teal/amber/violet material palette, dynamic relighting, reduced-motion support,
   and no overlapping R3F logo.
+- The pointer catch on that crystal is a finite-source specular lobe, never a
+  screen-space pool under the cursor. Its peak comes from the real
+  lamp/surface/camera half vector at the pinhole ray/facet-plane intersection,
+  its width from the material roughness plus the one source radius, and its
+  bounded isocontours supply the projected ellipse. Do not bend the facet
+  normal or reintroduce a pointer-UV window.
 - The gem's CAST is four three-ray facet bundles on ONE receiver — the far-field
   mesh behind the UI. Filled controls occlude that plane; never duplicate the
   caustic in the full-stage pointer-light filter, which both invents a second

@@ -958,8 +958,6 @@ describe('Atoma GPU brand mark', () => {
     expect(centre.position[2]).toBe(ATOMA_MARK_LAMP_Z);
     expect(centre.position[2]).toBeGreaterThan(ATOMA_MARK_RADIUS);
     expect(centre.on).toBeGreaterThan(0.9);
-    expect(centre.uv[0]).toBeCloseTo(0.5);
-    expect(centre.uv[1]).toBeCloseTo(0.5);
 
     const right = pointerLampForLocal(14 + ATOMA_MARK_PROJECTION_SCALE, 14);
     expect(right.position[0]).toBeCloseTo(1);

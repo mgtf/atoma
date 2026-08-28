@@ -791,18 +791,14 @@ function triangleCoverage(
 export function pointerLampForLocal(
   localX: number,
   localY: number
-): { position: MarkVec3; uv: [number, number]; on: number } {
+): { position: MarkVec3; on: number } {
   if (!Number.isFinite(localX) || !Number.isFinite(localY)) {
-    return { position: [0, 0, ATOMA_MARK_LAMP_Z], uv: [0.5, 0.5], on: 0 };
+    return { position: [0, 0, ATOMA_MARK_LAMP_Z], on: 0 };
   }
   const position: MarkVec3 = [
     (localX - CENTER.x) / PROJECTION_SCALE,
     (CENTER.y - localY) / PROJECTION_SCALE,
     ATOMA_MARK_LAMP_Z,
-  ];
-  const uv: [number, number] = [
-    localX / ATOMA_MARK_LOCAL_SIZE,
-    localY / ATOMA_MARK_LOCAL_SIZE,
   ];
   const fromCenter = Math.hypot(localX - CENTER.x, localY - CENTER.y);
   // Hull is ~12.5 projected units. Wider than that, the lamp is a nearby
@@ -810,7 +806,7 @@ export function pointerLampForLocal(
   const gemReach = ATOMA_MARK_RADIUS * PROJECTION_SCALE * 1.65;
   const t = fromCenter / gemReach;
   const on = t >= 1 ? 0 : Math.exp(-t * t * 2.0);
-  return { position, uv, on };
+  return { position, on };
 }
 
 interface PointerEntryCoupling {

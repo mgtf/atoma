@@ -208,6 +208,16 @@ export const POINTER_LIGHT_WGSL = /* wgsl */ `
 // mark's own values live in `markUniforms`.
 // ---------------------------------------------------------------------------
 
+/**
+ * Radius of the pointer's finite emitter in model units. Surface roughness
+ * still comes from the material; this is only the source's angular size, so a
+ * polished diamond reflects a compact light instead of an infinite point.
+ */
+export const MARK_POINTER_SOURCE_RADIUS_MODEL = 0.055;
+const MARK_POINTER_SOURCE_RADIUS_SQ = MARK_POINTER_SOURCE_RADIUS_MODEL ** 2;
+const MARK_POINTER_LOBE_SUPPORT_INNER = 6.25;
+const MARK_POINTER_LOBE_SUPPORT_OUTER = 9;
+
 export const MARK_SHELL_WGSL = /* wgsl */ `
   struct GlobalUniforms {
     uProjectionMatrix: mat3x3<f32>,
@@ -244,7 +254,6 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     uLocalSize: f32,
     uBackdropTexel: vec2<f32>,
     uCoreRadius: f32,
-    uLampUv: vec2<f32>,
     uEnvOn: f32,
     uEnvJump: f32,
     uPointerClip: vec4<f32>,
@@ -471,54 +480,74 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // mirror there and hides what is behind it.
     let bounce = 1.0 - fresnel;
 
-    // POINTER LAMP. A point light parked in FRONT of the gem, in model space.
+    // POINTER LAMP. A finite emitter in FRONT of the gem, in model space.
+    // Its lobe uses the real camera and the unmodified facet normal. Therefore
+    // N=H exactly at the mirror-law point; there is no screen-space window
+    // glued under the cursor and no bent normal moving the peak back there.
     // Specular only — Lambert from this lamp buried the far facets.
-    let toLamp = markUniforms.uLamp.xyz - vWorld;
-    let lampDist = length(toLamp);
-    let lampDir = toLamp / max(lampDist, 1e-4);
-    let lampNdotL = max(dot(normal, lampDir), 0.0);
-    let lampHalf = normalize(lampDir + viewDir);
-    let lampShade = normalize(normal + lampDir * 0.55);
-    let lampFacing = max(dot(lampShade, lampHalf), 0.0);
-    let lampSpecF = f0 + (1.0 - f0) *
-      pow(1.0 - max(dot(viewDir, lampHalf), 0.0), 5.0);
-    let lampFres = mix(0.38, 1.0, lampSpecF);
-    let lampGate = smoothstep(0.0, 0.08, lampNdotL);
-    // FACE-PLANE FOOTPRINT. The old window measured an isotropic distance in
-    // screen UV, so it stayed circular however far the facet tilted. Cast the
-    // camera ray through the pointer onto this facet's plane, then measure the
-    // falloff in that plane. A face-on table remains round; an oblique table
-    // projects this plane-circle as an ellipse.
-    let pointerPlane = vec3<f32>(
-      (markUniforms.uLampUv.x - 0.5) * markUniforms.uLocalSize /
+    let camera = vec3<f32>(0.0, 0.0, markUniforms.uCameraZ);
+    // vWorld is affine-interpolated after the CPU's pinhole projection, so it
+    // is coplanar but not the 3D point seen at this fragment. Rebuild that point
+    // by intersecting the camera ray through vScreen with the facet plane.
+    let screenPoint = vec3<f32>(
+      (vScreen.x - 0.5) * markUniforms.uLocalSize /
         markUniforms.uProjectScale,
-      (0.5 - markUniforms.uLampUv.y) * markUniforms.uLocalSize /
+      (0.5 - vScreen.y) * markUniforms.uLocalSize /
         markUniforms.uProjectScale,
       0.0
     );
-    let camera = vec3<f32>(0.0, 0.0, markUniforms.uCameraZ);
-    let pointerRay = normalize(pointerPlane - camera);
-    let planeOffset = dot(normal, vWorld);
-    let planeDenom = dot(normal, pointerRay);
-    let safePlaneDenom = select(
-      max(planeDenom, 0.04),
-      min(planeDenom, -0.04),
-      planeDenom < 0.0
+    let surfaceRay = screenPoint - camera;
+    let surfacePlaneOffset = dot(normal, vWorld);
+    let surfaceDenom = dot(normal, surfaceRay);
+    let safeSurfaceDenom = select(
+      max(surfaceDenom, 1e-4),
+      min(surfaceDenom, -1e-4),
+      surfaceDenom < 0.0
     );
-    let planeT = (planeOffset - dot(normal, camera)) / safePlaneDenom;
-    let planeHit = camera + pointerRay * planeT;
-    let lampPlaneDelta = (vWorld - planeHit) *
-      markUniforms.uProjectScale / markUniforms.uLocalSize;
-    let lampWindow = exp(-dot(lampPlaneDelta, lampPlaneDelta) * 280.0);
-    let lampSoft = mix(14.0, 32.0, smoothstep(0.85, 2.7, lampDist));
-    let lampNorm = (lampSoft + 2.0) / 22.0;
-    let lampSpectral = vec3<f32>(
-      pow(lampFacing, lampSoft * 0.88),
-      pow(lampFacing, lampSoft),
-      pow(lampFacing, lampSoft * 1.18)
+    let surfaceT = (surfacePlaneOffset - dot(normal, camera)) /
+      safeSurfaceDenom;
+    let surfacePoint = camera + surfaceRay * surfaceT;
+    let surfaceValid = step(1e-4, abs(surfaceDenom)) * step(0.0, surfaceT);
+    let toLampView = camera - surfacePoint;
+    let lampViewDir = toLampView / max(length(toLampView), 1e-4);
+    let toLamp = markUniforms.uLamp.xyz - surfacePoint;
+    let lampDist = length(toLamp);
+    let lampDir = toLamp / max(lampDist, 1e-4);
+    let lampNdotL = max(dot(normal, lampDir), 0.0);
+    let lampNdotV = max(dot(normal, lampViewDir), 0.0);
+    let lampHalfSum = lampDir + lampViewDir;
+    let lampHalfLength2 = dot(lampHalfSum, lampHalfSum);
+    let lampHalf = lampHalfSum / sqrt(max(lampHalfLength2, 1e-6));
+    let lampFacing = clamp(dot(normal, lampHalf), 0.0, 1.0);
+    let lampSpecF = f0 + (1.0 - f0) *
+      pow(1.0 - max(dot(lampViewDir, lampHalf), 0.0), 5.0);
+    let lampGeo = lampNdotL * lampNdotV /
+      max(lampNdotL + lampNdotV - lampNdotL * lampNdotV, 1e-4);
+    let lampGate = smoothstep(0.0, 0.08, lampNdotL) *
+      smoothstep(0.0, 0.08, lampNdotV) * step(1e-6, lampHalfLength2) *
+      surfaceValid;
+    // Invert markSpecularPower to recover material roughness squared, then
+    // add the finite source's angular variance. H(P) maps that isotropic lobe
+    // onto the correct screen ellipse and puts its maximum at the mirror point.
+    let roughness2 = 2.0 / max(specularPower + 2.0, 2.0);
+    let sourceAlpha2 = ${MARK_POINTER_SOURCE_RADIUS_SQ.toFixed(6)} / max(
+      4.0 * lampDist * lampDist * max(lampNdotL * lampNdotV, 0.0256),
+      1e-5
     );
+    let alpha2 = roughness2 + sourceAlpha2;
+    let lampFacing2 = lampFacing * lampFacing;
+    let tanHalf2 = (1.0 - lampFacing2) / max(lampFacing2, 1e-5);
+    let rho2 = tanHalf2 / max(alpha2, 1e-5);
+    let lampSupport = 1.0 - smoothstep(
+      ${MARK_POINTER_LOBE_SUPPORT_INNER.toFixed(2)},
+      ${MARK_POINTER_LOBE_SUPPORT_OUTER.toFixed(1)},
+      rho2
+    );
+    let lampSpectral = exp(
+      -rho2 * vec3<f32>(0.88, 1.0, 1.18)
+    ) * lampSupport;
     let lampRaw = mix(vec3<f32>(lampSpectral.y), lampSpectral, dispersion * 0.4) *
-      lampFres * lampGate * lampWindow * lampNorm *
+      lampSpecF * lampGeo * lampGate * specNorm *
       vec3<f32>(0.86, 0.96, 1.0) *
       markUniforms.uSpecular * markUniforms.uLamp.w * outer * 2.15;
     let lampPeak = max(lampRaw.x, max(lampRaw.y, lampRaw.z));
@@ -914,7 +943,6 @@ export const MARK_SHELL_GLSL = /* glsl */ `#version 300 es
   uniform float uLocalSize;
   uniform vec2 uBackdropTexel;
   uniform float uCoreRadius;
-  uniform vec2 uLampUv;
   uniform float uEnvOn;
   uniform float uEnvJump;
   uniform vec4 uPointerClip;
@@ -988,50 +1016,65 @@ export const MARK_SHELL_GLSL = /* glsl */ `#version 300 es
     float fresnel = f0 + (1.0 - f0) * pow(1.0 - nDotV, 5.0);
     float bounce = 1.0 - fresnel;
 
-    // Same pointer lamp and face-plane footprint as the WGSL path.
-    vec3 toLamp = uLamp.xyz - vWorld;
+    // POINTER LAMP. Same physical finite-source lobe as the WGSL path.
+    vec3 camera = vec3(0.0, 0.0, uCameraZ);
+    vec3 screenPoint = vec3(
+      (vScreen.x - 0.5) * uLocalSize / uProjectScale,
+      (0.5 - vScreen.y) * uLocalSize / uProjectScale,
+      0.0
+    );
+    vec3 surfaceRay = screenPoint - camera;
+    float surfacePlaneOffset = dot(normal, vWorld);
+    float surfaceDenom = dot(normal, surfaceRay);
+    float safeSurfaceDenom = abs(surfaceDenom) < 1e-4
+      ? (surfaceDenom < 0.0 ? -1e-4 : 1e-4)
+      : surfaceDenom;
+    float surfaceT = (surfacePlaneOffset - dot(normal, camera)) /
+      safeSurfaceDenom;
+    vec3 surfacePoint = camera + surfaceRay * surfaceT;
+    float surfaceValid = step(1e-4, abs(surfaceDenom)) * step(0.0, surfaceT);
+    vec3 toLampView = camera - surfacePoint;
+    vec3 lampViewDir = toLampView / max(length(toLampView), 1e-4);
+    vec3 toLamp = uLamp.xyz - surfacePoint;
     float lampDist = length(toLamp);
     vec3 lampDir = toLamp / max(lampDist, 1e-4);
     float lampNdotL = max(dot(normal, lampDir), 0.0);
-    vec3 lampHalf = normalize(lampDir + viewDir);
-    vec3 lampShade = normalize(normal + lampDir * 0.55);
-    float lampFacing = max(dot(lampShade, lampHalf), 0.0);
+    float lampNdotV = max(dot(normal, lampViewDir), 0.0);
+    vec3 lampHalfSum = lampDir + lampViewDir;
+    float lampHalfLength2 = dot(lampHalfSum, lampHalfSum);
+    vec3 lampHalf = lampHalfSum / sqrt(max(lampHalfLength2, 1e-6));
+    float lampFacing = clamp(dot(normal, lampHalf), 0.0, 1.0);
     float lampSpecF = f0 + (1.0 - f0) *
-      pow(1.0 - max(dot(viewDir, lampHalf), 0.0), 5.0);
-    float lampFres = mix(0.38, 1.0, lampSpecF);
-    float lampGate = smoothstep(0.0, 0.08, lampNdotL);
-    vec3 pointerPlane = vec3(
-      (uLampUv.x - 0.5) * uLocalSize / uProjectScale,
-      (0.5 - uLampUv.y) * uLocalSize / uProjectScale,
-      0.0
+      pow(1.0 - max(dot(lampViewDir, lampHalf), 0.0), 5.0);
+    float lampGeo = lampNdotL * lampNdotV /
+      max(lampNdotL + lampNdotV - lampNdotL * lampNdotV, 1e-4);
+    float lampGate = smoothstep(0.0, 0.08, lampNdotL) *
+      smoothstep(0.0, 0.08, lampNdotV) * step(1e-6, lampHalfLength2) *
+      surfaceValid;
+    float roughness2 = 2.0 / max(specularPower + 2.0, 2.0);
+    float sourceAlpha2 = ${MARK_POINTER_SOURCE_RADIUS_SQ.toFixed(6)} / max(
+      4.0 * lampDist * lampDist * max(lampNdotL * lampNdotV, 0.0256),
+      1e-5
     );
-    vec3 camera = vec3(0.0, 0.0, uCameraZ);
-    vec3 pointerRay = normalize(pointerPlane - camera);
-    float planeOffset = dot(normal, vWorld);
-    float planeDenom = dot(normal, pointerRay);
-    float safePlaneDenom = abs(planeDenom) < 0.04
-      ? (planeDenom < 0.0 ? -0.04 : 0.04)
-      : planeDenom;
-    float planeT = (planeOffset - dot(normal, camera)) / safePlaneDenom;
-    vec3 planeHit = camera + pointerRay * planeT;
-    vec3 lampPlaneDelta = (vWorld - planeHit) * uProjectScale / uLocalSize;
-    float lampWindow = exp(-dot(lampPlaneDelta, lampPlaneDelta) * 280.0);
-    float lampSoft = mix(14.0, 32.0, smoothstep(0.85, 2.7, lampDist));
-    float lampNorm = (lampSoft + 2.0) / 22.0;
-    vec3 lampSpectral = vec3(
-      pow(lampFacing, lampSoft * 0.88),
-      pow(lampFacing, lampSoft),
-      pow(lampFacing, lampSoft * 1.18)
+    float alpha2 = roughness2 + sourceAlpha2;
+    float lampFacing2 = lampFacing * lampFacing;
+    float tanHalf2 = (1.0 - lampFacing2) / max(lampFacing2, 1e-5);
+    float rho2 = tanHalf2 / max(alpha2, 1e-5);
+    float lampSupport = 1.0 - smoothstep(
+      ${MARK_POINTER_LOBE_SUPPORT_INNER.toFixed(2)},
+      ${MARK_POINTER_LOBE_SUPPORT_OUTER.toFixed(1)},
+      rho2
     );
+    vec3 lampSpectral = exp(-rho2 * vec3(0.88, 1.0, 1.18)) * lampSupport;
     vec3 lampRaw = mix(vec3(lampSpectral.y), lampSpectral, dispersion * 0.4) *
-      lampFres * lampGate * lampWindow * lampNorm *
+      lampSpecF * lampGeo * lampGate * specNorm *
       vec3(0.86, 0.96, 1.0) *
       uSpecular * uLamp.w * outer * 2.15;
     float lampPeak = max(lampRaw.x, max(lampRaw.y, lampRaw.z));
     vec3 lampHighlight = lampRaw *
       (1.0 / (1.0 + max(lampPeak - 0.22, 0.0) * 3.4));
 
-    // Same inner image as the WGSL path; keep the two in step.
+    // INNER IMAGE. Same virtual filament as the WGSL path; keep the two in step.
     float nearInner = (1.0 - outer) * (facingView < 0.0 ? 1.0 : 0.0);
     float wallDist = dot(uCore - vWorld, normal);
     vec3 virtualCore = uCore - normal * (2.0 * wallDist);

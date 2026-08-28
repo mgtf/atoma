@@ -5,6 +5,7 @@ import {
   refractionForBackdrop,
 } from '../src/viz/client-gl/renderer/mark-shell.js';
 import {
+  MARK_POINTER_SOURCE_RADIUS_MODEL,
   MARK_SHELL_GLSL,
   MARK_SHELL_GLSL_VERTEX,
   MARK_SHELL_WGSL,
@@ -267,34 +268,110 @@ describe('mark shell shader contract', () => {
     }
   });
 
-  it('projects the pointer catch into each outer face plane', () => {
+  it('places a compact pointer catch at the physical mirror point', () => {
     // The 2D Pixi filter washes the UI; it is not a specular on the crystal.
     // A Lambert term from this lamp would lift the near table and bury the
     // far facets — the same fill that was tried and reverted for the window.
-    // Packed as vec4 so `on` cannot vanish into vec3 padding on WebGPU.
+    // Packed as vec4 so `on` cannot vanish into vec3 padding on WebGPU. The
+    // pointer UV used to pin a circular window directly under the cursor;
+    // the true L+V half vector now places the maximum by the mirror law.
     expect(MARK_SHELL_UNIFORMS.map(({ name }) => name)).toEqual(
-      expect.arrayContaining(['uLamp', 'uLampUv'])
+      expect.arrayContaining(['uLamp', 'uCameraZ'])
     );
+    expect(MARK_SHELL_UNIFORMS.map(({ name }) => name)).not.toContain('uLampUv');
+    expect(MARK_POINTER_SOURCE_RADIUS_MODEL).toBeCloseTo(0.055);
     for (const source of [MARK_SHELL_WGSL, MARK_SHELL_GLSL]) {
+      const pointerBlock = source.split('// POINTER LAMP.')[1]
+        ?.split('// INNER IMAGE.')[0] ?? '';
+
+      expect(pointerBlock, 'pointer lamp block must remain independently auditable')
+        .not.toBe('');
       expect(source).toContain('lampHighlight');
-      expect(source).toContain('lampDist');
-      expect(source).toContain('lampSoft');
-      expect(source).toContain('uLampUv');
       expect(source).toMatch(/windowHighlight \+\s*\n\s*lampHighlight \+/);
-      expect(source, 'the lamp must not add a Lambertian term')
+
+      // aWorld/vWorld is deliberately affine-interpolated because the CPU has
+      // already projected every vertex. It still identifies the facet plane,
+      // but the camera ray must intersect that plane to recover the actual 3D
+      // point seen by this fragment before either light vector is evaluated.
+      expect(pointerBlock).toContain('(vScreen.x - 0.5)');
+      expect(pointerBlock).toContain('(0.5 - vScreen.y)');
+      expect(pointerBlock).toContain('surfaceRay = screenPoint - camera');
+      expect(pointerBlock).toContain('surfacePlaneOffset = dot(normal, vWorld)');
+      expect(pointerBlock).toContain('surfaceDenom = dot(normal, surfaceRay)');
+      expect(pointerBlock).toMatch(
+        /surfaceT = \(surfacePlaneOffset - dot\(normal, camera\)\) \/\s*safeSurfaceDenom/
+      );
+      expect(pointerBlock).toContain('surfacePoint = camera + surfaceRay * surfaceT');
+      expect(pointerBlock).toMatch(
+        /surfaceValid = step\(1e-4, abs\(surfaceDenom\)\) \* step\(0\.0, surfaceT\)/
+      );
+      expect(pointerBlock.match(/\bvScreen\.[xy]\b/g)).toEqual([
+        'vScreen.x',
+        'vScreen.y',
+      ]);
+      expect(pointerBlock.match(/\bscreenPoint\b/g)).toHaveLength(2);
+      expect(pointerBlock).toContain('toLampView = camera - surfacePoint');
+      expect(pointerBlock).toMatch(/toLamp = (?:markUniforms\.)?uLamp\.xyz - surfacePoint/);
+
+      // N=H is the mirror law. Roughness and the finite source radius determine
+      // the footprint; bounded Beckmann-like support removes the distant tail
+      // that would otherwise wash neighbouring facets while preserving the
+      // catch's natural ellipse.
+      expect(pointerBlock).toContain('lampHalfSum = lampDir + lampViewDir');
+      expect(pointerBlock).toContain('lampFacing = clamp(dot(normal, lampHalf)');
+      expect(pointerBlock).toContain('dot(lampViewDir, lampHalf)');
+      expect(pointerBlock).toMatch(/2\.0 \/ max\(specularPower \+ 2\.0, 2\.0\)/);
+      expect(pointerBlock).toContain(
+        `${(MARK_POINTER_SOURCE_RADIUS_MODEL ** 2).toFixed(6)} / max(`
+      );
+      expect(pointerBlock).toMatch(
+        /4\.0 \* lampDist \* lampDist \* max\(lampNdotL \* lampNdotV, 0\.0256\)/
+      );
+      expect(pointerBlock).toContain('alpha2 = roughness2 + sourceAlpha2');
+      expect(pointerBlock).toContain(
+        'tanHalf2 = (1.0 - lampFacing2) / max(lampFacing2, 1e-5)'
+      );
+      expect(pointerBlock).toContain('rho2 = tanHalf2 / max(alpha2, 1e-5)');
+      expect(pointerBlock).toMatch(/smoothstep\(\s*6\.25,\s*9\.0,\s*rho2/);
+      expect(pointerBlock).toMatch(
+        /lampSpectral = exp\([\s\S]*?\) \* lampSupport;/
+      );
+      expect(pointerBlock).toMatch(
+        /lampRaw = mix\([\s\S]*?lampSpectral[\s\S]*?\) \*\s*lampSpecF \* lampGeo \* lampGate \* specNorm/
+      );
+      expect(pointerBlock).toMatch(/lampGate[\s\S]{0,260}surfaceValid/);
+
+      expect(pointerBlock, 'the lamp must not add a Lambertian term')
         .not.toMatch(/0\.42 \* lampNdotL/);
-      expect(source).not.toMatch(/lampR \* 22/);
-      expect(source).toMatch(/mix\(14\.0,\s*32\.0/);
-      expect(source).toContain('lampShade');
-      expect(source).toContain('lampDir * 0.55');
-      expect(source).toContain('lampWindow');
-      expect(source).toContain('pointerRay');
-      expect(source).toContain('planeHit');
-      expect(source).toMatch(/dot\(lampPlaneDelta, lampPlaneDelta\) \* 280\.0/);
-      expect(source, 'screen-space distance would keep the catch circular')
-        .not.toMatch(/dot\(lampDelta, lampDelta\)/);
-      expect(source).toContain('lampPeak');
+      expect(pointerBlock, 'the catch must not be pinned under the cursor')
+        .not.toContain('uLampUv');
+      expect(pointerBlock).not.toContain('vClipUv');
+      expect(pointerBlock).not.toContain('uPointerClip');
+      expect(pointerBlock).not.toContain('pointerPlane');
+      expect(pointerBlock).not.toContain('pointerRay');
+      expect(pointerBlock).not.toContain('planeHit');
+      expect(pointerBlock).not.toContain('lampWindow');
+      expect(pointerBlock).not.toContain('camera - vWorld');
+      expect(pointerBlock, 'the real facet normal must stay unmodified')
+        .not.toContain('lampShade');
+      expect(pointerBlock).not.toContain('lampDir * 0.55');
+      expect(pointerBlock, 'material roughness is the only surface-width control')
+        .not.toContain('lampSoft');
+      expect(pointerBlock, 'Fresnel must come directly from the diamond IOR')
+        .not.toContain('lampFres = mix');
+      expect(pointerBlock).toContain('lampPeak');
     }
+
+    const wgslPointer = MARK_SHELL_WGSL.split('// POINTER LAMP.')[1]
+      ?.split('// INNER IMAGE.')[0] ?? '';
+    const glslPointer = MARK_SHELL_GLSL.split('// POINTER LAMP.')[1]
+      ?.split('// INNER IMAGE.')[0] ?? '';
+    expect(wgslPointer).toMatch(
+      /safeSurfaceDenom = select\(\s*max\(surfaceDenom, 1e-4\),\s*min\(surfaceDenom, -1e-4\),\s*surfaceDenom < 0\.0\s*\)/
+    );
+    expect(glslPointer).toMatch(
+      /safeSurfaceDenom = abs\(surfaceDenom\) < 1e-4[\s\S]{0,100}\? \(surfaceDenom < 0\.0 \? -1e-4 : 1e-4\)[\s\S]{0,30}: surfaceDenom/
+    );
   });
 
   it('scales refraction with the backdrop so the hero actually bends', () => {

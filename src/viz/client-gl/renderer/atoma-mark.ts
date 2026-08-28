@@ -767,11 +767,9 @@ export function attachAtomaMark(
     let pointerSpills: AtomaMarkRearSpill[] = [];
     let lamp: {
       position: readonly [number, number, number];
-      uv: readonly [number, number];
       on: number;
     } = {
       position: [0, 0, ATOMA_MARK_LAMP_Z],
-      uv: [0.5, 0.5],
       on: 0,
     };
     let pointerClip: {
