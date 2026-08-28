@@ -104,7 +104,6 @@ import {
   movePointerLight,
   hidePointerLight,
 } from './pointer-light.js';
-import { packMarkCaustic, readMarkFieldCaustic } from './mark-field-light.js';
 import { TooltipLayer } from './renderer/tooltip.js';
 import { viewFrameGutterRects } from './renderer/view-frame.js';
 import type { GpuUiState, ViewName } from './store.js';
@@ -507,26 +506,7 @@ export class GpuRenderer {
     uStrength: number;
     uRadiusScale: number;
     uHueShift: number;
-    uCaustic0: Float32Array;
-    uCaustic1: Float32Array;
-    uCaustic2: Float32Array;
-    uCaustic3: Float32Array;
-    uCaustic4: Float32Array;
-    uCaustic5: Float32Array;
-    uCausticColor: Float32Array;
-    uCausticSpec0: Float32Array;
-    uCausticSpec1: Float32Array;
-    uCausticSpec2: Float32Array;
-    uCausticSpec3: Float32Array;
-    uCausticSpec4: Float32Array;
-    uCausticSpec5: Float32Array;
-    uCausticBand: number;
-    uCausticDetail: number;
   } | null = null;
-  /** The cast's uniform slots, in declaration order. Built once. */
-  private pointerCausticSlots: Float32Array[] = [];
-  /** The cast's spectral slots, in the same order. Built once. */
-  private pointerCausticSpectralSlots: Float32Array[] = [];
   private pointerLightStrength = 0;
   /** Light position in renderer pixels, published by `updatePointerLight`. */
   private lightRendererX = 0;
@@ -841,44 +821,6 @@ export class GpuRenderer {
     this.timelineCardMaterial?.updateLight(local.x, local.y, uniforms.uStrength);
     uniforms.uRadiusScale = tuning.lightHeight;
     uniforms.uHueShift = tuning.lightHue;
-    // The crystal's cast, on the UI this filter covers. Same packer the
-    // far-field mesh behind the UI uses, same renderer pixels, so one
-    // diamond crosses the backdrop and the buttons as a single shape.
-    const cast = packMarkCaustic(
-      readMarkFieldCaustic(),
-      this.app.canvas.getBoundingClientRect(),
-      this.app.screen.width,
-      this.app.screen.height,
-      (x, y) => this.clientToRendererPosition(x, y)
-    );
-    for (let index = 0; index < this.pointerCausticSlots.length; index += 1) {
-      const slot = this.pointerCausticSlots[index]!;
-      const first = cast?.corners[index * 2];
-      const second = cast?.corners[index * 2 + 1];
-      // No cast parks the slots meaninglessly; the intensity below is the
-      // guard that actually turns the shape off.
-      slot[0] = first?.x ?? -1e6;
-      slot[1] = first?.y ?? -1e6;
-      slot[2] = second?.x ?? -1e6;
-      slot[3] = second?.y ?? -1e6;
-    }
-    uniforms.uCausticColor[0] = cast?.r ?? 0;
-    uniforms.uCausticColor[1] = cast?.g ?? 0;
-    uniforms.uCausticColor[2] = cast?.b ?? 0;
-    uniforms.uCausticColor[3] = cast?.intensity ?? 0;
-    // The traced spectral band, packed two corners per vec4. No band
-    // published collapses every delta to zero, which draws both wavelengths
-    // on the mean trace — the correct degenerate for a non-dispersive glass.
-    for (let slot = 0; slot < this.pointerCausticSpectralSlots.length; slot += 1) {
-      const target = this.pointerCausticSpectralSlots[slot]!;
-      for (let half = 0; half < 2; half += 1) {
-        const delta = cast?.spectral?.[slot * 2 + half];
-        target[half * 2] = delta?.x ?? 0;
-        target[half * 2 + 1] = delta?.y ?? 0;
-      }
-    }
-    uniforms.uCausticBand = tuning.causticDispersion;
-    uniforms.uCausticDetail = tuning.causticDetail;
     filter.enabled = true;
     // Published for the shadow cast, which runs right after on the same
     // ticker. Recomputing it there would mean a SECOND
@@ -912,26 +854,6 @@ export class GpuRenderer {
           // exactly what it rendered before these existed.
           uRadiusScale: { value: 1, type: 'f32' },
           uHueShift: { value: 0, type: 'f32' },
-          // The crystal's cast. Declaration order is load-bearing: Pixi
-          // derives the UBO layout from it and the WGSL struct restates the
-          // same order by hand.
-          uCaustic0: { value: new Float32Array(4).fill(-1e6), type: 'vec4<f32>' },
-          uCaustic1: { value: new Float32Array(4).fill(-1e6), type: 'vec4<f32>' },
-          uCaustic2: { value: new Float32Array(4).fill(-1e6), type: 'vec4<f32>' },
-          uCaustic3: { value: new Float32Array(4).fill(-1e6), type: 'vec4<f32>' },
-          uCaustic4: { value: new Float32Array(4).fill(-1e6), type: 'vec4<f32>' },
-          uCaustic5: { value: new Float32Array(4).fill(-1e6), type: 'vec4<f32>' },
-          uCausticColor: { value: new Float32Array(4), type: 'vec4<f32>' },
-          // Per-corner spectral half-separations, two corners per vec4, and
-          // the band scalar that scales them apart. Same order contract.
-          uCausticSpec0: { value: new Float32Array(4), type: 'vec4<f32>' },
-          uCausticSpec1: { value: new Float32Array(4), type: 'vec4<f32>' },
-          uCausticSpec2: { value: new Float32Array(4), type: 'vec4<f32>' },
-          uCausticSpec3: { value: new Float32Array(4), type: 'vec4<f32>' },
-          uCausticSpec4: { value: new Float32Array(4), type: 'vec4<f32>' },
-          uCausticSpec5: { value: new Float32Array(4), type: 'vec4<f32>' },
-          uCausticBand: { value: 1, type: 'f32' },
-          uCausticDetail: { value: 1, type: 'f32' },
         },
       },
       padding: 0,
@@ -945,41 +867,10 @@ export class GpuRenderer {
       uStrength: number;
       uRadiusScale: number;
       uHueShift: number;
-      uCaustic0: Float32Array;
-      uCaustic1: Float32Array;
-      uCaustic2: Float32Array;
-      uCaustic3: Float32Array;
-      uCaustic4: Float32Array;
-      uCaustic5: Float32Array;
-      uCausticColor: Float32Array;
-      uCausticSpec0: Float32Array;
-      uCausticSpec1: Float32Array;
-      uCausticSpec2: Float32Array;
-      uCausticSpec3: Float32Array;
-      uCausticSpec4: Float32Array;
-      uCausticSpec5: Float32Array;
-      uCausticBand: number;
-      uCausticDetail: number;
     };
-    this.pointerCausticSlots = [
-      this.pointerLightUniforms.uCaustic0,
-      this.pointerLightUniforms.uCaustic1,
-      this.pointerLightUniforms.uCaustic2,
-      this.pointerLightUniforms.uCaustic3,
-      this.pointerLightUniforms.uCaustic4,
-      this.pointerLightUniforms.uCaustic5,
-    ];
-    this.pointerCausticSpectralSlots = [
-      this.pointerLightUniforms.uCausticSpec0,
-      this.pointerLightUniforms.uCausticSpec1,
-      this.pointerLightUniforms.uCausticSpec2,
-      this.pointerLightUniforms.uCausticSpec3,
-      this.pointerLightUniforms.uCausticSpec4,
-      this.pointerLightUniforms.uCausticSpec5,
-    ];
     this.stage.filters = [filter];
     this.app.ticker.add(this.updatePointerLight);
-    // AFTER the light: it damps `pointerLightStrength`, which the cast reads.
+    // AFTER the light: it damps `pointerLightStrength`, which shadows read.
     this.app.ticker.add(this.updateCastShadows);
   }
 

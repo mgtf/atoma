@@ -263,7 +263,6 @@ ${CAUSTIC_FIELD_GLSL}
       uCausticBand,
       uCausticDetail
     );
-    color *= 1.0 - crystalCast.a * ${C.markGain};
     color += crystalCast.rgb * ${C.markGain};
 
     float vignette = smoothstep(1.0, 0.12, length(p));
@@ -453,7 +452,6 @@ ${CAUSTIC_FIELD_WGSL}
       farFieldUniforms.uCausticBand,
       farFieldUniforms.uCausticDetail,
     );
-    color *= 1.0 - crystalCast.a * ${C.markGain};
     color += crystalCast.rgb * ${C.markGain};
 
     let vignette = smoothstep(1.0, 0.12, length(p));
@@ -635,8 +633,9 @@ export function createFarField(): FarField | null {
         color[1] = spill.g;
         color[2] = spill.b;
       }
-      // The cast, through the ONE packer the pointer-light filter also uses,
-      // so the shape drawn on the backdrop is the shape drawn on the UI.
+      // The cast lives on this ONE receiver plane behind the UI. Filled controls
+      // occlude it naturally instead of paying for a second full-screen copy at
+      // an incompatible depth.
       const cast = packMarkCaustic(
         readMarkFieldCaustic(),
         bounds,

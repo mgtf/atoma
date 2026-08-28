@@ -250,29 +250,18 @@ describe('both shader backends carry the tuning uniforms', () => {
     }
   });
 
-  it('lands the crystal cast on the UI, gated by surface and strength', () => {
-    // The cast used to stop at the backdrop: the far-field mesh drew it and
-    // the UI in front of it was untouched, so the diamond vanished under
-    // every button it crossed. This filter covers the whole stage, so the
-    // same polygon reaches the surfaces themselves.
+  it('keeps the pointer filter independent from the crystal cast', () => {
+    // The filter covers the whole stage at device resolution. A caustic here
+    // duplicated the far-field reconstruction and made UI at every depth act
+    // like one receiver plane; it now carries only the local pointer wash.
     for (const source of [POINTER_LIGHT_GLSL, POINTER_LIGHT_WGSL]) {
-      expect(source).toContain('causticField');
-      expect(source).toContain('uCaustic0');
-      expect(source).toContain('uCaustic5');
-      expect(source).toContain('uCausticColor');
-      // Dispersion and structural detail ride the same uniform block on both
-      // backends, while remaining independent controls.
-      expect(source).toContain('uCausticSpec0');
-      expect(source).toContain('uCausticSpec5');
-      expect(source).toContain('uCausticBand');
-      expect(source).toContain('uCausticDetail');
-      // Alpha-gated for the same reason the wash is: a transparent pixel has
-      // no surface to light. Strength-gated so it fades with the pointer.
-      expect(source).toMatch(/uStrength \* sampleColor\.a/);
+      expect(source).not.toContain('causticField');
+      expect(source).not.toContain('uCaustic');
+      expect(source).not.toContain('crystalCast');
     }
   });
 
-  it('declares the cast slots in the ONE order the WGSL struct restates', () => {
+  it('declares the pointer-light slots in the ONE order WGSL restates', () => {
     // Pixi derives the UBO layout from the declaration order in `resources`;
     // the WGSL struct writes that order out by hand. A field inserted on one
     // side only shifts every offset after it, silently.
@@ -284,21 +273,6 @@ describe('both shader backends carry the tuning uniforms', () => {
       'uStrength',
       'uRadiusScale',
       'uHueShift',
-      'uCaustic0',
-      'uCaustic1',
-      'uCaustic2',
-      'uCaustic3',
-      'uCaustic4',
-      'uCaustic5',
-      'uCausticColor',
-      'uCausticSpec0',
-      'uCausticSpec1',
-      'uCausticSpec2',
-      'uCausticSpec3',
-      'uCausticSpec4',
-      'uCausticSpec5',
-      'uCausticBand',
-      'uCausticDetail',
     ]);
     const renderer = readFileSync(
       new URL('../src/viz/client-gl/gpu-renderer.ts', import.meta.url),

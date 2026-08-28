@@ -42,7 +42,12 @@ import {
 } from '../src/viz/client-gl/brand-mark.js';
 import type { MarkOctant } from '../src/viz/client-gl/mark-geometry.js';
 import {
+  ATOMA_MARK_BACKDROP_MAX_PX,
+  ATOMA_MARK_BACKDROP_UPDATE_INTERVAL_MS,
+  ATOMA_MARK_CAUSTIC_UPDATE_INTERVAL_MS,
   ATOMA_MARK_CORE_DISC_SEGMENTS,
+  ATOMA_MARK_ENV_MAX_PX,
+  ATOMA_MARK_ENV_UPDATE_INTERVAL_MS,
 } from '../src/viz/client-gl/renderer/atoma-mark.js';
 import { welcomeLayout } from '../src/viz/client-gl/renderer/views/welcome.js';
 
@@ -84,6 +89,21 @@ function distanceFromHull(point: Point, hull: readonly Point[]) {
 }
 
 describe('Atoma GPU brand mark', () => {
+  it('bounds and throttles the hero offscreen passes', () => {
+    // These are ceilings, not preferred dimensions: DPR and the welcome
+    // layout must never make the intermediate textures grow past them.
+    expect(ATOMA_MARK_BACKDROP_MAX_PX).toBeGreaterThan(0);
+    expect(ATOMA_MARK_BACKDROP_MAX_PX).toBeLessThanOrEqual(512);
+    expect(ATOMA_MARK_ENV_MAX_PX).toBeGreaterThan(0);
+    expect(ATOMA_MARK_ENV_MAX_PX).toBeLessThanOrEqual(256);
+
+    // A smaller interval is a higher update rate. The expensive captures and
+    // CPU ray projection stay below display refresh even on 60–144Hz panels.
+    expect(ATOMA_MARK_BACKDROP_UPDATE_INTERVAL_MS).toBeGreaterThanOrEqual(1_000 / 30);
+    expect(ATOMA_MARK_ENV_UPDATE_INTERVAL_MS).toBeGreaterThanOrEqual(1_000 / 12);
+    expect(ATOMA_MARK_CAUSTIC_UPDATE_INTERVAL_MS).toBeGreaterThanOrEqual(1_000 / 30);
+  });
+
   it('keeps one depth-sorted shell of sixteen facets over all four ranks', () => {
     const frame = buildAtomaMarkFrame(0);
     expect(frame.facets).toHaveLength(16);

@@ -18,12 +18,13 @@ export const MARK_FIELD_LIGHT_MAX = 4;
 
 /**
  * The mark's CAUSTIC: four facet ray bundles projected onto the wall behind.
- * One sample, written when the pointer couples into the glass, read by every
- * surface the cast lands on —
- * the far-field aurora behind the UI and the pointer-light filter over it.
+ * One sample, written when the pointer couples into the glass and read by the
+ * far-field aurora behind the UI. The UI itself occludes this receiver plane;
+ * projecting the same cast through filled controls would imply two incompatible
+ * depths and would duplicate the fragment cost.
  *
  * Corners are VIEWPORT CSS PIXELS, the same space the pools are reported in,
- * so both readers convert them through the one mapping in `packMarkCaustic`.
+ * so the field reader converts them through `packMarkCaustic`.
  */
 export const MARK_CAUSTIC_MAX_POINTS = 12;
 
@@ -153,10 +154,7 @@ export interface MarkCausticUniforms {
 }
 
 /**
- * THE conversion from the published cast to shader uniforms. Both readers use
- * it: the far-field mesh behind the UI and the pointer-light filter over it
- * must resolve the same ray bundles in the same pixels, or the diamond drawn on
- * the backdrop would not line up with the one drawn on the buttons.
+ * THE conversion from the published cast to far-field shader uniforms.
  *
  * Winding is FORCED positive here rather than trusted from the hull order:
  * screen y runs opposite to the mark's local y, so hull order alone flips it.

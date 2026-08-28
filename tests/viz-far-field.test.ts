@@ -15,13 +15,12 @@ import {
   writeMarkFieldCaustic,
 } from '../src/viz/client-gl/mark-field-light.js';
 import {
-  CAUSTIC_ARC_STEPS,
+  CAUSTIC_BUNDLE_COUNT,
+  CAUSTIC_CORNER_SLOTS,
   CAUSTIC_FIELD_GLSL,
   CAUSTIC_FIELD_WGSL,
-  CAUSTIC_FILL_SUBDIVISION,
-  CAUSTIC_FILL_WEIGHT,
-  CAUSTIC_FOLD_ARCS,
-  CAUSTIC_SAMPLES_PER_BUNDLE,
+  CAUSTIC_FOOTPRINT_EVALUATIONS_PER_BUNDLE,
+  CAUSTIC_SPECTRAL_SLOTS,
 } from '../src/viz/client-gl/renderer/caustic-shader.js';
 import {
   POINTER_LIGHT_GLSL,
@@ -114,117 +113,76 @@ describe('far-field shader contract', () => {
       .toHaveLength(15);
   });
 
-  it('takes the cast from the ONE shared source, on every surface', () => {
-    // The cast lands on two surfaces: the aurora behind the UI and the
-    // filled UI itself. Two hand-written containment tests would drift and
-    // the diamond would stop lining up across the boundary.
+  it('lands the cast on one far-field receiver, never on the filled UI', () => {
+    // The receiver is the backdrop behind the UI. Re-running the caustic in
+    // the full-stage pointer filter doubled its hottest fragment work and
+    // made buttons behave like a second wall at the same depth.
     expect(FAR_FIELD_GLSL).toContain(CAUSTIC_FIELD_GLSL);
-    expect(POINTER_LIGHT_GLSL).toContain(CAUSTIC_FIELD_GLSL);
     expect(FAR_FIELD_WGSL).toContain(CAUSTIC_FIELD_WGSL);
-    expect(POINTER_LIGHT_WGSL).toContain(CAUSTIC_FIELD_WGSL);
+    for (const source of [POINTER_LIGHT_GLSL, POINTER_LIGHT_WGSL]) {
+      expect(source).not.toContain('causticField');
+      expect(source).not.toContain('uCaustic');
+      expect(source).not.toContain('crystalCast');
+    }
   });
 
   it('maps the traced wavelengths to red, green and blue channels in order', () => {
     // deltaPoint is the signed (red - blue) half-separation: the positive
     // trace is red, the mean trace is green, and the negative trace is blue.
-    expect(CAUSTIC_FIELD_GLSL).toContain('return vec3(red, green, blue);');
-    expect(CAUSTIC_FIELD_WGSL).toContain('return vec3<f32>(red, green, blue);');
+    expect(CAUSTIC_FIELD_GLSL).toContain('vec3(red, green, blue)');
+    expect(CAUSTIC_FIELD_WGSL).toContain('vec3<f32>(red, green, blue)');
   });
 
-  it('reconstructs sampled caustics and carries translucent shadow on both backends', () => {
+  it('keeps the analytic caustic bounded, neutral and additive on both backends', () => {
     for (const source of [CAUSTIC_FIELD_GLSL, CAUSTIC_FIELD_WGSL]) {
-      expect(source).toContain('causticKernel');
-      expect(source).toContain('causticSpectralFold');
+      // Four CPU-traced triangles remain independent, but each is evaluated
+      // once with fixed-cost analytic moments. The former generated shader
+      // expanded hundreds of Gaussian kernels into more than 15KB per
+      // backend and scaled cost with its sampling constants.
       expect(source).toContain('causticBundle');
-      expect(source).toContain('centre');
-      expect(source).toContain('shadow');
-      expect(source).not.toContain('causticEdge');
-      // One plain kernel remains: the radial-offset fold pair is gone, its
-      // job taken by the two traced wavelengths it approximated.
-      expect(source).not.toContain('causticFold(');
-      // Four curved fold arcs plus the interior fill, plus four broader
-      // shadow samples per bundle; causticField invokes the bundle for all
-      // four traced facets. Every fold sample is the SPECTRAL triple — one
-      // traced position per wavelength — and the fill and shadow stay plain.
-      const arcs = CAUSTIC_FOLD_ARCS * (CAUSTIC_ARC_STEPS + 1);
-      const fillGrid = CAUSTIC_FILL_SUBDIVISION;
-      const fill = ((fillGrid - 1) * (fillGrid - 2)) / 2;
-      expect(CAUSTIC_FOLD_ARCS).toBe(4);
-      // The extra asymmetric fold adds detail without the 2× hot-path cost of
-      // mirroring a second fold across all three edges.
-      expect(arcs).toBe(84);
-      expect(CAUSTIC_SAMPLES_PER_BUNDLE).toBe(arcs + fill);
-      expect(source.split('causticSpectralFold(p,').length - 1).toBe(arcs);
-      // fill + 4 shadow kernels + 3 calls inside the spectral fold's own
-      // definition (green, red, blue) — one function, three wavelengths.
-      expect(source.split('causticKernel(p,').length - 1).toBe(fill + 4 + 3);
-      expect(source.match(/causticBundle\(/g)).toHaveLength(5);
-      // The dense reconstruction never runs where any traced wavelength can
-      // contribute. Its ROI includes both spectral extremes and the ACTUAL
-      // bundle rim — never the global maximum that made a hero cast shade
-      // most of the viewport.
-      expect(source).toContain('spectralMin');
-      expect(source).toContain('spectralMax');
-      expect(source).toContain('cullPad');
-      expect(source).toContain('foldRim * 4.6');
-      expect(source).not.toContain('sqrt(reach)');
-      // Filament width rides the bundle's own footprint, clamped — one fixed
-      // pixel width is a blob on the header cast and a hairline on the hero's.
-      expect(source).toContain('foldRim');
-      expect(source).toMatch(/clamp\(\s*sqrt\(area\)/);
-      // THE FRINGE IS TRACED, NOT PAINTED: the two extra wavelengths are the
-      // SAME samples offset by each corner's signed half-separation, and the
-      // band scalar can collapse them onto the mean trace in a uniform
-      // branch. No radial heuristic may come back.
-      expect(source).toContain('deltaPoint * band');
-      expect(source).toContain('band < 0.004');
-      expect(source).toContain('detailWeight');
-      expect(source).toContain('detailRim');
-      expect(source).toContain('detailAmount > 0.004');
+      expect(source.match(/causticBundle\(/g)).toHaveLength(CAUSTIC_BUNDLE_COUNT + 1);
+      expect(source.match(/causticFootprint\(/g))
+        .toHaveLength(CAUSTIC_FOOTPRINT_EVALUATIONS_PER_BUNDLE + 1);
+      expect(source.length).toBeLessThan(10_000);
+      expect(source).not.toContain('exp(');
+      expect(source).not.toContain('causticKernel');
+      expect(source).not.toContain('causticSpectralFold');
+      expect(source).not.toMatch(/\b(?:float|let)\s+shadow\b/);
+      expect(source).not.toContain('mix(tint');
+      expect(source).not.toMatch(/for\s*\(/);
+
+      // Dispersion still follows the traced endpoints; it is not replaced by
+      // radial RGB offsets. Detail may tune concentration, never sample count.
+      expect(source).toContain('a + da * tracedBand');
+      expect(source).toContain('a - da * tracedBand');
+      expect(source).toContain('detail');
       expect(source).not.toContain('prism');
       expect(source).not.toContain('fringe');
-      // Fold filaments stay far heavier than fill: the cusped envelope must
-      // outshine the body, or the cast degrades into the filled shape this
-      // file bans.
-      expect(CAUSTIC_FILL_WEIGHT).toBeLessThan(0.5);
-      expect(source).toContain(`fill * ${CAUSTIC_FILL_WEIGHT.toFixed(2)}`);
-      // Beam compression: a tight footprint is a hot sparkle, a spread one a
-      // dim wash — brightness must ride the bundle's area, not a constant.
-      expect(source).toContain('* press');
-      // A caustic is CURVED folds, never the bundle's own straight edges: a
-      // straight-edge sampler puts pure two-corner mixes back on the wall,
-      // where every fold point must blend all three corners.
-      expect(source).not.toMatch(/causticFold\(p, a \* [\d.]+ \+ b \* [\d.]+,/);
-      expect(source).not.toMatch(/causticFold\(p, b \* [\d.]+ \+ c \* [\d.]+,/);
-      expect(source).not.toMatch(/causticKernel\(p, a \* [\d.]+ \+ b \* [\d.]+,/);
-      expect(source).not.toMatch(/causticKernel\(p, b \* [\d.]+ \+ c \* [\d.]+,/);
     }
     for (const source of [FAR_FIELD_GLSL, FAR_FIELD_WGSL]) {
-      expect(source).toMatch(/color \*= 1\.0 - crystalCast\.a/);
       expect(source).toMatch(/color \+= crystalCast\.rgb/);
+      expect(source).not.toContain('crystalCast.a');
     }
-    expect(POINTER_LIGHT_GLSL).toContain('sampleColor.rgb *= 1.0 - crystalCast.a');
-    expect(POINTER_LIGHT_GLSL).toContain('sampleColor.rgb += crystalCast.rgb');
-    expect(POINTER_LIGHT_WGSL).toContain('sampleColor.r *= 1.0 - crystalCast.a');
-    expect(POINTER_LIGHT_WGSL).toContain('sampleColor.r += crystalCast.r');
+    expect(CAUSTIC_CORNER_SLOTS).toBe(6);
+    expect(CAUSTIC_SPECTRAL_SLOTS).toBe(6);
+    expect(CAUSTIC_BUNDLE_COUNT).toBe(4);
+    expect(CAUSTIC_FOOTPRINT_EVALUATIONS_PER_BUNDLE).toBe(3);
   });
 
-  it('keeps the shared caustic source legal in GLSL ES 1.00', () => {
-    // The pointer-light program carries no `#version 300 es`, so Pixi
-    // compiles it as ES 1.00. Array parameters, dynamic indexing and `%`
-    // do not exist there — the corners are six explicit parameters and the
-    // sample accumulation is unrolled for exactly that reason.
-    expect(POINTER_LIGHT_GLSL).not.toContain('#version 300 es');
+  it('keeps the caustic source legal without dynamic shader arrays', () => {
+    // Six explicit slots keep the WebGL fallback free from dynamic indexing;
+    // unlike the former implementation, that does not require generated
+    // sample accumulation.
     expect(CAUSTIC_FIELD_GLSL).not.toMatch(/\[\s*\d+\s*\]/);
     expect(CAUSTIC_FIELD_GLSL).not.toContain('%');
     expect(CAUSTIC_FIELD_GLSL).toContain('vec4 c5');
     for (const source of [CAUSTIC_FIELD_GLSL, CAUSTIC_FIELD_WGSL]) {
       expect(source).toContain('intensity < 0.001');
-      expect(source).toContain('lobe3');
+      expect(source.match(/causticBundle\(/g)).toHaveLength(CAUSTIC_BUNDLE_COUNT + 1);
     }
   });
 
-  it('transports exactly four triangular caustic bundles', () => {
+  it('transports exactly four triangular caustic bundles to the receiver', () => {
     clearMarkFieldLight();
     expect(readMarkFieldCaustic()).toBeNull();
 
@@ -299,8 +257,8 @@ describe('far-field shader contract', () => {
   });
 
   it('packs both ray triangles into renderer pixels with positive winding', () => {
-    // ONE packer feeds both surfaces, so both resolve the same bundles in
-    // the same pixels. The shaders use a single inward-normal rule, which
+    // ONE packer feeds the far-field receiver in renderer pixels. The shader
+    // uses a single inward-normal rule, which
     // only holds on positive winding — and screen y runs opposite to the
     // mark's local y, so the hull order alone cannot promise it.
     const bounds = { left: 100, top: 50, width: 400, height: 200 };

@@ -197,19 +197,23 @@ npm run viz:mark-turn:analyze
 - The brand mark is a single all-diamond Pixi crystal with an archived inactive
   teal/amber/violet material palette, dynamic relighting, reduced-motion support,
   and no overlapping R3F logo.
-- The gem's CAST is four three-ray facet bundles on TWO surfaces — the far-field
-  mesh behind the UI and the pointer-light stage filter over it, so it crosses
-  buttons and frames instead of stopping at the backdrop. `projectMarkCaustic`
-  alone traces and derives throw falloff, `packMarkCaustic` alone writes the
-  bundles, and `renderer/caustic-shader.ts` alone reconstructs their curved folds,
-  in GLSL kept ES 1.00-legal. The bundles are traced at TWO wavelengths (the
+- The gem's CAST is four three-ray facet bundles on ONE receiver — the far-field
+  mesh behind the UI. Filled controls occlude that plane; never duplicate the
+  caustic in the full-stage pointer-light filter, which both invents a second
+  receiver at the UI's depth and doubles the hottest fragment work.
+  `projectMarkCaustic` alone traces and derives throw falloff,
+  `packMarkCaustic` alone writes the bundles, and
+  `renderer/caustic-shader.ts` alone reconstructs their bounded analytic
+  footprints. The shader stays constant-cost: no generated sample grids,
+  per-fragment loops, Gaussian kernel banks, negative shadow patch, or
+  bundle-specific colour tints. The bundles are traced at TWO wavelengths (the
   material dispersion band, diamond by default): the published corners are the
-  mean trace and each carries its signed red−blue half-separation, so the
-  fold reconstruction draws three real traces — the fringe is traced, never a
-  radial heuristic. Scene Tuning keeps two live uniforms distinct:
-  `causticDetail` sharpens the three primary folds and fades the asymmetric
-  fourth fold, while `causticDispersion` opens or closes the traced wavelength
-  band around its measured positions.
+  mean trace and each carries its signed red−blue half-separation, so
+  `causticDispersion` opens or closes the measured band while `causticDetail`
+  changes concentration without changing sample count. Hero offscreen work is
+  separately clocked and physically capped: backdrop at 30 Hz / 512 px,
+  environment at 12 Hz / 256 px, and CPU caustic projection at 30 Hz; reduced
+  motion renders those passes only on invalidation.
 - The UI is `i18next` catalog-backed, including accessibility, crash and developer copy. Use flat `<key>_one` / `<key>_other` entries and call `<key>` with numeric `count`; never select suffixes or write `run(s)` / `entry(ies)`. Split multiple counts into independently pluralised fragments. The catalogs are JSON (`client/locales/*.json`), not TS literals: `en.json` is the source of truth, a blank or missing target value means "awaiting translation" (renders the EN fallback). Agents write EN only — never `fr.json` or any other target; the pre-commit hook blanks target values whose EN source changed and CI on main translates every target (`npm run i18n`, `scripts/i18n.mjs`). CI TRANSLATION IS ONE JOB OF THE `CI` WORKFLOW, not a separate workflow: one runner, one queue, no self-re-triggering push loop. Translation pins `gpt-5.6-sol`: local runs reuse `codex login` (ChatGPT Plus/Pro), while CI needs the separately billed `OPENAI_API_KEY`. A non-empty translation must carry exactly its EN `{{placeholder}}` signature (tests + `i18n check`); `i18n sync --locale=<code>` is an operator path without an API key, not an agent fill-in. TRANSLATION ISOLATES LOCALES: `translate` writes each catalog as its locale finishes, a failing language ends only itself — a sibling's success is never discarded (2026-08-27: ten `{}` catalogs after a zh failure). A REJECTED key gets one isolated retry, then survives as blank without failing the run; exit 1 is for HARD failures only, and CI's translate step is `continue-on-error` with check/commit running `always()`, so paid work can never again be dropped with the runner (same day: 712 ar strings written to disk, then skipped before the commit step). `tests/i18n-pipeline.test.ts` pins the behaviour with a fake `codex` binary and the workflow's shape. BLANK IS ONE PREDICATE, and so is the placeholder signature: both live in `scripts/i18n-predicates.mjs`, imported by the script and by `tests/locales-contract.test.ts`, because `translate` accepting `value.length > 0` where `check` demanded `value.trim()` wrote a whitespace-only value that no later pass could see — a permanently red job (2026-08-27). SEMANTIC DRIFT — a reworded EN value that keeps its placeholders — is invisible to `check` and `fix-drift` alike, so CI replays the hook's invalidation over the pushed range (`i18n invalidate-range --since=<sha>`, same code as `invalidate-staged`): the hook is skipped under `CI=true`, bypassed by `--no-verify`, and absent from the web editor.
 - Push keeps a separate server catalog (never import the React catalog) but uses the same rules. English push copy is the explicit fallback until a target has reviewed copy; operator announcements are translated into every supported locale before sending.
 - PWA/service-worker registration is production-default and dev-opt-in

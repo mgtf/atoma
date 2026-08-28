@@ -28,7 +28,10 @@ import {
   writeMarkFieldCaustic,
   writeMarkFieldLight,
 } from '../mark-field-light.js';
-import { readPointerLight } from '../pointer-light.js';
+import {
+  readPointerLight,
+  type PointerLightSnapshot,
+} from '../pointer-light.js';
 import { markBeadVisible, markClockIsPinned, markElapsedMs } from './mark-clock.js';
 import { createMarkShell } from './mark-shell.js';
 import { prefersReducedMotion } from './motion.js';
@@ -80,8 +83,16 @@ export function interpolateAtomaMarkPlacement(
   };
 }
 
-/** Longest side of the env capture. Screen-space reflection, not a cubemap. */
-const MARK_ENV_MAX_PX = 512;
+/** Physical-pixel ceilings keep the hero's two ping-pong pairs bounded at high DPR. */
+export const ATOMA_MARK_BACKDROP_MAX_PX = 512;
+export const ATOMA_MARK_ENV_MAX_PX = 256;
+
+/** Offscreen work runs below display refresh; input transitions still invalidate immediately. */
+export const ATOMA_MARK_BACKDROP_UPDATE_INTERVAL_MS = 1_000 / 30;
+export const ATOMA_MARK_ENV_UPDATE_INTERVAL_MS = 1_000 / 12;
+
+/** The CPU ray bundle follows the backdrop cadence instead of a 120/144 Hz display. */
+export const ATOMA_MARK_CAUSTIC_UPDATE_INTERVAL_MS = 1_000 / 30;
 
 
 /** Colour of everything the bead emits: its own body rim and its glow. */
@@ -525,15 +536,15 @@ export function attachAtomaMark(
    *
    * Sized from the mark's own box rather than the screen: the crystal occupies a
    * fixed 28x28 local square, so compact chrome at 1.8x needs a 51px texture
-   * while the arrival gate needs a few hundred. Sizing to the viewport would
-   * spend megabytes to refract a 51px logo.
+   * while the arrival gate grows only to the physical-pixel ceiling. Sizing
+   * to the viewport would spend megabytes to refract a 51px logo.
    *
    * Skipped entirely without a renderer. The mark must keep working in the
    * headless view tests and anywhere the caller has no renderer to lend, and
    * the shell's own default — an empty texture with a zero texel size — makes
    * the sampling inert rather than wrong when this never runs.
    */
-  const backdropPass = ((): ((elapsedMs: number) => void) | null => {
+  const backdropPass = ((): (() => void) | null => {
     if (!renderer || !shell) return null;
     const resolution = renderer.resolution;
     // Navigation animates between 1.8x and 3.2x. Allocate its two ping-pong
@@ -543,9 +554,12 @@ export function attachAtomaMark(
     const backdropVisualScale = initialVisualScale < ATOMA_MARK_ENV_MIN_SCALE
       ? Math.max(initialVisualScale, ATOMA_MARK_OVERVIEW_RAIL_SCALE)
       : initialVisualScale;
-    const sizePx = Math.max(
-      1,
-      Math.ceil(ATOMA_MARK_LOCAL_CENTER * 2 * backdropVisualScale * resolution)
+    const sizePx = Math.min(
+      ATOMA_MARK_BACKDROP_MAX_PX,
+      Math.max(
+        1,
+        Math.ceil(ATOMA_MARK_LOCAL_CENTER * 2 * backdropVisualScale * resolution)
+      )
     );
     /**
      * TWO textures, alternating. WebGPU forbids a texture being bound for
@@ -554,10 +568,9 @@ export function attachAtomaMark(
      * shell samples the backdrop in the very frame it is written. It is not a
      * warning: the command buffer is rejected and the mark stops drawing.
      *
-     * So the shell always samples the texture written LAST frame while this
-     * frame renders into the other. The cost is a one-frame-old interior behind
-     * the glass, which at 60fps is 16ms of lag on a refraction — invisible, and
-     * the crystal turns once every 15 seconds.
+     * So the shell samples the last capture while the next cadence slot renders
+     * into the other texture. At 30 Hz the refracted interior can trail by at
+     * most one capture interval; the crystal turns once every 15 seconds.
      */
     const textures = [
       RenderTexture.create({ width: sizePx, height: sizePx, resolution: 1 }),
@@ -587,10 +600,13 @@ export function attachAtomaMark(
       const target = textures[writeIndex]!;
       // Refraction OFF for the pass: the back facets share the front's shader.
       shell.setRefracting(false);
-      renderer.render({ container: behind, target, clear: true });
-      shell.setRefracting(true);
-      behind.position.set(0, 0);
-      behind.scale.set(1);
+      try {
+        renderer.render({ container: behind, target, clear: true });
+      } finally {
+        shell.setRefracting(true);
+        behind.position.set(0, 0);
+        behind.scale.set(1);
+      }
       // Hand the shell what we just wrote; next frame writes to the other one,
       // so nothing is ever sampled and rendered into at the same time.
       shell.setBackdrop(target, sizePx, sizePx);
@@ -609,9 +625,10 @@ export function attachAtomaMark(
    * pointer that is lighting them.
    *
    * Ping-pong: same WebGPU rule as the interior backdrop. Hide the gem so the
-   * capture cannot feed on its own output.
+   * capture cannot feed on its own output. The scheduler below samples this
+   * broad pass at 12 Hz and invalidates it immediately on resize or rebuild.
    */
-  const envPass = ((): ((elapsedMs: number) => void) | null => {
+  const envPass = ((): ((pointer: PointerLightSnapshot) => void) | null => {
     if (!renderer || !shell) return null;
     if (visualScale < ATOMA_MARK_ENV_MIN_SCALE) return null;
     const stage = parent.parent;
@@ -625,15 +642,16 @@ export function attachAtomaMark(
     cursorEcho = echo;
     const transform = new Matrix();
     let textures: RenderTexture[] | null = null;
+    const retiredTextures: RenderTexture[] = [];
     let writeIndex = 0;
     let envW = 0;
     let envH = 0;
     const ensureTextures = (widthPx: number, heightPx: number) => {
       if (textures && widthPx === envW && heightPx === envH) return;
-      for (const texture of textures ?? []) {
-        ownedTextures.delete(texture);
-        texture.destroy(true);
-      }
+      // Keep the pair currently bound by the shell alive until a capture into
+      // the replacement pair succeeds and setEnv swaps the resource. Destroying
+      // a still-bound WebGPU texture during resize can poison its cached group.
+      retiredTextures.push(...(textures ?? []));
       envW = widthPx;
       envH = heightPx;
       textures = [
@@ -643,16 +661,15 @@ export function attachAtomaMark(
       for (const texture of textures) ownedTextures.add(texture);
       writeIndex = 0;
     };
-    return () => {
+    return (pointer) => {
       const screenW = Math.max(1, renderer.screen.width);
       const screenH = Math.max(1, renderer.screen.height);
-      const fit = Math.min(1, MARK_ENV_MAX_PX / Math.max(screenW, screenH));
+      const fit = Math.min(1, ATOMA_MARK_ENV_MAX_PX / Math.max(screenW, screenH));
       ensureTextures(
         Math.max(1, Math.ceil(screenW * fit)),
         Math.max(1, Math.ceil(screenH * fit))
       );
       transform.set(envW / screenW, 0, 0, envH / screenH, 0, 0);
-      const pointer = readPointerLight();
       if (pointer.active) {
         const stagePos = markClientToStage(
           renderer,
@@ -667,12 +684,19 @@ export function attachAtomaMark(
       } else {
         echo.visible = false;
       }
-      container.visible = false;
       const target = textures![writeIndex]!;
-      renderer.render({ container: stage, target, transform, clear: true });
-      container.visible = true;
-      echo.visible = false;
+      container.visible = false;
+      try {
+        renderer.render({ container: stage, target, transform, clear: true });
+      } finally {
+        container.visible = true;
+        echo.visible = false;
+      }
       shell.setEnv(target, true);
+      for (const texture of retiredTextures.splice(0)) {
+        ownedTextures.delete(texture);
+        texture.destroy(true);
+      }
       writeIndex = 1 - writeIndex;
     };
   })();
@@ -691,17 +715,37 @@ export function attachAtomaMark(
 
   const reducedMotion = prefersReducedMotion();
   /**
-   * Reduced-motion capture damper. The two offscreen passes (interior
-   * backdrop, stage env) each render every ticker frame — on a frozen pose
-   * that is full GPU cost for a still image. Once every capture input has
-   * been stable for the two frames the ping-pong pair needs to fill, the
-   * passes are skipped until an input changes (pose pin, bead knob, pointer,
-   * screen size). Never engaged outside reduced motion: a turning crystal
-   * needs every frame.
+   * Offscreen passes and CPU optics own their clocks. A 120/144 Hz display
+   * should make the shell and pointer glint smoother, not multiply texture
+   * captures or ray tracing. Rare state transitions invalidate immediately;
+   * continuous pose and pointer motion are coalesced to each pass' cadence.
+   * Reduced motion has no periodic work: it renders only on invalidation.
    */
-  let stillFrames = 0;
-  let lastCaptureKey = '';
-  const paint = (elapsedMs: number) => {
+  let renderClockMs = 0;
+  let backdropDirty = true;
+  let envDirty = true;
+  let envInvalidated = true;
+  let backdropLastCaptureMs = Number.NEGATIVE_INFINITY;
+  let envLastCaptureMs = Number.NEGATIVE_INFINITY;
+  let causticDirty = true;
+  let causticLastUpdateMs = Number.NEGATIVE_INFINITY;
+  let causticWasCoupled: boolean | null = null;
+  let observedElapsedMs = Number.NaN;
+  let observedBeadVisible: boolean | null = null;
+  let observedPointerRevision = -1;
+  let observedMarkX = Number.NaN;
+  let observedMarkY = Number.NaN;
+  let observedVisualScale = Number.NaN;
+  let observedScreenW = Number.NaN;
+  let observedScreenH = Number.NaN;
+  let observedPinned: boolean | null = null;
+  let urgentPointerActive: boolean | null = null;
+  let urgentBeadVisible: boolean | null = null;
+  let urgentPinned: boolean | null = null;
+  let urgentScreenW = Number.NaN;
+  let urgentScreenH = Number.NaN;
+
+  const paint = (elapsedMs: number, nowMs: number) => {
     // Bob lives HERE, before the pointer sample, so a parked mouse still
     // sees the lamp XY drift as the gem floats. A second ticker after paint
     // left the glint one frame behind — and, worse, glued it to the cursor
@@ -719,6 +763,7 @@ export function attachAtomaMark(
     crystal.scale.set(frame.scale * visualScale);
     const beadVisible = markBeadVisible();
     const scale = visualScale * frame.scale;
+    const pointer = renderer ? readPointerLight() : null;
     let pointerSpills: AtomaMarkRearSpill[] = [];
     let lamp: {
       position: readonly [number, number, number];
@@ -735,8 +780,7 @@ export function attachAtomaMark(
     } = { uv: [0, 0], on: 0 };
     /** The pointer's local position when it couples into the glass, else null. */
     let coupledLocal: { x: number; y: number } | null = null;
-    if (renderer) {
-      const pointer = readPointerLight();
+    if (renderer && pointer) {
       if (pointer.active) {
         const local = markClientToLocal(
           renderer,
@@ -761,6 +805,59 @@ export function attachAtomaMark(
         };
       }
     }
+    const pointerActive = pointer?.active ?? false;
+    const pointerRevision = pointer?.revision ?? -1;
+    const screenW = renderer ? Math.max(1, renderer.screen.width) : 1;
+    const screenH = renderer ? Math.max(1, renderer.screen.height) : 1;
+    const pinned = markClockIsPinned();
+    const pointerChanged = pointerRevision !== observedPointerRevision;
+    const screenChanged = screenW !== observedScreenW || screenH !== observedScreenH;
+    const backdropInputChanged =
+      elapsedMs !== observedElapsedMs ||
+      beadVisible !== observedBeadVisible ||
+      pointerChanged ||
+      markX !== observedMarkX ||
+      markY !== observedMarkY ||
+      visualScale !== observedVisualScale ||
+      screenChanged ||
+      pinned !== observedPinned;
+    if (backdropInputChanged) {
+      backdropDirty = true;
+      causticDirty = true;
+    }
+    if (!reducedMotion || pointerChanged || screenChanged || envInvalidated) {
+      // The wider stage may have its own animation, so normal motion samples
+      // it at the bounded cadence even if the pointer has not moved.
+      envDirty = true;
+    }
+    const backdropUrgent =
+      urgentPointerActive === null ||
+      pointerActive !== urgentPointerActive ||
+      beadVisible !== urgentBeadVisible ||
+      pinned !== urgentPinned ||
+      screenW !== urgentScreenW ||
+      screenH !== urgentScreenH;
+    const envUrgent =
+      envInvalidated ||
+      urgentPointerActive === null ||
+      pointerActive !== urgentPointerActive ||
+      screenW !== urgentScreenW ||
+      screenH !== urgentScreenH;
+    observedElapsedMs = elapsedMs;
+    observedBeadVisible = beadVisible;
+    observedPointerRevision = pointerRevision;
+    observedMarkX = markX;
+    observedMarkY = markY;
+    observedVisualScale = visualScale;
+    observedScreenW = screenW;
+    observedScreenH = screenH;
+    observedPinned = pinned;
+    urgentPointerActive = pointerActive;
+    urgentBeadVisible = beadVisible;
+    urgentPinned = pinned;
+    urgentScreenW = screenW;
+    urgentScreenH = screenH;
+    envInvalidated = false;
     shell?.update(frame, { beadVisible, lamp, pointerClip });
     // Lantern light belongs on the far-field mesh. The bead throws from
     // inside; the pointer lamp sits in front and has to go THROUGH the glass
@@ -777,16 +874,27 @@ export function attachAtomaMark(
         pointerSpills
       );
       if (merged.length === 0) {
-        clearMarkFieldLight();
+        // Clear only the halo lane. The caustic has its own 30 Hz clock below;
+        // clearing both here would make its cached sample blink between ticks.
+        writeMarkFieldLight([]);
       } else {
         writeMarkFieldLight(
           fieldSpillsToSample(merged, container, scale, localRadius, renderer)
         );
       }
-      // The CAST: the gem's silhouette projected onto the same wall, the
-      // shape a real glass would draw where the pools only glow. Published
-      // through the same sample channel, on the same coupling.
-      if (coupledLocal) {
+      // The CAST is CPU ray traced. Its published sample stays live between
+      // updates; entering/leaving is immediate, continuous motion is 30 Hz.
+      // The rear spill uses the same entry-coupling threshold as the trace,
+      // so it cheaply distinguishes an active pointer from one over the gem.
+      const causticCoupled = coupledLocal !== null && pointerSpills.length > 0;
+      const enteringCaustic = causticCoupled && causticWasCoupled !== true;
+      const updateCaustic = causticCoupled && causticDirty && (
+        enteringCaustic ||
+        screenChanged ||
+        reducedMotion ||
+        nowMs - causticLastUpdateMs >= ATOMA_MARK_CAUSTIC_UPDATE_INTERVAL_MS
+      );
+      if (coupledLocal && updateCaustic) {
         const cast = projectMarkCaustic(frame, coupledLocal.x, coupledLocal.y);
         const rgb = cast ? markColorToRgb(cast.color) : null;
         if (!cast || !rgb) {
@@ -824,9 +932,12 @@ export function attachAtomaMark(
             b: rgb.b,
           });
         }
-      } else {
+        causticDirty = false;
+        causticLastUpdateMs = nowMs;
+      } else if (!causticCoupled && causticWasCoupled !== false) {
         writeMarkFieldCaustic(null);
       }
+      causticWasCoupled = causticCoupled;
     }
     const { x: coreX, y: coreY } = frame.corePosition;
     traceSilhouette(interiorMask, frame.silhouette);
@@ -851,28 +962,31 @@ export function attachAtomaMark(
     // circular sticker survived every pose of the turn film. The front mesh
     // already paints coverage 1 and draws that interior bent. Toggle around
     // the pass: Pixi skips a hidden container even when it is the render target.
-    const pointerActive = renderer ? readPointerLight().active : false;
-    const captureKey = [
-      beadVisible,
-      elapsedMs,
-      markX,
-      markY,
-      visualScale,
-      pointerActive,
-      renderer ? `${renderer.screen.width}x${renderer.screen.height}` : '',
-    ].join('|');
-    if (!reducedMotion || captureKey !== lastCaptureKey) {
-      stillFrames = 0;
-      lastCaptureKey = captureKey;
-    }
-    const skipCaptures = reducedMotion && !pointerActive && stillFrames >= 2;
-    if (!skipCaptures) stillFrames += 1;
-    if (backdropPass && !skipCaptures) {
+    const captureBackdrop = backdropPass && backdropDirty && (
+      backdropUrgent ||
+      reducedMotion ||
+      nowMs - backdropLastCaptureMs >= ATOMA_MARK_BACKDROP_UPDATE_INTERVAL_MS
+    );
+    if (captureBackdrop) {
       behind.visible = true;
-      backdropPass(elapsedMs);
-      behind.visible = false;
+      try {
+        backdropPass();
+      } finally {
+        behind.visible = false;
+      }
+      backdropDirty = false;
+      backdropLastCaptureMs = nowMs;
     }
-    if (envPass && !skipCaptures) envPass(elapsedMs);
+    const captureEnv = envPass && envDirty && (
+      envUrgent ||
+      reducedMotion ||
+      nowMs - envLastCaptureMs >= ATOMA_MARK_ENV_UPDATE_INTERVAL_MS
+    );
+    if (captureEnv && pointer) {
+      envPass(pointer);
+      envDirty = false;
+      envLastCaptureMs = nowMs;
+    }
   };
 
   // Always tick: reduced motion still has to honour a pinned pose and the
@@ -880,10 +994,14 @@ export function attachAtomaMark(
   // the ticker — skipping would leave both inspect knobs dead.
   const elapsedForPaint = () =>
     reducedMotion && !markClockIsPinned() ? 0 : markElapsedMs();
-  const tick = () => {
-    paint(elapsedForPaint());
+  const tick = (ticker: Ticker) => {
+    const deltaMs = Number.isFinite(ticker?.deltaMS)
+      ? Math.max(0, ticker.deltaMS)
+      : 1_000 / 60;
+    renderClockMs += deltaMs;
+    paint(elapsedForPaint(), renderClockMs);
   };
-  paint(elapsedForPaint());
+  paint(elapsedForPaint(), renderClockMs);
   addTicker(tick);
   parent.addChild(container);
 
@@ -901,15 +1019,20 @@ export function attachAtomaMark(
       visualScale = nextVisualScale;
       container.position.set(markX, markY);
       crystal.scale.set(frameScale * visualScale);
+      if (reducedMotion) backdropDirty = true;
     },
     resume(nextParent, nextAddTicker) {
       if (destroyed) return;
       for (const child of retained) nextParent.addChild(child);
+      // A scene rebuild may replace every reflected card while retaining the
+      // crystal resource. Refresh the environment on the next paint.
+      envInvalidated = true;
       nextAddTicker(tick);
     },
     destroy() {
       if (destroyed) return;
       destroyed = true;
+      writeMarkFieldCaustic(null);
       // Display subtree first (meshes detach from geometry/shader), then the
       // shell's GPU resources, then the textures the passes ping-pong.
       cursorEcho?.destroy();
