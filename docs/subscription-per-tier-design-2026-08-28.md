@@ -1,10 +1,14 @@
-<!-- Design proposal. Not a decision record: nothing below is approved. -->
+<!-- Design proposal. The owner's answers to section 12 were taken 2026-08-28
+     and are recorded there; the body below still reads as the proposal that
+     was put to them, so the reasoning behind each choice stays legible. -->
 
 # Per-tier host subscription — design proposal, 2026-08-28
 
-**Nothing here is approved.** This is a proposal for review: it names the choices, the
-alternatives it rejects, and the four defects an adversarial pass found in earlier drafts.
-The owner's decisions are listed at the end; several of them change the shape of the commit.
+This was a proposal for review: it names the choices, the alternatives it rejects, and the four
+defects an adversarial pass found in earlier drafts. **The eight open questions were answered on
+2026-08-28 and the answers are recorded in section 12** — six confirmed the proposal, one
+reversed it. Nothing is implemented yet; the body below is left as it was put to the owner, so
+the reasoning behind each choice remains readable next to the decision.
 
 ## 1. The ask, in the owner's terms
 
@@ -664,9 +668,26 @@ naming the tier, until cleared.
   work that is arguably a customer's. It makes the crossing require an explicit operator
   declaration and makes it visible in the journal for the first time.
 
-## 12. Open questions for the owner
+## 12. Questions for the owner — ANSWERED 2026-08-28
 
-Several of these change the commit's shape. None is decided here.
+Six answers confirmed the proposal. **Q8 reversed it**, and Q7 was re-asked before it could do
+damage: read literally, "remove `claude-cli` from `ATOMA_LLM`" would have deleted the transport
+that every LOCAL run on this machine depends on — `npm run run:build`, the MCP server and the
+benchmark protocol all pin it, against a dead API key. The scope was the ambiguity, not the
+preference, and the owner settled it by keeping both paths.
+
+| # | Decision |
+|---|---|
+| Q1 | **One declared organisation.** `ATOMA_HOST_SUBSCRIPTION_ORG` names it; the subscription is selectable there and nowhere else. Confirms the operator-plane reading of `docs/saas-architecture.md`. |
+| Q2 | **Alias, no version.** "Claude (host subscription) — Opus". The transport serves `opus`/`sonnet`/`haiku` and reports the alias back; a dated generation would be a promise it cannot keep. |
+| Q3 | **The cost fix rides in this commit.** `LlmCallMetrics.requestedModel` and a nullable `RunStats.subscriptionCostUsd`, so the journal row and the cost figure agree from the first mixed run rather than contradicting each other on day one. |
+| Q4 | **A keyless host is refused.** D7 stands: the Anthropic SDK does not throw on a null credential, it silently resolves the operator's login profile, so a keyless base would spend the subscription with nothing saying so. |
+| Q5 | **The admin catalogue unlock is narrowed now.** `unlockAll: platformAdmin` currently lets an admin pick a billed model with no org key — billing the operator's API key under a comment claiming the subscription pays. The unlock and the comment are corrected in the same commit as the feature. |
+| Q6 | **A stale pin refuses the run.** A revoked admin's runs fail until the pin is cleared in Settings. Never a silent fall-through. |
+| Q7 | **Both paths survive.** `ATOMA_LLM=claude-cli` stays the "whole deployment on the subscription" route and wins by construction, being read before any preference. The cost — two ways to say one thing — is paid down to one sentence in `src/projects/AGENTS.md`. |
+| Q8 | **The in-child gate is built here, not deferred.** REVERSES the proposal. `assertTransportHonoursCredentials` never fires on a project run because `spawnRun` replaces the child env wholesale and `runTask` supplies no snapshot; threading `providerEnv` through gives a real second gate at the process boundary the payer decision crosses. It widens the diff into `src/run` and `src/cli`. |
+
+The questions as they were put:
 
 1. Is a per-tier host-subscription choice inside the operator-plane carve-out at all? This design answers 'only for the single organisation the operator declares in ATOMA_HOST_SUBSCRIPTION_ORG'. Confirm that reading of docs/saas-architecture.md, or say that the subscription must stay whole-deployment (regime A only), in which case the feature reduces to per-tier alias choice on a machine that serves no tenants.
 
@@ -686,6 +707,6 @@ Several of these change the commit's shape. None is decided here.
 
 ---
 
-*Status: proposed, not approved. Per COOLING-OFF this lands as one reviewed commit — the write
+*Status: decided 2026-08-28, not yet built. Per COOLING-OFF this lands as one reviewed commit — the write
 validator, the store, the coordinator gate, the transport strip, the catalogue neighbour, the
 picker, the audit row and the docs move together, or the guards contradict each other.*
