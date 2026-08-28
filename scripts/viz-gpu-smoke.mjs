@@ -1,4 +1,4 @@
-/* global document, DOMMatrixReadOnly, DOMPoint, getComputedStyle, HTMLButtonElement, HTMLElement, matchMedia, requestAnimationFrame, MutationObserver, WheelEvent, window */
+/* global document, DOMMatrixReadOnly, DOMPoint, getComputedStyle, HTMLButtonElement, HTMLElement, HTMLInputElement, HTMLTextAreaElement, matchMedia, requestAnimationFrame, MutationObserver, WheelEvent, window */
 import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
@@ -1908,6 +1908,36 @@ try {
           },
         },
         '/api/admin/announce': { segment: 'all', orgCount: null },
+        // Settings gained this fetch when BYO provider keys and per-tier org
+        // defaults landed (e05c7b8). Unstubbed it fell through to the fixture
+        // server, which has no auth store, and the 404 landed in the page
+        // diagnostics — failing this arm on a missing stub rather than on
+        // anything the renderer did.
+        '/api/org/models': {
+          models: { l1: null, l2: null, l3: null },
+          keys: [{ provider: 'anthropic', configuredAt: '2026-08-27T00:00:00.000Z' }],
+          encryptionReady: true,
+          catalog: [
+            {
+              id: 'anthropic',
+              label: 'Anthropic',
+              credentialEnvVar: 'ANTHROPIC_API_KEY',
+              suggestive: false,
+              models: [
+                { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
+                { id: 'claude-sonnet-5', label: 'Sonnet 5' },
+                { id: 'claude-opus-5', label: 'Opus 5' },
+              ],
+            },
+          ],
+          choices: ['claude-haiku-4-5-20251001', 'claude-sonnet-5', 'claude-opus-5'],
+          operatorDefaults: {
+            l1: 'claude-haiku-4-5-20251001',
+            l2: 'claude-sonnet-5',
+            l3: 'claude-opus-5',
+          },
+          ollamaAvailable: false,
+        },
       };
       accountPage.on('request', (request) => {
         const path = new URL(request.url()).pathname;
@@ -1998,7 +2028,12 @@ try {
           `account scenario: project-row click navigated ${accountUrlBeforeProjectClick} -> ${accountPage.url()}`
         );
       }
-      const boundedProjectCopy = await accountPage.evaluate(() => {
+      // SETTLED, not merely present. These labels are measured off the live
+      // Pixi text nodes, and a node that has been created but not yet laid out
+      // reports width 0 — which reads as a bounding failure rather than as a
+      // frame not drawn yet. Poll until both adversarial labels have a real
+      // width, then measure once.
+      const readProjectCopy = () => accountPage.evaluate(() => {
         const rows = [];
         const walk = (node) => {
           // CONTAINS, not starts-with. The adversarial runs are what identify
@@ -2023,6 +2058,18 @@ try {
         walk(globalThis.__ATOMA_GPU__.app.stage);
         return rows;
       });
+      let boundedProjectCopy = [];
+      const copySettleBy = Date.now() + READY_TIMEOUT_MS;
+      while (Date.now() < copySettleBy) {
+        boundedProjectCopy = await readProjectCopy();
+        if (
+          boundedProjectCopy.length >= 2 &&
+          boundedProjectCopy.every((label) => label.width > 0)
+        ) {
+          break;
+        }
+        await accountPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 200)));
+      }
       await accountPage.setViewport({ width: 1280, height: 800, deviceScaleFactor: 2 });
       // The orb only exists at this width, and the re-render that brings it
       // back is one frame — which on a software rasteriser is seconds.
@@ -2094,7 +2141,33 @@ try {
         ),
         'account scenario: Settings never opened from the menu'
       );
-      const settings = await targetIds();
+      // The DOM form proves the VIEW switched; the account control proves the
+      // SCENE finished drawing. Both, before observing either — asking only
+      // for the form caught the page one render early and read an empty hit
+      // target list.
+      // SETTLED, for the same reason: a view change clears the hit-target list
+      // and republishes it on the next render, so a single read can land in
+      // the gap and report nothing at all.
+      const settledTargetIds = async (id, describe) => {
+        const settleBy = Date.now() + READY_TIMEOUT_MS;
+        while (Date.now() < settleBy) {
+          const ids = await targetIds();
+          if (ids.includes(id)) return ids;
+          await accountPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 200)));
+        }
+        throw new Error(describe);
+      };
+      const settings = await settledTargetIds(
+        'account.menu.toggle',
+        'account scenario: Settings never republished its account control'
+      );
+      const settingsDom = await accountPage.evaluate(() => ({
+        accountForm: document.querySelectorAll('.gpu-settings-form').length,
+        // The per-tier pickers: one row per tier for the account, and one per
+        // tier for the organisation when the viewer may manage it.
+        accountPickers: document.querySelectorAll('[id^="accountmodel-"]').length,
+        orgPickers: document.querySelectorAll('[id^="orgmodel-"]').length,
+      }));
       const countScene = () => accountPage.evaluate(() => {
         let orbs = 0;
         const walk = (node) => {
@@ -2137,12 +2210,59 @@ try {
         const clicked = await accountPage.evaluate((wanted) => {
           const button = [...document.querySelectorAll('.gpu-announce-form button')]
             .find((candidate) => candidate.textContent?.trim() === wanted);
-          if (!(button instanceof HTMLButtonElement)) return false;
+          if (!(button instanceof HTMLButtonElement)) return 'missing';
+          // A DISABLED button swallows `click()` in silence. That silence used
+          // to surface sixty seconds later as "the next label never appeared",
+          // pointing at the wrong step entirely — say which button refused.
+          if (button.disabled) return 'disabled';
           button.click();
-          return true;
+          return 'clicked';
         }, label);
-        if (!clicked) throw new Error(`account scenario: announcement button ${label} missing`);
+        if (clicked !== 'clicked') {
+          throw new Error(`account scenario: announcement button ${label} is ${clicked}`);
+        }
       };
+      /**
+       * Fill every language the translator did not.
+       *
+       * THIS ARM MUST NOT NEED A PROVIDER. `Send` is gated on all thirteen
+       * languages carrying a title and a body, and the draft step fills them
+       * from an LLM — so on a deployment with no provider (or a dead key) the
+       * button stayed disabled and this arm could only pass by spending a
+       * subscription on twelve translations, every single run. The form
+       * already documents the way out: "an unavailable translator is not a
+       * failure: the admin fills the other languages in the same fields".
+       * That is what this does, through the very inputs the review phase
+       * renders — so the arm exercises the same production path either way,
+       * and proves the fallback works as a side effect.
+       */
+      const fillMissingLanguages = () =>
+        accountPage.evaluate(() => {
+          // React tracks a controlled input's value on the node, so assigning
+          // `.value` is invisible to it. The native setter plus a bubbling
+          // `input` event is what an actual keystroke looks like from React's
+          // side.
+          const nativeSetter = (element) =>
+            Object.getOwnPropertyDescriptor(
+              element instanceof HTMLTextAreaElement
+                ? HTMLTextAreaElement.prototype
+                : HTMLInputElement.prototype,
+              'value'
+            )?.set;
+          let filled = 0;
+          const fields = document.querySelectorAll(
+            '.gpu-announce-form input[aria-label], .gpu-announce-form textarea[aria-label]'
+          );
+          for (const field of fields) {
+            if (field.value.trim().length > 0) continue;
+            const setter = nativeSetter(field);
+            if (!setter) continue;
+            setter.call(field, `[${field.getAttribute('aria-label')}]`);
+            field.dispatchEvent(new Event('input', { bubbles: true }));
+            filled += 1;
+          }
+          return filled;
+        });
       const waitForAnnouncementButton = (label) =>
         accountPage.waitForFunction(
           (wanted) => [...document.querySelectorAll('.gpu-announce-form button')]
@@ -2152,6 +2272,9 @@ try {
         );
       await clickAnnouncementButton('Translate');
       await waitForAnnouncementButton('Send');
+      // Whatever the translator managed — everything, nothing, or a deployment
+      // that has no provider at all — the composer is complete after this.
+      const filledByHand = await fillMissingLanguages();
       await clickAnnouncementButton('Send');
       await waitForAnnouncementButton('Confirm — this cannot be recalled');
       await clickAnnouncementButton('Confirm — this cannot be recalled');
@@ -2169,10 +2292,12 @@ try {
         withOrb,
         opened,
         settings,
+        settingsDom,
         meshes,
         afterTab,
         meshesAfterTab,
         announcementReset,
+        filledByHand,
         webgpuErrors: await readWebGpuErrors(accountPage),
       };
     } finally {
@@ -2208,9 +2333,14 @@ try {
       !accountHas(accountStats.opened, 'auth.signOut') ||
       !accountHas(accountStats.opened, 'account.settings') ||
       !accountHas(accountStats.opened, 'org.switch.org-b') ||
-      // Settings is reachable from the menu and offers a cell per tier.
-      !accountHas(accountStats.settings, 'settings.model.1.default') ||
-      !accountHas(accountStats.settings, 'settings.model.3.2') ||
+      // Settings is reachable from the menu, drew its chrome, and offers a
+      // picker per tier — in DOM since BYO keys and org defaults moved them
+      // out of the GL scene (e05c7b8). This asked for the retired Pixi cells
+      // `settings.model.1.default` / `settings.model.3.2` until 2026-08-28.
+      !accountHas(accountStats.settings, 'account.menu.toggle') ||
+      accountStats.settingsDom.accountForm !== 1 ||
+      accountStats.settingsDom.accountPickers !== 3 ||
+      accountStats.settingsDom.orgPickers !== 3 ||
       // Settings draws TWO orbs — the global account control and profile — in
       // their own slots. One meant the slots were evicting each other.
       accountStats.meshes.orbs !== 2 ||
@@ -2241,7 +2371,10 @@ try {
       })}`);
     }
     console.log(
-      `viz GPU account ok: menu opened with ${accountStats.opened.filter((id) => id.startsWith('org.switch.')).length} org switch, settings reached with 2 orbs, account orb survived the tab change, active Announcements reset its receipt`
+      `viz GPU account ok: menu opened with ${accountStats.opened.filter((id) => id.startsWith('org.switch.')).length} org switch, settings reached with 2 orbs, account orb survived the tab change, active Announcements reset its receipt` +
+        (accountStats.filledByHand > 0
+          ? `; ${accountStats.filledByHand} announcement field(s) typed by hand — no translator on this deployment, which is the documented fallback and costs nothing`
+          : '; announcement translated by the configured provider')
     );
 
     // A LIVE run's polling must not rebuild the GPU scene when nothing
