@@ -249,13 +249,14 @@ npm run viz:mark-turn:analyze
   `panel()`, title and `VIEW_FRAME_CONTENT_TOP`; the established split views
   (Registry/Skills/Docs/Runs) keep their own pane geometry. The app had grown
   two single-column conventions, one framed and one with a title floating at
-  y = 78, so one product carried two ideas of what a surface is. A DOM overlay
-  that sits inside a column uses `.gpu-panel-skin`, the sole CSS restatement of
-  `panel()`'s fill, border, radius and elevation-2 resting shadows (the GL
-  shadows swing with the pointer light). The Projects form is the exception
-  that proves the boundary: its DOM wrapper is transparent and the view draws
-  its frame with the SAME `panel()` call as the project list below, so adjacent
-  cards cannot disagree as the pointer moves. Do not add a per-form skin.
+  y = 78, so one product carried two ideas of what a surface is. The Projects
+  form is the REFERENCE for a DOM overlay inside a column: its wrapper is
+  transparent and the view draws its frame with the SAME `panel()` call as the
+  project list below, so adjacent cards cannot disagree as the pointer moves.
+  `.gpu-panel-skin`, the sole CSS restatement of `panel()`'s look, survives
+  only on the overlays THE OVERLAY STACK entry grandfathers — a CSS-painted
+  frame is out of the pointer light and over the hover bubble by construction.
+  Do not add a per-form skin, and do not skin a new overlay at all.
 - The app OPENS on Projects, the authenticated launch surface. Runs is where
   you go to watch what you started, which is a second step, not an arrival. The
   unroutable-view fallback lands on Projects too. On the ungated developer path
@@ -326,6 +327,24 @@ npm run viz:mark-turn:analyze
   cannot reach the nav ungrouped and silently vanish. Settings has no rail row
   on purpose — the account menu is its entrance, and a second one would put one
   job in two places.
+- THE OVERLAY STACK IS FOUR LAYERS AND ONE FILTER, in one fixed order:
+  `ambientRoot` (far field) < `stage` — EVERY product surface: chrome, views,
+  panels, overlay menus, and the layer THE POINTER-LIGHT FILTER APPLIES TO —
+  < `markRoot` (the retained crystal and avatar orbs, reached only through
+  `retainAtomaMark`/`retainAvatarOrb`) < `tooltipRoot` (the one hover bubble;
+  nothing ever mounts above it). A surface mounted above `stage` escapes the
+  pointer light; one mounted above `tooltipRoot` buries the bubble a reader
+  opened — the recurring hand-fixed z-order defect this entry retires
+  (2026-08-28). DOM over the canvas is for INPUT the browser must own (fields,
+  selects, links), on a TRANSPARENT wrapper with the frame drawn by the view
+  (`panel()`, the Projects-form pattern): a DOM-painted frame has both defects
+  at any z-index, because the canvas is one element. The CSS-framed overlays
+  that predate this rule (`gpu-settings-form`, `gpu-org-models-form`,
+  `gpu-announce-form`, plus `gpu-scene-tuning`, a floating window by
+  contract) are grandfathered debts: migrate one by giving it the Projects
+  treatment, never add another. `tests/viz-overlay-stack.test.ts` pins the
+  mount order, the filter's home, the views' no-direct-`markRoot` rule and
+  holds the skin list closed; `viz:smoke` remains the on-device proof.
 - The renderer draws in two PIXI spaces. `stage` is the persistent scene root;
   `root` is the container the CURRENT pass draws into. Chrome (header, rail,
   overlays, account menu) draws into the stage, and each view draws into a
