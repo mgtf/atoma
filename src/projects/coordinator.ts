@@ -13,6 +13,21 @@ import type {
 } from '../contracts/projects.js';
 import type { TierModelPins } from '../contracts/tierModels.js';
 import { LLM_PROVIDER_CATALOG } from '../core/providerCatalog.js';
+import {
+  HOST_SUBSCRIPTION_PREFIX,
+  hostSubscriptionAlias,
+  ledgerTouchesSubscription,
+  runPayerLedgerSchema,
+  subscriptionTiers,
+  type PayerKind,
+  type RunPayerLedger,
+  type TierPayer,
+} from '../contracts/runPayers.js';
+import {
+  resolveTierChain,
+  tierChainCandidates,
+  type TierChainLevel,
+} from '../contracts/tierModels.js';
 import type { ProviderKeyProvider } from '../auth/store.js';
 import { readTraceTopLevelFields } from '../contracts/traceFields.js';
 // TYPE-ONLY, and it must stay that way: `src/viz/server.ts` imports four
@@ -126,6 +141,14 @@ export interface SubscriptionTransportUse {
   readonly principalId: string;
   /** The `ATOMA_LLM` value the host configured, e.g. `claude-cli`. */
   readonly transport: string;
+  /**
+   * WHICH TIERS, PAID BY WHOM. A whole-run fact is no longer enough: a run may
+   * spend the operator's login on L2 and L3 while L1 bills the organisation's
+   * own key, and the journal row has to say so or it names the wrong payer.
+   * The caller journals; this coordinator emits no audit row itself, as with
+   * `onRunFinished`.
+   */
+  readonly payers: RunPayerLedger;
 }
 
 export class ProjectRunBusy extends Error {
@@ -274,6 +297,77 @@ function injectOrgProviderKeys(
   }
 }
 
+/**
+ * WHO PAYS FOR A CATALOGUE SELECTION. Ollama is the operator's own hardware
+ * (priced at zero, billed to nobody) and is a different fact from "the
+ * operator's API key"; a provider whose key the ORG brought bills the org; a
+ * bare model id inherits whoever pays for the base transport.
+ */
+function payerForProvider(
+  providerId: string | null,
+  base: TierPayer,
+  keys: Partial<Record<ProviderKeyProvider, string>>
+): PayerKind {
+  if (providerId === null) return base.payer;
+  if (providerId === 'ollama') return 'host-selfhosted';
+  if (providerId === 'anthropic') return keys.anthropic ? 'org-key' : base.payer;
+  return keys[providerId as ProviderKeyProvider] ? 'org-key' : base.payer;
+}
+
+/**
+ * MAY THIS RUN SPEND THE OPERATOR'S OWN LOGIN ON THIS TIER? Three refusals,
+ * each naming what is missing, and every one of them THROWS rather than
+ * falling through: a revoked authority that quietly became a billed
+ * credential is exactly the audit lie this feature exists to avoid.
+ *
+ * The authority is asked HERE, per run, and is never handed in as an answer —
+ * `resolveSubscriptionGrant` is fail-closed and reads the platform-admin flag
+ * that only the operator CLI can mint. A stored pin is data; permission is not
+ * storable.
+ */
+function assertSubscriptionPinIsHonourable(input: {
+  readonly tier: 1 | 2 | 3;
+  readonly level: TierChainLevel;
+  readonly grant: { readonly principalId: string } | undefined;
+  readonly declaredOrg: string | undefined;
+  readonly orgId: string | undefined;
+}): void {
+  const where = `ATOMA_MODEL_L${input.tier}`;
+  if (input.level !== 'account') {
+    // An org default is inherited by every member by construction, and the
+    // host env is the third candidate for EVERY tier: a sentinel at either
+    // level would be a payer-bearing default nobody chose (design D2/D3).
+    throw new ProjectRunConfigurationError(
+      `${where} names the host subscription from the ${input.level} level; only a platform ` +
+        "admin's own account pin may spend the operator's login"
+    );
+  }
+  if (!input.grant) {
+    throw new ProjectRunConfigurationError(
+      `${where} names the host subscription, but the requesting account no longer holds the ` +
+        'platform-admin flag. Clear the pin in Settings, or have the flag restored'
+    );
+  }
+  if (!input.declaredOrg) {
+    throw new ProjectRunConfigurationError(
+      `${where} names the host subscription, but this deployment declares no organisation for ` +
+        'it. Set ATOMA_HOST_SUBSCRIPTION_ORG, or clear the pin in Settings'
+    );
+  }
+  if (input.orgId !== input.declaredOrg) {
+    throw new ProjectRunConfigurationError(
+      `${where} names the host subscription, but this run belongs to another organisation than ` +
+        'the one this deployment declares for it'
+    );
+  }
+}
+
+export interface ProjectRunEnvironment {
+  readonly environment: NodeJS.ProcessEnv;
+  /** Who paid for what, per tier plus the base transport. */
+  readonly payers: RunPayerLedger;
+}
+
 export function projectRunEnvironment(input: {
   readonly hostEnv: NodeJS.ProcessEnv;
   readonly dbPath: string;
@@ -302,6 +396,15 @@ export function projectRunEnvironment(input: {
   /** The org-level defaults under `tierModels`. See its doc above. */
   readonly orgTierModels?: TierModelPins;
   /**
+   * The organisation this run belongs to. Required to judge a per-tier
+   * host-subscription pin: the deployment declares ONE organisation in
+   * `ATOMA_HOST_SUBSCRIPTION_ORG` where the operator's own login may be
+   * spent, and a pin naming it from anywhere else is refused (design
+   * 2026-08-28, D6/Q1). Optional so the many callers that never touch the
+   * subscription keep compiling; absent simply cannot match a declaration.
+   */
+  readonly orgId?: string;
+  /**
    * Credentials the org configured, by catalogue provider id. Present keys
    * are forwarded into the run child; absent ones are not.
    */
@@ -322,7 +425,7 @@ export function projectRunEnvironment(input: {
    * the store on disk, can mint it.
    */
   readonly subscriptionTransport?: { readonly principalId: string };
-}): NodeJS.ProcessEnv {
+}): ProjectRunEnvironment {
   const selected = input.hostEnv['ATOMA_LLM']?.trim() || 'anthropic';
   const subscriptionRequested = isSubscriptionTransport(selected);
   if (subscriptionRequested && !input.subscriptionTransport) {
@@ -407,6 +510,25 @@ export function projectRunEnvironment(input: {
       if (baseUrl) environment['ANTHROPIC_BASE_URL'] = baseUrl;
     }
   }
+  // THE BASE ROW OF THE PAYER LEDGER. The branch above just decided who pays
+  // for every call that carries no `provider:` prefix — an unpinned tier,
+  // `resolveLatestOpus` on the L3 path, anything reaching the default client.
+  // A ledger of three tier rows would say "L2 and L3 were on the subscription"
+  // and stay silent about the account that paid for everything else, which is
+  // the omission finding 2.2 punished (design 2026-08-28, D8).
+  const baseRow: TierPayer = subscriptionRequested
+    ? {
+        selection: null,
+        provider: HOST_SUBSCRIPTION_PREFIX,
+        payer: 'host-subscription',
+        source: 'host',
+      }
+    : {
+        selection: null,
+        provider: 'anthropic',
+        payer: orgAnthropicKey ? 'org-key' : 'host-key',
+        source: orgAnthropicKey ? 'org' : 'host',
+      };
   // THE HOST'S OLLAMA ENDPOINT crosses on every branch: it selects no payer
   // (self-hosted, priced at zero), so unlike the anthropic gateway URL above
   // it is safe beside a BYO key and on a subscription run alike. Forwarded
@@ -426,39 +548,89 @@ export function projectRunEnvironment(input: {
   // credential nobody configured falls through to the level beneath it
   // instead of reaching the router and detonating mid-run. Non-catalogue
   // provider prefixes refuse outright at every level.
-  const candidatesPerTier: Array<string | null> = [
-    input.tierModels?.l1 ?? null,
-    input.orgTierModels?.l1 ?? null,
-    typeof input.hostEnv['ATOMA_MODEL_L1'] === 'string' ? input.hostEnv['ATOMA_MODEL_L1'].trim() : null,
-  ];
-  const candidatesL2: Array<string | null> = [
-    input.tierModels?.l2 ?? null,
-    input.orgTierModels?.l2 ?? null,
-    typeof input.hostEnv['ATOMA_MODEL_L2'] === 'string' ? input.hostEnv['ATOMA_MODEL_L2'].trim() : null,
-  ];
-  const candidatesL3: Array<string | null> = [
-    input.tierModels?.l3 ?? null,
-    input.orgTierModels?.l3 ?? null,
-    typeof input.hostEnv['ATOMA_MODEL_L3'] === 'string' ? input.hostEnv['ATOMA_MODEL_L3'].trim() : null,
-  ];
-  const tierCandidates = { 1: candidatesPerTier, 2: candidatesL2, 3: candidatesL3 } as const;
+  //
+  // THE THREE ANSWERS ARE NOT INTERCHANGEABLE, and the rule generalises:
+  // FALL-THROUGH IS PERMITTED WITHIN A PAYER, REFUSAL IS REQUIRED ACROSS
+  // PAYERS. A credential nobody brought is a fall-through (the next level
+  // bills the same kind of account); a provider you may not use, or an
+  // authority you no longer hold, is a refusal — falling through there would
+  // move the payer from the operator's subscription to a billed credential
+  // with no event anywhere, which is the defect class finding 2.2 closed.
+  const subscriptionOrg = input.hostEnv['ATOMA_HOST_SUBSCRIPTION_ORG']?.trim();
+  const ledger: Record<'l1' | 'l2' | 'l3', TierPayer> = {
+    l1: baseRow,
+    l2: baseRow,
+    l3: baseRow,
+  };
   for (const tier of [1, 2, 3] as const) {
-    for (const candidate of tierCandidates[tier]) {
-      const value = candidate?.trim();
-      if (!value) continue;
-      if (!isCatalogueSelection(value)) {
-        throw new ProjectRunConfigurationError(
-          `${`ATOMA_MODEL_L${tier}`}=${value} names a provider project runs cannot be routed to`
-        );
+    const key = `l${tier}` as const;
+    const chosen = resolveTierChain(
+      tierChainCandidates({
+        account: input.tierModels,
+        org: input.orgTierModels,
+        host: input.hostEnv[`ATOMA_MODEL_L${tier}`],
+        tier,
+      }),
+      (candidate) => {
+        const alias = hostSubscriptionAlias(candidate.value);
+        if (alias) {
+          assertSubscriptionPinIsHonourable({
+            tier,
+            level: candidate.level,
+            grant: input.subscriptionTransport,
+            declaredOrg: subscriptionOrg,
+            orgId: input.orgId,
+          });
+          return 'take';
+        }
+        if (!isCatalogueSelection(candidate.value)) {
+          throw new ProjectRunConfigurationError(
+            `ATOMA_MODEL_L${tier}=${candidate.value} names a provider project runs cannot be routed to`
+          );
+        }
+        // Fail-open: nobody brought this provider's credential, so the next
+        // level of the chain decides instead.
+        return providerCredentialAvailable(candidate.value, usableOrgKeys, environment)
+          ? 'take'
+          : 'skip';
       }
-      if (!providerCredentialAvailable(value, usableOrgKeys, environment)) {
-        // Fail-open: nobody brought this provider's credential, so the
-        // next level of the chain decides instead.
-        continue;
-      }
-      environment[`ATOMA_MODEL_L${tier}`] = value;
-      break;
+    );
+    if (!chosen) continue;
+    const alias = hostSubscriptionAlias(chosen.value);
+    if (alias) {
+      // TRANSLATED HERE AND NOWHERE ELSE, downstream of the authority check.
+      // The sentinel is what is STORED — non-routable on purpose, so no other
+      // code path that forwards a pin into an environment can become a
+      // subscription route by accident.
+      environment[`ATOMA_MODEL_L${tier}`] = `claude-cli:${alias}`;
+      ledger[key] = {
+        selection: chosen.value,
+        provider: HOST_SUBSCRIPTION_PREFIX,
+        payer: 'host-subscription',
+        source: chosen.level,
+      };
+      continue;
     }
+    environment[`ATOMA_MODEL_L${tier}`] = chosen.value;
+    ledger[key] = {
+      selection: chosen.value,
+      provider: selectorProvider(chosen.value) ?? baseRow.provider,
+      payer: payerForProvider(selectorProvider(chosen.value), baseRow, usableOrgKeys),
+      source: chosen.level,
+    };
+  }
+  const payers: RunPayerLedger = runPayerLedgerSchema.parse({
+    base: baseRow,
+    l1: ledger.l1,
+    l2: ledger.l2,
+    l3: ledger.l3,
+  });
+  if (ledgerTouchesSubscription(payers)) {
+    // A GATEWAY AND A SUBSCRIPTION DO NOT SHARE A RUN. `ANTHROPIC_BASE_URL`
+    // redirects the anthropic transport at a third party; the subscription
+    // subprocess already refuses every `ANTHROPIC_*` variable, so leaving it
+    // in the env would only mislead about where the OTHER tiers went.
+    delete environment['ANTHROPIC_BASE_URL'];
   }
   // WHICH PROVIDERS THIS RUN CAN ACTUALLY REACH. Read from the RESOLVED pins
   // rather than from the preferences, because a pin whose credential nobody
@@ -510,8 +682,22 @@ export function projectRunEnvironment(input: {
     // shared product store, so one tenant's cached planning decisions would be
     // readable to the next. Partitioning it is its own change.
     ATOMA_PREFILTER_CACHE: '0',
+    // THE SECOND GATE'S INPUT. A tenant run's child re-checks, at launch,
+    // that every machine-bound transport it can see was authorised HERE —
+    // `assertTransportHonoursCredentials` in `src/run/providers.ts`, which
+    // never fired on a project run before because nothing supplied it a
+    // credential snapshot. `ATOMA_TENANT_RUN` is what arms it; the tier list
+    // is what keeps it from refusing the very pins this coordinator just
+    // authorised (design 2026-08-28, Q8).
+    ATOMA_TENANT_RUN: '1',
   });
-  return environment;
+  const authorisedTiers = subscriptionTiers(payers).map((tier) =>
+    tier === 'base' ? 'base' : tier
+  );
+  if (authorisedTiers.length > 0) {
+    environment['ATOMA_SUBSCRIPTION_TIERS'] = authorisedTiers.join(',');
+  }
+  return { environment, payers };
 }
 
 function previousDeliveredWorkspace(
@@ -900,7 +1086,7 @@ export class ProjectRunCoordinator {
     const subscriptionGrant = this.resolveSubscriptionGrant(input.principalId);
     let environment: NodeJS.ProcessEnv;
     try {
-      environment = projectRunEnvironment({
+      const built = projectRunEnvironment({
         hostEnv: this.hostEnv,
         dbPath: this.dbPath,
         workspacePath: paths.workspacePath,
@@ -908,18 +1094,26 @@ export class ProjectRunCoordinator {
         skillsPath: paths.skillsPath,
         runId: run.projectRunId,
         artifactManifestPath: paths.artifactManifestPath,
+        orgId: input.orgId,
         tierModels: this.resolveTierModels(input.principalId),
         orgTierModels: this.resolveOrgTierModels(input.orgId),
         orgProviderKeys: this.resolveOrgProviderKeys(input.orgId),
         ...(subscriptionGrant ? { subscriptionTransport: subscriptionGrant } : {}),
       });
-      if (subscriptionGrant && isSubscriptionTransport(this.hostEnv['ATOMA_LLM'])) {
+      environment = built.environment;
+      // FIRED FROM THE LEDGER, not from the host env. A run may now spend the
+      // subscription on some tiers and a key on others, so "did this run touch
+      // the operator's login" is a question about what was RESOLVED — the old
+      // `isSubscriptionTransport(hostEnv.ATOMA_LLM)` test could only see the
+      // whole-deployment regime and would stay silent on every mixed run.
+      if (ledgerTouchesSubscription(built.payers)) {
         this.onSubscriptionTransport?.({
           orgId: input.orgId,
           projectId: input.projectId,
           projectRunId: run.projectRunId,
           principalId: input.principalId,
-          transport: (this.hostEnv['ATOMA_LLM'] ?? '').trim(),
+          transport: (this.hostEnv['ATOMA_LLM'] ?? '').trim() || 'claude-cli',
+          payers: built.payers,
         });
       }
       this.store.transitionProjectRun({

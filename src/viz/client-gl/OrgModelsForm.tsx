@@ -6,6 +6,7 @@ import {
 } from '../../core/providerCatalog.js';
 import { formatDateTime } from '../client/date-format.js';
 import { api } from '../client/data-api.js';
+import { HOST_SUBSCRIPTION_PREFIX } from '../../contracts/runPayers.js';
 import type { VizAccountModels, VizLlmCatalogEntry, VizOrganisation, VizOrgModels } from '../client/types.js';
 
 /**
@@ -14,9 +15,15 @@ import type { VizAccountModels, VizLlmCatalogEntry, VizOrganisation, VizOrgModel
  * never paints a second copy of the directory through the form.
  *
  * SaaS members need a billed-provider key before anyone can pick a model.
- * Platform admins are the exception: their runs use the host CLI subscription,
- * so the catalogue is unlocked without a stored org key. Keys remain optional
- * so the organisation's members can run without that subscription.
+ *
+ * PLATFORM ADMINS ARE THE EXCEPTION, AND THE REASON WAS WRONG UNTIL
+ * 2026-08-28. The unlock was justified by "their runs use the host CLI
+ * subscription", which is false on any deployment whose `ATOMA_LLM` asks for
+ * anthropic: there, an admin's unlocked pick of a billed model resolves
+ * against the HOST's own API key and bills the operator's account, under a
+ * comment claiming the subscription paid. The unlock now follows DECLARED
+ * FACTS — a stored billed key, or an offered host subscription — and the
+ * subscription is a named choice rather than an implied one.
  */
 export function OrgModelsForm({
   t,
@@ -88,7 +95,13 @@ export function OrgModelsForm({
   const ollamaAvailable = (org.ollamaAvailable ?? account.ollamaAvailable) !== false;
   const configuredProviders = new Set(org.keys.map((key) => key.provider));
   const billedKeyReady = orgHasBilledProviderKey(configuredProviders);
-  const canPickModels = billedKeyReady || platformAdmin;
+  // The operator's own login, offered per REQUESTER by the server. Absent
+  // means not offered at all; a `reason` means offered-but-unusable, which is
+  // shown greyed rather than hidden — hiding it would make an already-armed
+  // pin invisible in the very select that must be used to clear it.
+  const hostSubscription = account.hostSubscription;
+  const subscriptionUsable = Boolean(hostSubscription && !hostSubscription.reason);
+  const canPickModels = billedKeyReady || subscriptionUsable;
   const tierIds = ['l1', 'l2', 'l3'] as const;
 
   const inheritLabel = (tier: (typeof tierIds)[number]): string => {
@@ -214,8 +227,10 @@ export function OrgModelsForm({
                 <option value="" disabled>
                   {t('settings.orgModelRequired')}
                 </option>
+                {/* NO `hostSubscription` HERE. An org default is inherited by
+                    every member by construction, so the subscription is an
+                    ACCOUNT pin and the server refuses it at this level too. */}
                 {catalogOptions(t, catalog, configuredProviders, org.models[tier], {
-                  unlockAll: platformAdmin,
                   billedKeyReady,
                   ollamaAvailable,
                 })}
@@ -254,9 +269,9 @@ export function OrgModelsForm({
               {inheritLabel(tier)}
             </option>
             {catalogOptions(t, catalog, configuredProviders, account.pins[tier], {
-              unlockAll: platformAdmin,
               billedKeyReady,
               ollamaAvailable,
+              ...(hostSubscription ? { hostSubscription } : {}),
             })}
           </select>
         </div>
@@ -318,27 +333,65 @@ export function OrgModelsForm({
   );
 }
 
+/**
+ * PURE, AND THAT IS THE POINT. Every unlock decision is computed here from
+ * declared facts, so what the picker offers can be proven without a browser —
+ * the browser smoke cannot run in CI, and "who may spend which payer" is not a
+ * property to leave to a manual check.
+ */
+export interface CatalogueUnlocks {
+  readonly billedKeyReady: boolean;
+  readonly ollamaAvailable: boolean;
+  /** The operator's login, when the server offered it to THIS requester. */
+  readonly hostSubscription?: VizAccountModels['hostSubscription'];
+}
+
+export function providerIsUnlocked(
+  provider: { readonly id: string },
+  configuredProviders: ReadonlySet<string>,
+  opts: CatalogueUnlocks
+): boolean {
+  if (provider.id === 'ollama') return opts.ollamaAvailable;
+  if (provider.id === HOST_SUBSCRIPTION_PREFIX) {
+    return Boolean(opts.hostSubscription && !opts.hostSubscription.reason);
+  }
+  // NO BLANKET ADMIN UNLOCK. A platform admin picking a billed model still
+  // needs the key that pays for it; the subscription is its own family, named.
+  return (
+    opts.billedKeyReady &&
+    orgProviderIsReady(
+      provider as { id: string; credentialEnvVar: string | null },
+      configuredProviders
+    )
+  );
+}
+
 function catalogOptions(
   t: (key: string, vars?: Record<string, unknown>) => string,
   catalog: VizLlmCatalogEntry[],
   configuredProviders: ReadonlySet<string>,
   selected: string | null,
-  opts: { unlockAll: boolean; billedKeyReady: boolean; ollamaAvailable: boolean }
+  opts: CatalogueUnlocks
 ): ReactNode {
-  return catalog.map((provider) => {
+  const families = opts.hostSubscription
+    ? [...catalog, opts.hostSubscription.family]
+    : catalog;
+  return families.map((provider) => {
     // The honest label: ollama compute is the platform's, and where the
     // deployment declared no endpoint the family stays visible but locked —
     // hiding it would make the operator's choice look like a client bug.
     const isOllama = provider.id === 'ollama';
-    const unlocked = isOllama
-      ? opts.ollamaAvailable
-      : opts.unlockAll ||
-        (opts.billedKeyReady && orgProviderIsReady(provider, configuredProviders));
+    const isSubscription = provider.id === HOST_SUBSCRIPTION_PREFIX;
+    const unlocked = providerIsUnlocked(provider, configuredProviders, opts);
     const label = isOllama
       ? t(opts.ollamaAvailable ? 'settings.ollamaHosted' : 'settings.ollamaUnavailable', {
           label: provider.label,
         })
-      : provider.label;
+      : isSubscription
+        ? t(unlocked ? 'settings.hostSubscription' : 'settings.hostSubscriptionUnavailable', {
+            label: provider.label,
+          })
+        : provider.label;
     return (
       <optgroup key={provider.id} label={label}>
         {provider.models.map((model) => {

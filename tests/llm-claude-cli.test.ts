@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { z } from 'zod';
-import { resolveCliModel, jsonSchemaToZodShape, cliEffortFor, cliThinkingFor } from '../src/core/llmClaudeCli.js';
+import {
+  resolveCliModel,
+  jsonSchemaToZodShape,
+  cliEffortFor,
+  cliThinkingFor,
+  subscriptionTransportEnv,
+} from '../src/core/llmClaudeCli.js';
 import { PIN_HAIKU, PIN_SONNET, FALLBACK_OPUS } from '../src/core/models.js';
 import type { LlmCompletionRequest } from '../src/core/types.js';
 
@@ -134,5 +140,40 @@ describe('jsonSchemaToZodShape — builtin tool schema conversion', () => {
 
   it('handles a schema with no properties (empty shape)', () => {
     expect(jsonSchemaToZodShape({ type: 'object' })).toEqual({});
+  });
+});
+
+describe('the subscription transport authenticates from its login session alone', () => {
+  /**
+   * 2026-08-28, D9. Dropping a stale ANTHROPIC_API_KEY used to be tidiness —
+   * one variable, so the CLI's own OAuth login authenticates the subprocess.
+   * Since a tier may now be pinned to this transport while OTHER tiers bill
+   * real keys, it is load-bearing for the payer guarantee: any inherited
+   * variable that could re-credential or redirect this subprocess would
+   * silently move the payer of a tier the journal has already named.
+   */
+  it('strips every ANTHROPIC_* variable and both cloud-gateway switches', () => {
+    const env = subscriptionTransportEnv({
+      PATH: '/bin',
+      HOME: '/home/op',
+      ANTHROPIC_API_KEY: 'stale',
+      ANTHROPIC_AUTH_TOKEN: 'bearer',
+      ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic',
+      ANTHROPIC_MODEL: 'something',
+      CLAUDE_CODE_USE_BEDROCK: '1',
+      CLAUDE_CODE_USE_VERTEX: '1',
+    });
+    expect(Object.keys(env).filter((key) => key.startsWith('ANTHROPIC_'))).toEqual([]);
+    expect(env['CLAUDE_CODE_USE_BEDROCK']).toBeUndefined();
+    expect(env['CLAUDE_CODE_USE_VERTEX']).toBeUndefined();
+    // Everything the subprocess still needs is untouched.
+    expect(env['PATH']).toBe('/bin');
+    expect(env['HOME']).toBe('/home/op');
+  });
+
+  it('does not mutate the environment it was handed', () => {
+    const source = { ANTHROPIC_API_KEY: 'stale', PATH: '/bin' };
+    subscriptionTransportEnv(source);
+    expect(source.ANTHROPIC_API_KEY).toBe('stale');
   });
 });

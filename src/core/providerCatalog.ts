@@ -1,3 +1,10 @@
+import {
+  HOST_SUBSCRIPTION_ALIASES,
+  HOST_SUBSCRIPTION_PREFIX,
+  hostSubscriptionAlias,
+  isHostSubscriptionSelection,
+} from '../contracts/runPayers.js';
+
 /**
  * THE PROVIDER/MODEL CATALOGUE FOR TENANT SELECTION.
  * ===================================================
@@ -23,6 +30,20 @@
  * self-hosted, so what actually resolves depends on the deployment pulling
  * the tags. The listed tags keep it selectable without free text, and stay
  * honest about their role through `suggestive: true`.
+ *
+ * THE HOST SUBSCRIPTION IS A NEIGHBOUR, NOT A MEMBER (design 2026-08-28, D4).
+ * `HOST_SUBSCRIPTION_FAMILY` below is offered by the account picker beside
+ * this catalogue, and is deliberately NOT a fourth entry, because three
+ * mechanisms read `LLM_PROVIDER_CATALOG` as "things that may hold a key":
+ * `orgProviderIsReady` returns TRUE for any entry whose `credentialEnvVar` is
+ * null, so a fourth row would read as always-ready to every viewer — the exact
+ * inverse of a per-requester offer; `resolveOrgProviderKeys` passes
+ * `provider.id` into a `ProviderKeyProvider` parameter, whose widening is
+ * mirrored by the `CHECK (provider IN (…))` constraint on
+ * `auth_org_provider_keys`, letting that table hold a row for something that
+ * must never have a key; and `injectOrgProviderKeys` iterates the same array.
+ * Keeping the family out is a positive property, and it leaves the SCOPE
+ * paragraph above true exactly as written.
  */
 
 export interface ProviderModelEntry {
@@ -109,6 +130,37 @@ export const LLM_PROVIDER_CATALOG: readonly LlmProviderEntry[] = [
   },
 ] as const;
 
+/**
+ * The host's own Claude Code login, offered per tier to a platform admin on a
+ * deployment that declares it. Shaped like a catalogue entry so one picker can
+ * render both, and typed separately so nothing that iterates the catalogue can
+ * reach it. Its "models" are the ALIASES the transport serves — a subscription
+ * resolves whatever generation Claude Code gives it that day, so a dated id
+ * here would be a promise the transport cannot keep (design 2026-08-28, Q2).
+ */
+export const HOST_SUBSCRIPTION_FAMILY = {
+  id: HOST_SUBSCRIPTION_PREFIX,
+  label: 'Claude (host subscription)',
+  models: HOST_SUBSCRIPTION_ALIASES.map((alias) => ({
+    id: alias,
+    label: aliasLabel(alias),
+  })),
+} as const;
+
+function aliasLabel(alias: string): string {
+  return alias.charAt(0).toUpperCase() + alias.slice(1);
+}
+
+/**
+ * The ACCOUNT level's admissible value space: a catalogue selection, or the
+ * host-subscription sentinel. The single union point — every other reader
+ * stays on `isValidTierModelSelection`, so widening the account space cannot
+ * widen the org space by accident.
+ */
+export function isAccountTierSelection(value: string): boolean {
+  return isValidTierModelSelection(value) || isHostSubscriptionSelection(value);
+}
+
 /** Every selectable provider id, e.g. handed to the routing tables. */
 export function llmProviderIds(): readonly LlmProviderEntry['id'][] {
   return LLM_PROVIDER_CATALOG.map((provider) => provider.id);
@@ -160,6 +212,8 @@ export function isValidTierModelSelection(value: string): boolean {
 
 /** Label for a stored selection, or the raw value when unknown. */
 export function tierModelSelectionLabel(value: string): string {
+  const alias = hostSubscriptionAlias(value);
+  if (alias) return `${HOST_SUBSCRIPTION_FAMILY.label} — ${aliasLabel(alias)}`;
   const colonIndex = value.indexOf(':');
   if (colonIndex === -1) return value;
   const provider = findProvider(value.slice(0, colonIndex));

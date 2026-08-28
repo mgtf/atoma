@@ -101,6 +101,15 @@ function lease(): RunLease {
   };
 }
 
+/**
+ * The ENVIRONMENT half of the builder. `projectRunEnvironment` returns
+ * `{ environment, payers }` since the per-tier host subscription made "who
+ * paid" a per-tier fact rather than a property of the whole run; most
+ * assertions here only care about the env, and the ledger has its own cases.
+ */
+const runEnv = (input: Parameters<typeof projectRunEnvironment>[0]): NodeJS.ProcessEnv =>
+  projectRunEnvironment(input).environment;
+
 describe('project run environment', () => {
   it('lays a run out under orgs/<org>/projects/<project>/runs/<run>', () => {
     const layout = projectRunHostLayout('/control', 'org-a', 'proj-b', 'run-c');
@@ -110,7 +119,7 @@ describe('project run environment', () => {
     expect(layout.skillsPath).toBe('/control/orgs/org-a/projects/proj-b/skills');
   });
   it('forwards only the direct model credential and host runtime allowlist', () => {
-    const env = projectRunEnvironment({
+    const env = runEnv({
       hostEnv: {
         PATH: '/bin',
         ANTHROPIC_API_KEY: 'model-key',
@@ -134,7 +143,7 @@ describe('project run environment', () => {
   it('lets a tenant run LEARN, and keeps promotion, dispatch and the shared cache off', () => {
     // The platform's own point: a project's runs get cheaper as it grows.
     // Measured before this was on — two delivered runs, $0.59, learnedSkills 0.
-    const env = projectRunEnvironment({
+    const env = runEnv({
       hostEnv: { PATH: '/bin', ANTHROPIC_API_KEY: 'model-key' },
       dbPath: '/control/atoma.db',
       workspacePath: '/control/workspace',
@@ -168,9 +177,9 @@ describe('project run environment', () => {
       runId: '3c584a3c-933d-4488-ac44-4cdcc8e66f31',
       artifactManifestPath: '/control/manifest.json',
     };
-    expect(() => projectRunEnvironment({ ...base, hostEnv: { ATOMA_LLM: 'claude-cli' } }))
+    expect(() => runEnv({ ...base, hostEnv: { ATOMA_LLM: 'claude-cli' } }))
       .toThrow(ProjectRunConfigurationError);
-    expect(() => projectRunEnvironment({
+    expect(() => runEnv({
       ...base,
       hostEnv: { ANTHROPIC_API_KEY: 'key', ATOMA_MODEL_L2: 'codex:gpt-5' },
     })).toThrow(/cannot be routed/);
@@ -178,11 +187,11 @@ describe('project run environment', () => {
     // product can supply one (the org key store is keyed by catalogue
     // provider, and anthropic's credential is ANTHROPIC_API_KEY), and a
     // token refreshed from a login profile would expire inside a long run.
-    expect(() => projectRunEnvironment({
+    expect(() => runEnv({
       ...base,
       hostEnv: { ANTHROPIC_API_KEY: 'key', ANTHROPIC_AUTH_TOKEN: 'token' },
     })).toThrow(/do not accept ANTHROPIC_AUTH_TOKEN/);
-    expect(() => projectRunEnvironment({
+    expect(() => runEnv({
       ...base,
       hostEnv: { ANTHROPIC_AUTH_TOKEN: 'token' },
     })).toThrow(/do not accept ANTHROPIC_AUTH_TOKEN/);
@@ -201,7 +210,7 @@ describe('project run environment', () => {
       runId: '3c584a3c-933d-4488-ac44-4cdcc8e66f31',
       artifactManifestPath: '/control/manifest.json',
     };
-    const byoOnly = projectRunEnvironment({
+    const byoOnly = runEnv({
       ...base,
       hostEnv: { PATH: '/bin' },
       orgProviderKeys: { anthropic: 'sk-org-anthropic' },
@@ -210,7 +219,7 @@ describe('project run environment', () => {
     expect(byoOnly['ANTHROPIC_AUTH_TOKEN']).toBeUndefined();
     // And an anthropic tier pin is now routable on that deployment: the
     // credential check reads the org key, not only the host env.
-    const pinned = projectRunEnvironment({
+    const pinned = runEnv({
       ...base,
       hostEnv: { PATH: '/bin' },
       orgProviderKeys: { anthropic: 'sk-org-anthropic' },
@@ -219,7 +228,7 @@ describe('project run environment', () => {
     expect(pinned['ATOMA_MODEL_L1']).toBe('anthropic:claude-haiku-4-5-20251001');
     // BYO beats a host key of the same shape: the org brought its own, it
     // pays with its own.
-    const overHostKey = projectRunEnvironment({
+    const overHostKey = runEnv({
       ...base,
       hostEnv: { PATH: '/bin', ANTHROPIC_API_KEY: 'host-key' },
       orgProviderKeys: { anthropic: 'sk-org-anthropic' },
@@ -229,7 +238,7 @@ describe('project run environment', () => {
     // own Claude Code instructions use) must not carry a tenant's key to a
     // third party the org never consented to.
     const hostGateway = { PATH: '/bin', ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic' };
-    const orgKeyBehindGateway = projectRunEnvironment({
+    const orgKeyBehindGateway = runEnv({
       ...base,
       hostEnv: { ...hostGateway, ANTHROPIC_API_KEY: 'host-key' },
       orgProviderKeys: { anthropic: 'sk-org-anthropic' },
@@ -237,14 +246,14 @@ describe('project run environment', () => {
     expect(orgKeyBehindGateway['ANTHROPIC_API_KEY']).toBe('sk-org-anthropic');
     expect(orgKeyBehindGateway['ANTHROPIC_BASE_URL']).toBeUndefined();
     // The host's own credential still reaches the host's own gateway.
-    const hostKeyBehindGateway = projectRunEnvironment({
+    const hostKeyBehindGateway = runEnv({
       ...base,
       hostEnv: { ...hostGateway, ANTHROPIC_API_KEY: 'host-key' },
     });
     expect(hostKeyBehindGateway['ANTHROPIC_BASE_URL']).toBe('https://api.z.ai/api/anthropic');
     // No host key and no org key is still a refusal, and the message names
     // both ways out.
-    expect(() => projectRunEnvironment({ ...base, hostEnv: { PATH: '/bin' } })).toThrow(
+    expect(() => runEnv({ ...base, hostEnv: { PATH: '/bin' } })).toThrow(
       /anthropic credential/
     );
   });
@@ -264,17 +273,108 @@ describe('project run environment', () => {
       orgProviderKeys: { anthropic: 'sk-org-anthropic', zai: 'sk-zai-org' },
     };
     // No tier names zai: its key stays out of the child.
-    const unreferenced = projectRunEnvironment(base);
+    const unreferenced = runEnv(base);
     expect(unreferenced['ZAI_API_KEY']).toBeUndefined();
     // The base transport is always referenced — an unpinned tier routes there.
     expect(unreferenced['ANTHROPIC_API_KEY']).toBe('sk-org-anthropic');
 
-    const referenced = projectRunEnvironment({
+    const referenced = runEnv({
       ...base,
       tierModels: { l1: 'zai:glm-4.5-air', l2: null, l3: null },
     });
     expect(referenced['ZAI_API_KEY']).toBe('sk-zai-org');
     expect(referenced['ATOMA_MODEL_L1']).toBe('zai:glm-4.5-air');
+  });
+
+  it('honours a per-tier host-subscription pin ONLY from an admin, in the declared org', () => {
+    // Design 2026-08-28. The pin is a NON-ROUTABLE sentinel in storage and
+    // becomes a transport only here, downstream of the authority check.
+    const base = {
+      dbPath: '/control/atoma.db',
+      workspacePath: '/control/workspace',
+      runsPath: '/control/runs',
+      skillsPath: '/control/skills',
+      runId: '3c584a3c-933d-4488-ac44-4cdcc8e66f31',
+      artifactManifestPath: '/control/manifest.json',
+      hostEnv: {
+        PATH: '/bin',
+        ANTHROPIC_API_KEY: 'host-key',
+        ATOMA_HOST_SUBSCRIPTION_ORG: 'org-operator',
+      },
+      orgId: 'org-operator',
+      subscriptionTransport: { principalId: 'admin-1' },
+      tierModels: { l1: null, l2: 'host-subscription:sonnet', l3: null },
+    };
+    const mixed = projectRunEnvironment(base);
+    // Translated to the transport the router understands…
+    expect(mixed.environment['ATOMA_MODEL_L2']).toBe('claude-cli:sonnet');
+    // …and the base transport keeps its own credential: this is a MIXED run,
+    // not a subscription run.
+    expect(mixed.environment['ANTHROPIC_API_KEY']).toBe('host-key');
+    expect(mixed.environment['ATOMA_LLM']).toBe('anthropic');
+    // The ledger names both payers, base included — a three-row ledger would
+    // be silent about the account that paid for everything unpinned.
+    expect(mixed.payers.l2).toMatchObject({ payer: 'host-subscription', source: 'account' });
+    expect(mixed.payers.base).toMatchObject({ payer: 'host-key', provider: 'anthropic' });
+    expect(mixed.payers.l1.payer).toBe('host-key');
+    // And the child's own gate is armed, naming exactly the authorised tier.
+    expect(mixed.environment['ATOMA_TENANT_RUN']).toBe('1');
+    expect(mixed.environment['ATOMA_SUBSCRIPTION_TIERS']).toBe('l2');
+
+    // NO GRANT: refused, never fallen through. A revoked authority that
+    // quietly became a billed credential is the audit lie this prevents.
+    const { subscriptionTransport: _grant, ...noGrant } = base;
+    expect(() => projectRunEnvironment(noGrant)).toThrow(/no longer holds the platform-admin flag/);
+    // NO DECLARATION: refused, and told which variable is missing.
+    expect(() =>
+      projectRunEnvironment({
+        ...base,
+        hostEnv: { PATH: '/bin', ANTHROPIC_API_KEY: 'host-key' },
+      })
+    ).toThrow(/declares no organisation/);
+    // ANOTHER ORGANISATION: refused. The flag is instance-wide; the
+    // declaration is what scopes the spend.
+    expect(() => projectRunEnvironment({ ...base, orgId: 'org-tenant' })).toThrow(
+      /belongs to another organisation/
+    );
+  });
+
+  it('refuses a host-subscription pin that arrives from the org or the host level', () => {
+    // An org default is inherited by every member by construction, and the
+    // host env is the third candidate for EVERY tier: a sentinel at either
+    // level would be a payer-bearing default nobody chose.
+    const base = {
+      dbPath: '/control/atoma.db',
+      workspacePath: '/control/workspace',
+      runsPath: '/control/runs',
+      skillsPath: '/control/skills',
+      runId: '3c584a3c-933d-4488-ac44-4cdcc8e66f31',
+      artifactManifestPath: '/control/manifest.json',
+      orgId: 'org-operator',
+      subscriptionTransport: { principalId: 'admin-1' },
+    };
+    expect(() =>
+      projectRunEnvironment({
+        ...base,
+        hostEnv: {
+          PATH: '/bin',
+          ANTHROPIC_API_KEY: 'host-key',
+          ATOMA_HOST_SUBSCRIPTION_ORG: 'org-operator',
+        },
+        orgTierModels: { l1: 'host-subscription:haiku', l2: null, l3: null },
+      })
+    ).toThrow(/from the org level/);
+    expect(() =>
+      projectRunEnvironment({
+        ...base,
+        hostEnv: {
+          PATH: '/bin',
+          ANTHROPIC_API_KEY: 'host-key',
+          ATOMA_HOST_SUBSCRIPTION_ORG: 'org-operator',
+          ATOMA_MODEL_L3: 'host-subscription:opus',
+        },
+      })
+    ).toThrow(/from the host level/);
   });
 
   it('opens the subscription transport for a platform admin ONLY, and forwards no credential', () => {
@@ -294,10 +394,10 @@ describe('project run environment', () => {
     for (const spelling of ['claude-cli', 'claude', 'CLAUDE-CLI']) {
       // Both spellings `resolveBaseProviderKind` accepts, or the door has a
       // hole in it.
-      expect(() => projectRunEnvironment({ ...base, hostEnv: { ATOMA_LLM: spelling } })).toThrow(
+      expect(() => runEnv({ ...base, hostEnv: { ATOMA_LLM: spelling } })).toThrow(
         /platform admin/
       );
-      const env = projectRunEnvironment({
+      const env = runEnv({
         ...base,
         hostEnv: { ATOMA_LLM: spelling, ANTHROPIC_API_KEY: 'stale-host-key' },
         subscriptionTransport: { principalId: 'admin-1' },
@@ -315,7 +415,7 @@ describe('project run environment', () => {
     // A subscription run has no per-run credential by definition, so the
     // exactly-one-credential rule must not fire on it.
     expect(() =>
-      projectRunEnvironment({
+      runEnv({
         ...base,
         hostEnv: { ATOMA_LLM: 'claude-cli' },
         subscriptionTransport: { principalId: 'admin-1' },
@@ -324,7 +424,7 @@ describe('project run environment', () => {
     // THE ORG'S KEYS ARE WITHHELD TOO. Injected, a tier pinned to zai or
     // anthropic would bill the ORGANISATION while the journal records
     // `run.host_subscription` — the audit row would name the wrong payer.
-    const withOrgKeys = projectRunEnvironment({
+    const withOrgKeys = runEnv({
       ...base,
       hostEnv: { ATOMA_LLM: 'claude-cli', ANTHROPIC_API_KEY: 'stale-host-key' },
       subscriptionTransport: { principalId: 'admin-1' },
@@ -339,7 +439,7 @@ describe('project run environment', () => {
     expect(withOrgKeys['ATOMA_MODEL_L2']).toBeUndefined();
     // A grant does not turn every provider into a subscription transport.
     expect(() =>
-      projectRunEnvironment({
+      runEnv({
         ...base,
         hostEnv: { ATOMA_LLM: 'ollama' },
         subscriptionTransport: { principalId: 'admin-1' },
@@ -362,12 +462,12 @@ describe('project run environment', () => {
       },
     };
     // No account pins: the operator's host pins stand, unchanged behaviour.
-    const operatorOnly = projectRunEnvironment(base);
+    const operatorOnly = runEnv(base);
     expect(operatorOnly['ATOMA_MODEL_L1']).toBe('claude-haiku-4-5-20251001');
     expect(operatorOnly['ATOMA_MODEL_L2']).toBe('claude-sonnet-5');
     expect(operatorOnly['ATOMA_MODEL_L3']).toBeUndefined();
 
-    const withPins = projectRunEnvironment({
+    const withPins = runEnv({
       ...base,
       tierModels: { l1: 'claude-sonnet-5', l2: null, l3: 'claude-opus-5' },
     });
@@ -379,11 +479,11 @@ describe('project run environment', () => {
     // A non-catalogue provider prefix refuses on the account path exactly as
     // on the host path; claude-cli/codex stay unreachable whatever a client
     // sends, because nothing in the catalogue carries their ids.
-    expect(() => projectRunEnvironment({
+    expect(() => runEnv({
       ...base,
       tierModels: { l1: 'claude-cli:opus', l2: null, l3: null },
     })).toThrow(/cannot be routed/);
-    expect(() => projectRunEnvironment({
+    expect(() => runEnv({
       ...base,
       hostEnv: { ANTHROPIC_API_KEY: 'key', ATOMA_MODEL_L2: 'codex:gpt-5' },
     })).toThrow(/cannot be routed/);
@@ -392,13 +492,13 @@ describe('project run environment', () => {
     // assert — assuming the default localhost is exactly what detonates on a
     // host without one — so an undeclared pin falls through to the level
     // beneath it, like any provider whose credential nobody brought.
-    const ollamaUndeclared = projectRunEnvironment({
+    const ollamaUndeclared = runEnv({
       ...base,
       tierModels: { l1: 'ollama:qwen3:8b', l2: null, l3: null },
     });
     expect(ollamaUndeclared['ATOMA_MODEL_L1']).toBe('claude-haiku-4-5-20251001');
     expect(ollamaUndeclared['OLLAMA_BASE_URL']).toBeUndefined();
-    const ollamaPin = projectRunEnvironment({
+    const ollamaPin = runEnv({
       ...base,
       hostEnv: { ...base.hostEnv, OLLAMA_BASE_URL: 'http://gpu-box:11434' },
       tierModels: { l1: 'ollama:qwen3:8b', l2: null, l3: null },
@@ -430,7 +530,7 @@ describe('project run environment', () => {
       } as { l1: string | null; l2: string | null; l3: string | null },
     };
     // No account pins: the operator's host pins stand, unchanged behaviour.
-    const accountL1 = projectRunEnvironment({
+    const accountL1 = runEnv({
       ...base,
       tierModels: { l1: null, l2: null, l3: null },
       orgProviderKeys: { zai: 'sk-zai-org' },
@@ -438,10 +538,10 @@ describe('project run environment', () => {
     expect(accountL1['ATOMA_MODEL_L1']).toBe('zai:glm-4.5-air');
     // Org L1 defaults to zai but nobody brought its key: fail-open drops to
     // the operator's pin rather than detonating at the first billable call.
-    const noZaiKey = projectRunEnvironment({ ...base });
+    const noZaiKey = runEnv({ ...base });
     expect(noZaiKey['ATOMA_MODEL_L1']).toBe('claude-haiku-4-5-20251001');
     // With the org key present the selection stays AND the key is forwarded.
-    const withZaiKey = projectRunEnvironment({
+    const withZaiKey = runEnv({
       ...base,
       orgProviderKeys: { zai: 'sk-zai-org' },
     });
@@ -449,10 +549,10 @@ describe('project run environment', () => {
     expect(withZaiKey['ZAI_API_KEY']).toBe('sk-zai-org');
     // The anthropic org default on L3 inherits to a member who did not pin,
     // because the deployment's own key is always there for that transport.
-    const memberL3 = projectRunEnvironment({ ...base });
+    const memberL3 = runEnv({ ...base });
     expect(memberL3['ATOMA_MODEL_L3']).toBe('anthropic:claude-sonnet-4-5');
     // An account pin beats both levels.
-    const pinned = projectRunEnvironment({
+    const pinned = runEnv({
       ...base,
       tierModels: { l1: 'anthropic:claude-haiku-4-5', l2: null, l3: null },
       orgProviderKeys: { zai: 'sk-zai-org' },

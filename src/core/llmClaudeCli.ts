@@ -224,9 +224,17 @@ export class ClaudeCliLlmClient implements LlmClient {
           ...(cliThinkingFor(req) ? { thinking: cliThinkingFor(req) } : {}),
           maxTurns: hasTools ? budget : 2,
           abortController: abort,
-          // Drop a (possibly stale) exported API key so the CLI's own OAuth
-          // login is what authenticates the subprocess.
-          env: { ...process.env, ANTHROPIC_API_KEY: undefined },
+          // THE LOGIN SESSION, AND NOTHING ELSE. Dropping a stale
+          // `ANTHROPIC_API_KEY` used to be tidiness — one variable, so the
+          // CLI's own OAuth login authenticates the subprocess. Since a tier
+          // may now be pinned to this transport while other tiers bill real
+          // keys, it is LOAD-BEARING for the payer guarantee: any inherited
+          // variable that could re-credential or redirect this subprocess
+          // would silently move the payer of a tier the journal has already
+          // named (design 2026-08-28, D9). So the whole `ANTHROPIC_*` family
+          // goes, plus the two gateway switches that reroute Claude Code to
+          // another vendor's account.
+          env: subscriptionTransportEnv(process.env),
         },
       });
 
@@ -331,6 +339,26 @@ function attachPartialUsage(
     // frozen/exotic errors can't carry properties — fine.
   }
   return err;
+}
+
+/**
+ * The environment the subscription subprocess runs in: the caller's, minus
+ * everything that could authenticate or redirect it somewhere else.
+ *
+ * Exported because this is a payer guarantee, and a guarantee nothing can
+ * observe is a comment. `tests/llm-claude-cli.test.ts` pins the constructed
+ * env rather than trusting the call site.
+ */
+export function subscriptionTransportEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...source };
+  for (const key of Object.keys(env)) {
+    if (key.startsWith('ANTHROPIC_')) delete env[key];
+  }
+  // Not `ANTHROPIC_*`-prefixed, and both reroute Claude Code onto a cloud
+  // account whose bill is not the operator's login.
+  delete env['CLAUDE_CODE_USE_BEDROCK'];
+  delete env['CLAUDE_CODE_USE_VERTEX'];
+  return env;
 }
 
 /**

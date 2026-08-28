@@ -34,6 +34,21 @@ Neighbours:
   and detonate at the first tool-bearing execute, mid-run and mid-spend.
   `assertTransportHonoursCredentials` refuses `claude-cli` / `codex` as the
   base transport AND as a tier pin whenever a snapshot is supplied.
+- IT NOW FIRES ON PROJECT RUNS TOO, and that is the point. It never had:
+  `runTask` passes no snapshot and `spawnRun` replaces the child env wholesale,
+  so on the ONE path where a payer decision crosses a process boundary the
+  coordinator was the sole gate. A tenant run is marked `ATOMA_TENANT_RUN=1` by
+  the coordinator, and its own `process.env` IS the supplied snapshot; the
+  developer path, which sets no such marker, is untouched.
+- The refusal reads `ATOMA_SUBSCRIPTION_TIERS`, the list of tiers the PARENT
+  authorised for the host subscription (`base`, `l1`, `l2`, `l3`). A
+  `claude-cli:` pin on a tier that list does not name reached the child another
+  way and throws at launch, before spend. The list only ever NARROWS what is
+  permitted: a forged one grants no credential, because that transport
+  authenticates from the host's own login session, which a tenant run has no
+  way to obtain. `codex:` is never authorisable. See
+  [src/projects](../projects/AGENTS.md) for who may arm a tier, and
+  `docs/subscription-per-tier-design-2026-08-28.md` for why.
 
 ## Provider construction
 

@@ -13,6 +13,50 @@ import { ClaudeCliLlmClient } from '../src/core/llmClaudeCli.js';
 import { OllamaLlmClient } from '../src/core/llmOllama.js';
 import type Anthropic from '@anthropic-ai/sdk';
 
+describe('the child re-checks what the parent authorised', () => {
+  // 2026-08-28, Q8. `assertTransportHonoursCredentials` had never fired on a
+  // project run: `runTask` supplies no credential snapshot and `spawnRun`
+  // replaces the child env wholesale, so the coordinator was the sole gate at
+  // the boundary the payer decision crosses. It is armed for a tenant run now,
+  // and it has to permit exactly the pins the parent translated — a gate that
+  // refuses the feature it protects is not a gate.
+  it('permits a claude-cli pin the parent named, and refuses one it did not', () => {
+    const authorised = {
+      ATOMA_MODEL_L2: 'claude-cli:sonnet',
+      ATOMA_SUBSCRIPTION_TIERS: 'l2',
+      ANTHROPIC_API_KEY: 'host-key',
+    };
+    expect(() => assertTransportHonoursCredentials('anthropic', authorised)).not.toThrow();
+    // Same pin, a tier the parent did not authorise.
+    expect(() =>
+      assertTransportHonoursCredentials('anthropic', {
+        ...authorised,
+        ATOMA_MODEL_L3: 'claude-cli:opus',
+      })
+    ).toThrow(/cannot honour a supplied credential snapshot/);
+    // No authorisation at all: the historical refusal, unchanged.
+    expect(() =>
+      assertTransportHonoursCredentials('anthropic', { ATOMA_MODEL_L2: 'claude-cli:sonnet' })
+    ).toThrow(/cannot honour a supplied credential snapshot/);
+    // `codex:` is never authorisable — it is not a payer this feature can name.
+    expect(() =>
+      assertTransportHonoursCredentials('anthropic', {
+        ATOMA_MODEL_L3: 'codex:gpt-5',
+        ATOMA_SUBSCRIPTION_TIERS: 'l3',
+      })
+    ).toThrow(/cannot honour a supplied credential snapshot/);
+  });
+
+  it('lets the whole-deployment regime through only when the parent said base', () => {
+    expect(() =>
+      assertTransportHonoursCredentials('claude-cli', { ATOMA_SUBSCRIPTION_TIERS: 'base' })
+    ).not.toThrow();
+    expect(() => assertTransportHonoursCredentials('claude-cli', {})).toThrow(
+      /binds to the machine/
+    );
+  });
+});
+
 describe('base provider selection — one rule for runner and curriculum', () => {
   it('defaults to Anthropic and recognises Ollama', () => {
     expect(resolveBaseProviderKind()).toBe('anthropic');

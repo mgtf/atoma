@@ -27,6 +27,7 @@ import {
 import { isSubscriptionTransport, ProjectRunCoordinator } from '../projects/coordinator.js';
 import { GitHubPublisher } from '../projects/publisher.js';
 import { ProjectStateConflict, ProjectStore } from '../projects/store.js';
+import { hostSubscriptionSummary, runPayerDetail } from '../contracts/runPayers.js';
 import { GitHubStore } from '../github/store.js';
 import { GitHubAppClient } from '../github/client.js';
 import { snapshotGitHubAppConfig } from '../github/config.js';
@@ -529,7 +530,8 @@ async function main(): Promise<void> {
         orgId: use.orgId,
         projectId: use.projectId,
         runId: use.projectRunId,
-        summary: `Run billed to the host subscription (${use.transport}) for ${eventLabel(principal.displayName, 60)}`,
+        summary: hostSubscriptionSummary(use.payers),
+        detail: runPayerDetail(use.payers),
       });
     },
   });

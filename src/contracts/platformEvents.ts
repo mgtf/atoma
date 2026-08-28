@@ -86,8 +86,25 @@ export const platformEventKindSchema = z.enum([
    * noise as a notification, but it must be answerable after the fact —
    * "which runs did this instance bill to its own login session, and who
    * asked for them".
+   *
+   * SINCE 2026-08-28 IT NAMES TIERS, NOT A WHOLE RUN. A run may spend the
+   * operator's login on some tiers while others bill an organisation's own
+   * key, so the row carries a `detail` built by
+   * `contracts/runPayers.ts#runPayerDetail` — four rows, base included. The
+   * summary is rendered by `hostSubscriptionSummary` so the two emitters
+   * (`viz/server.ts` and `cli/projects.ts`) stop wording the same fact
+   * differently.
    */
   'run.host_subscription',
+  /**
+   * A platform admin armed or cleared a per-tier host-subscription pin in
+   * their own Settings. SECURITY, and journaled at the moment of the CHOICE
+   * rather than only at the runs that follow it: the pin is what makes the
+   * operator's own login spendable on a tier, and "who decided that, and
+   * when" is a question the run rows cannot answer — they are written by
+   * whoever launches, which may be someone else entirely.
+   */
+  'principal.subscription_pin',
   'admin.granted',
   'admin.revoked',
   'invitation.created',
@@ -262,6 +279,7 @@ export const PLATFORM_EVENT_SEVERITY: Record<PlatformEventKind, PlatformEventSev
   'run.anomaly': 'warning',
   'security.flagged': 'security',
   'run.host_subscription': 'security',
+  'principal.subscription_pin': 'security',
   'admin.granted': 'security',
   'admin.revoked': 'security',
   'invitation.created': 'security',

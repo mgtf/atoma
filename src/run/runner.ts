@@ -11,7 +11,7 @@ import {
   makeBaseClient,
   resolveBaseProviderKind,
 } from './providers.js';
-import { InMemoryMetrics, MetricsLlmClient } from '../core/metrics.js';
+import { InMemoryMetrics, MetricsLlmClient, subscriptionCostUsd } from '../core/metrics.js';
 import { DEFAULT_LIMITS } from '../core/limits.js';
 import { openDb } from '../registry/db.js';
 import { skillsDirPath } from '../core/stores.js';
@@ -119,9 +119,21 @@ function machineRunStats(
   const opusCalls = callsMatching(/opus/i);
   const sonnetCalls = callsMatching(/sonnet/i);
   const haikuCalls = callsMatching(/haiku/i);
+  // WHAT THE SUBSCRIPTION PAID FOR, split out of the total. Computed from the
+  // REQUESTED model, because that is the only field where the payer survives:
+  // the CLI transport maps every pin onto a bare alias and reports the alias
+  // as `servedModel`, so by the time pricing sees it the prefix is gone.
+  // Filled on every epilogue path, cancelled and failed included, because a
+  // run that died mid-flight still spent whatever it spent.
+  const subscriptionShare = subscriptionCostUsd(metrics.events, (requested) =>
+    requested.toLowerCase().startsWith('claude-cli:')
+  );
   return {
     outcome,
     costUsd: Number(summary.totals.costUsd.toFixed(4)),
+    ...(subscriptionShare > 0
+      ? { subscriptionCostUsd: Number(subscriptionShare.toFixed(4)) }
+      : {}),
     llmCalls: summary.totals.calls,
     opusCalls,
     sonnetCalls,
@@ -367,7 +379,15 @@ export async function startTask(
   // Supplying it also arms `assertTransportHonoursCredentials`: a transport
   // that cannot read the snapshot must fail here rather than silently bill
   // somebody else's subscription.
-  const suppliedProviderEnv = opts?.providerEnv;
+  // ARMED FOR A TENANT RUN EVEN WITHOUT AN EXPLICIT SNAPSHOT. A project run is
+  // a child process whose whole environment the coordinator built, so its
+  // `process.env` IS the supplied credential snapshot — but `runTask` passes
+  // no opts, so the credential assertion below had never once fired on the
+  // path where a payer decision actually crosses a process boundary (design
+  // 2026-08-28, Q8). The developer path, which supplies no snapshot and sets
+  // no such marker, is untouched.
+  const suppliedProviderEnv =
+    opts?.providerEnv ?? (process.env['ATOMA_TENANT_RUN'] === '1' ? process.env : undefined);
   const providerEnv = suppliedProviderEnv ?? process.env;
   // HOST snapshot first — before any pin write — so a previous in-process
   // run that applied a snapshot cannot become the next run's "operator

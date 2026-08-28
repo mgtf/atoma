@@ -6,6 +6,20 @@ import type {
 
 export interface LlmCallMetrics {
   readonly model: string;
+  /**
+   * The model as the CALLER asked for it, prefix intact — `req.model`, before
+   * a transport collapsed it onto what it actually served. `model` above is
+   * priced and must stay the served id; this one is what says WHO PAID, and it
+   * is the only place the distinction survives. Optional so every existing
+   * recorder and fixture keeps compiling; absent means "same as `model`".
+   *
+   * Added 2026-08-28 with the per-tier host subscription: a mixed run bills an
+   * organisation's key for some calls and spends the operator's own login for
+   * others, and a single `costUsd` that blends real spend with the notional
+   * API-price equivalent of subscription tokens is a figure that contradicts
+   * the journal row beside it.
+   */
+  readonly requestedModel?: string;
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly cacheCreationInputTokens: number;
@@ -108,6 +122,34 @@ export function estimateCostUsd(
       usage.outputTokens * prices.output) /
     1_000_000
   );
+}
+
+/**
+ * WHAT THE SUBSCRIPTION SPENT, separated from what a key spent.
+ *
+ * The number is what those tokens WOULD have cost at API list prices — the
+ * convention this file already states for the codex rows — not a bill: on a
+ * subscription nothing is charged per token. It exists so a mixed run's single
+ * `costUsd` stops silently blending an organisation's real spend with the
+ * operator's notional one, which is the contradiction the journal row would
+ * otherwise carry from its first day (design 2026-08-28, Q3).
+ *
+ * Reads `requestedModel`, because that is the only field where the payer
+ * survives: `model` is what the transport served, and `claude-cli` maps every
+ * pin onto a bare alias, so by the time pricing sees it the prefix is gone.
+ */
+export function subscriptionCostUsd(
+  events: readonly LlmCallMetrics[],
+  isSubscriptionModel: (requestedModel: string) => boolean,
+  table: PriceTable = DEFAULT_PRICES
+): number {
+  let total = 0;
+  for (const event of events) {
+    const requested = event.requestedModel ?? event.model;
+    if (!isSubscriptionModel(requested)) continue;
+    total += estimateCostUsd(event, pricesFor(event.model, table));
+  }
+  return total;
 }
 
 /**
@@ -289,6 +331,7 @@ export class MetricsLlmClient implements LlmClient {
       const partial = partialUsageOf(err);
       this.recorder.record({
         model: req.model,
+        requestedModel: req.model,
         inputTokens: partial?.inputTokens ?? 0,
         outputTokens: partial?.outputTokens ?? 0,
         cacheCreationInputTokens: partial?.cacheCreationInputTokens ?? 0,
@@ -305,6 +348,8 @@ export class MetricsLlmClient implements LlmClient {
       // defaultModel, claude-cli maps pins onto aliases (review 2026-08-14
       // §1.13). Transports that serve req.model verbatim omit servedModel.
       model: resp.servedModel ?? req.model,
+      // A failed call keeps its partial tokens AND its payer; so does this one.
+      requestedModel: req.model,
       inputTokens: resp.usage.inputTokens,
       outputTokens: resp.usage.outputTokens,
       cacheCreationInputTokens: resp.usage.cacheCreationInputTokens ?? 0,

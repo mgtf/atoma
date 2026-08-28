@@ -646,15 +646,31 @@ describe('viz auth gate (process level)', () => {
     // GET is not a rename.
     expect((await fetch(`${base}/api/account`, { headers: cookie })).status).toBe(405);
 
-    // ---- tier pins: the closed choice list, then the run environment.
+    // ---- tier pins: the catalogue, then the run environment. `choices` was
+    // dropped from this payload on 2026-08-28: a closed list left over from
+    // the pre-catalogue design that nothing in the client had read since.
     const defaults = await (await fetch(`${base}/api/account/models`, { headers: cookie })).json() as {
       pins: Record<string, string | null>;
       defaults: Record<string, string>;
-      choices: string[];
+      catalog: Array<{ id: string; models: Array<{ id: string }> }>;
+      hostSubscription?: unknown;
     };
     expect(defaults.pins).toEqual({ l1: null, l2: null, l3: null });
     expect(defaults.defaults['l3']).toContain('opus');
-    expect(defaults.choices.length).toBeGreaterThan(0);
+    expect(defaults).not.toHaveProperty('choices');
+    const anthropic = defaults.catalog.find((entry) => entry.id === 'anthropic')!;
+    const catalogueChoice = anthropic.models[1]!.id;
+    // This viewer is not a platform admin, so the operator's own login is not
+    // named to them at all — an offer a viewer cannot use is a payer they
+    // should never see.
+    expect(defaults.hostSubscription).toBeUndefined();
+    // And they cannot arm it by hand either.
+    const refusedSubscription = await fetch(`${base}/api/account/models`, {
+      method: 'PUT',
+      headers: { ...cookie, 'content-type': 'application/json', origin: base },
+      body: JSON.stringify({ pins: { l1: 'host-subscription:opus', l2: null, l3: null } }),
+    });
+    expect(refusedSubscription.status).toBe(403);
 
     const refusedPin = await fetch(`${base}/api/account/models`, {
       method: 'PUT',
@@ -665,11 +681,11 @@ describe('viz auth gate (process level)', () => {
     const savedPin = await fetch(`${base}/api/account/models`, {
       method: 'PUT',
       headers: { ...cookie, 'content-type': 'application/json', origin: base },
-      body: JSON.stringify({ pins: { l1: defaults.choices[1], l2: null, l3: null } }),
+      body: JSON.stringify({ pins: { l1: catalogueChoice, l2: null, l3: null } }),
     });
     expect(savedPin.status).toBe(200);
     expect(await (await fetch(`${base}/api/account/models`, { headers: cookie })).json())
-      .toMatchObject({ pins: { l1: defaults.choices[1], l2: null, l3: null } });
+      .toMatchObject({ pins: { l1: catalogueChoice, l2: null, l3: null } });
 
     const prefixedPin = await fetch(`${base}/api/account/models`, {
       method: 'PUT',
@@ -937,6 +953,122 @@ describe('viz auth gate (process level)', () => {
     ).toBe(true);
     // A rule's `check` is not something a reader may hold.
     expect(JSON.stringify(sentinelBody.rules)).not.toContain('check');
+  });
+
+  it('serves each member their own notification tray through the push routing table', async () => {
+    const instance = tempInstance();
+    const provider = await startFakeProvider({ port: await freePort(), subject: 909 });
+    const port = await freePort();
+    const base = `http://127.0.0.1:${port}`;
+    const running = startViz(
+      [...instance.args, '--port', String(port)],
+      providerEnv(provider, base)
+    );
+    await waitReady(running, `${base}/auth/whoami`);
+
+    // No session, no tray: the route lives behind the gate.
+    expect((await fetch(`${base}/api/notifications`)).status).toBe(401);
+
+    const jar = new CookieJar();
+    expect((await fetchWithJar(jar, `${base}/auth/login?provider=github`)).status).toBe(200);
+    const cookie = { cookie: jar.header(base)! };
+    const whoami = (await (await fetch(`${base}/auth/whoami`, { headers: cookie })).json()) as {
+      principalId: string;
+    };
+
+    interface TrayPage {
+      notifications: Array<{
+        seq: number;
+        at: string;
+        kind: string;
+        severity: string;
+        title: string;
+        body: string;
+      }>;
+      nextBefore: number | null;
+    }
+    const read = async (query = ''): Promise<TrayPage> => {
+      const response = await fetch(`${base}/api/notifications${query}`, { headers: cookie });
+      expect(response.status).toBe(200);
+      return (await response.json()) as TrayPage;
+    };
+
+    // The login journaled `org.created`, but its audience is platform admins:
+    // a fresh member's tray is empty, not a mirror of the journal.
+    expect((await read()).notifications).toEqual([]);
+
+    // Journal facts from ANOTHER process, exactly like the operator CLI: the
+    // tray is a projection of the table, not of this server's memory.
+    const { PlatformEventLog } = await import('../src/platform/events.js');
+    const log = PlatformEventLog.open(instance.dbPath);
+    expect(
+      log.append({
+        kind: 'run.finished',
+        actorType: 'principal',
+        actorId: whoami.principalId,
+        summary: 'their own run SECRET-SUMMARY',
+        detail: { status: 'delivered', goal: 'Ship the tray' },
+      })
+    ).not.toBeNull();
+    expect(
+      log.append({
+        kind: 'run.finished',
+        actorType: 'principal',
+        actorId: 'somebody-else',
+        summary: 'another requester run',
+        detail: { status: 'failed', goal: 'Not yours' },
+      })
+    ).not.toBeNull();
+    expect(
+      log.append({
+        kind: 'platform.announcement',
+        actorType: 'principal',
+        actorId: 'operator-admin',
+        summary: 'announcement',
+        detail: {
+          texts: {
+            en: { title: 'Maintenance window', body: 'Tonight at 22:00 UTC' },
+            fr: { title: 'Fenêtre de maintenance', body: 'Ce soir à 22:00 UTC' },
+          },
+        },
+      })
+    ).not.toBeNull();
+
+    // Newest first: the announcement, then the viewer's own run — and never
+    // the run somebody else asked for. Copy arrives RENDERED; the row's
+    // operator-facing summary never leaves the journal.
+    const page = await read();
+    expect(page.notifications.map((row) => row.kind)).toEqual([
+      'platform.announcement',
+      'run.finished',
+    ]);
+    expect(page.notifications[0]).toMatchObject({
+      title: 'Maintenance window',
+      body: 'Tonight at 22:00 UTC',
+    });
+    expect(page.notifications[1]).toMatchObject({
+      title: 'Atoma — run delivered',
+      body: 'Ship the tray',
+    });
+    expect(page.notifications.map((row) => row.seq)).toEqual(
+      [...page.notifications.map((row) => row.seq)].sort((a, b) => b - a)
+    );
+    expect(JSON.stringify(page)).not.toContain('SECRET-SUMMARY');
+
+    // The copy follows the requested language, rendered by the same frozen
+    // templates a push subscription reads.
+    const french = await read('?locale=fr');
+    expect(french.notifications[0]!.title).toBe('Fenêtre de maintenance');
+    expect(french.notifications[1]!.title).toBe('Atoma — run livré');
+
+    // The exclusive cursor pages without repeating or skipping.
+    const first = await read('?limit=1');
+    expect(first.notifications).toHaveLength(1);
+    expect(first.nextBefore).toBe(first.notifications[0]!.seq);
+    const second = await read(`?limit=1&before=${first.nextBefore!}`);
+    expect(second.notifications).toHaveLength(1);
+    expect(second.notifications[0]!.seq).toBeLessThan(first.notifications[0]!.seq);
+    expect(second.notifications[0]!.kind).toBe('run.finished');
   });
 
   it('hosts the watch itself, armed by default, and says so honestly', async () => {

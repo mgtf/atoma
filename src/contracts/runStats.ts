@@ -21,6 +21,18 @@ export const runStatsSchema = z.object({
   // the same run's cost (both overnight 2026-08-14 'error' rows were this).
   outcome: z.enum(['delivered', 'failed', 'error', 'cancelled']),
   costUsd: z.number().finite().nonnegative().nullable(),
+  /**
+   * The share of `costUsd` that the HOST SUBSCRIPTION paid for, at API list
+   * prices — not a bill: on a subscription nothing is charged per token.
+   *
+   * Nullable and OPTIONAL, because a run with no subscription tier has no
+   * such share and every epilogue written before 2026-08-28 has no such
+   * field. It exists so a mixed run's single `costUsd` stops silently
+   * blending an organisation's real spend with the operator's notional one —
+   * the journal row names both payers, and a cost figure that cannot be
+   * split would contradict it from the first run.
+   */
+  subscriptionCostUsd: z.number().finite().nonnegative().nullable().optional(),
   llmCalls: countSchema.nullable(),
   opusCalls: countSchema,
   sonnetCalls: countSchema,

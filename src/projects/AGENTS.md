@@ -73,6 +73,43 @@ Neighbours:
   `security`, never pushed). The coordinator emits no audit row itself — it
   calls `onSubscriptionTransport` and the caller journals, so there is one
   delivery path, as with `onRunFinished`.
+## Per-tier host subscription
+
+- TWO REGIMES, and they are not the same mechanism. **A** is the door above:
+  `ATOMA_LLM=claude-cli` on the host, decided at boot, whole deployment, no
+  credential forwarded at all. **B** is a platform admin's per-tier ACCOUNT
+  pin, decided per run. Both survive on purpose; the host env is read before
+  any preference, so A wins where it is set.
+- The stored value is a NON-ROUTABLE sentinel, `host-subscription:<alias>`.
+  It is not `claude-cli:` — the string `isCatalogueSelection` here and
+  `assertTransportHonoursCredentials` in [src/run](../run/AGENTS.md) both
+  exist to refuse — and it becomes a transport only inside
+  `projectRunEnvironment`, downstream of the authority check.
+- ADMISSIBLE BY CHAIN LEVEL, not merely by value: the ACCOUNT level only. An
+  org default is inherited by every member by construction, and the host env
+  is the third candidate for every tier; a sentinel at either level would be a
+  payer-bearing default nobody chose.
+- Authority is re-asked PER RUN and is never handed in: the platform-admin
+  flag through the fail-closed `resolveSubscriptionGrant`, plus
+  `ATOMA_HOST_SUBSCRIPTION_ORG` naming the ONE organisation where the
+  operator's own login may be spent, plus a match against this run's org. A
+  stored pin is data; permission is not storable.
+- FALL-THROUGH IS PERMITTED WITHIN A PAYER; REFUSAL IS REQUIRED ACROSS PAYERS.
+  The candidate loop already had two mechanisms with two meanings — a provider
+  you may not use THROWS, a credential nobody brought CONTINUES. A revoked
+  authority is the first kind: falling through would change the payer from a
+  subscription to a billed credential with no event anywhere, which is what
+  finding 2.2 closed.
+- A run that touches the subscription forwards no `ANTHROPIC_BASE_URL`, and
+  its `payers` ledger ([src/contracts](../contracts/AGENTS.md)) is what fires
+  `onSubscriptionTransport` — a mixed run is invisible to the old
+  whole-deployment test.
+- The whole-run withholding of org keys (`usableOrgKeys`) is REGIME A's rule
+  and stays exactly as finding 2.2 left it. Regime B is mixed by design: the
+  base transport keeps its own credential, and the ledger names both payers.
+- Design and the owner's decisions:
+  [docs/subscription-per-tier-design-2026-08-28.md](../../docs/subscription-per-tier-design-2026-08-28.md).
+
 - The door does NOT change the lifecycle settings a project run pins. Those
   are stated once, under "What a tenant run may learn" below.
 

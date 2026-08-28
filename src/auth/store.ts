@@ -2,10 +2,14 @@ import { createHash, randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
 import {
   EMPTY_TIER_MODEL_PINS,
+  accountTierModelPinsSchema,
   tierModelPinsSchema,
   type TierModelPins,
 } from '../contracts/tierModels.js';
-import { isValidTierModelSelection } from '../core/providerCatalog.js';
+import {
+  isAccountTierSelection,
+  isValidTierModelSelection,
+} from '../core/providerCatalog.js';
 import {
   decryptBoundSecret,
   encryptBoundSecret,
@@ -41,14 +45,31 @@ export interface OrgProviderKeyStatus {
 }
 
 /**
- * A stored principal pin that is no longer selectable reads as `null`
- * (inherit) rather than throwing — a retired model id must never break the
- * account page or a run launch. Validation happens on WRITE; this read-side
- * degrade is the tolerance for choices retired AFTER they were stored.
+ * A stored ORG default that is no longer selectable reads as `null` (inherit)
+ * rather than throwing — a retired model id must never break the account page
+ * or a run launch. Validation happens on WRITE; this read-side degrade is the
+ * tolerance for choices retired AFTER they were stored.
  */
 function allowedStoredSelection(value: string | null): string | null {
   if (value === null) return null;
   return isValidTierModelSelection(value) ? value : null;
+}
+
+/**
+ * The ACCOUNT level's read-side, which also admits the host-subscription
+ * sentinel.
+ *
+ * THE DEGRADE MUST NOT BECOME THE RETIREMENT LEVER for the subscription.
+ * Whether the sentinel is honourable is decided at RUN LAUNCH, per run, by
+ * re-asking the platform-admin flag and the deployment's declaration — so a
+ * withdrawn declaration must reach the requester as a loud refusal naming the
+ * tier, never as a quiet downgrade to a billed credential (design 2026-08-28,
+ * D5). Reading it back as `null` here would BE that downgrade, silently
+ * changing who pays: the defect class finding 2.2 closed on 2026-08-27.
+ */
+function allowedPrincipalSelection(value: string | null): string | null {
+  if (value === null) return null;
+  return isAccountTierSelection(value) ? value : null;
 }
 
 /**
@@ -1413,16 +1434,22 @@ export class AuthStore {
       | { model_l1: string | null; model_l2: string | null; model_l3: string | null }
       | undefined;
     if (!row) return { ...EMPTY_TIER_MODEL_PINS };
-    const parsed = tierModelPinsSchema.safeParse({
-      l1: allowedStoredSelection(row.model_l1),
-      l2: allowedStoredSelection(row.model_l2),
-      l3: allowedStoredSelection(row.model_l3),
+    const parsed = accountTierModelPinsSchema.safeParse({
+      l1: allowedPrincipalSelection(row.model_l1),
+      l2: allowedPrincipalSelection(row.model_l2),
+      l3: allowedPrincipalSelection(row.model_l3),
     });
     return parsed.success ? parsed.data : { ...EMPTY_TIER_MODEL_PINS };
   }
 
+  /**
+   * SHAPE, not authority. This accepts the host-subscription sentinel because
+   * the account level's value space admits it; whether THIS principal may name
+   * it is the route's question, and whether a run may honour it is asked
+   * again, per run, by the coordinator.
+   */
   setModelPins(principalId: string, pins: unknown): TierModelPins {
-    const parsed = tierModelPinsSchema.parse(pins);
+    const parsed = accountTierModelPinsSchema.parse(pins);
     this.db
       .prepare(
         `INSERT INTO auth_principal_model_pins

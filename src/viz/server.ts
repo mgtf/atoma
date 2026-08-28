@@ -17,8 +17,13 @@ import { authPublicOrigin, openAuthGate, vizAuthEnabled } from '../auth/gate.js'
 import { AUTH_COPY } from '../auth/copy.js';
 import { snapshotProviderRegistry, type ProviderConfig } from '../auth/providers.js';
 import { fetchAvatarImage } from '../auth/avatar.js';
-import { LLM_PROVIDER_CATALOG } from '../core/providerCatalog.js';
-import { operatorTierDefaults, TIER_MODEL_CHOICES } from '../contracts/tierModels.js';
+import { HOST_SUBSCRIPTION_FAMILY, LLM_PROVIDER_CATALOG } from '../core/providerCatalog.js';
+import {
+  hostSubscriptionSummary,
+  isHostSubscriptionSelection,
+  runPayerDetail,
+} from '../contracts/runPayers.js';
+import { operatorTierDefaults } from '../contracts/tierModels.js';
 import {
   ORG_ROLES,
   sha256Hex,
@@ -77,8 +82,13 @@ import { GitHubPublisher } from '../projects/publisher.js';
 import { ProjectHttpError, ProjectService, roleAtLeast } from '../projects/service.js';
 import { PushStore } from './push/store.js';
 import { PushNotifier } from './push/notifier.js';
-import { NotificationRouter } from './push/router.js';
-import { asPushLocale } from './push/routes.js';
+import {
+  NotificationRouter,
+  cachedAudienceDirectory,
+  resolveAudience,
+  type AudienceDirectory,
+} from './push/router.js';
+import { PUSH_ROUTES, asPushLocale, renderPush } from './push/routes.js';
 import { draftAnnouncementTranslations } from './push/translate.js';
 import { organisationsForSegment } from './push/segments.js';
 import {
@@ -479,39 +489,49 @@ function announcementTranslator(): LlmClient | null {
 }
 
 /**
+ * The audience readers over the auth store — the push router's view of
+ * identity, and the ONLY one. The notification-tray read (`/api/notifications`)
+ * replays the same resolution over journal rows, so both consume this one
+ * wiring: a tray that resolved audiences its own way would drift from what was
+ * actually pushed.
+ */
+function audienceDirectory(authStore: AuthStore): AudienceDirectory {
+  return {
+    // Selected here rather than through a filtering argument so this
+    // wiring does not depend on the reader's parameter list.
+    ownersOf: (orgId) =>
+      (
+        authStore
+          .listOrganisationsWithMembers()
+          .find((organisation) => organisation.orgId === orgId)?.members ?? []
+      )
+        .filter((member) => member.role === 'org:owner')
+        .map((member) => member.principalId),
+    platformAdmins: () => authStore.listPlatformAdmins().map((admin) => admin.principalId),
+    // Every principal, membership or not: an announcement addressed to the
+    // whole instance must not silently skip someone who has yet to join an
+    // organisation but has already subscribed a device.
+    allPrincipals: () => authStore.listPrincipals().map((principal) => principal.principalId),
+    membersOf: (orgIds) => {
+      const wanted = new Set(orgIds);
+      return authStore
+        .listOrganisationsWithMembers()
+        .filter((organisation) => wanted.has(organisation.orgId))
+        .flatMap((organisation) => organisation.members.map((member) => member.principalId));
+    },
+  };
+}
+
+/**
  * THE ONE PATH FROM AN EVENT TO A DEVICE. Subscribing the router to the log
  * means no emitter can notify anybody directly: journal the fact, and the
  * routing table decides. The audience readers are the auth store's own
  * queries, wrapped so the router cannot reach anything else.
  */
 if (EVENTS && PUSH_RUNTIME && AUTH?.store) {
-  const authStore = AUTH.store;
   const router = new NotificationRouter({
     notifier: PUSH_RUNTIME.notifier,
-    directory: {
-      // Selected here rather than through a filtering argument so this
-      // wiring does not depend on the reader's parameter list.
-      ownersOf: (orgId) =>
-        (
-          authStore
-            .listOrganisationsWithMembers()
-            .find((organisation) => organisation.orgId === orgId)?.members ?? []
-        )
-          .filter((member) => member.role === 'org:owner')
-          .map((member) => member.principalId),
-      platformAdmins: () => authStore.listPlatformAdmins().map((admin) => admin.principalId),
-      // Every principal, membership or not: an announcement addressed to the
-      // whole instance must not silently skip someone who has yet to join an
-      // organisation but has already subscribed a device.
-      allPrincipals: () => authStore.listPrincipals().map((principal) => principal.principalId),
-      membersOf: (orgIds) => {
-        const wanted = new Set(orgIds);
-        return authStore
-          .listOrganisationsWithMembers()
-          .filter((organisation) => wanted.has(organisation.orgId))
-          .flatMap((organisation) => organisation.members.map((member) => member.principalId));
-      },
-    },
+    directory: audienceDirectory(AUTH.store),
   });
   EVENTS.subscribe((event) => router.handle(event));
 }
@@ -625,7 +645,11 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
         orgId: use.orgId,
         projectId: use.projectId,
         runId: use.projectRunId,
-        summary: `Run billed to the host subscription (${use.transport}) by platform admin`,
+        // ONE summary and one detail shape, shared with the CLI emitter: the
+        // two used to word the same fact differently, so the row read
+        // differently depending on which surface started the run.
+        summary: hostSubscriptionSummary(use.payers),
+        detail: runPayerDetail(use.payers),
       });
     },
     // The terminal-run hook JOURNALS; the router turns that row into pushes.
@@ -990,6 +1014,22 @@ async function readBodyBounded(
 
 function sendJson(res: import('node:http').ServerResponse, code: number, obj: unknown): void {
   send(res, code, JSON.stringify(obj), 'application/json; charset=utf-8');
+}
+
+/** Does a submitted pins body name the host subscription anywhere? */
+function namesHostSubscription(pins: unknown): boolean {
+  if (!pins || typeof pins !== 'object') return false;
+  return Object.values(pins as Record<string, unknown>).some(
+    (value) => typeof value === 'string' && isHostSubscriptionSelection(value)
+  );
+}
+
+/** The tiers a saved pin set arms the subscription on, in tier order. */
+function subscriptionTiersOf(pins: { l1: string | null; l2: string | null; l3: string | null }): string[] {
+  return (['l1', 'l2', 'l3'] as const).filter((tier) => {
+    const value = pins[tier];
+    return typeof value === 'string' && isHostSubscriptionSelection(value);
+  });
 }
 
 function listOperatorRunIndex(): VizRunIndexEntry[] {
@@ -2061,6 +2101,25 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       return;
     }
 
+    // MAY THIS VIEWER SPEND THE OPERATOR'S OWN LOGIN, AND WHERE? Shaped per
+    // REQUESTER, not served to everyone and filtered in the browser: an offer
+    // a viewer cannot use is a payer they should never see named. Three
+    // declared facts, all read server-side — the platform-admin flag on the
+    // resolved session, the deployment's declaration, and whether the
+    // viewer's ACTIVE organisation is the declared one. The picker greys the
+    // family when it is offered-but-unusable and hides it entirely otherwise.
+    const hostSubscriptionOffer = (): { family: unknown; reason?: string } | undefined => {
+      if (!viewer.platformAdmin) return undefined;
+      const declared = process.env['ATOMA_HOST_SUBSCRIPTION_ORG']?.trim();
+      if (!declared) {
+        return { family: HOST_SUBSCRIPTION_FAMILY, reason: 'undeclared' };
+      }
+      if (viewer.orgId !== declared) {
+        return { family: HOST_SUBSCRIPTION_FAMILY, reason: 'other-organisation' };
+      }
+      return { family: HOST_SUBSCRIPTION_FAMILY };
+    };
+
     // ACCOUNT SELF-CARE — the viewer's own name and per-tier model pins.
     // Self-scoped by construction: the principal id comes from the resolved
     // session, never from the request, so there is no object to authorise.
@@ -2072,12 +2131,12 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           // Labels for the "operator default" choice, resolved from the HOST
           // environment rather than a second copy of the tier defaults.
           defaults: operatorTierDefaults(process.env),
-          choices: TIER_MODEL_CHOICES,
           catalog: LLM_PROVIDER_CATALOG,
           // Whether THIS deployment declared an Ollama endpoint. An ollama
           // pin without one falls through at run time, so the picker greys
           // the family instead of offering a dormant choice.
           ollamaAvailable: Boolean(process.env['OLLAMA_BASE_URL']?.trim()),
+          ...(hostSubscriptionOffer() ? { hostSubscription: hostSubscriptionOffer() } : {}),
         });
         return;
       }
@@ -2115,13 +2174,43 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         return;
       }
       try {
-        const pins = authStore.setModelPins(viewer.principalId, (body as { pins?: unknown }).pins);
+        const requested = (body as { pins?: unknown }).pins;
+        // AUTHORITY IS THE ROUTE'S QUESTION. The store validates the SHAPE and
+        // its account-level space admits the sentinel; whether THIS principal
+        // may name it is decided here, from the resolved session, and again at
+        // every run by the coordinator. A stored pin is data, never permission.
+        if (namesHostSubscription(requested) && !hostSubscriptionOffer()) {
+          sendJson(res, 403, {
+            error: 'the host subscription is not offered to this account on this deployment',
+          });
+          return;
+        }
+        const before = authStore.modelPins(viewer.principalId);
+        const pins = authStore.setModelPins(viewer.principalId, requested);
+        // Journaled at the moment of the CHOICE. The run rows that follow are
+        // written by whoever launches, which may be someone else entirely, so
+        // they cannot answer "who decided the operator's login was spendable".
+        const armedBefore = subscriptionTiersOf(before);
+        const armedAfter = subscriptionTiersOf(pins);
+        if (armedBefore.join(',') !== armedAfter.join(',')) {
+          emit({
+            kind: 'principal.subscription_pin',
+            actorType: 'principal',
+            actorId: viewer.principalId,
+            orgId: viewer.orgId,
+            summary:
+              armedAfter.length > 0
+                ? `Host subscription armed on ${armedAfter.join(', ')}`
+                : 'Host subscription cleared from every tier',
+            detail: { tiers: armedAfter },
+          });
+        }
         sendJson(res, 200, {
           pins,
           defaults: operatorTierDefaults(process.env),
-          choices: TIER_MODEL_CHOICES,
           catalog: LLM_PROVIDER_CATALOG,
           ollamaAvailable: Boolean(process.env['OLLAMA_BASE_URL']?.trim()),
+          ...(hostSubscriptionOffer() ? { hostSubscription: hostSubscriptionOffer() } : {}),
         });
       } catch {
         sendJson(res, 400, { error: 'each tier must be null or one of the offered models' });
@@ -2149,7 +2238,6 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
             keys: authStore.listOrgProviderKeys(viewer.orgId),
             encryptionReady: SECRET_ENCRYPTION.context !== null,
             catalog: LLM_PROVIDER_CATALOG,
-            choices: TIER_MODEL_CHOICES,
             operatorDefaults: operatorTierDefaults(process.env),
             ollamaAvailable: Boolean(process.env['OLLAMA_BASE_URL']?.trim()),
           });
@@ -2166,6 +2254,19 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           body = JSON.parse((await readBodyBounded(req, 4_096)).toString('utf8') || '{}');
         } catch {
           sendJson(res, 400, { error: 'request body is not valid JSON' });
+          return;
+        }
+        // The ORG level's value space never admits the sentinel: an org
+        // default is inherited by every member by construction, so a
+        // payer-bearing value there would need a fail-closed re-ask on every
+        // tenant run. `setOrgTierModels` refuses it through the narrower
+        // schema; this says WHICH rule refused, instead of "not a model".
+        if (namesHostSubscription((body as { models?: unknown }).models)) {
+          sendJson(res, 400, {
+            error:
+              'the host subscription cannot be an organisation default; it is an account pin, ' +
+              'held by a platform admin',
+          });
           return;
         }
         try {
@@ -2305,6 +2406,83 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           ? authStore.countLiveInvitations(viewer.orgId)
           : null,
       });
+      return;
+    }
+
+    // THE VIEWER'S NOTIFICATION TRAY — the journal, projected through the SAME
+    // routing table the push path delivers from. A row is in your tray exactly
+    // when `PUSH_ROUTES` would have pushed it to your devices, resolved
+    // against your CURRENT roles: no second table of per-principal deliveries,
+    // no second audience policy. Newest first, cursor-paged on `seq` like the
+    // admin journal; copy is rendered per request in the viewer's language by
+    // the same `renderPush` a subscription reads.
+    if (pathname === '/api/notifications') {
+      if (!methodAllowed(req, res, 'GET')) return;
+      if (!EVENTS) {
+        sendJson(res, 200, { notifications: [], nextBefore: null });
+        return;
+      }
+      const rawBefore = url.searchParams.get('before');
+      const rawLimit = url.searchParams.get('limit');
+      const before = rawBefore === null ? Number.NaN : Number(rawBefore);
+      const limit = Math.max(
+        1,
+        Math.min(50, Number.isFinite(Number(rawLimit)) && rawLimit !== null ? Math.trunc(Number(rawLimit)) : 30)
+      );
+      const locale = asPushLocale(url.searchParams.get('locale')) ?? DEFAULT_LOCALE;
+      // One request, one directory: the cache keeps a page scan from listing
+      // every organisation once per row, and dies with the response so a
+      // membership change is visible on the next read.
+      const directory = cachedAudienceDirectory(audienceDirectory(AUTH.store!));
+      const notifications: {
+        seq: number;
+        at: string;
+        kind: string;
+        severity: string;
+        title: string;
+        body: string;
+      }[] = [];
+      // Routed kinds are sparse in the journal, so the page FILLS by scanning:
+      // filtering a fixed page would thin it (the journal filter rule). The
+      // scan is bounded per request; a cap hit hands back the cursor with a
+      // short page rather than holding the response open over 50k rows.
+      let cursor = Number.isFinite(before) && before > 0 ? Math.trunc(before) : undefined;
+      let nextBefore: number | null = null;
+      for (let scanned = 0; notifications.length < limit && scanned < 1_000; ) {
+        const chunk = EVENTS.list({
+          ...(cursor !== undefined ? { before: cursor } : {}),
+          limit: 200,
+        });
+        for (const event of chunk.events) {
+          scanned += 1;
+          nextBefore = event.seq;
+          const route = PUSH_ROUTES[event.kind] ?? null;
+          if (!route) continue;
+          if (!resolveAudience(event, route.audience, directory).includes(viewer.principalId)) {
+            continue;
+          }
+          const copy = renderPush(event, locale, route);
+          // The router's own refusal: a row that renders no title is a blank
+          // line in a tray, not a degraded notification.
+          if (!copy.title) continue;
+          notifications.push({
+            seq: event.seq,
+            at: event.at,
+            kind: event.kind,
+            severity: event.severity,
+            title: copy.title,
+            body: copy.body,
+          });
+          if (notifications.length >= limit) break;
+        }
+        if (notifications.length >= limit) break;
+        if (chunk.nextBefore === null) {
+          nextBefore = null;
+          break;
+        }
+        cursor = chunk.nextBefore;
+      }
+      sendJson(res, 200, { notifications, nextBefore });
       return;
     }
 

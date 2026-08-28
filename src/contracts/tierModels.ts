@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { FALLBACK_OPUS, PIN_HAIKU, PIN_SONNET, modelForTier } from '../core/models.js';
 import { isValidTierModelSelection } from '../core/providerCatalog.js';
+import { isHostSubscriptionSelection } from './runPayers.js';
 
 /**
  * PER-TIER MODEL SELECTION — THE ONE CHOICE CONTRACT.
@@ -39,24 +40,44 @@ export const TIER_MODEL_CHOICES = [PIN_HAIKU, PIN_SONNET, FALLBACK_OPUS] as cons
 export type TierModelChoice = (typeof TIER_MODEL_CHOICES)[number];
 
 /**
- * One selection as STORAGE accepts it: bare historical id OR full selector.
- * The stricter per-write rules live in the schemas below.
+ * ONE SHAPE, TWO ADMISSIBLE VALUE SPACES, both defined here.
+ *
+ * The `{l1,l2,l3}` triple is stated once, by this factory, and instantiated
+ * twice: the ORG-level space accepts exactly what the provider catalogue
+ * offers, and the ACCOUNT-level space additionally accepts the non-routable
+ * host-subscription sentinel (`contracts/runPayers.ts`). The difference is the
+ * whole reason the sentinel cannot be inherited: an org default is read by
+ * every member by construction, so a payer-bearing value there would need a
+ * fail-closed re-ask on every tenant run — and a gate that fires constantly is
+ * a gate that gets ignored (design 2026-08-28, D2).
+ *
+ * `null` still means "inherit" at both levels, and never means "subscription".
  */
-const storedSelectionSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(200)
-  .refine(isValidTierModelSelection, {
-    message: 'must be a model offered by the provider catalogue',
-  })
-  .nullable();
+function tierPinsSchemaFor(accepts: (value: string) => boolean, message: string) {
+  const selection = z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .refine(accepts, { message })
+    .nullable();
+  return z.object({ l1: selection, l2: selection, l3: selection });
+}
 
-export const tierModelPinsSchema = z.object({
-  l1: storedSelectionSchema,
-  l2: storedSelectionSchema,
-  l3: storedSelectionSchema,
-});
+export const tierModelPinsSchema = tierPinsSchemaFor(
+  isValidTierModelSelection,
+  'must be a model offered by the provider catalogue'
+);
+
+/**
+ * The account level, which MAY name the host subscription. Storage verifies
+ * shape; the ROUTE verifies authority, and the coordinator re-asks it per run
+ * — a stored sentinel is data, never permission.
+ */
+export const accountTierModelPinsSchema = tierPinsSchemaFor(
+  (value) => isValidTierModelSelection(value) || isHostSubscriptionSelection(value),
+  'must be a catalogue model or the host subscription'
+);
 
 export type TierModelPins = z.infer<typeof tierModelPinsSchema>;
 
@@ -75,20 +96,64 @@ export function pinForTier(pins: TierModelPins, tier: 1 | 2 | 3): string | null 
   return tier === 1 ? pins.l1 : tier === 2 ? pins.l2 : pins.l3;
 }
 
+/** Where a candidate came from. The chain is walked in this order. */
+export const TIER_CHAIN_LEVELS = ['account', 'org', 'host'] as const;
+
+export type TierChainLevel = (typeof TIER_CHAIN_LEVELS)[number];
+
+export interface TierChainCandidate {
+  readonly level: TierChainLevel;
+  readonly value: string;
+}
+
 /**
- * Effective selection for one tier across BOTH preference levels:
- * the account's own pin wins, an org default fills a null, and a fully null
- * chain yields `null`, whose meaning stays "operator default". Pure, and
- * therefore the exact function both the coordinator and the Settings API
- * reuse instead of re-implementing precedence.
+ * THE PRECEDENCE CHAIN, walked once, here.
+ *
+ * Replaces `effectiveTierSelection`, which documented itself as "the exact
+ * function both the coordinator and the Settings API reuse instead of
+ * re-implementing precedence" and had ZERO callers, while
+ * `projectRunEnvironment` re-implemented the walk inline as three parallel
+ * candidate arrays — with a THIRD level (the host env) this contract did not
+ * model, and named this function in its own docstring as though it called it.
+ * One concept, two definitions, exactly what the root AGENTS.md warns about,
+ * in the file a fourth kind of value has to edit (design 2026-08-28, D12).
+ *
+ * `accept` is LEVEL-AWARE, which is what makes the host-subscription sentinel
+ * admissible from an account pin and refusable everywhere else without the
+ * caller restating the order. It has three answers, and they are not
+ * interchangeable: `take` routes the candidate, `skip` falls through to the
+ * next level (a credential nobody brought), and THROWING refuses the run (a
+ * provider you may not use, or an authority you no longer hold). Fall-through
+ * is permitted within a payer; refusal is required across payers.
  */
-export function effectiveTierSelection(input: {
+export function resolveTierChain(
+  candidates: readonly (TierChainCandidate | null)[],
+  accept: (candidate: TierChainCandidate) => 'take' | 'skip'
+): TierChainCandidate | null {
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const value = candidate.value.trim();
+    if (!value) continue;
+    const resolved: TierChainCandidate = { level: candidate.level, value };
+    if (accept(resolved) === 'take') return resolved;
+  }
+  return null;
+}
+
+/** The three candidates for one tier, in precedence order, nulls preserved. */
+export function tierChainCandidates(input: {
+  readonly account?: TierModelPins | undefined;
   readonly org?: TierModelPins | undefined;
-  readonly account: TierModelPins;
-}): TierModelPins {
-  const resolve = (tier: 1 | 2 | 3): string | null =>
-    pinForTier(input.account, tier) ?? (input.org ? pinForTier(input.org, tier) : null);
-  return { l1: resolve(1), l2: resolve(2), l3: resolve(3) };
+  readonly host?: string | null | undefined;
+  readonly tier: 1 | 2 | 3;
+}): readonly (TierChainCandidate | null)[] {
+  const account = input.account ? pinForTier(input.account, input.tier) : null;
+  const org = input.org ? pinForTier(input.org, input.tier) : null;
+  return [
+    account === null ? null : { level: 'account', value: account },
+    org === null ? null : { level: 'org', value: org },
+    input.host ? { level: 'host', value: input.host } : null,
+  ];
 }
 
 /**

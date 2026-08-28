@@ -180,6 +180,25 @@ export function assertTransportHonoursCredentials(
   kind: BaseProviderKind,
   env: NodeJS.ProcessEnv = {}
 ): void {
+  // WHAT THE PARENT AUTHORISED, named tier by tier. A project run may now be
+  // MIXED: the coordinator translates a platform admin's per-tier pin into a
+  // `claude-cli:` selector, having re-asked the admin flag and matched the
+  // deployment's declared organisation, and records the result here. Anything
+  // machine-bound that is NOT in this list reached the child another way and
+  // is refused at launch, before spend — which is the whole point of a second
+  // gate at the boundary the payer decision crosses (design 2026-08-28, Q8).
+  //
+  // The list is a CAPABILITY, not a claim: it only ever narrows what this
+  // assertion permits, and a child that forges it cannot grant itself a
+  // credential — the subscription subprocess authenticates from the host's own
+  // login session, which a tenant's run has no way to obtain.
+  const authorised = new Set(
+    (env['ATOMA_SUBSCRIPTION_TIERS'] ?? '')
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+  );
+  if (kind === 'claude-cli' && authorised.has('base')) return;
   if (kind === 'claude-cli') {
     throw new RunnerConfigError(
       'ATOMA_LLM=claude-cli cannot honour a supplied credential snapshot: it binds to the ' +
@@ -196,6 +215,15 @@ export function assertTransportHonoursCredentials(
     (name) => name === 'claude-cli' || name === 'codex'
   );
   if (pinned.length === 0) return;
+  // Every machine-bound pin the parent authorised, by tier. A `claude-cli:`
+  // pin on a tier the parent did NOT name still throws below.
+  const unauthorised = ([1, 2, 3] as const).filter((tier) => {
+    const value = env[`ATOMA_MODEL_L${tier}`]?.trim().toLowerCase();
+    if (!value) return false;
+    if (!value.startsWith('claude-cli:') && !value.startsWith('codex:')) return false;
+    return !(value.startsWith('claude-cli:') && authorised.has(`l${tier}`));
+  });
+  if (unauthorised.length === 0) return;
   throw new RunnerConfigError(
     `tier pin ${pinned.map((name) => `"${name}:"`).join(', ')} cannot honour a supplied credential snapshot: ` +
       'those transports bind to a machine-local login and ignore the credential passed to startTask. ' +

@@ -295,9 +295,19 @@ export interface VizAccountModels {
   pins: { l1: string | null; l2: string | null; l3: string | null };
   /** What "operator default" resolves to today, per tier. */
   defaults: { l1: string; l2: string; l3: string };
-  /** Historical closed list, kept so older clients still render chips. */
-  choices: string[];
   catalog: VizLlmCatalogEntry[];
+  /**
+   * The operator's own Claude login, offered per tier. ABSENT MEANS NOT
+   * OFFERED — the inverse of `ollamaAvailable`'s tolerant default, and
+   * deliberately so: an unknown endpoint is a dormant choice, an unknown
+   * PAYER is somebody's money. `reason` present means offered-but-unusable,
+   * so the picker can say why instead of hiding the family and leaving an
+   * armed pin invisible in the select that must be used to clear it.
+   */
+  hostSubscription?: {
+    family: VizLlmCatalogEntry;
+    reason?: 'undeclared' | 'other-organisation';
+  };
   /**
    * Whether the deployment declared an Ollama endpoint (OLLAMA_BASE_URL).
    * Ollama runs on the OPERATOR's infrastructure — orgs pick its models,
@@ -332,7 +342,6 @@ export interface VizOrgModels {
   /** False when the deployment lacks ATOMA_SECRET_ENCRYPTION_KEY: key management is refused server-side. */
   encryptionReady: boolean;
   catalog: VizLlmCatalogEntry[];
-  choices: string[];
   operatorDefaults: { l1: string; l2: string; l3: string };
   /** See VizAccountModels.ollamaAvailable. */
   ollamaAvailable?: boolean;
@@ -362,6 +371,27 @@ export interface VizPlatformEvent {
 
 export interface VizPlatformEventPage {
   events: VizPlatformEvent[];
+  /** Exclusive `seq` cursor for the next (older) page, or null at the end. */
+  nextBefore: number | null;
+}
+
+/**
+ * One row of the viewer's notification tray: a journal event the push routing
+ * table addresses to them, with its copy already rendered server-side in the
+ * language the request asked for. `kind` and `severity` stay plain strings for
+ * the same newer-server tolerance as the journal rows above.
+ */
+export interface VizNotification {
+  seq: number;
+  at: string;
+  kind: string;
+  severity: string;
+  title: string;
+  body: string;
+}
+
+export interface VizNotificationPage {
+  notifications: VizNotification[];
   /** Exclusive `seq` cursor for the next (older) page, or null at the end. */
   nextBefore: number | null;
 }

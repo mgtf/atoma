@@ -5,6 +5,7 @@ import { createSecretKey } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+import { hostSubscriptionAlias } from '../src/contracts/runPayers.js';
 import {
   decryptBoundSecret,
   encryptBoundSecret,
@@ -15,6 +16,8 @@ import {
 } from '../src/core/secretCrypto.js';
 import {
   LLM_PROVIDER_CATALOG,
+  HOST_SUBSCRIPTION_FAMILY,
+  isAccountTierSelection,
   llmProviderIds,
   isValidTierModelSelection,
   orgHasBilledProviderKey,
@@ -104,6 +107,55 @@ describe('operator encryption-key parsing', () => {
     // And it points at the form that does not have the weakness.
     expect(section).toMatch(/openssl rand -hex 32/);
     expect(section).toContain('ATOMA_SECRET_ENCRYPTION_KEY');
+  });
+});
+
+describe('the host subscription is a neighbour, not a catalogue member', () => {
+  // Design 2026-08-28, D4. Three mechanisms read LLM_PROVIDER_CATALOG as
+  // "things that may hold a key", and a fourth entry would break each
+  // differently — `orgProviderIsReady` would report it always-ready to every
+  // viewer, `resolveOrgProviderKeys` would need a widened ProviderKeyProvider
+  // mirrored by a SQL CHECK, and `injectOrgProviderKeys` iterates the same
+  // array.
+  it('stays out of the catalogue that decides what may hold a key', () => {
+    // The TYPE is the first proof: `LlmProviderEntry['id']` is a closed union
+    // of the three credential-honouring providers, so comparing an entry's id
+    // to the family's is a compile error, not a test. This guards the RUNTIME
+    // array against a future widening of that union — the moment someone adds
+    // a fourth id, `orgProviderIsReady` starts reporting it always-ready to
+    // every viewer and this fails.
+    const ids: string[] = [...llmProviderIds()];
+    expect(ids).toEqual(['anthropic', 'zai', 'ollama']);
+    expect(ids).not.toContain(String(HOST_SUBSCRIPTION_FAMILY.id));
+    expect(LLM_PROVIDER_CATALOG.map((entry) => String(entry.id))).not.toContain(
+      String(HOST_SUBSCRIPTION_FAMILY.id)
+    );
+  });
+
+  it('is storable at the ACCOUNT level and nowhere else', () => {
+    // The org space is unchanged: a payer-bearing default inherited by every
+    // member is the thing this design refuses.
+    expect(isValidTierModelSelection('host-subscription:opus')).toBe(false);
+    expect(isAccountTierSelection('host-subscription:opus')).toBe(true);
+    // And it is not `claude-cli:` — the string two independent guards refuse.
+    expect(isAccountTierSelection('claude-cli:opus')).toBe(false);
+    expect(isAccountTierSelection('anthropic:claude-opus-5')).toBe(true);
+  });
+
+  it('names a family, never a dated generation', () => {
+    // The transport serves opus/sonnet/haiku and reports the alias back, so a
+    // version number here would be a promise it cannot keep (Q2).
+    expect(HOST_SUBSCRIPTION_FAMILY.models.map((model) => model.id)).toEqual([
+      'opus',
+      'sonnet',
+      'haiku',
+    ]);
+    expect(tierModelSelectionLabel('host-subscription:opus')).toBe(
+      'Claude (host subscription) — Opus'
+    );
+    expect(hostSubscriptionAlias('host-subscription:sonnet')).toBe('sonnet');
+    expect(hostSubscriptionAlias('host-subscription:gpt')).toBeNull();
+    expect(hostSubscriptionAlias('anthropic:claude-opus-5')).toBeNull();
   });
 });
 
