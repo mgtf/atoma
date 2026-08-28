@@ -7,6 +7,9 @@ import { isLocale, type Locale } from '../../contracts/locales.js';
 import { applyDocumentLocale } from '../client/i18n-catalog.js';
 import type { EventFilters } from '../client/run-utils.js';
 import type { SceneCameraMode } from './scene-camera.js';
+import type { DocsThemeKey } from './docs-content.js';
+
+export { DOC_THEMES, type DocsThemeKey } from './docs-content.js';
 
 export type ViewName =
   | 'projects'
@@ -60,8 +63,8 @@ export const ADMIN_VIEWS: readonly ViewName[] = [
  * There is no `launch` tab: a tab that could only DESCRIBE how to phrase a
  * goal, beside a Projects tab that actually starts runs, split one job over
  * two places. The family guidance now renders inside the project run form
- * (`views/projects.ts`), and the shell path for an instance with no
- * organisations is documented under the `launch` docs theme.
+ * (`views/projects.ts`), while the member guide expands the same principle
+ * under Strong goals.
  */
 export function visibleViews(auth: { viewer: { platformAdmin: boolean } } | null): ViewName[] {
   if (!auth) return ['projects', 'runs', 'registry', 'skills', 'burnin', 'docs'];
@@ -70,33 +73,6 @@ export function visibleViews(auth: { viewer: { platformAdmin: boolean } } | null
   }
   return ['projects', 'runs', 'docs'];
 }
-
-/**
- * Doc themes are pure prose about what a feature does, never a fetch of its
- * data — so unlike `visibleViews`, every theme is offered to every viewer
- * regardless of gating. `mcp` has no nav tab of its own; it documents the
- * stdio control plane a host application connects with.
- */
-export type DocsThemeKey =
-  | 'projects'
-  | 'runs'
-  | 'registry'
-  | 'skills'
-  | 'burnin'
-  | 'launch'
-  | 'admin'
-  | 'mcp';
-
-export const DOC_THEMES: readonly { key: DocsThemeKey; ref: string }[] = [
-  { key: 'projects', ref: 'src/projects/AGENTS.md' },
-  { key: 'runs', ref: 'src/run/AGENTS.md' },
-  { key: 'registry', ref: 'src/registry/AGENTS.md' },
-  { key: 'skills', ref: 'src/skills/AGENTS.md' },
-  { key: 'burnin', ref: 'src/cli/AGENTS.md' },
-  { key: 'launch', ref: 'src/run/AGENTS.md' },
-  { key: 'admin', ref: 'src/auth/AGENTS.md' },
-  { key: 'mcp', ref: 'src/mcp/AGENTS.md' },
-];
 
 /**
  * Which views may be ACTIVE, which is not the same question as which get a nav
@@ -362,7 +338,7 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
   burninPage: 1,
   journalSeverity: 'all',
   journalFamily: 'all',
-  selectedDocsTheme: 'runs',
+  selectedDocsTheme: 'quick',
   scrollY: {
     projects: 0,
     runs: 0,
@@ -525,7 +501,13 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
       ...(kind === 'severity' ? { journalSeverity: value } : { journalFamily: value }),
       scrollY: { ...state.scrollY, journal: 0 },
     })),
-  selectDocsTheme: (selectedDocsTheme) => set({ selectedDocsTheme }),
+  // A topic is a different document. Keeping the previous topic's scroll
+  // offset can open the next one halfway down — or below its entire body.
+  selectDocsTheme: (selectedDocsTheme) =>
+    set((state) => ({
+      selectedDocsTheme,
+      scrollY: { ...state.scrollY, docs: 0 },
+    })),
   setScrollY: (view, value) =>
     set((state) => {
       const next = Math.max(0, value);

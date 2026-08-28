@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import '@testing-library/jest-dom/vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -43,6 +43,7 @@ beforeEach(() => {
     locale: 'en',
     selectedRunId: 'run-1',
     selectedProjectId: null,
+    selectedDocsTheme: 'quick',
     focusedInput: null,
     runPickerActiveIndex: 0,
     runPickerScrollY: 0,
@@ -240,6 +241,39 @@ describe('full-GL minimal DOM bridge', () => {
     await user.click(screen.getByRole('tab', { name: 'Registry' }));
     expect(useGpuStore.getState().view).toBe('registry');
     expect(screen.getByText('Registry')).toBeInTheDocument();
+  });
+
+  it('mirrors the complete Docs guide as semantic, selectable content', async () => {
+    useGpuStore.setState({ view: 'docs', selectedDocsTheme: 'quick', entered: true });
+    const user = userEvent.setup();
+    renderBridge();
+
+    const topics = screen.getByRole('navigation', { name: 'Guide topics' });
+    expect(within(topics).getAllByRole('button')).toHaveLength(7);
+    expect(
+      within(topics).getByRole('button', { name: 'Quick start' })
+    ).toHaveAttribute('aria-current', 'page');
+    const article = screen.getByRole('article');
+    expect(
+      within(article).getByRole('heading', {
+        level: 1,
+        name: 'From business outcome to reviewable software',
+      })
+    ).toBeInTheDocument();
+    expect(within(article).getByText('Choose the project')).toBeInTheDocument();
+
+    await user.click(within(topics).getByRole('button', { name: 'Trust & limits' }));
+    expect(useGpuStore.getState().selectedDocsTheme).toBe('trust');
+    expect(
+      within(topics).getByRole('button', { name: 'Trust & limits' })
+    ).toHaveAttribute('aria-current', 'page');
+    expect(
+      within(screen.getByRole('article')).getByRole('heading', {
+        level: 1,
+        name: 'Know what Atoma proves and where humans decide',
+      })
+    ).toBeInTheDocument();
+    expect(within(topics).queryByRole('button', { name: 'Admin' })).not.toBeInTheDocument();
   });
 
   it('hides Connect GitHub once an App installation is active', () => {

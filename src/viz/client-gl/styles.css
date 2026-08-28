@@ -627,6 +627,71 @@ html.atoma-cursor-active * {
   margin-block: 0 8px;
 }
 
+/* Docs is content as well as navigation. The canvas is aria-hidden, so this
+   article is the complete semantic twin of the Pixi field guide. It shares
+   the bounded keyboard palette instead of creating a second visible product
+   surface; headings and ordered flows remain readable by assistive tech. */
+.gpu-a11y-bridge:focus-within .gpu-docs-guide {
+  display: block;
+  color: #e6edf7;
+  font: 12px/1.45 ui-sans-serif, system-ui, sans-serif;
+}
+
+.gpu-a11y-bridge:focus-within .gpu-docs-topic-nav {
+  padding-block: 4px 10px;
+  border-bottom: 1px solid rgba(110, 168, 255, .28);
+}
+
+.gpu-a11y-bridge:focus-within .gpu-docs-topic-nav button[aria-current="page"] {
+  border-color: #6ea8ff;
+  background: #243a5d;
+}
+
+.gpu-a11y-bridge:focus-within .gpu-docs-article,
+.gpu-a11y-bridge:focus-within .gpu-docs-article section {
+  display: block;
+  margin: 0;
+}
+
+.gpu-a11y-bridge:focus-within .gpu-docs-article h1 {
+  margin: 4px 0 8px;
+  font-size: 18px;
+}
+
+.gpu-a11y-bridge:focus-within .gpu-docs-article h2 {
+  margin: 18px 0 6px;
+  font-size: 14px;
+}
+
+.gpu-a11y-bridge:focus-within .gpu-docs-article h3 {
+  margin: 2px 0 3px;
+  font-size: 12px;
+}
+
+.gpu-a11y-bridge:focus-within .gpu-docs-article p {
+  margin: 0 0 8px;
+  color: #a9b5ca;
+  white-space: pre-line;
+}
+
+.gpu-a11y-bridge:focus-within .gpu-docs-article ol,
+.gpu-a11y-bridge:focus-within .gpu-docs-article ul {
+  margin: 6px 0 0;
+  padding-inline-start: 22px;
+}
+
+.gpu-a11y-bridge:focus-within .gpu-docs-article li {
+  margin-block: 8px;
+}
+
+.gpu-a11y-bridge:focus-within .gpu-docs-article li > span,
+.gpu-a11y-bridge:focus-within .gpu-docs-eyebrow {
+  color: #6ea8ff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+
 .gpu-a11y-bridge:focus-within :focus-visible {
   outline: 2px solid #6ea8ff;
   outline-offset: 2px;

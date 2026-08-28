@@ -420,10 +420,20 @@ npm run viz:mark-turn:analyze
   `/api/profiles` stays a READER: it is ungated, so
   it must never gain launch power — browser launches live on the authenticated
   project routes, where a session the run does not hold is the boundary. The
-  shell path for an instance with no organisations is the `launch` docs theme.
+  end-user Docs guide may explain the same briefing principles, while the
+  ungated shell path remains operator documentation outside the product guide.
   The FROZEN MUI fallback keeps its own Launch tab: it has no Projects view to
   fold the guidance into, and it is a fallback, not where product decisions get
   expressed.
+- DOCS IS THE MEMBER FIELD GUIDE, not an index of implementation contracts or
+  platform-admin surfaces. `docs-content.ts` is the structured source shared by
+  the Pixi article and its semantic DOM twin; the former canvas is aria-hidden,
+  so a topic or content block present in one must be present in both. Keep the
+  guide limited to member-visible Projects/Runs workflows and current product
+  boundaries. Repository paths, shell/MCP instructions, Registry, Skills,
+  Burn-in and the admin plane belong in operator documentation, never here.
+  Topic changes reset `scrollY.docs`, and the narrow layout stacks the complete
+  topic index above the article rather than squeezing or clipping either pane.
 - `TraceRecorder.persist()` IS A WIRE CONTRACT for one reader outside this
   subsystem. It must keep emitting ONE top-level JSON object whose members are
   `VizRun`'s, because the projects control plane decides delivered-versus-failed

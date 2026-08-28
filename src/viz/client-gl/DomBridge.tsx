@@ -7,6 +7,7 @@ import {
 import type { RunIndexEntry, VizGitHubInstallation, VizProject } from '../client/types.js';
 import type { ComponentProps, ReactNode } from 'react';
 import type { AuthUiSnapshot } from './AuthControls.js';
+import { DOC_PAGES, DOC_THEMES, type DocsThemeKey } from './docs-content.js';
 import {
   projectSelectionAfterActivate,
   useGpuStore,
@@ -15,6 +16,59 @@ import {
 import { AnnouncementForm } from './AnnouncementForm.js';
 
 const DEFAULT_VIEWS: ViewName[] = ['projects', 'runs', 'registry', 'skills', 'burnin', 'docs'];
+
+function AccessibleDocs({
+  selected,
+  onSelect,
+  t,
+}: {
+  selected: DocsThemeKey;
+  onSelect: (theme: DocsThemeKey) => void;
+  t: (key: string, vars?: Record<string, unknown>) => string;
+}) {
+  const page = DOC_PAGES[selected];
+  const titleId = `docs-user-title-${selected}`;
+  return (
+    <div className="gpu-docs-guide">
+      <nav className="gpu-docs-topic-nav" aria-label={t('docs.user.topics')}>
+        {DOC_THEMES.map((theme) => (
+          <button
+            key={theme.key}
+            type="button"
+            aria-current={theme.key === selected ? 'page' : undefined}
+            aria-pressed={theme.key === selected}
+            onClick={() => onSelect(theme.key)}
+          >
+            {t(theme.navKey)}
+          </button>
+        ))}
+      </nav>
+      <article className="gpu-docs-article" aria-labelledby={titleId}>
+        <p className="gpu-docs-eyebrow">{t(page.eyebrowKey)}</p>
+        <h1 id={titleId}>{t(page.titleKey)}</h1>
+        <p>{t(page.ledeKey)}</p>
+        {page.sections.map((section) => {
+          const List = section.flow ? 'ol' : 'ul';
+          return (
+            <section key={section.titleKey}>
+              <h2>{t(section.titleKey)}</h2>
+              {section.introKey ? <p>{t(section.introKey)}</p> : null}
+              <List>
+                {section.cards.map((card) => (
+                  <li key={card.titleKey}>
+                    {card.tagKey ? <span>{t(card.tagKey)}</span> : null}
+                    <h3>{t(card.titleKey)}</h3>
+                    <p>{t(card.bodyKey)}</p>
+                  </li>
+                ))}
+              </List>
+            </section>
+          );
+        })}
+      </article>
+    </div>
+  );
+}
 
 export function DomBridge({
   runs,
@@ -88,6 +142,7 @@ export function DomBridge({
   const locale = useGpuStore((state) => state.locale);
   const selectedRunId = useGpuStore((state) => state.selectedRunId);
   const selectedProjectId = useGpuStore((state) => state.selectedProjectId);
+  const selectedDocsTheme = useGpuStore((state) => state.selectedDocsTheme);
   const accountMenuOpen = useGpuStore((state) => state.accountMenuOpen);
   const localeMenuOpen = useGpuStore((state) => state.localeMenuOpen);
   const focusedInput = useGpuStore((state) => state.focusedInput);
@@ -106,6 +161,7 @@ export function DomBridge({
   const projectVisibility = useGpuStore((state) => state.projectVisibility);
   const setProjectVisibility = useGpuStore((state) => state.setProjectVisibility);
   const selectProject = useGpuStore((state) => state.selectProject);
+  const selectDocsTheme = useGpuStore((state) => state.selectDocsTheme);
   const announcementResetSignal = useGpuStore((state) => state.announcementResetSignal);
   const activeGithubInstallations = githubInstallations.filter(
     (installation) => installation.status === 'active'
@@ -224,6 +280,13 @@ export function DomBridge({
               </button>
             ))}
           </section>
+        ) : null}
+        {view === 'docs' ? (
+          <AccessibleDocs
+            selected={selectedDocsTheme}
+            onSelect={selectDocsTheme}
+            t={t}
+          />
         ) : null}
       </div>
 

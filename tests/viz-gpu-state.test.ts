@@ -184,6 +184,7 @@ beforeEach(() => {
     burninOutcome: 'all',
     burninPreset: 'all',
     burninPage: 1,
+    selectedDocsTheme: 'quick',
     scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 0, docs: 0, admin: 0, journal: 0, ledger: 0, sentinel: 0, announce: 0, settings: 0 },
     entered: false,
   });
@@ -321,6 +322,18 @@ describe('full-GL Zustand scene state', () => {
     expect(useGpuStore.getState()).toMatchObject({
       selectedProjectId: null,
       scrollY: { projects: 0 },
+    });
+  });
+
+  it('opens the end-user guide on quick start and resets scroll between topics', () => {
+    expect(useGpuStore.getState().selectedDocsTheme).toBe('quick');
+    useGpuStore.setState((state) => ({
+      scrollY: { ...state.scrollY, docs: 640 },
+    }));
+    useGpuStore.getState().selectDocsTheme('trust');
+    expect(useGpuStore.getState()).toMatchObject({
+      selectedDocsTheme: 'trust',
+      scrollY: { docs: 0 },
     });
   });
 

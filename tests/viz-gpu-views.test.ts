@@ -112,7 +112,14 @@ import {
   visibleViews,
   type GpuUiState,
 } from '../src/viz/client-gl/store.js';
-import { drawDocs } from '../src/viz/client-gl/renderer/views/docs.js';
+import {
+  docsViewLayout,
+  drawDocs,
+} from '../src/viz/client-gl/renderer/views/docs.js';
+import {
+  DOC_PAGES,
+  docsCatalogKeys,
+} from '../src/viz/client-gl/docs-content.js';
 import type { AuthUiSnapshot } from '../src/viz/client-gl/AuthControls.js';
 import {
   GPU_COLORS,
@@ -593,7 +600,7 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     burninPage: 1,
     journalSeverity: 'all',
     journalFamily: 'all',
-    selectedDocsTheme: 'runs',
+    selectedDocsTheme: 'quick',
     scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 0, docs: 0, admin: 0, journal: 0, ledger: 0, sentinel: 0, announce: 0, settings: 0 },
     entered: true,
     accountMenuOpen: false,
@@ -1021,44 +1028,99 @@ describe('drawWelcome as the login gate', () => {
 });
 
 describe('drawDocs', () => {
-  it('renders every theme as a selectable button, active theme first', () => {
+  it('renders every end-user topic and opens on the quick-start guide', () => {
     const ctx = createRecordingCtx();
     drawDocs(ctx, makeSnapshot({ view: 'docs' }), 1000, 700);
     for (const theme of DOC_THEMES) {
       const button = ctx.buttons.find((candidate) => candidate.id === `docs.theme.${theme.key}`);
       expect(button).toBeDefined();
-      expect(button!.active).toBe(theme.key === 'runs');
+      expect(button!.active).toBe(theme.key === 'quick');
     }
-    expect(ctx.texts.some((text) => text.value === I18N_CATALOGS.en['docs.theme.runs.title'])).toBe(
-      true
-    );
-    expect(ctx.texts.some((text) => text.value === I18N_CATALOGS.en['docs.theme.runs.body'])).toBe(
+    expect(ctx.texts.some((text) => text.value === I18N_CATALOGS.en['docs.user.quick.title'])).toBe(
       true
     );
     expect(
-      ctx.texts.some((text) => text.value === `${I18N_CATALOGS.en['docs.refLabel']} src/run/AGENTS.md`)
-    ).toBe(true);
+      ctx.texts.some(
+        (text) => text.value === I18N_CATALOGS.en['docs.user.quick.flow.handoff.title']
+      )
+    ).toBe(
+      true
+    );
   });
 
   it('switches the right-hand content to whichever theme is selected', () => {
     const ctx = createRecordingCtx();
-    drawDocs(ctx, makeSnapshot({ view: 'docs', selectedDocsTheme: 'mcp' }), 1000, 700);
-    const mcpButton = ctx.buttons.find((candidate) => candidate.id === 'docs.theme.mcp');
-    expect(mcpButton!.active).toBe(true);
-    const runsButton = ctx.buttons.find((candidate) => candidate.id === 'docs.theme.runs');
-    expect(runsButton!.active).toBe(false);
-    expect(ctx.texts.some((text) => text.value === I18N_CATALOGS.en['docs.theme.mcp.title'])).toBe(
+    drawDocs(ctx, makeSnapshot({ view: 'docs', selectedDocsTheme: 'playbooks' }), 1000, 700);
+    const playbooksButton = ctx.buttons.find(
+      (candidate) => candidate.id === 'docs.theme.playbooks'
+    );
+    expect(playbooksButton!.active).toBe(true);
+    const quickButton = ctx.buttons.find((candidate) => candidate.id === 'docs.theme.quick');
+    expect(quickButton!.active).toBe(false);
+    expect(
+      ctx.texts.some((text) => text.value === I18N_CATALOGS.en['docs.user.playbooks.title'])
+    ).toBe(
       true
     );
     expect(
-      ctx.texts.some((text) => text.value === `${I18N_CATALOGS.en['docs.refLabel']} src/mcp/AGENTS.md`)
+      ctx.texts.some(
+        (text) => text.value === I18N_CATALOGS.en['docs.user.playbooks.industry.title']
+      )
     ).toBe(true);
   });
 
-  it('reports a scroll max instead of leaving the pane unbounded', () => {
+  it('keeps internal/operator copy out and resolves every structured key', () => {
+    for (const key of docsCatalogKeys()) {
+      expect(I18N_CATALOGS.en[key], key).toBeTruthy();
+    }
+    expect(DOC_THEMES.map((theme) => theme.key)).toEqual([
+      'quick', 'projects', 'goals', 'runs', 'review', 'playbooks', 'trust',
+    ]);
+    const copy = docsCatalogKeys().map((key) => I18N_CATALOGS.en[key]).join('\n');
+    expect(copy).not.toMatch(/AGENTS\.md|src\/|\bMCP\b|\bBurn-in\b|platform-admin flag/i);
+    expect(Object.keys(DOC_PAGES)).toEqual(DOC_THEMES.map((theme) => theme.key));
+  });
+
+  it('stacks the topic index above a full-width article on narrow viewports', () => {
+    const wide = docsViewLayout(1000, 700, 250);
+    expect(wide.stacked).toBe(false);
+    expect(wide.content.x).toBeGreaterThan(wide.navigation.x + wide.navigation.width);
+
+    const compact = docsViewLayout(416, 800, 250);
+    expect(compact.stacked).toBe(true);
+    expect(compact.navigation.width).toBe(compact.content.width);
+    expect(compact.content.y).toBeGreaterThan(
+      compact.navigation.y + compact.navigation.height
+    );
+    expect(compact.content.height).toBeGreaterThan(0);
+  });
+
+  it('keeps every compact topic target visible even in a short viewport', () => {
+    const ctx = createRecordingCtx();
+    drawDocs(ctx, makeSnapshot({ view: 'docs' }), 416, 480);
+    const topicTargets = ctx.metrics.hitTargets.filter((target) =>
+      target.id.startsWith('docs.theme.')
+    );
+    expect(topicTargets).toHaveLength(DOC_THEMES.length);
+    const navigationPanel = ctx.panels
+      .filter((panel) => panel.x === GPU_LAYOUT.gap && panel.y === GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap)
+      .sort((a, b) => a.height - b.height)[0]!;
+    for (const target of topicTargets) {
+      expect(target.x).toBeGreaterThanOrEqual(navigationPanel.x);
+      expect(target.y).toBeGreaterThanOrEqual(navigationPanel.y);
+      expect(target.x + target.width).toBeLessThanOrEqual(
+        navigationPanel.x + navigationPanel.width
+      );
+      expect(target.y + target.height).toBeLessThanOrEqual(
+        navigationPanel.y + navigationPanel.height
+      );
+    }
+  });
+
+  it('reports a real scroll max for the long-form guide', () => {
     const ctx = createRecordingCtx();
     drawDocs(ctx, makeSnapshot({ view: 'docs' }), 1000, 700);
-    expect(ctx.scrollMax.docs).toBeGreaterThanOrEqual(0);
+    expect(ctx.scrollMax.docs).toBeGreaterThan(0);
   });
 });
 
