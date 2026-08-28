@@ -1047,7 +1047,13 @@ try {
         firstNav,
         lastNav,
         profile: control('account.menu.toggle'),
-        locale: control('locale.toggle'),
+        // `locale.menu.toggle`, matching `account.menu.toggle` beside it. It was
+        // `locale.toggle` until the i18n commit renamed the control on
+        // 2026-08-27 and left this asking for a name nothing records — a
+        // failure that could only ever surface here, since the browser smoke
+        // left CI on 2026-08-24. `tests/viz-gpu-smoke-contract.test.ts` now
+        // fails on the mismatch inside `npm run check` instead.
+        locale: control('locale.menu.toggle'),
       };
     });
     if (
@@ -1251,15 +1257,21 @@ try {
             (instruction) => instruction.action === 'fill'
           )
         ).length,
-        gutterIsViewportFirstChild:
-          gutter !== null && gutter.parent?.children?.[0] === gutter,
+        // FOCUS HAS NO GUTTER, and that is the contract, not an omission:
+        // `viewFrameGutterRects` returns none there because focus has no
+        // horizontal header seam to wash over, and painting one would put a
+        // second frame edge under the real one's rounded corner
+        // (`renderer/view-frame.ts`, 831654e). This probe asserted the
+        // OVERVIEW shape here and was left behind by that change; nothing
+        // caught it because the smoke had already left CI two days earlier.
+        gutterPresent: gutter !== null,
       };
     });
     if (
       focusedViewFrames.frames.length !== 2 ||
       focusedViewFrames.frameLayerShadows !== 0 ||
       focusedViewFrames.frameLayerFilledGraphics !== focusedViewFrames.frames.length ||
-      !focusedViewFrames.gutterIsViewportFirstChild ||
+      focusedViewFrames.gutterPresent ||
       focusedViewFrames.frames.some(({ parentLabel }) =>
         parentLabel !== 'camera-view-frames'
       ) ||
@@ -2034,19 +2046,26 @@ try {
       // (the CI runner draws one roughly every 2s) so a click still in flight
       // is never mistaken for one that was lost. The assertions are unchanged:
       // the GL orb must open the menu, and the menu must reach Settings.
-      const clickUntil = async (clickId, expectId, describe) => {
+      // `reached` is a PREDICATE, not an id, because the two things this drives
+      // to no longer land in the same layer: the menu publishes a Pixi hit
+      // target, while Settings' model pickers became real DOM when per-tier
+      // defaults and BYO keys landed (`OrgModelsForm`, e05c7b8). Asking for a
+      // hit target there waited for a control the renderer had stopped
+      // drawing — and nothing said so, because this file had already left CI.
+      const clickUntil = async (clickId, reached, describe) => {
         const attempts = [];
         for (let attempt = 0; attempt < 3; attempt += 1) {
-          const ids = await targetIds();
-          if (ids.includes(expectId)) return;
+          if (await reached()) return;
           // Re-click ONLY while the control is still offered. A landed click
           // removes it (the menu toggles, Settings navigates), so its absence
           // is progress to wait out — and re-clicking a toggle that already
           // worked would undo it.
-          if (ids.includes(clickId)) attempts.push(await clickAccountTarget(clickId));
+          if ((await targetIds()).includes(clickId)) {
+            attempts.push(await clickAccountTarget(clickId));
+          }
           const settleBy = Date.now() + 20_000;
           while (Date.now() < settleBy) {
-            if ((await targetIds()).includes(expectId)) return;
+            if (await reached()) return;
             await accountPage.evaluate(
               () => new Promise((resolve) => setTimeout(resolve, 250))
             );
@@ -2054,10 +2073,11 @@ try {
         }
         throw new Error(`${describe}: ${JSON.stringify(attempts)}`);
       };
+      const hasTarget = (id) => async () => (await targetIds()).includes(id);
 
       await clickUntil(
         'account.menu.toggle',
-        'account.settings',
+        hasTarget('account.settings'),
         'account scenario: menu never opened from the orb'
       );
       const opened = await targetIds();
@@ -2066,7 +2086,12 @@ try {
       // a different size — a second retain of the same program.
       await clickUntil(
         'account.settings',
-        'settings.model.1.default',
+        // The Settings body is DOM: the account form plus, for a viewer with an
+        // organisation, the models/keys panel. Its presence is what proves the
+        // view rendered, and it is the layer the controls actually live in now.
+        () => accountPage.evaluate(
+          () => document.querySelector('.gpu-settings-form') !== null
+        ),
         'account scenario: Settings never opened from the menu'
       );
       const settings = await targetIds();
