@@ -184,4 +184,53 @@ describe('child HOME is a scratch dir, not the credential store (audit rank-11)'
     // Stable within the process: caches accumulate across tool calls.
     expect(sandboxChildEnv()['HOME']).toBe(env['HOME']);
   });
+
+  it('substitutes the scratch HOME even when the parent has none (the win32 shape)', async () => {
+    // The original guard only rewrote an EXISTING HOME. A win32 parent
+    // usually defines none, so nothing was rewritten — and a child with no
+    // HOME at all still reaches the real profile through os.homedir()'s
+    // USERPROFILE/syscall fallback. Measured 2026-08-30 on a Windows host:
+    // ~/.claude/.credentials.json was readable from run_shell.
+    const { sandboxChildEnv } = await import('../src/tools/sandbox.js');
+    const saved = process.env['HOME'];
+    delete process.env['HOME'];
+    try {
+      const env = sandboxChildEnv({}, 'win32');
+      expect(env['HOME']).toMatch(/atoma-home-/);
+    } finally {
+      if (saved !== undefined) process.env['HOME'] = saved;
+    }
+  });
+
+  it('pins the win32 home variables to the scratch dir, never the real profile', async () => {
+    const { sandboxChildEnv } = await import('../src/tools/sandbox.js');
+    const saved = process.env['USERPROFILE'];
+    process.env['USERPROFILE'] = 'C:\\Users\\real-user';
+    try {
+      const env = sandboxChildEnv({}, 'win32');
+      // The parent's USERPROFILE is not allowlisted and must not leak; the
+      // child's one is the scratch HOME itself.
+      expect(env['USERPROFILE']).toBe(env['HOME']);
+      expect(env['USERPROFILE']).not.toBe('C:\\Users\\real-user');
+      // A drive-qualified scratch path splits into the legacy pair; the two
+      // halves must reassemble into HOME exactly. (On a POSIX host running
+      // this branch the scratch path has no drive and the pair is absent.)
+      if (env['HOMEDRIVE'] !== undefined) {
+        expect(`${env['HOMEDRIVE']}${env['HOMEPATH']}`).toBe(env['HOME']);
+      } else {
+        expect(env['HOMEPATH']).toBeUndefined();
+      }
+      // Task-owned HOME propagates to the win32 variables coherently.
+      const task = sandboxChildEnv({ HOME: 'D:\\task\\home' }, 'win32');
+      expect(task['HOME']).toBe('D:\\task\\home');
+      expect(task['USERPROFILE']).toBe('D:\\task\\home');
+      expect(task['HOMEDRIVE']).toBe('D:');
+      expect(task['HOMEPATH']).toBe('\\task\\home');
+      // POSIX children carry no win32 home variables at all.
+      expect(sandboxChildEnv({}, 'linux')['USERPROFILE']).toBeUndefined();
+    } finally {
+      if (saved === undefined) delete process.env['USERPROFILE'];
+      else process.env['USERPROFILE'] = saved;
+    }
+  });
 });
