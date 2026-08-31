@@ -1,0 +1,52 @@
+{
+  "name": "atoma — verification environment",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "."
+  },
+  "remoteUser": "node",
+
+  // NO Docker socket, and no docker-outside-of-docker / docker-in-docker
+  // feature. This is a deliberate boundary, not an omission — see README.md
+  // in this directory. This container covers the VERIFICATION path
+  // (docs:check, typecheck, lint, test, build). Container-isolation work
+  // (`build:worker`, `doctor --container`, `release:container-smoke`) needs a
+  // Linux host with a real Docker daemon, which is WSL2, not this image.
+  "features": {},
+
+  "mounts": [
+    // node_modules as a named volume, NOT the bind mount. better-sqlite3 is a
+    // native module: a node_modules built on the Windows host is unusable in
+    // here, and one built in here breaks the host. Keeping them in separate
+    // volumes means neither install can corrupt the other.
+    "source=atoma-node-modules,target=${containerWorkspaceFolder}/node_modules,type=volume",
+    // Chrome survives rebuilds.
+    "source=atoma-puppeteer-cache,target=/home/node/.cache/puppeteer,type=volume"
+  ],
+
+  "containerEnv": {
+    "PUPPETEER_CACHE_DIR": "/home/node/.cache/puppeteer"
+  },
+
+  // `npm ci` is what CI runs; `prepare` (husky-install.mjs) fires from it and
+  // needs the .git directory, so this must run on the real checkout.
+  //
+  // safe.directory comes FIRST and must be --global: a bind-mounted checkout is
+  // owned by a uid that is not `node`, so git refuses it as "dubious ownership"
+  // — and that refusal would surface as a confusing `npm ci` failure inside the
+  // husky `prepare` step rather than as a git error. Measured while verifying
+  // this image: -c overrides are not enough, because git forks helpers that do
+  // not inherit them.
+  "postCreateCommand": "git config --global --add safe.directory ${containerWorkspaceFolder} && sudo chown -R node:node ${containerWorkspaceFolder}/node_modules && npm ci",
+
+  "customizations": {
+    "vscode": {
+      "extensions": ["dbaeumer.vscode-eslint"],
+      "settings": {
+        "files.eol": "\n",
+        "eslint.useFlatConfig": true,
+        "typescript.tsdk": "node_modules/typescript/lib"
+      }
+    }
+  }
+}
