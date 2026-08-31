@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AUTH_COPY } from '../src/auth/copy.js';
 import { AuthStore, sha256Hex, type OrgRole } from '../src/auth/store.js';
 import { pkceChallenge } from '../src/auth/oidc.js';
@@ -17,6 +17,14 @@ import { GITHUB_COPY } from '../src/github/http.js';
  * The fake rejects a wrong PKCE verifier and records the canonical redirect,
  * so a passing test proves the boundaries rather than just the final status.
  */
+
+// Every test here boots at least one real tsx server, and the internal
+// watchdogs below (waitReady, waitForExit) are sized at 30s for a fully
+// parallel suite. The repo default of 15s would fire FIRST — a generic
+// "Test timed out" that swallows the child's stderr — so the file default
+// must sit comfortably above the watchdogs. The one test that boots four
+// servers in sequence carries its own larger budget.
+vi.setConfig({ testTimeout: 60_000 });
 
 const children: RunningChild[] = [];
 const servers: Server[] = [];
@@ -272,7 +280,12 @@ function startViz(args: string[], env: Record<string, string>): RunningChild {
   return running;
 }
 
-function waitForExit(child: ChildProcess, timeoutMs = 5_000): Promise<number | null> {
+// 30s, not 5s: this is a WATCHDOG, not an expected duration. A healthy child
+// exits in well under a second; the budget only binds when 238 test files
+// compete for the machine and a tsx boot alone takes longer than the old 5s
+// (measured 2026-08-30: this file needed 53.6s under full parallelism while
+// passing in isolation), so a green run pays nothing for the headroom.
+function waitForExit(child: ChildProcess, timeoutMs = 30_000): Promise<number | null> {
   if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(child.exitCode);
   return new Promise((resolve) => {
     const timeout = setTimeout(() => {
@@ -283,6 +296,24 @@ function waitForExit(child: ChildProcess, timeoutMs = 5_000): Promise<number | n
       resolve(code);
     });
   });
+}
+
+/**
+ * The exit code of a child that must die BY ITSELF. The watchdog's SIGKILL
+ * surfaces as code null, which `expect(code).not.toBe(0)` happily accepts —
+ * under a fully parallel suite that turned a hung boot into a silent pass of
+ * the fail-closed assertion, with only a confusing empty-stderr mismatch
+ * left behind. Refuse the kill loudly instead.
+ */
+async function ownExitCode(running: RunningChild): Promise<number> {
+  const code = await waitForExit(running.process);
+  if (running.process.signalCode !== null || code === null) {
+    throw new Error(
+      `child did not exit by itself (signal ${String(running.process.signalCode)}); ` +
+        `stderr: ${running.stderr.join('')}`
+    );
+  }
+  return code;
 }
 
 async function freePort(): Promise<number> {
@@ -297,7 +328,7 @@ async function freePort(): Promise<number> {
   });
 }
 
-async function waitReady(running: RunningChild, url: string, timeoutMs = 10_000): Promise<void> {
+async function waitReady(running: RunningChild, url: string, timeoutMs = 30_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (running.process.exitCode !== null) {
@@ -392,11 +423,11 @@ describe('viz auth gate (process level)', () => {
     const instance = tempInstance();
     const fallback = join(instance.root, 'ambient-fallback.db');
     const running = startViz([...instance.args, ...tail], { ATOMA_DB_PATH: fallback });
-    expect(await waitForExit(running.process)).not.toBe(0);
+    expect(await ownExitCode(running)).not.toBe(0);
     expect(running.stderr.join('')).toContain(message);
     expect(existsSync(fallback)).toBe(false);
     expect(existsSync(instance.dbPath)).toBe(false);
-  });
+  }, 60_000);
 
   it('leaves the localhost developer path open when auth is disabled', async () => {
     const instance = tempInstance();
@@ -417,7 +448,7 @@ describe('viz auth gate (process level)', () => {
       [...invalid.args, '--port', String(invalidPort)],
       { ATOMA_VIZ_AUTH: 'TRUE' }
     );
-    expect(await waitForExit(ambiguousSwitch.process)).not.toBe(0);
+    expect(await ownExitCode(ambiguousSwitch)).not.toBe(0);
     expect(ambiguousSwitch.stderr.join('')).toContain(
       'ATOMA_VIZ_AUTH must be one of: 0, false, 1, true'
     );
@@ -428,7 +459,7 @@ describe('viz auth gate (process level)', () => {
       ATOMA_VIZ_AUTH: '1',
       ATOMA_VIZ_PUBLIC_ORIGIN: `http://127.0.0.1:${portA}`,
     });
-    expect(await waitForExit(noProvider.process)).not.toBe(0);
+    expect(await ownExitCode(noProvider)).not.toBe(0);
     expect(noProvider.stderr.join('')).toContain('no complete login provider');
 
     const second = tempInstance();
@@ -438,7 +469,7 @@ describe('viz auth gate (process level)', () => {
       ATOMA_AUTH_GITHUB_CLIENT_ID: 'id',
       ATOMA_AUTH_GITHUB_CLIENT_SECRET: 'secret',
     });
-    expect(await waitForExit(noOrigin.process)).not.toBe(0);
+    expect(await ownExitCode(noOrigin)).not.toBe(0);
     expect(noOrigin.stderr.join('')).toContain('ATOMA_VIZ_PUBLIC_ORIGIN is required');
 
     const third = tempInstance();
@@ -450,11 +481,11 @@ describe('viz auth gate (process level)', () => {
       ATOMA_AUTH_GITHUB_CLIENT_ID: 'id',
       ATOMA_AUTH_GITHUB_CLIENT_SECRET: 'secret',
     });
-    expect(await waitForExit(unsafeProxy.process)).not.toBe(0);
+    expect(await ownExitCode(unsafeProxy)).not.toBe(0);
     expect(unsafeProxy.stderr.join('')).toContain(
       'ATOMA_VIZ_TRUSTED_PROXIES must contain at most 32 comma-separated IP literals'
     );
-  });
+  }, 120_000);
 
   it('creates an owner organisation for an unknown identity without an invitation', async () => {
     const instance = tempInstance();
@@ -1140,9 +1171,9 @@ describe('viz auth gate (process level)', () => {
     expect(body.watch.incumbent).toBeNull();
 
     // And the watch is not why the server refuses to die. `waitForExit`
-    // escalates to SIGKILL after five seconds, so the signal it actually died
-    // from is the assertion: SIGTERM means the term worked, SIGKILL would mean
-    // something held the loop open.
+    // escalates to SIGKILL after thirty seconds, so the signal it actually
+    // died from is the assertion: SIGTERM means the term worked, SIGKILL
+    // would mean something held the loop open.
     running.process.kill('SIGTERM');
     await waitForExit(running.process);
     expect(running.process.signalCode).toBe('SIGTERM');
@@ -1238,7 +1269,7 @@ describe('viz auth gate (process level)', () => {
     const after = await fetch(`${base}/api/org/models`, { headers: cookie });
     expect((await after.json() as { keys: unknown[] }).keys).toHaveLength(0);
 
-  }, 30_000);
+  });
 
   it('completes invited login, ignores hostile forwarded headers, and revokes on POST logout', async () => {
     const instance = tempInstance();
@@ -1429,7 +1460,7 @@ describe('viz auth gate (process level)', () => {
       selected.close();
     }
     expect(() => new Database(decoyDb, { readonly: true, fileMustExist: true })).toThrow();
-  }, 30_000);
+  });
 
   it('tells an invited user how to retry after the provider refuses login', async () => {
     const instance = tempInstance();
@@ -1497,7 +1528,7 @@ describe('viz auth gate (process level)', () => {
     });
     expect(replay.status).toBe(302);
     expect(replay.headers.get('location')).toBe('/?authNotice=expiredState');
-  }, 30_000);
+  });
 
   it('derives Secure and redirect_uri only from the configured HTTPS public origin', async () => {
     const instance = tempInstance();
@@ -1591,7 +1622,7 @@ describe('viz auth gate (process level)', () => {
     expect(connect.status).toBe(503);
     expect(await connect.json()).toEqual({ error: GITHUB_COPY.notConfigured });
     expect((await fetch(`${base}/webhooks/github`, { method: 'POST', body: '{}' })).status).toBe(404);
-  }, 30_000);
+  });
 
   it('routes GitHub App connect, CSRF and webhook boundaries', async () => {
     const instance = tempInstance();
@@ -1661,5 +1692,5 @@ describe('viz auth gate (process level)', () => {
     const listed = await fetch(`${base}/api/github/installations`, { headers: { cookie } });
     expect(listed.status).toBe(200);
     expect(await listed.json()).toEqual([]);
-  }, 30_000);
+  });
 });

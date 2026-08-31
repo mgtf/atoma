@@ -22,6 +22,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dirs: string[] = [];
 
+// Each test drives the real hook, which shells out to node and npx eslint.
+// That chain ran ~16s against the default 15s budget when the whole suite
+// competed for the machine (measured 2026-08-31), while passing alone in a
+// fraction of it — the timeout is a watchdog, so headroom costs nothing.
+const HOOK_TEST_TIMEOUT_MS = 60_000;
+
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
@@ -80,7 +86,7 @@ describe('the pre-commit hook preserves what was left unstaged', () => {
     // Which is still there, untouched, for the next commit.
     expect(readFileSync(file, 'utf8')).toContain('second = 22');
     expect(git(dir, ['status', '--porcelain'])).toContain('sample.ts');
-  });
+  }, HOOK_TEST_TIMEOUT_MS);
 
   it('still fixes and re-stages a file that is staged whole', () => {
     // The narrowing must not cost the hook its job on the ordinary case.
@@ -97,7 +103,7 @@ describe('the pre-commit hook preserves what was left unstaged', () => {
     expect(git(dir, ['show', 'HEAD:whole.ts'])).toContain('value = 2');
     // Nothing left behind: index, worktree and HEAD agree.
     expect(git(dir, ['status', '--porcelain']).trim()).toBe('');
-  });
+  }, HOOK_TEST_TIMEOUT_MS);
 
   it('does not stage a locale catalog that carries unstaged edits of its own', () => {
     // Same class, the i18n half: `invalidate-staged` writes target catalogs and
@@ -126,5 +132,5 @@ describe('the pre-commit hook preserves what was left unstaged', () => {
     const worktreeFr = JSON.parse(readFileSync(fr, 'utf8'));
     expect(worktreeFr.greeting).toBe('');
     expect(worktreeFr.other).toBe('MON BROUILLON');
-  });
+  }, HOOK_TEST_TIMEOUT_MS);
 });
