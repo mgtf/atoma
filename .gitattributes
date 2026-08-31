@@ -1,0 +1,37 @@
+# Line endings are a property of this repository, not of the machine that
+# happens to check it out. Without this file, `core.autocrlf=true` — which
+# ships in the SYSTEM gitconfig of Git for Windows — gives a Windows worktree
+# CRLF while the index stays LF. That is not cosmetic here: it breaks
+# byte-exact fixture comparisons in tests/i18n-pipeline.test.ts, and it makes
+# `node benchmark/make-tabstat-seed.mjs --check` report a seed drift that never
+# happened — a false alarm indistinguishable from real corruption of the
+# benchmark instrument.
+#
+# The index is already fully LF, so this file changes only what lands in
+# working trees.
+* text=auto eol=lf
+
+# --- Files where CRLF is actively dangerous, stated explicitly ------------
+# A shell script or a git hook read by a POSIX shell must be LF. Git for
+# Windows' bundled MSYS bash tolerates CRLF; /bin/sh on Linux and in the
+# worker image does not.
+*.sh            text eol=lf
+*.Dockerfile    text eol=lf
+.husky/pre-commit text eol=lf
+.husky/_/*      text eol=lf
+
+# --- Binaries: never transformed, never diffed as text -------------------
+# .glb are the viz 3D models (13 tracked); text=auto's binary heuristic would
+# almost certainly get these right, but "almost" is not a contract for an
+# asset that fails silently when mangled.
+*.glb    binary
+*.png    binary
+*.webp   binary
+*.ico    binary
+*.gz     binary
+*.woff   binary
+*.woff2  binary
+*.pdf    binary
+
+# .svg is XML — keep it text so it diffs and normalises like source.
+*.svg    text eol=lf
