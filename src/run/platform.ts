@@ -17,9 +17,9 @@
  * `typecheck`, `lint`, `docs:check`, `build` and the compiled MCP smoke all
  * pass there (measured 2026-08-30); parts of the TEST SUITE are POSIX-shaped
  * on purpose, because they drive the shells, `chmod`, `tar` and process
- * groups the product's own boundaries are made of. WSL2 and `.devcontainer/`
- * are the two supported ways to run — and to run the full suite — from
- * Windows.
+ * groups the product's own boundaries are made of. WSL2, with the checkout on
+ * ext4, is the supported way to run — and to run the full suite — from
+ * Windows; `docs/development-setup.md` is the per-platform procedure.
  *
  * There is deliberately NO override switch. A flag that lets a run start on a
  * host where the kill sequence cannot work would restore exactly the silent
@@ -34,7 +34,7 @@ export function runHostSupported(platform: NodeJS.Platform = process.platform): 
 
 /** The remedy, in one place, for every surface that reports the refusal. */
 export const UNSUPPORTED_RUN_HOST_REMEDY =
-  'Start runs from WSL2 (a Linux checkout on ext4) or from .devcontainer/ — see .devcontainer/README.md. ' +
+  'Start runs from WSL2, with the checkout on ext4 — see docs/development-setup.md. ' +
   'Editing, typecheck, lint, docs:check and build remain supported on this host.';
 
 /** The mechanical fact, for a surface that reports the remedy separately. */

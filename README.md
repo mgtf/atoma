@@ -299,9 +299,10 @@ and invitations from the Admin tab.
 Runs execute on **macOS or Linux**: a run is a detached process group reaped
 through SIGTERM → SIGKILL, which Windows has no equivalent for. Windows is a
 development host — `typecheck`, `lint` and `build` all work there — while runs
-and the full test suite belong in WSL2 or in
-[`.devcontainer/`](.devcontainer/README.md), whose image mirrors CI.
+and the full test suite belong in WSL2, with the checkout on ext4.
 `npm run doctor` names which side you are on before you spend anything.
+[`docs/development-setup.md`](docs/development-setup.md) is the step-by-step
+setup for each platform, including the system packages Linux needs.
 
 ```bash
 git clone https://github.com/mgtf/atoma.git

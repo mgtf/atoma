@@ -58,8 +58,9 @@ Neighbours:
   executable. Windows stays a DEVELOPMENT host — typecheck, lint, docs:check,
   build and the compiled MCP smoke pass there; parts of the TEST SUITE are
   POSIX-shaped on purpose (they drive shells, `chmod`, `tar` and process
-  groups, which is what makes them proof). WSL2 and `.devcontainer/` are the
-  named ways to run, and to run the full suite.
+  groups, which is what makes them proof). WSL2 with the checkout on ext4 is
+  the named way to run, and to run the full suite; the per-platform procedure
+  is [`docs/development-setup.md`](../../docs/development-setup.md).
 - The refusal is enforced at the LAUNCHER (`spawnRun`), before the spawn, and
   reuses the `--- spawn failed ---` log shape so every caller keeps reading
   outcome `error` with the reason in the log. Doctor reports the same fact as

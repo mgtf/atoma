@@ -40,12 +40,14 @@ describe('the run host contract', () => {
     expect(runHostSupported('freebsd')).toBe(false);
   });
 
-  it('names the platform and the two supported ways out', () => {
+  it('names the platform, the way out, and where the procedure is', () => {
     const message = unsupportedRunHostMessage('win32');
     expect(message).toContain('win32');
     expect(message).toContain(UNSUPPORTED_RUN_HOST_REMEDY);
     expect(message).toMatch(/WSL2/);
-    expect(message).toMatch(/devcontainer/);
+    // A remedy that only names a platform leaves the reader to guess the
+    // procedure; it must point at the document that carries it.
+    expect(message).toMatch(/development-setup\.md/);
     // The refusal must not read as "atoma does not work here": the
     // development path is unaffected and the message says so.
     expect(message).toMatch(/typecheck/);
@@ -75,7 +77,7 @@ describe('the run host contract', () => {
 
       expect(log).toContain('--- spawn failed ---');
       expect(log).toContain('not supported on win32');
-      expect(log).toMatch(/WSL2|devcontainer/);
+      expect(log).toMatch(/WSL2/);
       expect(log).not.toContain('ENOENT');
       // The log on disk and the resolved string agree, so a burn-in CSV row,
       // a project run record and an MCP run status all carry the reason.

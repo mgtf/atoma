@@ -365,7 +365,7 @@ describe('atoma doctor', () => {
       expect(host?.detail).toContain('win32');
       expect(host?.detail).not.toContain('WSL2');
       expect(host?.remedy).toMatch(/WSL2/);
-      expect(host?.remedy).toMatch(/devcontainer/);
+      expect(host?.remedy).toMatch(/development-setup\.md/);
     }
   });
 
