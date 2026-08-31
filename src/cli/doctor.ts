@@ -26,6 +26,11 @@ import {
   resolveToolBackendMode,
   type ToolBackendMode,
 } from '../run/backendMode.js';
+import {
+  runHostSupported,
+  UNSUPPORTED_RUN_HOST_REMEDY,
+  unsupportedRunHostReason,
+} from '../run/platform.js';
 import { ContainerToolExecutor, DEFAULT_WORKER_IMAGE } from '../tools/containerExecutor.js';
 import { DEFAULT_DB_PATH } from '../core/stores.js';
 import { inspectAtomStoreSchema } from '../registry/db.js';
@@ -62,6 +67,8 @@ export interface DoctorCommandOptions {
 
 export interface DoctorDependencies {
   readonly nodeVersion: string;
+  /** Run host. Injected so the suite can diagnose a platform it is not on. */
+  readonly platform: NodeJS.Platform;
   runCommand(
     command: string,
     args: readonly string[],
@@ -297,10 +304,42 @@ async function defaultProbeWorker(image: string): Promise<{ toolCount: number }>
 function defaultDependencies(): DoctorDependencies {
   return {
     nodeVersion: process.version,
+    platform: process.platform,
     runCommand: defaultRunCommand,
     fetchStatus: defaultFetchStatus,
     probeWorker: defaultProbeWorker,
   };
+}
+
+/**
+ * `start_static_server` — the element nearly every web run uses to serve its
+ * workspace — spawns `python3 -m http.server`, and `run_shell`'s allowlist
+ * admits `python3` outright. Neither was preflighted, so a host without it
+ * failed inside a run, several tool calls in, as an ENOENT the model then
+ * tried to work around. A WARNING, not a failure: tasks that never serve a
+ * page complete fine without python3.
+ */
+async function checkPython(deps: DoctorDependencies): Promise<DoctorCheck> {
+  try {
+    const { stdout, stderr } = await deps.runCommand('python3', ['--version']);
+    const version = `${stdout} ${stderr}`.trim();
+    if (!/^Python \d/.test(version)) throw new Error(`unexpected reply: ${version || 'no output'}`);
+    return {
+      id: 'python',
+      label: 'Python 3',
+      status: 'pass',
+      detail: `${version} answers on PATH`,
+    };
+  } catch (error) {
+    return {
+      id: 'python',
+      label: 'Python 3',
+      status: 'warn',
+      detail: `python3 did not answer (${failureDetail(error)})`,
+      remedy:
+        'start_static_server and run_shell need python3 on PATH; install it (Debian: apt-get install python3) or expect web-serving tasks to fail mid-run.',
+    };
+  }
 }
 
 async function checkProvider(
@@ -560,6 +599,25 @@ export async function diagnoseDoctor(args: {
         }
   );
 
+  // The run host, before anything about credentials or Docker: on an
+  // unsupported platform every other check can pass and no run can start.
+  checks.push(
+    runHostSupported(deps.platform)
+      ? {
+          id: 'run-host',
+          label: 'Run host',
+          status: 'pass',
+          detail: `${deps.platform} can execute runs`,
+        }
+      : {
+          id: 'run-host',
+          label: 'Run host',
+          status: 'fail',
+          detail: unsupportedRunHostReason(deps.platform),
+          remedy: UNSUPPORTED_RUN_HOST_REMEDY,
+        }
+  );
+
   let baseProvider: ProviderName | undefined;
   const configProblems: string[] = [];
   try {
@@ -677,6 +735,9 @@ export async function diagnoseDoctor(args: {
       remedy: 'Fix or replace ATOMA_DB_PATH.',
     });
   }
+  // Only for the LOCAL backend: in container mode the elements run inside the
+  // worker image, which ships its own python3, so the host's is irrelevant.
+  if (!args.mode.container) checks.push(await checkPython(deps));
   checks.push(...(await checkDocker(args.mode.container, deps, args.mode.egress)));
   if (args.mode.egress) {
     checks.push({

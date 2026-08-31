@@ -296,6 +296,13 @@ and invitations from the Admin tab.
 
 ## Install and evaluate it locally
 
+Runs execute on **macOS or Linux**: a run is a detached process group reaped
+through SIGTERM → SIGKILL, which Windows has no equivalent for. Windows is a
+development host — `typecheck`, `lint` and `build` all work there — while runs
+and the full test suite belong in WSL2 or in
+[`.devcontainer/`](.devcontainer/README.md), whose image mirrors CI.
+`npm run doctor` names which side you are on before you spend anything.
+
 ```bash
 git clone https://github.com/mgtf/atoma.git
 cd atoma

@@ -50,6 +50,26 @@ Neighbours:
   [src/projects](../projects/AGENTS.md) for who may arm a tier, and
   `docs/subscription-per-tier-design-2026-08-28.md` for why.
 
+## Run host
+
+- `src/run/platform.ts` is the ONE definition of where a run may execute:
+  `darwin` and `linux`. It is not a preference — the run is a detached process
+  GROUP reaped through SIGTERM → grace → SIGKILL, and `npm` must be an
+  executable. Windows stays a DEVELOPMENT host — typecheck, lint, docs:check,
+  build and the compiled MCP smoke pass there; parts of the TEST SUITE are
+  POSIX-shaped on purpose (they drive shells, `chmod`, `tar` and process
+  groups, which is what makes them proof). WSL2 and `.devcontainer/` are the
+  named ways to run, and to run the full suite.
+- The refusal is enforced at the LAUNCHER (`spawnRun`), before the spawn, and
+  reuses the `--- spawn failed ---` log shape so every caller keeps reading
+  outcome `error` with the reason in the log. Doctor reports the same fact as
+  a hard failure. Both quote `platform.ts`; neither restates the list.
+- Do NOT add an override switch. The defect this contract replaces was not the
+  platform's limits but SILENCE — a run that died as a bare `spawn npm ENOENT`
+  several processes deep, and a cancellation that reported success over
+  orphans still running. A flag that starts a run where the kill sequence
+  cannot work restores exactly that.
+
 ## Provider construction
 
 - Provider construction has one switch: `makeBaseClient` in

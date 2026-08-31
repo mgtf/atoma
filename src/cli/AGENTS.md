@@ -20,7 +20,12 @@ Neighbours:
 ## Doctor
 
 `atoma doctor` is quota-free. It proves configuration and local prerequisites,
-not that a provider will accept the next billable request. Local Docker failures
+not that a provider will accept the next billable request. The run-host check
+is a hard failure on an unsupported platform and quotes
+[`src/run/platform.ts`](../run/platform.ts), which owns that list. `python3` is
+a WARNING: `start_static_server` spawns it and `run_shell` admits it, so a host
+without it fails web-serving tasks mid-run — but a task that never serves a
+page is unaffected, and doctor does not fail a run that would succeed. Local Docker failures
 are warnings; container/egress modes make them hard failures. Egress implies
 container. A pre-T4 store (no `atom_id` column) is a hard failure — the schema
 is the schema and `CREATE TABLE IF NOT EXISTS` will not migrate it. Do not add
