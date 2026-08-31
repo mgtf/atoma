@@ -33,7 +33,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { hostname } from 'node:os';
+import { hostname, homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { skillsDirPath, storeDbPath } from '../core/stores.js';
 import { snapshotSqliteStore } from '../core/sqliteBackup.js';
@@ -127,7 +127,12 @@ export async function runBackup(opts: BackupOptions): Promise<BackupResult> {
     ['runs', opts.runsDir ?? process.env['ATOMA_RUNS_DIR'] ?? './runs', 'runs.tar.gz'],
     [
       'archive',
-      opts.archiveDir ?? join(process.env['HOME'] ?? '', '.atoma', 'archive'),
+      // `homedir()`, like every other `~/.atoma` site (the MCP lease, the
+      // build workspace, the projects root). `process.env['HOME']` is unset
+      // on Windows, and the `?? ''` then resolved the archive tier to the
+      // RELATIVE `.atoma/archive`, which does not exist — so the tier was
+      // silently skipped under a line reading "backup complete".
+      opts.archiveDir ?? join(homedir(), '.atoma', 'archive'),
       'archive.tar.gz',
     ],
   ];

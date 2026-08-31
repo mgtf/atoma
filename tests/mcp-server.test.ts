@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, posix, win32 } from 'node:path';
 import { readFileSync } from 'node:fs';
 import Database from 'better-sqlite3';
 import { INSTRUCTIONS, packageVersion } from '../src/mcp/server.js';
@@ -26,7 +26,15 @@ import {
   type RunDriver,
 } from '../src/mcp/run.js';
 import type { RunLeaseAcquirer } from '../src/mcp/runLock.js';
-import { families, friction, registryList, runTrace, skillsList, TRACE_ERROR_CAVEAT } from '../src/mcp/readers.js';
+import {
+  families,
+  friction,
+  pathIsInsideDir,
+  registryList,
+  runTrace,
+  skillsList,
+  TRACE_ERROR_CAVEAT,
+} from '../src/mcp/readers.js';
 import { promptNames } from '../src/mcp/prompts.js';
 import { findLaunchable } from '../src/run/profiles/index.js';
 import { BUILTIN_TOOL_VOCABULARY } from '../src/atoms/verdict.js';
@@ -542,6 +550,47 @@ describe('MCP readers', () => {
     const got = runTrace({ file: 'ok.json' }) as { id: string; eventCount: number };
     expect(got.id).toBe('r1');
     expect(got.eventCount).toBe(1);
+  });
+
+  /**
+   * The containment test itself, in BOTH separator regimes.
+   *
+   * The happy-path assertion above is what caught the real defect — on a
+   * Windows host, where `resolved.startsWith(resolve(dir) + '/')` was false
+   * for every legitimate file and the reader refused the whole corpus. Linux
+   * CI could not see it, which is how it survived; injecting the path
+   * implementation is what puts the failing regime under the same suite.
+   */
+  it.each([
+    ['posix', posix, '/home/u/runs', '/home/u'],
+    ['win32', win32, 'C:\\Users\\u\\runs', 'C:\\Users\\u'],
+  ] as const)('pathIsInsideDir answers for %s separators', (_name, impl, runs, parent) => {
+    const inside = impl.join(runs, 'ok.json');
+    const nested = impl.join(runs, 'a', 'b', 'deep.json');
+    expect(pathIsInsideDir(runs, inside, impl)).toBe(true);
+    expect(pathIsInsideDir(runs, nested, impl)).toBe(true);
+    // Escapes, the reason the guard exists.
+    expect(pathIsInsideDir(runs, impl.join(parent, 'secret.json'), impl)).toBe(false);
+    expect(pathIsInsideDir(runs, impl.resolve(runs, '..', 'secret.json'), impl)).toBe(false);
+    // The directory itself is not a file inside it.
+    expect(pathIsInsideDir(runs, runs, impl)).toBe(false);
+    // A sibling whose name merely BEGINS with the root — what a naive
+    // `startsWith(root)` without a trailing separator would have accepted.
+    expect(pathIsInsideDir(runs, `${runs}-backup${impl.sep}ok.json`, impl)).toBe(false);
+  });
+
+  it('serves a trace whatever the host separator, through the real reader', () => {
+    // Belt to the injected-impl braces: the production call path, with a
+    // NESTED file, so the resolved path contains a separator on either host.
+    const runs = join(dir, 'runs-nested');
+    mkdirSync(join(runs, 'inner'), { recursive: true });
+    process.env['ATOMA_RUNS_DIR'] = runs;
+    writeFileSync(
+      join(runs, 'inner', 'deep.json'),
+      JSON.stringify({ id: 'r-deep', label: 'l', startedAt: 'x', events: [] }),
+      'utf8'
+    );
+    expect((runTrace({ file: 'inner/deep.json' }) as { id?: string }).id).toBe('r-deep');
   });
 
   /**
