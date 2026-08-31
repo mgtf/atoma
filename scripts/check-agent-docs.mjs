@@ -4,6 +4,8 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { repoRelativeIfInside, subsystemLineBudget, toPosix } from './agent-docs-predicates.mjs';
+
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const agentsPath = resolve(repoRoot, 'AGENTS.md');
 const claudePath = resolve(repoRoot, 'CLAUDE.md');
@@ -14,18 +16,9 @@ const archivePath = resolve(repoRoot, 'docs/incidents/engineering-record-2026-08
 // quietly collapsing back into one always-loaded document.
 const ROOT_LINE_BUDGET = 500;
 const ROOT_BYTE_BUDGET = 60_000;
-// 300 until 2026-08-23, when src/viz sat AT the cap while the next largest
-// subsystem file was 175 lines: the limit had stopped shaping the split and
-// started shaping SENTENCES, condensing new rules until they lost their
-// reasons. A subsystem file is read only by an agent opening that subtree, so
-// the pressure it needs is "one subsystem, one file", not a word count.
-const SUBSYSTEM_LINE_BUDGET = 500;
-// src/viz owns more surfaces than any other subtree (trace projection, the GPU
-// client, the frozen MUI fallback, the gated HTTP surfaces, push, and the i18n
-// catalog contract). Splitting it further would mean inventing sub-subsystems
-// that no agent opens on its own, so it carries a named, explicit exception
-// rather than a silently raised global budget.
-const SUBSYSTEM_LINE_BUDGET_OVERRIDES = new Map([['src/viz/AGENTS.md', 600]]);
+// The subsystem budgets and the separator-sensitive path predicates live in
+// ./agent-docs-predicates.mjs so tests can import them without running this
+// script (module scope exits the process on the first failure).
 
 function fail(message) {
   process.stderr.write(`agent docs check failed: ${message}\n`);
@@ -117,9 +110,12 @@ function collectMarkdownLinks(file, text) {
     if (target.startsWith('http://') || target.startsWith('https://')) continue;
     const resolved = resolve(dirname(file), target);
     const shown = relative(repoRoot, file);
-    if (!resolved.startsWith(repoRoot + '/')) fail(`link escapes repository: ${target} (${shown})`);
+    const inRepo = repoRelativeIfInside(repoRoot, resolved);
+    if (inRepo === null) {
+      fail(`link escapes repository: ${target} (${shown})`);
+    }
     if (!existsSync(resolved)) fail(`broken Markdown link: ${target} (${shown})`);
-    targets.add(relative(repoRoot, resolved));
+    targets.add(inRepo);
   }
   return targets;
 }
@@ -128,18 +124,18 @@ checkImportMirror(agentsPath);
 checkNoPhantomImports(agentsPath, agents);
 const rootLinks = collectMarkdownLinks(agentsPath, agents);
 
-const archiveRelative = relative(repoRoot, archivePath);
+const archiveRelative = toPosix(relative(repoRoot, archivePath));
 if (!rootLinks.has(archiveRelative)) {
   fail(`AGENTS.md does not link ${archiveRelative}`);
 }
 
 let subsystemLines = 0;
 for (const doc of subsystemDocs) {
-  const shown = relative(repoRoot, doc);
+  const shown = toPosix(relative(repoRoot, doc));
   const text = readFileSync(doc, 'utf8');
   const lines = text.split('\n').length;
   subsystemLines += lines;
-  const budget = SUBSYSTEM_LINE_BUDGET_OVERRIDES.get(shown) ?? SUBSYSTEM_LINE_BUDGET;
+  const budget = subsystemLineBudget(repoRoot, doc);
   if (lines > budget) {
     fail(`${shown} is ${lines} lines; budget is ${budget}`);
   }
