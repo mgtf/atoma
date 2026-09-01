@@ -116,6 +116,7 @@ import {
   sentinelCostAlertFromEnv,
   sentinelIntervalFromEnv,
   startResidentSentinel,
+  sleepInhibitorHint,
   unarmedSentinelHealth,
   vizSentinelEnabled,
   type ResidentSentinel,
@@ -3302,8 +3303,13 @@ server.listen(cli.port, cli.host, () => {
         `(${sentinelRuleTable().length} rules, zero tokens, flagging only)`
     );
     // The same obligation the CLI banner carries: a laptop that sleeps stops
-    // watching exactly while the run it was watching keeps spending.
-    console.log('  keep this machine awake alongside long runs: caffeinate -i -m');
+    // watching exactly while the run it was watching keeps spending. The
+    // command is the HOST's own, and on a platform that cannot start a run
+    // there is nothing to say — see `sleepInhibitorHint`.
+    const inhibitor = sleepInhibitorHint();
+    if (inhibitor) {
+      console.log(`  keep this machine awake alongside long runs: ${inhibitor}`);
+    }
   } else if (health.reason === 'ungated') {
     console.log('sentinel: off (no platform journal on this path — npm run sentinel writes its own)');
   } else if (health.reason === 'lease-held' && health.incumbent) {

@@ -11,6 +11,7 @@ import { AuthStore, sha256Hex, type OrgRole } from '../src/auth/store.js';
 import { pkceChallenge } from '../src/auth/oidc.js';
 import { MAX_LOGOUT_SESSION_CANDIDATES } from '../src/auth/values.js';
 import { GITHUB_COPY } from '../src/github/http.js';
+import { sleepInhibitorHint } from '../src/sentinel/resident.js';
 
 /**
  * Process-level contract: real viz server, real SQLite and a local OAuth app.
@@ -1139,7 +1140,14 @@ describe('viz auth gate (process level)', () => {
     // command, and it says what it started.
     const banner = running.stdout.join('');
     expect(banner).toMatch(/sentinel: watching every \d+s/);
-    expect(banner).toContain('caffeinate -i -m');
+    // The stay-awake advice is the HOST's own command, so this asserts against
+    // the one definition rather than a literal — it used to pin macOS's
+    // `caffeinate`, which was wrong on the very platform CI runs on. Where the
+    // host has nothing to say the line is absent, and the absence is the
+    // assertion.
+    const inhibitor = sleepInhibitorHint();
+    if (inhibitor) expect(banner).toContain(inhibitor);
+    else expect(banner).not.toMatch(/keep this machine awake/);
 
     const jar = new CookieJar();
     expect((await fetchWithJar(jar, `${base}/auth/login?provider=github`)).status).toBe(200);

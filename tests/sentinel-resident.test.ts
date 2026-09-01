@@ -9,9 +9,11 @@ import {
   SENTINEL_FAILURE_LIMIT,
   sentinelCostAlertFromEnv,
   sentinelIntervalFromEnv,
+  sleepInhibitorHint,
   startResidentSentinel,
   vizSentinelEnabled,
 } from '../src/sentinel/resident.js';
+import { runHostSupported } from '../src/run/platform.js';
 import type { SentinelTickReport } from '../src/sentinel/watch.js';
 
 /**
@@ -236,5 +238,29 @@ describe('the environment surface', () => {
     expect(sentinelIntervalFromEnv({ ATOMA_VIZ_SENTINEL_INTERVAL_MS: '5000' })).toBe(5000);
     // Under a second is not an interval, it is a busy loop on the HTTP thread.
     expect(sentinelIntervalFromEnv({ ATOMA_VIZ_SENTINEL_INTERVAL_MS: '10' })).toBeNull();
+  });
+
+  /**
+   * The platform is INJECTED, so this suite exercises every regime from
+   * whichever host it runs on — the ubuntu CI included. Both banners printed
+   * `caffeinate -i -m` unconditionally, which is a command a Linux machine
+   * does not have and advice a Windows machine cannot use (observed
+   * 2026-09-01 on a win32 host).
+   */
+  it('names the host own sleep inhibitor, and says nothing where there is nothing to say', () => {
+    expect(sleepInhibitorHint('darwin')).toBe('caffeinate -i -m');
+    expect(sleepInhibitorHint('linux')).toMatch(/^systemd-inhibit /);
+    // Silence on win32 is the ANSWER, not a gap: the obligation is "alongside
+    // long runs", and `runHostSupported` refuses to start one there at all.
+    expect(sleepInhibitorHint('win32')).toBeNull();
+    expect(runHostSupported('win32')).toBe(false);
+    // An unlisted POSIX platform is silent for the ordinary reason: unchecked.
+    expect(sleepInhibitorHint('freebsd')).toBeNull();
+    // Whatever a host returns, it is a command a banner can print verbatim.
+    for (const platform of ['darwin', 'linux'] as const) {
+      const hint = sleepInhibitorHint(platform)!;
+      expect(hint.trim()).toBe(hint);
+      expect(hint).not.toContain('\n');
+    }
   });
 });

@@ -270,6 +270,30 @@ export const SENTINEL_INTERVAL_ENV = 'ATOMA_VIZ_SENTINEL_INTERVAL_MS';
 export const SENTINEL_COST_ALERT_ENV = 'ATOMA_SENTINEL_COST_ALERT_USD';
 
 /**
+ * THE HOST'S OWN WAY to hold a machine awake beside a long run, for the two
+ * banners that carry that obligation — this file's server host and
+ * `src/cli/sentinel.ts`. Both printed `caffeinate -i -m` unconditionally, so a
+ * Linux operator was handed a command their machine does not have and a
+ * Windows one was handed macOS advice (observed 2026-09-01 on a win32 host).
+ *
+ * `null` means SAY NOTHING, and on win32 that is the correct answer rather
+ * than a gap: the obligation exists "alongside long runs", and a run cannot
+ * start on a platform `runHostSupported` refuses ([src/run](../run/platform.ts)).
+ * Inventing a Windows incantation would be advice for a situation that cannot
+ * arise. An unlisted POSIX platform is silent for the ordinary reason — nobody
+ * has checked what it ships.
+ */
+export function sleepInhibitorHint(
+  platform: NodeJS.Platform = process.platform
+): string | null {
+  if (platform === 'darwin') return 'caffeinate -i -m';
+  // systemd-inhibit takes the command to hold the lock around; `sleep
+  // infinity` is the idiom for "until I stop it".
+  if (platform === 'linux') return 'systemd-inhibit --what=idle:sleep sleep infinity';
+  return null;
+}
+
+/**
  * Armed by default, and a typo must never cost the operator the visualizer.
  *
  * Deliberately NOT `vizAuthEnabled`'s throw-on-garbage shape. That variable

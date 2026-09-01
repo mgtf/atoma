@@ -802,6 +802,27 @@ export function runnerFailureDetail(log: string, outcome: string): string {
     }
     return parts.join(' ').slice(0, 2_000);
   }
+  // A LAUNCH that never became a run has no `✖ ` line, because the runner
+  // never spoke. `--- spawn failed --- <cause>` is the shape `spawnRun` writes
+  // for every one of those: an ENOENT on `npm`, an unwritable workspace, and
+  // the run-host refusal on a platform whose reap sequence cannot work
+  // (src/run/platform.ts). Without this branch every such failure reached the
+  // operator as the generic sentence below while the log held the reason —
+  // measured on a win32 host 2026-09-01, where the platform refusal names the
+  // way out and the Projects screen showed none of it.
+  //
+  // Ranked BELOW the runner's own verdict on purpose, and it is the same
+  // reasoning parseRunLog applies to outcomes: a run takes one path, so if the
+  // runner reported a failure it is the cause, and a launcher marker then
+  // belongs to an earlier attempt or to echoed prose. A tenant goal is echoed
+  // verbatim into this log and can therefore forge this line exactly as it can
+  // already forge `✖ ` — which changes a detail string, never an outcome, and
+  // is the accepted trade recorded in src/cli/AGENTS.md.
+  for (const line of lines) {
+    const spawned = /^-{3} spawn failed -{3}\s+(\S.*)$/.exec(line.trim());
+    const cause = spawned?.[1]?.trim();
+    if (cause) return cause.slice(0, 2_000);
+  }
   return `runner finished with outcome ${outcome}`.slice(0, 2_000);
 }
 

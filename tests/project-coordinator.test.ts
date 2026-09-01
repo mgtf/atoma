@@ -29,6 +29,7 @@ import {
   runnerFailureDetail,
 } from '../src/projects/coordinator.js';
 import { ProjectStore } from '../src/projects/store.js';
+import { unsupportedRunHostMessage } from '../src/run/platform.js';
 import { RunLockBusyError, type RunLease } from '../src/mcp/runLock.js';
 import { TraceRecorder } from '../src/viz/trace.js';
 
@@ -970,6 +971,74 @@ describe('runnerFailureDetail', () => {
     expect(
       runnerFailureDetail('✖ 401 API key is invalid.\nrun recorded in /tmp/x\n', 'failed')
     ).toBe('401 API key is invalid.');
+  });
+
+  /**
+   * A LAUNCH THAT NEVER BECAME A RUN has no bang line, because the runner never
+   * spoke. `spawnRun` writes `--- spawn failed --- <cause>` for all of those,
+   * and without that branch every one of them reached the operator as
+   * "runner finished with outcome error" while the log held the reason.
+   */
+  it('reads the launcher marker when the runner never spoke', () => {
+    expect(
+      runnerFailureDetail('\n--- spawn failed --- spawn npm ENOENT\n', 'error')
+    ).toBe('spawn npm ENOENT');
+    // The run-host refusal is the shape that surfaced this: reason AND remedy
+    // on one line, so the operator learns the way out from the screen.
+    const refusal = `\n--- spawn failed --- ${unsupportedRunHostMessage('win32')}\n`;
+    const detail = runnerFailureDetail(refusal, 'error');
+    expect(detail).toContain('not supported on win32');
+    expect(detail).toMatch(/WSL2/);
+    expect(detail).not.toBe('runner finished with outcome error');
+  });
+
+  it('still lets the runner outrank the launcher, and keeps the generic floor', () => {
+    // Both markers present: the runner took a path and reported on it, so a
+    // launcher line belongs to an earlier attempt or to echoed prose.
+    expect(
+      runnerFailureDetail('--- spawn failed --- stale\n✖ 401 API key is invalid.\n', 'failed')
+    ).toBe('401 API key is invalid.');
+    // A marker with no cause after it must not return an empty detail.
+    expect(runnerFailureDetail('--- spawn failed ---\n', 'error'))
+      .toBe('runner finished with outcome error');
+  });
+});
+
+/**
+ * THE PRODUCTION PATH, not just the helper: a refused launch has to reach
+ * `project_runs.error`, which is what the Projects screen shows. Measured
+ * 2026-09-01 on a win32 host — the refusal was written to the log, the outcome
+ * parsed as `error`, and the operator read "runner finished with outcome
+ * error" with no mention of the platform or the way out.
+ */
+describe('a launch refused before the spawn, through the coordinator', () => {
+  it('stores the launcher cause on the run row', async () => {
+    const f = fixture();
+    const refusal = `\n--- spawn failed --- ${unsupportedRunHostMessage('win32')}\n`;
+    // The real `spawnRun` returns exactly this and writes no trace, because it
+    // refuses BEFORE the spawn. The driver reproduces both halves.
+    const driver = vi.fn(async (_options: SpawnRunOptions) => refusal);
+    const coordinator = new ProjectRunCoordinator({
+      store: f.store,
+      dbPath: f.dbPath,
+      projectsRoot: f.root,
+      hostEnv: { PATH: process.env['PATH'], ANTHROPIC_API_KEY: 'model-key' },
+      driver,
+      acquireLease: async () => lease(),
+    });
+    const started = await coordinator.start({
+      orgId: f.viewer.orgId,
+      principalId: f.viewer.principalId,
+      projectId: f.project.projectId,
+      request: { idempotencyKey: 'run-refused-host', goal: 'Build a clock in one index.html.' },
+    });
+    await coordinator.waitForIdle();
+
+    const row = f.store.getProjectRun(f.viewer.orgId, started.projectRunId)!;
+    expect(row.status).toBe('failed');
+    expect(row.error).toContain('not supported on win32');
+    expect(row.error).toMatch(/WSL2/);
+    expect(row.error).not.toBe('runner finished with outcome error');
   });
 });
 

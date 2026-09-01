@@ -29,7 +29,7 @@ import { storeDbPath } from '../core/stores.js';
 import { mcpRunLockPath } from '../mcp/runLock.js';
 import { hasProjectTables, ProjectStore } from '../projects/store.js';
 import { claimSentinelWatch, type SentinelWatchLease } from '../sentinel/lease.js';
-import { sentinelCostAlertFromEnv } from '../sentinel/resident.js';
+import { sentinelCostAlertFromEnv, sleepInhibitorHint } from '../sentinel/resident.js';
 import {
   runSentinelLoop,
   SentinelWatch,
@@ -206,9 +206,11 @@ async function main(): Promise<void> {
 
   // A long-lived watcher on a laptop needs the machine awake, and this one is
   // meant to run BESIDE runs — a sleeping host stops watching exactly when
-  // the run it was watching is still spending.
+  // the run it was watching is still spending. The command belongs to the
+  // host; `sleepInhibitorHint` returns null where there is nothing to say.
+  const inhibitor = sleepInhibitorHint();
   process.stdout.write(
-    '  hold the machine awake alongside this process: caffeinate -i -m\n\n'
+    inhibitor ? `  hold the machine awake alongside this process: ${inhibitor}\n\n` : '\n'
   );
 
   const controller = new AbortController();
