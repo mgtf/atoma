@@ -639,6 +639,8 @@ describe('previewSummary — the only shape a browser receives', () => {
       reason: 'legacy-run',
       state: 'stopped',
       generation: 0,
+      source: 'delivered',
+      snapshotAt: null,
       readyAt: null,
       expiresAt: null,
       errorCode: null,
@@ -680,6 +682,9 @@ describe('previewSummary — the only shape a browser receives', () => {
       reason: null,
       state: 'ready',
       generation: 1,
+      // A delivered preview, and therefore no snapshot moment.
+      source: 'delivered',
+      snapshotAt: null,
       readyAt: '2026-09-01T10:00:05.000Z',
       expiresAt: '2026-09-01T11:00:00.000Z',
       errorCode: null,

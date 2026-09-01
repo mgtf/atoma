@@ -4,6 +4,7 @@ import { mintPreviewClaim, PreviewClaimRegistry } from './claims.js';
 import type { PreviewConfig } from './config.js';
 import { previewGenerationHost, previewOrigin } from './gateway.js';
 import { PreviewRouteTable } from './gatewayServer.js';
+import { classifyDeliveredWorkspace } from './descriptor.js';
 import { materializePreviewWorkspace } from './policy.js';
 import { startPreview, teardownPreview, PreviewRuntimeError } from './runtime.js';
 import { effectiveEgressHosts, PreviewStateConflict, PreviewStore } from './store.js';
@@ -233,6 +234,158 @@ export class PreviewManager {
         });
       } catch {
         /* the row moved on; the teardown below is what matters */
+      }
+      throw error;
+    } finally {
+      this.starting.delete(key);
+    }
+  }
+
+  /**
+   * Open a preview of a run that is STILL BUILDING.
+   *
+   * A snapshot taken at the moment it is asked for, and labelled with that
+   * moment — nothing more, and nothing that pretends to be more. The design
+   * and the reasons are in `docs/in-flight-preview-2026-09-02.md`; three of
+   * them decide the shape of this method:
+   *
+   * 1. THE RUN'S WORKSPACE IS ONLY EVER READ. The copy is the same filtered,
+   *    `lstat`-driven, symlink-refusing one a delivered preview makes. What is
+   *    being built is the deliverable and the seed of the next run.
+   * 2. THE COPY IS WHAT GETS CLASSIFIED, never the live workspace. Stable
+   *    bytes: classifying a moving target describes a state that may never
+   *    have existed.
+   * 3. NO DESCRIPTOR ROW IS WRITTEN. A descriptor is immutable and records
+   *    what DELIVERY observed; carving a moment into one would be a lie about
+   *    the run.
+   *
+   * A torn copy is not a defect to eliminate — it is the nature of watching
+   * unfinished work — and the readiness contract already filters the cases
+   * that matter: no runnable entry, a server that will not start, a marker
+   * that never arrives, a probe that goes unanswered. What survives all four
+   * is an application that starts and answers, which is exactly what was
+   * asked for.
+   */
+  async openInFlight(input: {
+    readonly orgId: string;
+    readonly projectId: string;
+    readonly projectRunId: string;
+    readonly opener: PreviewOpener;
+  }): Promise<OpenedPreview> {
+    const { store } = this.deps;
+    const existing = store.getInstance(input.orgId, input.projectRunId);
+    if (existing?.state === 'starting') {
+      throw new PreviewStateConflict('a preview for this run is already starting');
+    }
+    // A REOPEN IS A NEW SNAPSHOT, so a live generation is stopped first rather
+    // than reused: a member reopening a run in flight wants the state now, not
+    // the state ten minutes ago.
+    if (existing && existing.state !== 'stopped' && existing.state !== 'failed') {
+      await this.stop(input.orgId, input.projectId, input.projectRunId, 'restart');
+    }
+
+    this.assertCapacity(input.orgId);
+
+    const snapshotAt = new Date(this.now()).toISOString();
+    const opened = store.openInstance({
+      orgId: input.orgId,
+      projectRunId: input.projectRunId,
+      source: 'in-flight',
+      snapshotAt,
+      now: new Date(this.now()),
+    });
+    const generation = opened.instance.generation;
+    const ownerId = this.ownerId(input.projectRunId, generation);
+    const key = this.key(input.orgId, input.projectRunId);
+    this.starting.add(key);
+    try {
+      const workspace = await this.deps.launcher.createWorkspace(ownerId);
+      if (!workspace.hostPath) throw new PreviewRuntimeError('internal', 'no host-side copy');
+      materializePreviewWorkspace({
+        sourceRoot: this.deps.workspaceOf(input.orgId, input.projectId, input.projectRunId),
+        destinationRoot: workspace.hostPath,
+        limits: { maxBytes: this.deps.config.copyMaxBytes },
+      });
+
+      // Classified from the COPY. Its bytes cannot move under the classifier.
+      const classified = classifyDeliveredWorkspace(workspace.hostPath);
+      if (classified.availability !== 'available') {
+        throw new PreviewUnavailableError(classified.unavailableReason ?? 'unavailable');
+      }
+
+      const host = `${previewGenerationHost(input.orgId, input.projectRunId, generation)}.${this.deps.config.domain}`;
+      const approved = store.listApprovedHosts(input.orgId, input.projectId);
+      // A run in flight has declared no hosts, so the effective set is empty
+      // and egress is denied — which is the right default for code nobody has
+      // finished writing.
+      const { allowed } = effectiveEgressHosts([], approved);
+
+      if (classified.kind === 'static') {
+        this.deps.routes.set(host, {
+          orgId: input.orgId,
+          projectRunId: input.projectRunId,
+          generation,
+          kind: 'static',
+          workspaceRoot: workspace.hostPath,
+          allowedHosts: allowed,
+        });
+        store.markReady({
+          orgId: input.orgId,
+          projectRunId: input.projectRunId,
+          generation,
+          expiresAt: new Date(this.now() + this.deps.config.hardMs).toISOString(),
+          now: new Date(this.now()),
+        });
+      } else {
+        const running = await startPreview(
+          {
+            launcher: this.deps.launcher,
+            imageDigest: this.digestOf(this.deps.config.image),
+            runtime: this.deps.config.runtime,
+            probe: this.deps.probe,
+            copyMaxBytes: this.deps.config.copyMaxBytes,
+            ...(this.deps.log ? { log: this.deps.log } : {}),
+          },
+          {
+            ownerId,
+            // The copy the classifier just read, NOT the live workspace: the
+            // isolate must mount the bytes that were described.
+            sourceWorkspace: workspace.hostPath,
+            entry: classified.entry ?? '',
+          }
+        );
+        this.deps.routes.set(host, {
+          orgId: input.orgId,
+          projectRunId: input.projectRunId,
+          generation,
+          kind: 'node',
+          upstreamPort: running.hostPort,
+          allowedHosts: allowed,
+        });
+        store.markReady({
+          orgId: input.orgId,
+          projectRunId: input.projectRunId,
+          generation,
+          imageDigest: running.imageDigest,
+          runtime: running.runtime,
+          expiresAt: new Date(this.now() + this.deps.config.hardMs).toISOString(),
+          now: new Date(this.now()),
+        });
+      }
+
+      return this.claimFor(input, generation, []);
+    } catch (error) {
+      const code = error instanceof PreviewRuntimeError ? error.code : 'internal';
+      try {
+        store.markFailed({
+          orgId: input.orgId,
+          projectRunId: input.projectRunId,
+          generation,
+          errorCode: code,
+          now: new Date(this.now()),
+        });
+      } catch {
+        /* the row moved on; the teardown is what matters */
       }
       throw error;
     } finally {

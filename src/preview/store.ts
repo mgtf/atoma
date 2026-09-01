@@ -67,9 +67,17 @@ CREATE TABLE IF NOT EXISTS project_run_preview_instances (
   expires_at                    TEXT,
   error_code                    TEXT,
   last_stop_reason              TEXT,
+  -- WHAT THIS GENERATION IS SHOWING. A delivered preview describes the
+  -- immutable deliverable; an in-flight one is a snapshot of a run still
+  -- building, taken when it was opened. A row that could not say which would
+  -- let a surface read unfinished work as finished.
+  source                        TEXT NOT NULL DEFAULT 'delivered'
+                                CHECK (source IN ('delivered','in-flight')),
+  snapshot_at                   TEXT,
   updated_at                    TEXT NOT NULL,
   UNIQUE (project_run_id, org_id),
   FOREIGN KEY (project_run_id, org_id) REFERENCES project_runs(project_run_id, org_id),
+  CHECK (source <> 'delivered' OR snapshot_at IS NULL),
   CHECK (
     (state <> 'failed' AND error_code IS NULL) OR
     (state =  'failed' AND error_code IS NOT NULL)
@@ -146,6 +154,8 @@ interface InstanceRow {
   expires_at: string | null;
   error_code: string | null;
   last_stop_reason: string | null;
+  source: string;
+  snapshot_at: string | null;
   updated_at: string;
 }
 
@@ -177,6 +187,8 @@ function instanceFromRow(row: InstanceRow): PreviewInstance {
     expiresAt: row.expires_at,
     errorCode: row.error_code,
     lastStopReason: row.last_stop_reason,
+    source: row.source,
+    snapshotAt: row.snapshot_at,
     updatedAt: row.updated_at,
   });
 }
@@ -192,7 +204,27 @@ export class PreviewStore {
     this.db = db;
     this.db.pragma('foreign_keys = ON');
     this.db.pragma('busy_timeout = 5000');
-    if (options.initialize !== false) this.db.exec(PREVIEW_TABLES_DDL);
+    if (options.initialize !== false) {
+      this.db.exec(PREVIEW_TABLES_DDL);
+      // ADDITIVE MIGRATION, the AuthStore pattern: `CREATE TABLE IF NOT
+      // EXISTS` does nothing to a table an earlier build created, so a column
+      // added to the DDL above never reaches it. No backfill and no guess:
+      // every instance that existed before in-flight previews did was a
+      // preview of a delivered run, which is what the default says.
+      const columns = (
+        this.db.prepare('PRAGMA table_info(project_run_preview_instances)').all() as Array<{
+          name: string;
+        }>
+      ).map((column) => column.name);
+      if (!columns.includes('source')) {
+        this.db.exec(
+          "ALTER TABLE project_run_preview_instances ADD COLUMN source TEXT NOT NULL DEFAULT 'delivered'"
+        );
+      }
+      if (!columns.includes('snapshot_at')) {
+        this.db.exec('ALTER TABLE project_run_preview_instances ADD COLUMN snapshot_at TEXT');
+      }
+    }
   }
 
   /**
@@ -281,6 +313,9 @@ export class PreviewStore {
   openInstance(input: {
     readonly orgId: string;
     readonly projectRunId: string;
+    /** `in-flight` carries a snapshot moment; `delivered` must not. */
+    readonly source?: 'delivered' | 'in-flight';
+    readonly snapshotAt?: string | null;
     readonly now?: Date;
   }): { readonly instance: PreviewInstance; readonly started: boolean } {
     const orgId = organisationIdSchema.parse(input.orgId);
@@ -300,8 +335,8 @@ export class PreviewStore {
           `INSERT INTO project_run_preview_instances
              (project_run_id, org_id, state, generation, image_digest, runtime,
               started_at, ready_at, last_activity_at, expires_at,
-              error_code, last_stop_reason, updated_at)
-           VALUES (?, ?, 'starting', ?, NULL, NULL, ?, NULL, ?, NULL, NULL, ?, ?)
+              error_code, last_stop_reason, source, snapshot_at, updated_at)
+           VALUES (?, ?, 'starting', ?, NULL, NULL, ?, NULL, ?, NULL, NULL, ?, ?, ?, ?)
            ON CONFLICT(project_run_id) DO UPDATE SET
              state = 'starting',
              generation = excluded.generation,
@@ -312,6 +347,8 @@ export class PreviewStore {
              last_activity_at = excluded.last_activity_at,
              expires_at = NULL,
              error_code = NULL,
+             source = excluded.source,
+             snapshot_at = excluded.snapshot_at,
              updated_at = excluded.updated_at
            WHERE project_run_preview_instances.generation = ?`
         )
@@ -322,6 +359,8 @@ export class PreviewStore {
           now,
           now,
           current?.lastStopReason ?? null,
+          input.source ?? 'delivered',
+          input.source === 'in-flight' ? (input.snapshotAt ?? now) : null,
           now,
           current?.generation ?? 0
         );

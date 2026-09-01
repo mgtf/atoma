@@ -396,6 +396,7 @@ The frozen record contains the full dated reasoning behind these rules:
 - [lessons from Lovable — internal architecture review 2026-08-26](docs/lovable-lessons-atoma-2026-08-26.md)
 - [per-tier host subscription — design and implementation record 2026-08-28](docs/subscription-per-tier-design-2026-08-28.md)
 - [presenting the app under development — Lovable UI study and adopted direction 2026-08-31](docs/live-preview-direction-2026-08-31.md)
+- [previewing a run in flight — decision and contract 2026-09-02](docs/in-flight-preview-2026-09-02.md)
 - [release soak v0.1.0](docs/release-soak-v0.1.0.md)
 - [release acceptance v0.1.1](docs/release-acceptance-v0.1.1.md)
 - [release acceptance v0.1.3](docs/release-acceptance-v0.1.3.md)

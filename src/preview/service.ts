@@ -63,14 +63,21 @@ export function previewSummary(input: {
   readonly approvedHosts: readonly string[];
 }): PreviewSummary {
   const { descriptor, instance } = input;
+  // AN IN-FLIGHT PREVIEW HAS NO DESCRIPTOR, by contract: a descriptor is
+  // immutable and describes what DELIVERY observed, while a snapshot is a
+  // moment. Reading its absence as `legacy-run` would describe a run that is
+  // building right now as one delivered before the feature existed.
+  const inFlight = instance?.source === 'in-flight';
   const requestedHosts = descriptor?.requestedHosts ?? [];
   const { allowed, blocked } = effectiveEgressHosts(requestedHosts, input.approvedHosts);
   return previewSummarySchema.parse({
-    availability: descriptor?.availability ?? 'unavailable',
+    availability: descriptor?.availability ?? (inFlight ? 'available' : 'unavailable'),
     kind: descriptor?.kind ?? null,
-    reason: descriptor ? descriptor.unavailableReason : 'legacy-run',
+    reason: descriptor ? descriptor.unavailableReason : inFlight ? null : 'legacy-run',
     state: instance?.state ?? 'stopped',
     generation: instance?.generation ?? 0,
+    source: instance?.source ?? 'delivered',
+    snapshotAt: instance?.snapshotAt ?? null,
     readyAt: instance?.readyAt ?? null,
     expiresAt: instance?.expiresAt ?? null,
     errorCode: instance?.errorCode ?? null,

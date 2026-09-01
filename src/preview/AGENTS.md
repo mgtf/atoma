@@ -34,6 +34,34 @@ isolation runtime, the gateway and the client surface are not implemented.
 - A preview is NOT a deployment. It is ephemeral review evidence, and the
   member guide says so.
 
+## Two sources: a deliverable, and a moment
+
+- A **delivered** preview shows what a finished run produced, described once by
+  its immutable descriptor.
+- An **in-flight** preview shows a SNAPSHOT of a run still building, taken when
+  it was opened and labelled with that moment. It writes NO descriptor row: a
+  descriptor is immutable and records what DELIVERY observed, so carving a
+  moment into one would be a lie about the run.
+
+The instance row and the browser summary both carry `source` and `snapshotAt`,
+because a surface that cannot say "as of 14:32" lets a member read a snapshot
+as the present.
+
+A torn copy is NOT a defect to eliminate — it is the nature of watching
+unfinished work — and the readiness contract already filters what matters: no
+runnable entry, a server that will not start, a marker that never arrives, a
+probe that goes unanswered. What survives all four is an application that
+starts and answers, and that it is incomplete is the information that was
+asked for. The design and the rejected alternatives are in
+[`docs/in-flight-preview-2026-09-02.md`](../../docs/in-flight-preview-2026-09-02.md).
+
+Three rules make it safe: the run's workspace is only ever READ; the COPY is
+what gets classified, never the live workspace, so the classifier sees bytes
+that cannot move under it; and a reopen takes a NEW snapshot on a NEW
+generation rather than reusing one, because a member reopening wants the state
+now. In-flight egress is denied outright — a run has declared no hosts, which
+is the right default for code nobody has finished writing.
+
 ## The two facts, and why they are separate rows
 
 - A **descriptor** is what delivery OBSERVED: immutable, one per delivered run,

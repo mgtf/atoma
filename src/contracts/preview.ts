@@ -261,6 +261,17 @@ export const previewErrorCodeSchema = z.enum([
  */
 export const previewRuntimeSchema = z.enum(['runsc', 'runc']);
 
+/**
+ * WHAT THIS GENERATION IS SHOWING.
+ *
+ * `delivered` is the immutable deliverable a finished run produced, described
+ * once by its descriptor. `in-flight` is a SNAPSHOT of a run still building,
+ * taken at the moment it was opened — a different thing, and a surface that
+ * could not tell them apart would let a member read unfinished work as
+ * finished. See `docs/in-flight-preview-2026-09-02.md`.
+ */
+export const previewSourceSchema = z.enum(['delivered', 'in-flight']);
+
 /** A pinned image, by digest. A mutable tag is not an identity. */
 export const previewImageDigestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 
@@ -289,6 +300,9 @@ export const previewInstanceSchema = z
     /** Null for a static preview, which runs no container at all. */
     imageDigest: previewImageDigestSchema.nullable(),
     runtime: previewRuntimeSchema.nullable(),
+    source: previewSourceSchema.default('delivered'),
+    /** When the snapshot was taken. Null for a delivered preview. */
+    snapshotAt: instantSchema.nullable().default(null),
     startedAt: instantSchema.nullable(),
     readyAt: instantSchema.nullable(),
     lastActivityAt: instantSchema.nullable(),
@@ -349,6 +363,13 @@ export const previewSummarySchema = z
     reason: previewUnavailableReasonSchema.nullable(),
     state: previewStateSchema,
     generation: z.number().int().nonnegative(),
+    source: previewSourceSchema.default('delivered'),
+    /**
+     * When the snapshot behind an in-flight preview was taken. Null for a
+     * delivered one. A surface that cannot say "as of 14:32" lets a member
+     * read a snapshot as the present.
+     */
+    snapshotAt: instantSchema.nullable().default(null),
     readyAt: instantSchema.nullable(),
     expiresAt: instantSchema.nullable(),
     errorCode: previewErrorCodeSchema.nullable(),
@@ -368,6 +389,7 @@ export type PreviewState = z.infer<typeof previewStateSchema>;
 export type PreviewStopReason = z.infer<typeof previewStopReasonSchema>;
 export type PreviewErrorCode = z.infer<typeof previewErrorCodeSchema>;
 export type PreviewRuntime = z.infer<typeof previewRuntimeSchema>;
+export type PreviewSource = z.infer<typeof previewSourceSchema>;
 export type PreviewDescriptor = z.infer<typeof previewDescriptorSchema>;
 export type PreviewInstance = z.infer<typeof previewInstanceSchema>;
 export type PreviewEgressApproval = z.infer<typeof previewEgressApprovalSchema>;

@@ -338,6 +338,194 @@ describe('previewing a delivered artifact, end to end', () => {
     expect(previewManager.heartbeat(orgId, projectRunId, opened.summary.generation + 1)).toBe(false);
   });
 
+  it('previews a run that is STILL BUILDING, from a snapshot of the moment', async () => {
+    // The target: a member watching work in progress. The run's workspace is
+    // being written; we only ever read it, and we copy.
+    const building = join(root, 'in-flight-workspace');
+    mkdirSync(building, { recursive: true });
+    writeFileSync(join(building, 'index.html'), '<h1>half built</h1>');
+
+    const run = projects.createProjectRun({
+      orgId,
+      projectId,
+      principalId,
+      request: { goal: 'a page, in progress', idempotencyKey: 'live-1' },
+      hostPaths: {
+        workspacePath: building,
+        runsPath: join(root, 'traces'),
+        logPath: join(root, 'run.log'),
+      },
+    })!.run;
+    // NO DESCRIPTOR: a descriptor is what delivery observed, and this run has
+    // not delivered. The snapshot is a moment, not a fact about the run.
+    expect(previews.getDescriptor(orgId, run.projectRunId)).toBeNull();
+
+    const routes = new PreviewRouteTable();
+    const claims = new PreviewClaimRegistry();
+    const previewManager = new PreviewManager({
+      store: previews,
+      launcher: new WorkspaceOnlyLauncher(join(root, 'copies')),
+      routes,
+      claims,
+      config,
+      workspaceOf: () => building,
+      probe: async () => true,
+      log: () => undefined,
+    });
+
+    const opened = await previewManager.openInFlight({
+      orgId,
+      projectId,
+      projectRunId: run.projectRunId,
+      opener: { principalId, sessionId: 'session-1' },
+    });
+
+    expect(opened.summary.state).toBe('ready');
+    // The surface can say WHAT it is showing and WHEN, so nobody reads a
+    // snapshot as the present.
+    expect(opened.summary.source).toBe('in-flight');
+    expect(opened.summary.snapshotAt).not.toBeNull();
+    // Not a legacy run: the absence of a descriptor here means something else.
+    expect(opened.summary.reason).toBeNull();
+
+    // And the bytes actually come back.
+    const url = new URL(opened.url);
+    gateway = await startPreviewGateway({
+      host: '127.0.0.1',
+      port: 0,
+      routes,
+      claims,
+      visualizerOrigin: VISUALIZER,
+      log: () => undefined,
+    });
+    const exchanged = await call(
+      gateway.port,
+      url.hostname,
+      '/.atoma/claim',
+      {},
+      'POST',
+      url.hash.slice(1)
+    );
+    const cookie = /(__Host-AtomaPreview=[^;]+)/.exec(String(exchanged.headers['set-cookie']))![1]!;
+    const page = await call(gateway.port, url.hostname, '/', { cookie });
+    expect(page.body).toBe('<h1>half built</h1>');
+
+    // The run keeps building; the workspace it is writing was never touched.
+    const { readFileSync } = await import('node:fs');
+    expect(readFileSync(join(building, 'index.html'), 'utf8')).toBe('<h1>half built</h1>');
+  });
+
+  it('takes a NEW snapshot on every reopen, on a new origin', async () => {
+    const building = join(root, 'moving-workspace');
+    mkdirSync(building, { recursive: true });
+    writeFileSync(join(building, 'index.html'), '<h1>first</h1>');
+    const run = projects.createProjectRun({
+      orgId,
+      projectId,
+      principalId,
+      request: { goal: 'moving', idempotencyKey: 'live-2' },
+      hostPaths: {
+        workspacePath: building,
+        runsPath: join(root, 'traces'),
+        logPath: join(root, 'run.log'),
+      },
+    })!.run;
+
+    const routes = new PreviewRouteTable();
+    const claims = new PreviewClaimRegistry();
+    const previewManager = new PreviewManager({
+      store: previews,
+      launcher: new WorkspaceOnlyLauncher(join(root, 'copies')),
+      routes,
+      claims,
+      config,
+      workspaceOf: () => building,
+      probe: async () => true,
+      log: () => undefined,
+    });
+    const opener = { principalId, sessionId: 'session-1' };
+
+    const first = await previewManager.openInFlight({
+      orgId,
+      projectId,
+      projectRunId: run.projectRunId,
+      opener,
+    });
+
+    // The run writes more.
+    writeFileSync(join(building, 'index.html'), '<h1>second</h1>');
+
+    const second = await previewManager.openInFlight({
+      orgId,
+      projectId,
+      projectRunId: run.projectRunId,
+      opener,
+    });
+
+    // A reopen is a NEW moment: new generation, new origin, old grant gone.
+    expect(second.summary.generation).toBe(first.summary.generation + 1);
+    expect(new URL(second.url).hostname).not.toBe(new URL(first.url).hostname);
+    expect(routes.get(new URL(first.url).hostname)).toBeNull();
+
+    gateway = await startPreviewGateway({
+      host: '127.0.0.1',
+      port: 0,
+      routes,
+      claims,
+      visualizerOrigin: VISUALIZER,
+      log: () => undefined,
+    });
+    const url = new URL(second.url);
+    const exchanged = await call(
+      gateway.port,
+      url.hostname,
+      '/.atoma/claim',
+      {},
+      'POST',
+      url.hash.slice(1)
+    );
+    const cookie = /(__Host-AtomaPreview=[^;]+)/.exec(String(exchanged.headers['set-cookie']))![1]!;
+    const page = await call(gateway.port, url.hostname, '/', { cookie });
+    // The second snapshot shows the newer bytes.
+    expect(page.body).toBe('<h1>second</h1>');
+  });
+
+  it('says a run in flight has nothing runnable yet, rather than failing obscurely', async () => {
+    const empty = join(root, 'nothing-yet');
+    mkdirSync(empty, { recursive: true });
+    writeFileSync(join(empty, 'notes.md'), '# thinking');
+    const run = projects.createProjectRun({
+      orgId,
+      projectId,
+      principalId,
+      request: { goal: 'not started', idempotencyKey: 'live-3' },
+      hostPaths: {
+        workspacePath: empty,
+        runsPath: join(root, 'traces'),
+        logPath: join(root, 'run.log'),
+      },
+    })!.run;
+
+    const previewManager = new PreviewManager({
+      store: previews,
+      launcher: new WorkspaceOnlyLauncher(join(root, 'copies')),
+      routes: new PreviewRouteTable(),
+      claims: new PreviewClaimRegistry(),
+      config,
+      workspaceOf: () => empty,
+      probe: async () => true,
+      log: () => undefined,
+    });
+    await expect(
+      previewManager.openInFlight({
+        orgId,
+        projectId,
+        projectRunId: run.projectRunId,
+        opener: { principalId, sessionId: 'session-1' },
+      })
+    ).rejects.toBeInstanceOf(PreviewUnavailableError);
+  });
+
   it('refuses a run with nothing to preview, as a fact rather than a probe', async () => {
     mkdirSync(join(root, 'cli-workspace'), { recursive: true });
     writeFileSync(join(root, 'cli-workspace', 'cli.js'), 'console.log(1);');
