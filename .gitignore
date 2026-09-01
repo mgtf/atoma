@@ -49,3 +49,8 @@ benchmark/.scratch/
 .atoma-mark-turn/
 # Pointer-catch lighting captures (`npm run viz:mark-turn -- --pointer`).
 .atoma-mark-pointer/
+# CPython bytecode for the one Python script in the tree
+# (`scripts/viz-mark-turn-analyze.py`, run by `viz:mark-turn:analyze`). Build
+# output keyed to the interpreter version that produced it, never source.
+__pycache__/
+*.pyc
