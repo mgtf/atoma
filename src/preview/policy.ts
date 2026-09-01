@@ -159,6 +159,35 @@ export function readPreviewClassifierFile(
   }
 }
 
+/**
+ * Read one file the gateway may serve, or `null` when it is simply not there.
+ *
+ * The same path jail as everything else, under the SERVE policy — so a request
+ * for `node_modules/...`, `.git/...`, `.env` or anything `.atoma*` is refused
+ * here rather than at the socket, and a symlink anywhere on the way is refused
+ * by the jail itself. A missing file is `null` because a 404 is the honest
+ * answer; every other refusal propagates, because it means the request tried
+ * to leave the workspace.
+ */
+export function readPreviewServableFile(
+  workspaceRoot: string,
+  relativePath: string
+): Buffer | null {
+  try {
+    return secureReadWorkspaceFile(
+      workspaceRoot,
+      relativePath,
+      DEFAULT_ARTIFACT_LIMITS,
+      assertPreviewServablePath
+    ).bytes;
+  } catch (error) {
+    if (error instanceof ArtifactPolicyError && error.code === 'missing') return null;
+    if (error instanceof ArtifactPolicyError && error.code === 'path') return null;
+    if (error instanceof PreviewPolicyError && error.code === 'excluded') return null;
+    throw error;
+  }
+}
+
 /** Does this workspace hold a regular, non-symlinked file at `relativePath`? */
 export function previewWorkspaceHasFile(workspaceRoot: string, relativePath: string): boolean {
   let canonical: string;

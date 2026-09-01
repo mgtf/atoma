@@ -185,6 +185,68 @@ check, so a deployment that set four of the six is told so.
   a per-org cap above the global one never applies, and an idle bound at or
   past the hard bound never fires.
 
+## The origin, and who may open it
+
+A preview lives on its own registrable domain, so no Atoma cookie ever reaches
+it — which is exactly why the gateway needs its own way to know the browser in
+front of it was sent by an authenticated member.
+
+- **One host per GENERATION**, derived from `(orgId, runId, generation)`. A
+  restart mints a new generation and therefore a new origin, which is what
+  makes stale service workers, storage and caches from a previous generation
+  unable to control the next. No amount of cache-busting on one origin gives
+  that. The host is derived rather than stored because the gateway must route
+  from the `Host` header alone, before it has consulted anything.
+- **A claim is one-time, thirty seconds, and bound to everything it depends
+  on** — principal, session, org, run, generation and the exact host. It is
+  CONSUMED BEFORE it is validated, exactly as `consumeOauthState` is, so a
+  leaked value cannot be probed repeatedly for a match. It is stored hashed.
+- **The raw value travels in a URL FRAGMENT.** A fragment is never sent to a
+  server, so it stays out of request lines, access logs and `Referer`. Only a
+  script on the preview origin can read it, hand it back, and erase it — which
+  is the entire reason the gateway serves a bootstrap page of its own.
+- **The grant cookie carries a TOKEN the registry issued, and the registry
+  verifies it.** An earlier shape keyed grants by route alone and checked only
+  that one existed, which accepted ANY cookie value for as long as some member
+  held a live grant on that origin. A cookie must be a credential, never a
+  flag.
+- **One generic 404 for every negative answer** — unknown host, expired claim,
+  forged token, wrong organisation, stopped preview. Telling them apart tells
+  an unauthenticated caller which generation hosts exist and which
+  organisations own them, and no legitimate member needs the distinction. The
+  reason is logged for an operator and never returned.
+
+## The response policy is the gateway's, not the application's
+
+Headers an application sets that could weaken its own container —
+`Content-Security-Policy`, `X-Frame-Options`, `Set-Cookie`, the
+cross-origin family — are DROPPED and re-imposed. That is the difference
+between a policy and a suggestion. In the other direction the member's cookie,
+address, forwarding chain and referrer never reach the application: none of
+them are its business and all of them are things a hostile deliverable would
+like.
+
+- `frame-ancestors` is the exact visualizer origin; `frame-src`, `object-src`
+  and `base-uri` are closed.
+- `'unsafe-inline'` for scripts and styles is a DELIBERATE deviation from the
+  design's literal `'self'`. A deliverable is routinely a single HTML file with
+  inline `<script>`, and refusing those makes the feature not work for the
+  commonest shape a run produces. What the host allowlist actually buys is
+  EXFILTRATION control, and that lives in `default-src`/`connect-src`, which
+  stay closed — inline script is same-document and reaches nothing new. There
+  is also no trusted application here to protect from injected script: the
+  application IS model-authored code the member chose to open. `'unsafe-eval'`
+  is NOT granted.
+- A redirect is ALWAYS resolved against the origin, never pattern-matched. A
+  "looks relative, so it is safe" shortcut allowed `/\evil.example`, which
+  starts with a single slash and resolves off-origin in every WHATWG-compliant
+  browser because a special scheme treats a backslash as a separator. The
+  parser is the only thing that knows what a browser will do with a string.
+- The CSP host allowlist is a BROWSER RESOURCE POLICY, not a remote-browser
+  boundary: generated JavaScript runs on the member's own machine, so an
+  approved but hostile domain could still observe what they type. The chrome
+  says so permanently, and no header here can fix it.
+
 ## Egress is requested by a run and approved by a person
 
 - Hosts are exact, lower-case, dotted public DNS names. No wildcards, no
