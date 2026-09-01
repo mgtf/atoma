@@ -32,6 +32,11 @@ export default tseslint.config(
       // tree that belongs to no tsconfig here: 860 type-aware errors from code
       // that is not this working tree's. Not project source, never linted.
       '.claude/worktrees/**',
+      // Same reason, the other conventional location: a `git worktree` placed
+      // inside the checkout is a second full source tree belonging to no
+      // tsconfig here, so `eslint .` reports hundreds of parser errors from
+      // code this working tree does not own.
+      '.worktrees/**',
     ],
   },
   js.configs.recommended,

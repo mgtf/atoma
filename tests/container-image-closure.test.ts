@@ -35,7 +35,20 @@ import { fileURLToPath } from 'node:url';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
 const SRC = resolve(REPO, 'src');
-const ENTRY = resolve(SRC, 'tools/worker.ts');
+/**
+ * EVERY entry point the image can be started at, not only the worker.
+ *
+ * The image is launched three ways — the worker over stdio, and two long-
+ * running relays the launcher starts with an explicit `node <file>` command
+ * — and each is a root of its own import graph. Walking only the worker
+ * would let a relay gain a cross-directory import and die at startup on a
+ * clean rebuild, which is exactly the incident this file exists for.
+ */
+const ENTRIES = [
+  resolve(SRC, 'tools/worker.ts'),
+  resolve(SRC, 'tools/egressProxy.ts'),
+  resolve(SRC, 'tools/previewIngress.ts'),
+];
 
 interface Closure {
   /** Top-level `src/<dir>` directories reached, e.g. 'tools', 'contracts'. */
@@ -100,7 +113,14 @@ function packageName(spec: string): string {
   return spec.startsWith('@') ? parts.slice(0, 2).join('/') : (parts[0] ?? spec);
 }
 
-const closure = importClosure(ENTRY);
+const closure = ENTRIES.map(importClosure).reduce<Closure>(
+  (merged, one) => ({
+    dirs: new Set([...merged.dirs, ...one.dirs]),
+    external: new Set([...merged.external, ...one.external]),
+    files: new Set([...merged.files, ...one.files]),
+  }),
+  { dirs: new Set(), external: new Set(), files: new Set() }
+);
 const dockerfile = readFileSync(resolve(REPO, 'docker/worker.Dockerfile'), 'utf8');
 const workerPkg = JSON.parse(
   readFileSync(resolve(REPO, 'docker/worker-package.json'), 'utf8')
@@ -118,6 +138,13 @@ describe('worker image closure — everything the worker imports must be in the 
     expect(closure.files.has(resolve(SRC, 'contracts/probeManifest.ts'))).toBe(true);
     expect(closure.files.has(resolve(SRC, 'tools/builtin.ts'))).toBe(true);
     expect(closure.dirs.has('contracts')).toBe(true);
+  });
+
+  it('walks every container entry point, not only the worker', () => {
+    // A relay that is started by its own `node <file>` command is a root the
+    // worker's graph never reaches.
+    expect(closure.files.has(resolve(SRC, 'tools/egressProxy.ts'))).toBe(true);
+    expect(closure.files.has(resolve(SRC, 'tools/previewIngress.ts'))).toBe(true);
   });
 
   it('COPYs every src/ directory the worker imports', () => {
