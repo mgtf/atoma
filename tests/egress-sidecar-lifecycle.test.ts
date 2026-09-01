@@ -12,7 +12,10 @@ import {
 describe('egress sidecar hard-exit registry', () => {
   it('force-removes the proxy, every attached worker, then both per-run networks', () => {
     const registry = new EgressExitRegistry();
-    registry.track('atoma-egress-run', 'atoma-proxy-run', 'atoma-uplink-run');
+    registry.track('egress:run', {
+      containers: ['atoma-proxy-run'],
+      networks: ['atoma-egress-run', 'atoma-uplink-run'],
+    });
     const calls: string[][] = [];
     const runSync = (args: string[]): string => {
       calls.push(args);
@@ -51,8 +54,8 @@ describe('egress sidecar hard-exit registry', () => {
 
   it('does nothing after orderly cleanup untracks the run', () => {
     const registry = new EgressExitRegistry();
-    registry.track('network', 'proxy', 'uplink');
-    registry.untrack('network');
+    registry.track('egress:run', { containers: ['proxy'], networks: ['network', 'uplink'] });
+    registry.untrack('egress:run');
     const calls: string[][] = [];
     registry.cleanup((args) => {
       calls.push(args);
@@ -63,7 +66,7 @@ describe('egress sidecar hard-exit registry', () => {
 
   it('retries a transient hard-exit race without inheriting the long async budget', () => {
     const registry = new EgressExitRegistry();
-    registry.track('internal', 'proxy', 'uplink');
+    registry.track('egress:run', { containers: ['proxy'], networks: ['internal', 'uplink'] });
     const calls: string[][] = [];
     const waits: number[] = [];
     let internalRemoveAttempts = 0;

@@ -1,8 +1,12 @@
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
+import { mkdirSync, rmSync } from 'node:fs';
+import { homedir } from 'node:os';
+import path from 'node:path';
 import type {
   ContainerLauncher,
+  LauncherFamily,
   LauncherNetworkHandle,
   LauncherNetworkSpec,
   LauncherOwnerId,
@@ -11,6 +15,7 @@ import type {
   LauncherUnitKind,
   LauncherUnitSpec,
   LauncherUnitSummary,
+  LauncherWorkspaceHandle,
 } from '../contracts/launcher.js';
 
 /**
@@ -54,6 +59,27 @@ const DOCKER_EXIT_COMMAND_TIMEOUT_MS = 250;
 /** The label every object carries, so orphans are findable by one query. */
 export const LAUNCHER_OWNER_LABEL = 'dev.atoma.owner';
 export const LAUNCHER_RUN_LABEL = 'dev.atoma.run';
+export const LAUNCHER_PREVIEW_LABEL = 'dev.atoma.preview';
+
+/**
+ * The preview application's envelope. Every value is a REFUSAL of something a
+ * generated application might otherwise do to the host it runs on, and none of
+ * them is a caller's to choose.
+ */
+const PREVIEW_APP_MEMORY = '512m';
+const PREVIEW_APP_CPUS = '0.5';
+const PREVIEW_APP_PIDS = '64';
+const PREVIEW_APP_NOFILE = '1024';
+const PREVIEW_TMP_SIZE = '64m';
+const PREVIEW_DATA_SIZE = '128m';
+const PREVIEW_LOG_MAX_SIZE = '1m';
+/** Fixed by contract: the app is told PORT and must honour it (design D8). */
+export const PREVIEW_APP_PORT = 8080;
+/** Where the relay listens inside its own container. */
+export const PREVIEW_INGRESS_PORT = 8081;
+const PREVIEW_RELAY_MEMORY = '128m';
+const PREVIEW_RELAY_CPUS = '0.25';
+const PREVIEW_RELAY_PIDS = '32';
 
 /** Docker-safe, collision-resistant suffix for every per-owner object name. */
 export function launcherObjectId(ownerId: string): string {
@@ -130,6 +156,16 @@ export function launcherErrorText(error: unknown): string {
   return `${error.message}\n${renderedStderr}`;
 }
 
+/**
+ * A mount is a WIRE VALUE for the engine, and the engine always speaks POSIX —
+ * so a host path is converted rather than passed through. Without this a
+ * developer host with backslash separators hands Docker a string it reads as
+ * one path component.
+ */
+function toEnginePath(hostPath: string): string {
+  return hostPath.split(path.sep).join('/');
+}
+
 function isMissingNetworkError(error: unknown): boolean {
   return /no such network|network .* not found/i.test(launcherErrorText(error));
 }
@@ -175,22 +211,26 @@ function removeNetworkSync(
 export class LauncherExitRegistry {
   private readonly active = new Map<
     string,
-    { readonly proxyHost: string; readonly uplinkNetwork: string }
-  >(); // internal network → per-owner Docker objects
+    { readonly containers: readonly string[]; readonly networks: readonly string[] }
+  >(); // key → the objects one owner left behind
 
-  track(network: string, proxyHost: string, uplinkNetwork: string): void {
-    this.active.set(network, { proxyHost, uplinkNetwork });
+  /**
+   * CONTAINERS BEFORE NETWORKS, always. A network with an endpoint still
+   * attached refuses removal, so the reverse order spends the whole bounded
+   * retry budget losing to a container nobody removed.
+   */
+  track(key: string, objects: { containers: readonly string[]; networks: readonly string[] }): void {
+    this.active.set(key, { containers: [...objects.containers], networks: [...objects.networks] });
   }
 
-  untrack(network: string): void {
-    this.active.delete(network);
+  untrack(key: string): void {
+    this.active.delete(key);
   }
 
   cleanup(runSync: SyncDockerRunner, waitSync: SyncSleeper = sleepSync): void {
-    for (const [network, { proxyHost, uplinkNetwork }] of this.active) {
-      trySync(runSync, ['rm', '-f', proxyHost]);
-      removeNetworkSync(network, runSync, waitSync);
-      removeNetworkSync(uplinkNetwork, runSync, waitSync);
+    for (const [, { containers, networks }] of this.active) {
+      for (const container of containers) trySync(runSync, ['rm', '-f', container]);
+      for (const network of networks) removeNetworkSync(network, runSync, waitSync);
     }
     this.active.clear();
   }
@@ -289,6 +329,23 @@ export interface DockerLauncherOptions {
    * from being a remote shell.
    */
   readonly image: string;
+  /**
+   * The pinned-by-digest image a preview application runs from. Separate from
+   * the worker image on purpose: it carries no browser, no LLM SDK, no store,
+   * no source tree and no tool executor.
+   */
+  readonly previewImage?: string;
+  /**
+   * The isolation runtime for preview applications. The CALLER decides
+   * whether anything but `runsc` is admissible — production requires gVisor
+   * with no silent fallback, and the dev escape hatch refuses to boot behind
+   * the auth gate.
+   */
+  readonly previewRuntime?: string;
+  /** Numeric uid:gid a preview application runs as. Never root. */
+  readonly previewUser?: string;
+  /** Where preview workspaces live. The launcher owns the location. */
+  readonly workspaceRoot?: string;
   /** Injectable Docker boundary for command-level lifecycle tests. */
   readonly runDocker?: AsyncDockerRunner;
   /** Readiness is log-based in production; tests can acknowledge it directly. */
@@ -301,6 +358,10 @@ export interface DockerLauncherOptions {
 
 export class DockerLauncher implements ContainerLauncher {
   private readonly image: string;
+  private readonly previewImage: string;
+  private readonly previewRuntime: string;
+  private readonly previewUser: string;
+  private readonly workspaceRoot: string;
   private readonly runDocker: AsyncDockerRunner;
   private readonly waitUntilReady: ((name: string) => Promise<void>) | undefined;
   private readonly sleep: (delayMs: number) => Promise<void>;
@@ -308,6 +369,10 @@ export class DockerLauncher implements ContainerLauncher {
 
   constructor(options: DockerLauncherOptions) {
     this.image = options.image;
+    this.previewImage = options.previewImage ?? options.image;
+    this.previewRuntime = options.previewRuntime ?? 'runsc';
+    this.previewUser = options.previewUser ?? '10001:10001';
+    this.workspaceRoot = options.workspaceRoot ?? path.join(homedir(), '.atoma', 'previews');
     this.runDocker = options.runDocker ?? defaultDocker;
     this.waitUntilReady = options.waitUntilReady;
     this.sleep =
@@ -326,45 +391,75 @@ export class DockerLauncher implements ContainerLauncher {
 
   networkName(spec: LauncherNetworkSpec): string {
     const id = launcherObjectId(spec.ownerId);
+    if (spec.family === 'preview') return `atoma-preview-net-${id}`;
     return spec.kind === 'internal' ? `atoma-egress-${id}` : `atoma-uplink-${id}`;
   }
 
   unitName(kind: LauncherUnitKind, ownerId: LauncherOwnerId): string {
     const id = launcherObjectId(ownerId);
     // One name per kind. `egress-proxy` keeps its historical spelling, which
-    // is also the hostname the run reaches it by.
-    return kind === 'egress-proxy' ? `atoma-proxy-${id}` : `atoma-${kind}-${id}`;
+    // is also the hostname the run reaches it by — and is what the app
+    // container resolves its relay by, so these names are wire contracts
+    // between two containers, not cosmetics.
+    if (kind === 'egress-proxy') return `atoma-proxy-${id}`;
+    if (kind === 'preview-app') return `atoma-preview-app-${id}`;
+    return `atoma-preview-relay-${id}`;
   }
 
-  async purgeOwner(ownerId: LauncherOwnerId): Promise<void> {
-    await quiet(this.runDocker, ['rm', '-f', this.unitName('egress-proxy', ownerId)]);
-    await quiet(this.runDocker, [
-      'network',
-      'rm',
-      this.networkName({ kind: 'internal', ownerId }),
-    ]);
-    await quiet(this.runDocker, [
-      'network',
-      'rm',
-      this.networkName({ kind: 'uplink', ownerId }),
-    ]);
+  /** The objects one owner in one family can leave behind, in removal order. */
+  private ownedObjects(
+    family: LauncherFamily,
+    ownerId: LauncherOwnerId
+  ): { containers: string[]; networks: string[] } {
+    if (family === 'preview') {
+      return {
+        // The relay first: it is the only thing holding the network open once
+        // the app is gone, and it is what a member is still connected to.
+        containers: [
+          this.unitName('preview-ingress', ownerId),
+          this.unitName('preview-app', ownerId),
+        ],
+        networks: [this.networkName({ family, kind: 'internal', ownerId })],
+      };
+    }
+    return {
+      containers: [this.unitName('egress-proxy', ownerId)],
+      networks: [
+        this.networkName({ family, kind: 'internal', ownerId }),
+        this.networkName({ family, kind: 'uplink', ownerId }),
+      ],
+    };
   }
 
-  armHardExitCleanup(ownerId: LauncherOwnerId): void {
-    exitRegistry.track(
-      this.networkName({ kind: 'internal', ownerId }),
-      this.unitName('egress-proxy', ownerId),
-      this.networkName({ kind: 'uplink', ownerId })
-    );
+  async purgeOwner(family: LauncherFamily, ownerId: LauncherOwnerId): Promise<void> {
+    const owned = this.ownedObjects(family, ownerId);
+    for (const container of owned.containers) {
+      await quiet(this.runDocker, ['rm', '-f', container]);
+    }
+    for (const network of owned.networks) {
+      await quiet(this.runDocker, ['network', 'rm', network]);
+    }
   }
 
-  disarmHardExitCleanup(ownerId: LauncherOwnerId): void {
-    exitRegistry.untrack(this.networkName({ kind: 'internal', ownerId }));
+  armHardExitCleanup(family: LauncherFamily, ownerId: LauncherOwnerId): void {
+    exitRegistry.track(`${family}:${ownerId}`, this.ownedObjects(family, ownerId));
+  }
+
+  disarmHardExitCleanup(family: LauncherFamily, ownerId: LauncherOwnerId): void {
+    exitRegistry.untrack(`${family}:${ownerId}`);
+  }
+
+  /** The labels every object of one family carries, so a sweep can find them. */
+  private labels(family: LauncherFamily, ownerId: LauncherOwnerId): string[] {
+    const id = launcherObjectId(ownerId);
+    return family === 'preview'
+      ? ['--label', `${LAUNCHER_OWNER_LABEL}=preview`, '--label', `${LAUNCHER_PREVIEW_LABEL}=${id}`]
+      : ['--label', `${LAUNCHER_OWNER_LABEL}=egress`, '--label', `${LAUNCHER_RUN_LABEL}=${id}`];
   }
 
   async createNetwork(spec: LauncherNetworkSpec): Promise<LauncherNetworkHandle> {
     const name = this.networkName(spec);
-    const id = launcherObjectId(spec.ownerId);
+    const labels = this.labels(spec.family, spec.ownerId);
     if (spec.kind === 'internal') {
       // `--internal` alone still assigns the bridge a host gateway address;
       // Docker explicitly documents that containers can reach host services
@@ -376,10 +471,7 @@ export class DockerLauncher implements ContainerLauncher {
         'network',
         'create',
         '--internal',
-        '--label',
-        `${LAUNCHER_OWNER_LABEL}=egress`,
-        '--label',
-        `${LAUNCHER_RUN_LABEL}=${id}`,
+        ...labels,
         '--opt',
         'com.docker.network.bridge.gateway_mode_ipv4=isolated',
         '--opt',
@@ -389,17 +481,9 @@ export class DockerLauncher implements ContainerLauncher {
     } else {
       // A user-defined bridge gets outbound NAT like Docker's default bridge,
       // without being shared with unrelated containers.
-      await this.runDocker([
-        'network',
-        'create',
-        '--label',
-        `${LAUNCHER_OWNER_LABEL}=egress`,
-        '--label',
-        `${LAUNCHER_RUN_LABEL}=${id}`,
-        name,
-      ]);
+      await this.runDocker(['network', 'create', ...labels, name]);
     }
-    return { kind: spec.kind, ownerId: spec.ownerId, name };
+    return { family: spec.family, kind: spec.kind, ownerId: spec.ownerId, name };
   }
 
   async removeNetwork(handle: LauncherNetworkHandle): Promise<boolean> {
@@ -434,18 +518,17 @@ export class DockerLauncher implements ContainerLauncher {
     networks: readonly LauncherNetworkHandle[]
   ): Promise<LauncherUnitHandle> {
     const name = this.unitName(spec.kind, spec.ownerId);
-    const id = launcherObjectId(spec.ownerId);
     const attach = networks[0];
     if (!attach) throw new Error('a unit must be attached to at least one network');
+    if (spec.kind !== 'egress-proxy') {
+      return this.startPreviewUnit(spec, name, attach, networks.slice(1));
+    }
     await this.runDocker([
       'run',
       '-d',
       '--name',
       name,
-      '--label',
-      `${LAUNCHER_OWNER_LABEL}=egress`,
-      '--label',
-      `${LAUNCHER_RUN_LABEL}=${id}`,
+      ...this.labels('egress', spec.ownerId),
       '--network',
       attach.name,
       '--cap-drop',
@@ -479,9 +562,182 @@ export class DockerLauncher implements ContainerLauncher {
     return { kind: spec.kind, ownerId: spec.ownerId, name };
   }
 
+  /**
+   * The two preview profiles.
+   *
+   * Everything here is a REFUSAL of something a generated application might
+   * otherwise do to the host, and none of it is a caller's to choose: the
+   * image, the command, the mount, the environment and the whole resource
+   * envelope are derived from the profile.
+   */
+  private async startPreviewUnit(
+    spec: Extract<LauncherUnitSpec, { kind: 'preview-app' | 'preview-ingress' }>,
+    name: string,
+    attach: LauncherNetworkHandle,
+    extraNetworks: readonly LauncherNetworkHandle[]
+  ): Promise<LauncherUnitHandle> {
+    const labels = this.labels('preview', spec.ownerId);
+    if (spec.kind === 'preview-app') {
+      const workspace = this.workspacePath(spec.workspace.ownerId);
+      await this.runDocker([
+        'run',
+        '-d',
+        '--name',
+        name,
+        ...labels,
+        '--network',
+        attach.name,
+        // gVisor. Production requires it and there is no silent fallback; the
+        // CALLER decides whether a dev runtime is admissible and constructs
+        // the launcher accordingly, so an unset runtime here is a bug, not a
+        // permission.
+        '--runtime',
+        this.previewRuntime,
+        '--user',
+        this.previewUser,
+        '--read-only',
+        '--cap-drop',
+        'ALL',
+        '--security-opt',
+        'no-new-privileges',
+        '--memory',
+        PREVIEW_APP_MEMORY,
+        // Swap equal to memory: otherwise the cap is escapable by swapping.
+        '--memory-swap',
+        PREVIEW_APP_MEMORY,
+        '--cpus',
+        PREVIEW_APP_CPUS,
+        '--pids-limit',
+        PREVIEW_APP_PIDS,
+        '--ulimit',
+        `nofile=${PREVIEW_APP_NOFILE}`,
+        // A read-only root filesystem plus two bounded tmpfs: `/tmp` for what
+        // any program expects to be able to write, `/data` for the demo state
+        // an application keeps. Both die with the container, which is what
+        // makes a restart start again from the immutable copy.
+        '--tmpfs',
+        `/tmp:rw,noexec,nosuid,size=${PREVIEW_TMP_SIZE}`,
+        '--tmpfs',
+        `/data:rw,noexec,nosuid,size=${PREVIEW_DATA_SIZE}`,
+        '--log-opt',
+        `max-size=${PREVIEW_LOG_MAX_SIZE}`,
+        '--log-opt',
+        'max-file=1',
+        // EXACTLY these five. Never a spread of the parent environment: the
+        // control plane's own variables are credentials and store paths.
+        '-e',
+        `PORT=${PREVIEW_APP_PORT}`,
+        '-e',
+        'HOST=0.0.0.0',
+        '-e',
+        'NODE_ENV=production',
+        '-e',
+        'HOME=/tmp',
+        '-e',
+        'ATOMA_DATA_DIR=/data',
+        // The single mount: the filtered copy, writable because the app may
+        // keep state — on the COPY, which is deleted at teardown.
+        '-v',
+        `${toEnginePath(workspace)}:/workspace`,
+        '-w',
+        '/workspace',
+        this.previewImage,
+        'node',
+        spec.entry,
+      ]);
+      return { kind: spec.kind, ownerId: spec.ownerId, name };
+    }
+
+    // The relay. Its upstream is the app unit of the SAME owner, resolved
+    // here rather than accepted from the caller — which is what makes it
+    // impossible to point at anything else.
+    await this.runDocker([
+      'run',
+      '-d',
+      '--name',
+      name,
+      ...labels,
+      '--network',
+      attach.name,
+      // Published on LOOPBACK only, on an OS-assigned port. The gateway is
+      // the one thing that reaches it; nothing else on the machine should,
+      // and no caller chooses the number.
+      '-p',
+      `127.0.0.1::${PREVIEW_INGRESS_PORT}`,
+      '--cap-drop',
+      'ALL',
+      '--security-opt',
+      'no-new-privileges',
+      '--memory',
+      PREVIEW_RELAY_MEMORY,
+      '--memory-swap',
+      PREVIEW_RELAY_MEMORY,
+      '--cpus',
+      PREVIEW_RELAY_CPUS,
+      '--pids-limit',
+      PREVIEW_RELAY_PIDS,
+      '-e',
+      `ATOMA_PREVIEW_INGRESS_PORT=${PREVIEW_INGRESS_PORT}`,
+      '-e',
+      `ATOMA_PREVIEW_UPSTREAM_HOST=${this.unitName('preview-app', spec.ownerId)}`,
+      '-e',
+      `ATOMA_PREVIEW_UPSTREAM_PORT=${PREVIEW_APP_PORT}`,
+      this.image,
+      'node',
+      '/app/dist/tools/previewIngress.js',
+    ]);
+    for (const extra of extraNetworks) {
+      await this.runDocker(['network', 'connect', extra.name, name]);
+    }
+    const hostPort = await this.publishedPort(name, PREVIEW_INGRESS_PORT);
+    return {
+      kind: spec.kind,
+      ownerId: spec.ownerId,
+      name,
+      ...(hostPort === null ? {} : { hostPort }),
+    };
+  }
+
+  /** Which loopback port the engine actually gave a published container. */
+  private async publishedPort(name: string, containerPort: number): Promise<number | null> {
+    const stdout = await this.runDocker(['port', name, String(containerPort)]);
+    // `127.0.0.1:49154`, possibly several lines for several families.
+    const match = /:(\d+)\s*$/m.exec(stdout.trim());
+    const port = match?.[1] ? Number(match[1]) : Number.NaN;
+    return Number.isInteger(port) && port > 0 ? port : null;
+  }
+
+  private workspacePath(ownerId: LauncherOwnerId): string {
+    return path.join(this.workspaceRoot, launcherObjectId(ownerId));
+  }
+
+  async createWorkspace(ownerId: LauncherOwnerId): Promise<LauncherWorkspaceHandle> {
+    const hostPath = this.workspacePath(ownerId);
+    // Fresh, always. A directory left by a crashed predecessor would be
+    // mounted into the next generation, which is how a preview would serve
+    // bytes the run that owns it never produced.
+    rmSync(hostPath, { recursive: true, force: true });
+    mkdirSync(hostPath, { recursive: true });
+    return { ownerId, id: launcherObjectId(ownerId), hostPath };
+  }
+
+  async removeWorkspace(handle: LauncherWorkspaceHandle): Promise<void> {
+    rmSync(this.workspacePath(handle.ownerId), { recursive: true, force: true });
+  }
+
   async awaitUnitReady(handle: LauncherUnitHandle, timeoutMs = 15_000): Promise<void> {
     if (this.waitUntilReady) {
       await this.waitUntilReady(handle.name);
+      return;
+    }
+    if (handle.kind !== 'egress-proxy') {
+      // The app announces the port it bound; a marker naming a DIFFERENT port
+      // is a refusal, not readiness — the contract is that it honours `PORT`.
+      const marker =
+        handle.kind === 'preview-app'
+          ? new RegExp(`LISTENING_ON_PORT=${PREVIEW_APP_PORT}(?!\\d)`)
+          : /\[preview-ingress\] listening on/;
+      await waitForUnitLog(this.runDocker, handle.name, marker, timeoutMs);
       return;
     }
     // WAIT FOR IT TO LISTEN. `docker run -d` returns as soon as the container
@@ -497,56 +753,72 @@ export class DockerLauncher implements ContainerLauncher {
     await quiet(this.runDocker, ['rm', '-f', handle.name]);
   }
 
+  /** Which name prefix belongs to which kind, for reading a sweep back. */
+  private kindOfName(name: string): LauncherUnitKind | null {
+    if (name.startsWith('atoma-proxy-')) return 'egress-proxy';
+    if (name.startsWith('atoma-preview-app-')) return 'preview-app';
+    if (name.startsWith('atoma-preview-relay-')) return 'preview-ingress';
+    return null;
+  }
+
   async listUnits(kind?: LauncherUnitKind): Promise<LauncherUnitSummary[]> {
-    const stdout = await this.runDocker([
-      'ps',
-      '-a',
-      '--filter',
-      `label=${LAUNCHER_OWNER_LABEL}=egress`,
-      '--format',
-      '{{.Names}}\t{{.State}}',
-    ]);
     const units: LauncherUnitSummary[] = [];
-    for (const line of stdout.split('\n').map((row) => row.trim()).filter(Boolean)) {
-      const [name = '', state = ''] = line.split('\t');
-      if (!name.startsWith('atoma-proxy-')) continue;
-      if (kind && kind !== 'egress-proxy') continue;
-      units.push({
-        kind: 'egress-proxy',
-        // The owner id is NOT recoverable from the name — it is hashed — so
-        // the name stands in for it. A caller that needs the original owner
-        // holds it already; a reconciler only needs to remove the object.
-        ownerId: name,
-        name,
-        running: state === 'running',
-      });
+    for (const family of ['egress', 'preview'] as const) {
+      const stdout = await this.runDocker([
+        'ps',
+        '-a',
+        '--filter',
+        `label=${LAUNCHER_OWNER_LABEL}=${family}`,
+        '--format',
+        '{{.Names}}\t{{.State}}',
+      ]);
+      for (const line of stdout.split('\n').map((row) => row.trim()).filter(Boolean)) {
+        const [name = '', state = ''] = line.split('\t');
+        const found = this.kindOfName(name);
+        if (!found) continue;
+        if (kind && kind !== found) continue;
+        units.push({
+          kind: found,
+          // The owner id is NOT recoverable from the name — it is hashed — so
+          // the name stands in for it. A caller that needs the original owner
+          // holds it already; a reconciler only needs to remove the object.
+          ownerId: name,
+          name,
+          running: state === 'running',
+        });
+      }
     }
     return units;
   }
 
   async reconcileOrphans(): Promise<number> {
     let removed = 0;
+    // CONTAINERS FIRST, across both families: a network with an endpoint
+    // still attached refuses removal, so the reverse order spends the whole
+    // bounded retry budget losing to a container nobody removed.
     for (const unit of await this.listUnits()) {
       await quiet(this.runDocker, ['rm', '-f', unit.name]);
       removed += 1;
     }
-    const stdout = await this.runDocker([
-      'network',
-      'ls',
-      '--filter',
-      `label=${LAUNCHER_OWNER_LABEL}=egress`,
-      '--format',
-      '{{.Name}}',
-    ]);
-    for (const name of stdout.split('\n').map((row) => row.trim()).filter(Boolean)) {
-      const gone = await removeNetworkWithRetry(
-        name,
-        this.runDocker,
-        this.sleep,
-        this.cleanupDeadline(),
-        this.now
-      );
-      if (gone) removed += 1;
+    for (const family of ['egress', 'preview'] as const) {
+      const stdout = await this.runDocker([
+        'network',
+        'ls',
+        '--filter',
+        `label=${LAUNCHER_OWNER_LABEL}=${family}`,
+        '--format',
+        '{{.Name}}',
+      ]);
+      for (const name of stdout.split('\n').map((row) => row.trim()).filter(Boolean)) {
+        const gone = await removeNetworkWithRetry(
+          name,
+          this.runDocker,
+          this.sleep,
+          this.cleanupDeadline(),
+          this.now
+        );
+        if (gone) removed += 1;
+      }
     }
     return removed;
   }

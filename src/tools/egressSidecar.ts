@@ -109,8 +109,8 @@ export async function startEgressSidecar(
     ...(deps.now ? { now: deps.now } : {}),
   });
   const ownerId = opts.runId;
-  const internal = { kind: 'internal', ownerId } as const;
-  const uplink = { kind: 'uplink', ownerId } as const;
+  const internal = { family: 'egress', kind: 'internal', ownerId } as const;
+  const uplink = { family: 'egress', kind: 'uplink', ownerId } as const;
   const network = launcher.networkName(internal);
   const uplinkNetwork = launcher.networkName(uplink);
   const allowlist = opts.allowlist ?? DEFAULT_EGRESS_ALLOWLIST;
@@ -118,12 +118,12 @@ export async function startEgressSidecar(
   // Clean any debris from a previous crashed run with the same id before
   // creating: `docker network create` fails on an existing name, and the
   // failure would be reported as "egress unavailable" for a stale object.
-  await launcher.purgeOwner(ownerId);
+  await launcher.purgeOwner('egress', ownerId);
 
   // Arm hard-exit cleanup before creation too: if stale-object removal raced
   // Docker endpoint teardown, `network create` itself can fail while the old
   // network is still durable and still needs the synchronous fallback.
-  launcher.armHardExitCleanup(ownerId);
+  launcher.armHardExitCleanup('egress', ownerId);
   let proxy;
   try {
     const internalHandle = await launcher.createNetwork(internal);
@@ -149,16 +149,16 @@ export async function startEgressSidecar(
       'failed'
     );
     const internalRemoved = await launcher.removeNetworkBefore(
-      { kind: 'internal', ownerId, name: network },
+      { family: 'egress', kind: 'internal', ownerId, name: network },
       cleanupDeadline
     );
     const uplinkRemoved = await launcher.removeNetworkBefore(
-      { kind: 'uplink', ownerId, name: uplinkNetwork },
+      { family: 'egress', kind: 'uplink', ownerId, name: uplinkNetwork },
       cleanupDeadline
     );
     // If Docker is still tearing down an endpoint, keep the entry registered:
     // process-exit cleanup gets one final synchronous, bounded retry.
-    if (internalRemoved && uplinkRemoved) launcher.disarmHardExitCleanup(ownerId);
+    if (internalRemoved && uplinkRemoved) launcher.disarmHardExitCleanup('egress', ownerId);
     if (isIsolatedGatewayUnsupported(err)) {
       throw new Error(
         'proxied egress requires Docker Engine 28+ for an isolated bridge gateway; refusing to fall back to host-reachable --internal networking',
@@ -185,15 +185,15 @@ export async function startEgressSidecar(
         // tearing its endpoint down. The same attempt/delay bounds are used by
         // the synchronous process-exit cleanup in the launcher.
         const uplinkRemoved = await launcher.removeNetworkBefore(
-          { kind: 'uplink', ownerId, name: uplinkNetwork },
+          { family: 'egress', kind: 'uplink', ownerId, name: uplinkNetwork },
           cleanupDeadline
         );
         const internalRemoved = await launcher.removeNetworkBefore(
-          { kind: 'internal', ownerId, name: network },
+          { family: 'egress', kind: 'internal', ownerId, name: network },
           cleanupDeadline
         );
         if (internalRemoved && uplinkRemoved) {
-          launcher.disarmHardExitCleanup(ownerId);
+          launcher.disarmHardExitCleanup('egress', ownerId);
         } else {
           // Keep the hard-exit fallback armed and allow an explicit second
           // stop() call to retry. Reject explicitly: resolving here told the

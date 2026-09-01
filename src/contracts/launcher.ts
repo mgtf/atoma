@@ -62,9 +62,21 @@ export const launcherOwnerIdSchema = z
  *
  * It holds exactly what a backend implements. A member with no
  * implementation would be a promise the type system makes and the runtime
- * breaks; the preview profiles join it when the preview runtime lands.
+ * breaks.
  */
-export const launcherUnitKindSchema = z.enum(['egress-proxy']);
+export const launcherUnitKindSchema = z.enum([
+  'egress-proxy',
+  'preview-app',
+  'preview-ingress',
+]);
+
+/**
+ * WHOSE objects these are. Two families exist and they must not share a
+ * namespace or a label: a reconciler sweeping orphaned previews must never
+ * remove a live run's egress network, and `dev.atoma.owner` is what tells
+ * them apart.
+ */
+export const launcherFamilySchema = z.enum(['egress', 'preview']);
 
 /**
  * What a network is FOR. `internal` carries no route out and no host gateway;
@@ -77,6 +89,7 @@ export const launcherNetworkKindSchema = z.enum(['internal', 'uplink']);
 
 export const launcherNetworkSpecSchema = z
   .object({
+    family: launcherFamilySchema,
     kind: launcherNetworkKindSchema,
     ownerId: launcherOwnerIdSchema,
   })
@@ -84,6 +97,7 @@ export const launcherNetworkSpecSchema = z
 
 export const launcherNetworkHandleSchema = z
   .object({
+    family: launcherFamilySchema,
     kind: launcherNetworkKindSchema,
     ownerId: launcherOwnerIdSchema,
     /**
@@ -113,7 +127,42 @@ export const egressProxyUnitSpecSchema = z
   })
   .strict();
 
-export const launcherUnitSpecSchema = z.discriminatedUnion('kind', [egressProxyUnitSpecSchema]);
+/**
+ * The application a delivered run produced, running under gVisor.
+ *
+ * The spec carries no image, no mount and no command line. `entry` is a
+ * workspace-relative path the DESCRIPTOR resolved from machine-observed facts,
+ * and the launcher turns it into exactly `node <entry>` — the one start
+ * command a preview will ever run. `workspace` is a handle the launcher itself
+ * issued, never a path the caller chose: that is what keeps "no mount paths
+ * from callers" true while the copy's CONTENT stays the preview's business.
+ */
+export const previewAppUnitSpecSchema = z
+  .object({
+    kind: z.literal('preview-app'),
+    ownerId: launcherOwnerIdSchema,
+    entry: z.string().min(1).max(512),
+    workspace: z.object({ ownerId: launcherOwnerIdSchema, id: z.string().min(1).max(255) }).strict(),
+  })
+  .strict();
+
+/**
+ * The relay in front of that application. It takes nothing but the identity of
+ * what it fronts: its upstream is the app unit of the same owner, which is why
+ * it cannot be pointed anywhere else.
+ */
+export const previewIngressUnitSpecSchema = z
+  .object({
+    kind: z.literal('preview-ingress'),
+    ownerId: launcherOwnerIdSchema,
+  })
+  .strict();
+
+export const launcherUnitSpecSchema = z.discriminatedUnion('kind', [
+  egressProxyUnitSpecSchema,
+  previewAppUnitSpecSchema,
+  previewIngressUnitSpecSchema,
+]);
 
 export const launcherUnitHandleSchema = z
   .object({
@@ -121,6 +170,36 @@ export const launcherUnitHandleSchema = z
     ownerId: launcherOwnerIdSchema,
     /** Engine-side name. Also the hostname its peers reach it by. */
     name: z.string().min(1).max(255),
+    /**
+     * The loopback port the gateway reaches this unit on, when its profile
+     * publishes one. RESOLVED by the launcher, never requested: a caller that
+     * could choose a host port could collide with another preview's, or with
+     * something else on the machine entirely.
+     */
+    hostPort: z.number().int().min(1).max(65535).optional(),
+  })
+  .strict();
+
+/**
+ * Where a unit's bytes live.
+ *
+ * The launcher issues the location and the caller fills it. That split is
+ * deliberate: the CONTENT and its filtering policy belong to the subsystem
+ * that understands the deliverable, while WHERE it lives — and therefore what
+ * gets mounted — stays with the component that does the mounting. When
+ * workspaces become named volumes under a containerised control plane, this
+ * handle keeps its shape and only the backend changes.
+ */
+export const launcherWorkspaceHandleSchema = z
+  .object({
+    ownerId: launcherOwnerIdSchema,
+    id: z.string().min(1).max(255),
+    /**
+     * Where the caller writes. Present only while the backend is host-local;
+     * a volume-backed backend hands back an id the caller streams into
+     * instead. Callers must treat its absence as normal.
+     */
+    hostPath: z.string().min(1).max(4096).optional(),
   })
   .strict();
 
@@ -153,6 +232,8 @@ export type LauncherUnitSpec = z.infer<typeof launcherUnitSpecSchema>;
 export type LauncherUnitHandle = z.infer<typeof launcherUnitHandleSchema>;
 export type LauncherStopReason = z.infer<typeof launcherStopReasonSchema>;
 export type LauncherUnitSummary = z.infer<typeof launcherUnitSummarySchema>;
+export type LauncherFamily = z.infer<typeof launcherFamilySchema>;
+export type LauncherWorkspaceHandle = z.infer<typeof launcherWorkspaceHandleSchema>;
 
 /**
  * Everything a caller may ask of whatever holds engine access.
@@ -183,7 +264,7 @@ export interface ContainerLauncher {
    * would be reported as "egress unavailable" for a stale object. Never
    * throws — a missing object is the desired end state.
    */
-  purgeOwner(ownerId: LauncherOwnerId): Promise<void>;
+  purgeOwner(family: LauncherFamily, ownerId: LauncherOwnerId): Promise<void>;
 
   /**
    * Arm the synchronous, bounded, hard-exit cleanup for one owner.
@@ -197,10 +278,10 @@ export interface ContainerLauncher {
    * Kubernetes `ownerReferences` — implements this as a no-op, which is
    * precisely the kind of difference the swap is meant to absorb.
    */
-  armHardExitCleanup(ownerId: LauncherOwnerId): void;
+  armHardExitCleanup(family: LauncherFamily, ownerId: LauncherOwnerId): void;
 
   /** Disarm it, once every object for that owner is provably gone. */
-  disarmHardExitCleanup(ownerId: LauncherOwnerId): void;
+  disarmHardExitCleanup(family: LauncherFamily, ownerId: LauncherOwnerId): void;
 
   /**
    * Create one network for one owner. Creation only: the caller decides when
@@ -239,6 +320,15 @@ export interface ContainerLauncher {
 
   /** Stop and remove a unit. Safe to call twice; absence is the desired end. */
   stopUnit(handle: LauncherUnitHandle, reason: LauncherStopReason): Promise<void>;
+
+  /**
+   * Issue a place for one owner's bytes, empty. The caller fills it; the
+   * launcher decides where it lives and is the only thing that mounts it.
+   */
+  createWorkspace(ownerId: LauncherOwnerId): Promise<LauncherWorkspaceHandle>;
+
+  /** Remove it and everything in it. Safe to call twice. */
+  removeWorkspace(handle: LauncherWorkspaceHandle): Promise<void>;
 
   /** Every unit this launcher owns, optionally narrowed to one kind. */
   listUnits(kind?: LauncherUnitKind): Promise<LauncherUnitSummary[]>;

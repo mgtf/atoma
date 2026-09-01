@@ -43,12 +43,12 @@ describe('launcher contract shapes', () => {
 
   it('refuses an owner id that could reach into an engine namespace', () => {
     for (const owner of ['', 'a b', 'a/b', 'a;rm', 'x'.repeat(201)]) {
-      expect(launcherNetworkSpecSchema.safeParse({ kind: 'internal', ownerId: owner }).success).toBe(
+      expect(launcherNetworkSpecSchema.safeParse({ family: 'egress', kind: 'internal', ownerId: owner }).success).toBe(
         false
       );
     }
     expect(
-      launcherNetworkSpecSchema.safeParse({ kind: 'internal', ownerId: 'run-4f2c' }).success
+      launcherNetworkSpecSchema.safeParse({ family: 'egress', kind: 'internal', ownerId: 'run-4f2c' }).success
     ).toBe(true);
   });
 
@@ -65,8 +65,8 @@ describe('launcher contract shapes', () => {
 describe('launcher object naming', () => {
   it('is deterministic, and keeps colliding or truncated owners apart', () => {
     const { launcher } = recordingLauncher();
-    expect(launcher.networkName({ kind: 'internal', ownerId: 'run-a' })).toBe(
-      launcher.networkName({ kind: 'internal', ownerId: 'run-a' })
+    expect(launcher.networkName({ family: 'egress', kind: 'internal', ownerId: 'run-a' })).toBe(
+      launcher.networkName({ family: 'egress', kind: 'internal', ownerId: 'run-a' })
     );
     expect(launcherObjectId('run/42')).not.toBe(launcherObjectId('run:42'));
     expect(launcherObjectId('x'.repeat(80) + 'a')).not.toBe(launcherObjectId('x'.repeat(80) + 'b'));
@@ -75,8 +75,8 @@ describe('launcher object naming', () => {
   it('gives the internal network, the uplink and the unit three distinct names', () => {
     const { launcher } = recordingLauncher();
     const names = new Set([
-      launcher.networkName({ kind: 'internal', ownerId: 'run-a' }),
-      launcher.networkName({ kind: 'uplink', ownerId: 'run-a' }),
+      launcher.networkName({ family: 'egress', kind: 'internal', ownerId: 'run-a' }),
+      launcher.networkName({ family: 'egress', kind: 'uplink', ownerId: 'run-a' }),
       launcher.unitName('egress-proxy', 'run-a'),
     ]);
     expect(names.size).toBe(3);
@@ -86,7 +86,7 @@ describe('launcher object naming', () => {
 describe('launcher network creation', () => {
   it('removes the host gateway on the internal network and labels both', async () => {
     const { launcher, calls } = recordingLauncher();
-    const handle = await launcher.createNetwork({ kind: 'internal', ownerId: 'run-a' });
+    const handle = await launcher.createNetwork({ family: 'egress', kind: 'internal', ownerId: 'run-a' });
     const id = launcherObjectId('run-a');
 
     expect(handle.name).toBe(`atoma-egress-${id}`);
@@ -110,7 +110,7 @@ describe('launcher network creation', () => {
 
   it('gives the uplink outbound NAT and never the isolated gateway', async () => {
     const { launcher, calls } = recordingLauncher();
-    await launcher.createNetwork({ kind: 'uplink', ownerId: 'run-a' });
+    await launcher.createNetwork({ family: 'egress', kind: 'uplink', ownerId: 'run-a' });
     expect(calls[0]).not.toContain('--internal');
     expect(calls[0]?.join(' ')).not.toMatch(/gateway_mode/);
   });
@@ -119,8 +119,8 @@ describe('launcher network creation', () => {
 describe('launcher unit start', () => {
   it('bounds the unit, drops privilege, and carries only launcher-derived inputs', async () => {
     const { launcher, calls } = recordingLauncher();
-    const internal = await launcher.createNetwork({ kind: 'internal', ownerId: 'run-a' });
-    const uplink = await launcher.createNetwork({ kind: 'uplink', ownerId: 'run-a' });
+    const internal = await launcher.createNetwork({ family: 'egress', kind: 'internal', ownerId: 'run-a' });
+    const uplink = await launcher.createNetwork({ family: 'egress', kind: 'uplink', ownerId: 'run-a' });
     calls.length = 0;
 
     const unit = await launcher.startUnit(
@@ -165,7 +165,7 @@ describe('launcher purge and reconciliation', () => {
       },
     });
 
-    await expect(launcher.purgeOwner('run-a')).resolves.toBeUndefined();
+    await expect(launcher.purgeOwner('egress', 'run-a')).resolves.toBeUndefined();
     const id = launcherObjectId('run-a');
     expect(calls).toEqual([
       ['rm', '-f', `atoma-proxy-${id}`],
@@ -174,27 +174,164 @@ describe('launcher purge and reconciliation', () => {
     ]);
   });
 
-  it('lists only its own labelled proxies and reports whether they run', async () => {
-    const { launcher } = recordingLauncher((args) =>
-      args[0] === 'ps'
-        ? ['atoma-proxy-abc\trunning', 'atoma-proxy-def\texited', 'someone-elses\trunning'].join('\n')
-        : ''
-    );
+  it('lists both families and names each unit by its own kind', async () => {
+    // The stub answers PER FILTER, because that is how the engine answers:
+    // a sweep that ignored the family label would count every object twice.
+    const { launcher } = recordingLauncher((args) => {
+      if (args[0] !== 'ps') return '';
+      const filter = args[args.indexOf('--filter') + 1] ?? '';
+      if (filter.endsWith('=egress')) {
+        return ['atoma-proxy-abc\trunning', 'someone-elses\trunning'].join('\n');
+      }
+      return ['atoma-preview-app-xyz\trunning', 'atoma-preview-relay-xyz\texited'].join('\n');
+    });
+
     const units = await launcher.listUnits();
-    expect(units.map((u) => u.name)).toEqual(['atoma-proxy-abc', 'atoma-proxy-def']);
-    expect(units.map((u) => u.running)).toEqual([true, false]);
+    expect(units.map((u) => u.kind)).toEqual([
+      'egress-proxy',
+      'preview-app',
+      'preview-ingress',
+    ]);
+    expect(units.map((u) => u.running)).toEqual([true, true, false]);
   });
 
-  it('removes every labelled orphan and counts what it removed', async () => {
+  it('narrows a sweep to one kind', async () => {
+    const { launcher } = recordingLauncher((args) => {
+      if (args[0] !== 'ps') return '';
+      const filter = args[args.indexOf('--filter') + 1] ?? '';
+      return filter.endsWith('=egress') ? 'atoma-proxy-abc\trunning' : 'atoma-preview-app-xyz\trunning';
+    });
+    const units = await launcher.listUnits('preview-app');
+    expect(units.map((u) => u.name)).toEqual(['atoma-preview-app-xyz']);
+  });
+
+  it('removes every labelled orphan of both families, containers first', async () => {
     const { launcher, calls } = recordingLauncher((args) => {
-      if (args[0] === 'ps') return 'atoma-proxy-abc\texited';
-      if (args[0] === 'network' && args[1] === 'ls') return 'atoma-egress-abc\natoma-uplink-abc';
+      const filter = args[args.indexOf('--filter') + 1] ?? '';
+      if (args[0] === 'ps') return filter.endsWith('=egress') ? 'atoma-proxy-abc\texited' : '';
+      if (args[0] === 'network' && args[1] === 'ls') {
+        return filter.endsWith('=egress')
+          ? 'atoma-egress-abc\natoma-uplink-abc'
+          : 'atoma-preview-net-xyz';
+      }
       return '';
     });
-    await expect(launcher.reconcileOrphans()).resolves.toBe(3);
-    expect(calls).toContainEqual(['rm', '-f', 'atoma-proxy-abc']);
-    expect(calls).toContainEqual(['network', 'rm', 'atoma-egress-abc']);
-    expect(calls).toContainEqual(['network', 'rm', 'atoma-uplink-abc']);
+
+    await expect(launcher.reconcileOrphans()).resolves.toBe(4);
+    // A network with an endpoint still attached refuses removal, so the
+    // container must go first or the whole retry budget is spent losing.
+    const removedContainer = calls.findIndex((c) => c[0] === 'rm');
+    const removedNetwork = calls.findIndex((c) => c[0] === 'network' && c[1] === 'rm');
+    expect(removedContainer).toBeLessThan(removedNetwork);
+    expect(calls).toContainEqual(['network', 'rm', 'atoma-preview-net-xyz']);
+  });
+});
+
+describe('launcher preview profiles', () => {
+  function previewLauncher(): { launcher: DockerLauncher; calls: string[][] } {
+    const calls: string[][] = [];
+    const launcher = new DockerLauncher({
+      image: 'worker-image',
+      previewImage: 'preview-image@sha256:abc',
+      previewRuntime: 'runsc',
+      workspaceRoot: '/var/lib/atoma/previews',
+      runDocker: async (args) => {
+        calls.push(args);
+        return args[0] === 'port' ? '127.0.0.1:49154' : '';
+      },
+      waitUntilReady: async () => undefined,
+      sleep: async () => undefined,
+    });
+    return { launcher, calls };
+  }
+
+  it('labels preview objects as previews, never as egress', async () => {
+    const { launcher, calls } = previewLauncher();
+    await launcher.createNetwork({ family: 'preview', kind: 'internal', ownerId: 'prev-1' });
+    const args = calls[0]!;
+    expect(args).toContain(`${LAUNCHER_OWNER_LABEL}=preview`);
+    expect(args.join(' ')).not.toContain('=egress');
+    // A preview network is as isolated as a run's: no host gateway.
+    expect(args).toContain('com.docker.network.bridge.gateway_mode_ipv4=isolated');
+  });
+
+  it('runs the application under gVisor, read-only, non-root and bounded', async () => {
+    const { launcher, calls } = previewLauncher();
+    const net = await launcher.createNetwork({
+      family: 'preview',
+      kind: 'internal',
+      ownerId: 'prev-1',
+    });
+    calls.length = 0;
+
+    await launcher.startUnit(
+      {
+        kind: 'preview-app',
+        ownerId: 'prev-1',
+        entry: 'server.js',
+        workspace: { ownerId: 'prev-1', id: launcherObjectId('prev-1') },
+      },
+      [net]
+    );
+
+    const args = calls[0]!;
+    expect(args[args.indexOf('--runtime') + 1]).toBe('runsc');
+    expect(args).toContain('--read-only');
+    expect(args[args.indexOf('--cap-drop') + 1]).toBe('ALL');
+    expect(args[args.indexOf('--security-opt') + 1]).toBe('no-new-privileges');
+    expect(args[args.indexOf('--user') + 1]).not.toBe('0:0');
+    expect(args[args.indexOf('--memory') + 1]).toBe(args[args.indexOf('--memory-swap') + 1]);
+    expect(args).toContain('--pids-limit');
+    // The start command is EXACTLY `node <entry>` — never a shell.
+    expect(args.slice(-3)).toEqual(['preview-image@sha256:abc', 'node', 'server.js']);
+    // Exactly one mount, and it is the launcher-owned workspace.
+    const mounts = args.filter((a, i) => args[i - 1] === '-v');
+    expect(mounts).toEqual([`/var/lib/atoma/previews/${launcherObjectId('prev-1')}:/workspace`]);
+    // The environment is the five the profile names, and nothing inherited.
+    const env = args.filter((a, i) => args[i - 1] === '-e');
+    expect(env.map((e) => e.split('=')[0]).sort()).toEqual([
+      'ATOMA_DATA_DIR',
+      'HOME',
+      'HOST',
+      'NODE_ENV',
+      'PORT',
+    ]);
+    expect(env).toContain('PORT=8080');
+  });
+
+  it('publishes the relay on loopback only and reads back the assigned port', async () => {
+    const { launcher, calls } = previewLauncher();
+    const net = await launcher.createNetwork({
+      family: 'preview',
+      kind: 'internal',
+      ownerId: 'prev-1',
+    });
+    calls.length = 0;
+
+    const relay = await launcher.startUnit({ kind: 'preview-ingress', ownerId: 'prev-1' }, [net]);
+
+    const args = calls[0]!;
+    const publish = args[args.indexOf('-p') + 1];
+    expect(publish).toBe('127.0.0.1::8081');
+    // The relay's upstream is the app of the SAME owner, resolved here rather
+    // than accepted, which is what makes it impossible to point elsewhere.
+    expect(args).toContain(`ATOMA_PREVIEW_UPSTREAM_HOST=${launcher.unitName('preview-app', 'prev-1')}`);
+    expect(args).toContain('ATOMA_PREVIEW_UPSTREAM_PORT=8080');
+    expect(args.slice(-3)).toEqual(['worker-image', 'node', '/app/dist/tools/previewIngress.js']);
+    expect(relay.hostPort).toBe(49154);
+  });
+
+  it('purges a preview owner without touching a run of the same name', async () => {
+    const { launcher, calls } = previewLauncher();
+    await launcher.purgeOwner('preview', 'prev-1');
+    const flat = calls.map((c) => c.join(' '));
+    expect(flat.some((c) => c.includes('atoma-egress-'))).toBe(false);
+    expect(flat.some((c) => c.includes('atoma-uplink-'))).toBe(false);
+    expect(flat).toContain(`network rm ${launcher.networkName({ family: 'preview', kind: 'internal', ownerId: 'prev-1' })}`);
+    // The relay goes before the app: it is what holds the network open and
+    // what a member is still connected to.
+    expect(flat[0]).toContain('atoma-preview-relay-');
+    expect(flat[1]).toContain('atoma-preview-app-');
   });
 });
 
@@ -210,7 +347,7 @@ describe('launcher network removal', () => {
       sleep: async () => undefined,
     });
     await expect(
-      launcher.removeNetwork({ kind: 'internal', ownerId: 'run-a', name: 'atoma-egress-x' })
+      launcher.removeNetwork({ family: 'egress', kind: 'internal', ownerId: 'run-a', name: 'atoma-egress-x' })
     ).resolves.toBe(true);
     expect(attempts).toBe(1);
   });
@@ -224,7 +361,7 @@ describe('launcher network removal', () => {
       sleep: async () => undefined,
     });
     await expect(
-      launcher.removeNetwork({ kind: 'internal', ownerId: 'run-a', name: 'atoma-egress-x' })
+      launcher.removeNetwork({ family: 'egress', kind: 'internal', ownerId: 'run-a', name: 'atoma-egress-x' })
     ).resolves.toBe(false);
   });
 
@@ -242,13 +379,13 @@ describe('launcher network removal', () => {
     const deadline = clock + 3_500;
     await expect(
       launcher.removeNetworkBefore(
-        { kind: 'internal', ownerId: 'run-a', name: 'atoma-egress-x' },
+        { family: 'egress', kind: 'internal', ownerId: 'run-a', name: 'atoma-egress-x' },
         deadline
       )
     ).resolves.toBe(false);
     await expect(
       launcher.removeNetworkBefore(
-        { kind: 'uplink', ownerId: 'run-a', name: 'atoma-uplink-x' },
+        { family: 'egress', kind: 'uplink', ownerId: 'run-a', name: 'atoma-uplink-x' },
         deadline
       )
     ).resolves.toBe(false);
@@ -258,7 +395,10 @@ describe('launcher network removal', () => {
 describe('launcher hard-exit registry', () => {
   it('force-removes the unit, every attached container, then both networks', () => {
     const registry = new LauncherExitRegistry();
-    registry.track('atoma-egress-run', 'atoma-proxy-run', 'atoma-uplink-run');
+    registry.track('egress:run', {
+      containers: ['atoma-proxy-run'],
+      networks: ['atoma-egress-run', 'atoma-uplink-run'],
+    });
     const calls: string[][] = [];
     const runSync = (args: string[]): string => {
       calls.push(args);
@@ -276,8 +416,8 @@ describe('launcher hard-exit registry', () => {
 
   it('arms and disarms by owner, so a caller needs no handle to be safe', () => {
     const { launcher } = recordingLauncher();
-    expect(() => launcher.armHardExitCleanup('run-a')).not.toThrow();
-    expect(() => launcher.disarmHardExitCleanup('run-a')).not.toThrow();
+    expect(() => launcher.armHardExitCleanup('egress', 'run-a')).not.toThrow();
+    expect(() => launcher.disarmHardExitCleanup('egress', 'run-a')).not.toThrow();
   });
 });
 

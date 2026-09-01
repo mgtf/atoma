@@ -107,6 +107,61 @@ egress profile and none may be relaxed:
   `--internal` network read each other's HTTP servers, so a shared network
   hands one tenant's workspace to the next.
 
+## Two families, one namespace each
+
+`dev.atoma.owner` is `egress` or `preview`, and every object carries it. The
+families must not share a namespace: a sweep collecting orphaned previews must
+never remove a live run's egress network. A reconciler therefore queries once
+per family, and `listUnits` reads a unit's kind from its name prefix.
+
+Object names are deterministic from the owner id and are **wire contracts
+between containers**, not cosmetics: the relay resolves its upstream by the app
+unit's name, and the run reaches its proxy by the proxy's. Renaming one is a
+change to what two containers agree on.
+
+Sweeps and per-owner teardown remove **containers before networks**. A network
+with an endpoint still attached refuses removal, so the reverse order spends
+the entire bounded retry budget losing to a container nobody removed. Within a
+preview, the relay goes before the app: it is what holds the network open and
+what a member is still connected to.
+
+## The preview profiles
+
+- **`preview-app`** runs the delivered application: pinned image by digest,
+  `--runtime=runsc`, non-root, read-only root filesystem, `--cap-drop ALL`,
+  `no-new-privileges`, memory equal to memory-swap (otherwise the cap is
+  escapable by swapping), bounded CPU/pids/nofile, two bounded tmpfs (`/tmp`
+  and `/data`, both dying with the container, which is what makes a restart
+  begin again from the immutable copy), rotated logs, and **exactly five**
+  environment variables — never a spread of the parent environment, whose
+  variables are credentials and store paths. One mount: the launcher-issued
+  workspace. The command is exactly `node <entry>`, never a shell.
+- **`preview-ingress`** runs the relay. Its upstream is resolved HERE from the
+  app unit of the same owner, which is what makes it impossible to point
+  anywhere else. It publishes on **loopback only**, on an OS-assigned port the
+  launcher reads back — a caller that could choose a host port could collide
+  with another preview's, or with anything else on the machine.
+- `runsc` is the default and production requires it. Whether a dev runtime is
+  admissible is the CALLER's decision, made when it constructs the launcher;
+  an unset runtime here would be a bug, not a permission.
+
+A mount string is a wire value for the engine, and the engine speaks POSIX, so
+a host path is converted rather than passed through — a developer host with
+backslash separators would otherwise hand Docker one unreadable component.
+
+## Workspaces: the launcher issues, the caller fills
+
+`createWorkspace` hands back a location; the preview subsystem writes the
+filtered copy into it. That split keeps "no mount paths from callers" true
+while the copy's CONTENT and its filtering policy stay with the subsystem that
+understands the deliverable. The directory is recreated empty every time: one
+left by a crashed predecessor would be mounted into the next generation, which
+is how a preview would serve bytes the run that owns it never produced.
+
+When workspaces become named volumes under a containerised control plane, the
+handle keeps its shape and only the backend changes — which is why `hostPath`
+is optional on it and callers must treat its absence as normal.
+
 ## Ordering belongs to the caller
 
 `purgeOwner`, `createNetwork`, `startUnit` and `removeNetwork` are primitives.
