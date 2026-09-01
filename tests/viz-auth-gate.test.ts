@@ -210,7 +210,19 @@ async function startFakeProvider(input: {
         }
         stats.verifiedPkce++;
         res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ access_token: 'fake-access-token' }));
+        // EXPIRING TOKENS, because that is the only supported GitHub App
+        // configuration: with "Expire user authorization tokens" disabled
+        // GitHub sends no `expires_in` and no refresh token, and
+        // `persistGitHubUserTokens` throws on every callback
+        // (src/github/tokens.ts). A fake that omits them modelled a
+        // deployment that cannot work, and silently left every logged-in
+        // viewer without the stored authorization the connect flow needs.
+        res.end(JSON.stringify({
+          access_token: 'fake-access-token',
+          expires_in: 28_800,
+          refresh_token: 'fake-refresh-token',
+          refresh_token_expires_in: 15_811_200,
+        }));
       });
       return;
     }

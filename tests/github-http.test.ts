@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AUTH_TABLES_DDL, type Viewer } from '../src/auth/store.js';
-import { GITHUB_COPY, startGitHubConnect } from '../src/github/http.js';
+import { completeGitHubSetup, GITHUB_COPY, startGitHubConnect } from '../src/github/http.js';
+import type { GitHubAppClient, GitHubInstallationView } from '../src/github/client.js';
 import {
   GitHubStore,
   isGitHubConnectState,
@@ -112,6 +113,143 @@ describe('GitHub connect HTTP', () => {
       status: 403,
       body: { error: GITHUB_COPY.adminRequired },
     });
+  });
+});
+
+/**
+ * THE SUBSTITUTION CAPTURE, and the hop that makes closing it possible.
+ *
+ * `/auth/github/setup` receives `installation_id` from a URL the viewer can
+ * type, and the connect state binds a principal and an org — never an
+ * installation, the table has no such column. Linking from the App-JWT view
+ * alone therefore proved only "some installation of this App", so an
+ * authenticated admin could paste a stranger's id onto their own state and
+ * bind it: the cross-org guard fires only once a row exists, so the first
+ * binder wins, permanently, and nothing in the product can unbind it. Open
+ * signup makes org:admin free, and installation ids are not secret.
+ */
+describe('the setup callback verifies the installation against the connecting user', () => {
+  const STRANGER: GitHubInstallationView = Object.freeze({
+    installationId: '99887766',
+    appId: '123456',
+    accountId: '424242',
+    accountLogin: 'someone-else',
+    targetType: 'Organization',
+    repositorySelection: 'all',
+    permissions: Object.freeze({ contents: 'write', administration: 'write' }),
+    suspended: false,
+  });
+
+  function mintedState(viewer: Viewer): string {
+    const state = newGitHubConnectState();
+    github.createConnectState({
+      state,
+      principalId: viewer.principalId,
+      orgId: viewer.orgId,
+      ttlMs: 60_000,
+    });
+    return state;
+  }
+
+  /** The App-JWT view SUCCEEDS — that is exactly what the old code trusted. */
+  function clientRefusingUserView(): GitHubAppClient {
+    return {
+      getAppInstallation: async () => STRANGER,
+      verifyInstallation: async () => {
+        throw new Error('GitHub installation is not accessible to the authenticated user');
+      },
+    } as unknown as GitHubAppClient;
+  }
+
+  it('writes nothing when the viewer cannot administer the installation', async () => {
+    const result = await completeGitHubSetup({
+      viewer: owner,
+      github,
+      client: clientRefusingUserView(),
+      state: mintedState(owner),
+      installationId: STRANGER.installationId,
+      setupAction: 'install',
+      resolveUserAccessToken: async () => 'gho_attacker',
+      homePath: '/',
+    });
+
+    // The refusal itself matters less than the absence of a row: this is the
+    // assertion that fails against the code this test was written for.
+    expect(github.getInstallation(STRANGER.installationId)).toBeNull();
+    expect(result.kind).toBe('html');
+    if (result.kind !== 'html') return;
+    expect(result.status).toBeGreaterThanOrEqual(400);
+  });
+
+  it('links, and journals which door it came through, when the user can administer it', async () => {
+    const events: Array<Record<string, unknown>> = [];
+    const client = {
+      getAppInstallation: async () => STRANGER,
+      verifyInstallation: async () => STRANGER,
+    } as unknown as GitHubAppClient;
+
+    const result = await completeGitHubSetup({
+      viewer: owner,
+      github,
+      client,
+      state: mintedState(owner),
+      installationId: STRANGER.installationId,
+      setupAction: 'install',
+      resolveUserAccessToken: async () => 'gho_owner',
+      homePath: '/',
+      events: (event) => events.push(event),
+    });
+
+    expect(result).toEqual({ kind: 'redirect', location: '/' });
+    const linked = github.getInstallation(STRANGER.installationId);
+    expect(linked?.orgId).toBe(owner.orgId);
+    expect(linked?.status).toBe('active');
+    // `via` is what lets an operator tell an install from an adoption later.
+    const [event] = events;
+    expect(event?.['kind']).toBe('github.installation_linked');
+    expect((event?.['detail'] as Record<string, unknown>)['via']).toBe('setup');
+  });
+
+  it('refuses a suspended installation rather than binding a dead one', async () => {
+    const suspended = { ...STRANGER, suspended: true };
+    const client = {
+      getAppInstallation: async () => suspended,
+      verifyInstallation: async () => suspended,
+    } as unknown as GitHubAppClient;
+
+    const result = await completeGitHubSetup({
+      viewer: owner,
+      github,
+      client,
+      state: mintedState(owner),
+      installationId: suspended.installationId,
+      setupAction: 'install',
+      resolveUserAccessToken: async () => 'gho_owner',
+      homePath: '/',
+    });
+
+    expect(result).toEqual({ kind: 'html', status: 409, body: GITHUB_COPY.suspended });
+    expect(github.getInstallation(suspended.installationId)).toBeNull();
+  });
+
+  /**
+   * The token is a PRECONDITION of connecting, not a consequence: a flow whose
+   * callback could not verify must not start. An ordinary GitHub login already
+   * stores the authorization, so this hop is only ever seen by an admin who
+   * signed in with another provider.
+   */
+  it('sends a viewer with no stored GitHub authorization to authorize first', () => {
+    const result = startGitHubConnect({
+      viewer: owner,
+      github,
+      config: config(),
+      authorizePath: '/auth/github/authorize',
+    });
+    expect(result).toEqual({ kind: 'redirect', location: '/auth/github/authorize' });
+    // And it costs no connect state: nothing was started.
+    expect(
+      db.prepare('SELECT COUNT(*) AS n FROM github_connect_states').get()
+    ).toEqual({ n: 0 });
   });
 });
 

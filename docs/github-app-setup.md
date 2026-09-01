@@ -202,13 +202,23 @@ GitHub not at all.
 4. GitHub returns your browser to the Setup URL, which reads the installation
    with an App JWT and links it to your organisation.
 
-**If the installation targets a personal account, choose "All repositories".**
-The repository is created with a user-to-server token, and a repository outside
-the installation's scope is unreachable by the installation token that drives
-every write afterwards — so publication would fail immediately after a
-successful creation. (GitHub documents the auto-add behaviour for App-created
-repositories poorly; "All repositories" is correct either way, which is why it
-is the recommendation.)
+**Prefer "All repositories", especially for a personal-account installation.**
+The reasoning, and its limits: a project's repository is created at publication
+time, so it cannot be pre-selected — it does not exist yet. On the
+personal-account branch it is created with a *user-to-server* token
+([`publisher.ts:232-235`](../src/projects/publisher.ts#L232)) while every write
+afterwards uses the *installation* token
+([`publisher.ts:345`](../src/projects/publisher.ts#L345)), and an installation
+token cannot reach a repository outside its installation's scope.
+
+Whether GitHub adds a newly created repository to the installation on that
+branch is **not something this document can assert**: the behaviour is
+documented for App-created repositories without distinguishing the token that
+created them, and an account observed on 2026-09-01 had published successfully
+while scoped to selected repositories. So treat "All repositories" as the
+margin that removes a question, not as a proven requirement. If you keep a
+narrow scope and publication fails on the first write after a repository is
+created, this is the first thing to widen.
 
 A reachable webhook URL is **not** required for any of this. Installations link,
 projects are created, and artifacts publish with deliveries never arriving —
@@ -248,7 +258,8 @@ still mandatory *configuration*, it is simply never exercised.
 | `GitHub user access token has no expiry` | *Expire user authorization tokens* is disabled on the App |
 | `GitHub installation token lacks required publish permissions`, or an opaque 422 when minting a token | Administration and/or Contents write is not granted, or not yet accepted by the installation |
 | `repository creation was refused (HTTP 422)` | an org setting forbids creation or that visibility, or the name is taken outside the installation's scope |
-| publication fails on the first write after a successful creation | a personal-account installation scoped to selected repositories |
+| publication fails on the first write after a successful creation | most likely an installation scoped to selected repositories, which a just-created repository cannot be in — widen it to all repositories |
+| `connect a GitHub App installation first`, and Connect GitHub only ever shows you GitHub's "Configure" page | the App is already installed on that account, so GitHub never returns the browser to the Setup URL and no installation row is written |
 
 ## A note for maintainers
 

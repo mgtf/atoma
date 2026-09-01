@@ -554,6 +554,13 @@ interface ProjectsRuntime {
   readonly githubStore: GitHubStore;
   readonly githubConfig: GitHubAppConfig | null;
   readonly githubClient: GitHubAppClient | null;
+  /**
+   * ONE construction of the viewer-token resolver, shared by the publisher and
+   * by the setup callback that must corroborate an untrusted `installation_id`
+   * against the connecting user. Null only when there is no GitHub login
+   * provider, in which case no user token can exist to resolve.
+   */
+  readonly resolveUserAccessToken: ((principalId: string) => Promise<string>) | null;
 }
 
 const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
@@ -590,21 +597,23 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
     : null;
   const githubProvider = AUTH_RUNTIME.providers.find((provider) => provider.id === 'github');
   const appConfig = githubConfig;
+  const resolveUserAccessToken =
+    appConfig && githubProvider
+      ? (principalId: string): Promise<string> =>
+          resolveGitHubUserAccessToken({
+            github: githubStore,
+            config: appConfig,
+            provider: githubProvider,
+            principalId,
+          })
+      : null;
   const publisher = appConfig && githubClient
     ? new GitHubPublisher({
         client: githubClient,
         github: githubStore,
         store: projectStore,
         events: emit,
-        resolveUserAccessToken: githubProvider
-          ? (principalId) =>
-              resolveGitHubUserAccessToken({
-                github: githubStore,
-                config: appConfig,
-                provider: githubProvider,
-                principalId,
-              })
-          : undefined,
+        ...(resolveUserAccessToken ? { resolveUserAccessToken } : {}),
       })
     : undefined;
   const coordinator = new ProjectRunCoordinator({
@@ -695,7 +704,15 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
     github: githubStore,
     events: emit,
   });
-  return { store: projectStore, projects, coordinator, githubStore, githubConfig, githubClient };
+  return {
+    store: projectStore,
+    projects,
+    coordinator,
+    githubStore,
+    githubConfig,
+    githubClient,
+    resolveUserAccessToken,
+  };
 })();
 
 /**
@@ -1692,6 +1709,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
             installationId: url.searchParams.get('installation_id'),
             client: PROJECTS_RUNTIME.githubClient,
             homePath: '/',
+            events: emit,
           }),
           [clearCookie(OAUTH_TX_COOKIE, AUTH_RUNTIME.secureCookies, '/auth')]
         );
@@ -1949,6 +1967,11 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           viewer,
           github: PROJECTS_RUNTIME.githubStore,
           config: PROJECTS_RUNTIME.githubConfig,
+          // Send an admin with no stored GitHub authorization to acquire one
+          // first: the setup callback cannot verify the installation without
+          // their token, and a flow whose callback cannot verify must not
+          // start. Passing the path is what arms that hop.
+          authorizePath: '/auth/github/authorize',
         })
       );
       return;
@@ -1961,7 +1984,11 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         sendAuthHtml(res, 401, githubNoticePage(GITHUB_COPY.authenticationRequired));
         return;
       }
-      if (!PROJECTS_RUNTIME?.githubConfig || !PROJECTS_RUNTIME.githubClient) {
+      if (
+        !PROJECTS_RUNTIME?.githubConfig ||
+        !PROJECTS_RUNTIME.githubClient ||
+        !PROJECTS_RUNTIME.resolveUserAccessToken
+      ) {
         sendAuthHtml(res, 503, githubNoticePage(GITHUB_COPY.notConfigured));
         return;
       }
@@ -1974,7 +2001,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           state: url.searchParams.get('state'),
           installationId: url.searchParams.get('installation_id'),
           setupAction: url.searchParams.get('setup_action'),
-          authorizePath: '/auth/github/authorize',
+          resolveUserAccessToken: PROJECTS_RUNTIME.resolveUserAccessToken,
           homePath: '/',
           events: emit,
         })

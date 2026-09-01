@@ -22,11 +22,32 @@ Neighbours:
   hard requirements, and what is recoverable — is
   [`docs/github-app-setup.md`](../../docs/github-app-setup.md); keep it in step
   with `GITHUB_PUBLISH_PERMISSIONS` and `snapshotGitHubAppConfig`.
+- `bindInstallation` IS THE ONE PLACE AN INSTALLATION BECOMES AN
+  ORGANISATION'S, and both doors — the setup callback and the authorize
+  callback — route through it. They did not, and they disagreed: setup checked
+  the role and wrote no audit row, authorize wrote no audit row and checked NO
+  role, and neither refused a suspended installation though the client has
+  always parsed `suspended`. Its caller must pass a view obtained from
+  `verifyInstallation`, never from `getAppInstallation` alone.
+- THE VIEW MUST BE CORROBORATED AGAINST THE CONNECTING USER, and that is a
+  security property, not tidiness. `installation_id` reaches
+  `/auth/github/setup` from a URL the viewer can type, and the connect state
+  binds a principal and an org — the table has no installation column. Linking
+  from the App-JWT view alone therefore proved only "some installation of this
+  App", so an authenticated admin could put a stranger's id on their own state
+  and capture it: the cross-org guard fires only once a row exists, first
+  binder wins, and nothing in the product can unbind. Installation ids are not
+  secret and open signup makes `org:admin` free.
+  `startGitHubConnect` therefore REFUSES TO START a flow whose callback could
+  not verify: no stored user authorization means a redirect to the authorize
+  path first. Almost nobody sees that hop — an ordinary GitHub login already
+  stores one — and a test proves the ordinary admin still goes straight to
+  GitHub.
 - TWO GITHUB SETTINGS ARE LOAD-BEARING AND NEITHER IS OBVIOUS. *Request user
   authorization (OAuth) during installation* must stay OFF: it removes the
-  Setup URL field, which is the only place `linkInstallation` binds an
-  installation to an organisation, and the post-install arrival on
-  `/auth/callback` is refused because `startGitHubConnect` mints no tx cookie.
+  Setup URL field, which is where GitHub returns the browser after a real
+  install, and the post-install arrival on `/auth/callback` is refused because
+  `startGitHubConnect` mints no tx cookie.
   *Expire user authorization tokens* must stay ENABLED: `persistGitHubUserTokens`
   throws on a null `expires_in`, so the personal-account branch dies at every
   connect. A REACHABLE webhook URL, by contrast, is optional — nothing on the
