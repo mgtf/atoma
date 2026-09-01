@@ -17,7 +17,22 @@ Neighbours:
 - The optional GitHub App (`ATOMA_GITHUB_APP_*`) is a separate install from
   GitHub login: register setup at `/auth/github/setup` and webhooks at
   `/webhooks/github`. Repositories are created only after a delivered,
-  validated artifact manifest, and a retry never creates a second repo.
+  validated artifact manifest, and a retry never creates a second repo. The
+  operator procedure — the three repository permissions, the settings that are
+  hard requirements, and what is recoverable — is
+  [`docs/github-app-setup.md`](../../docs/github-app-setup.md); keep it in step
+  with `GITHUB_PUBLISH_PERMISSIONS` and `snapshotGitHubAppConfig`.
+- TWO GITHUB SETTINGS ARE LOAD-BEARING AND NEITHER IS OBVIOUS. *Request user
+  authorization (OAuth) during installation* must stay OFF: it removes the
+  Setup URL field, which is the only place `linkInstallation` binds an
+  installation to an organisation, and the post-install arrival on
+  `/auth/callback` is refused because `startGitHubConnect` mints no tx cookie.
+  *Expire user authorization tokens* must stay ENABLED: `persistGitHubUserTokens`
+  throws on a null `expires_in`, so the personal-account branch dies at every
+  connect. A REACHABLE webhook URL, by contrast, is optional — nothing on the
+  connect or publish path reads a delivery; without one an installation row
+  simply never leaves `active`, since status mutation lives only in
+  `recordWebhookDelivery` and there is no reconciliation poll.
 - THE GIT DATA API CANNOT START A REPOSITORY, and every publication path here
   used to begin with it. Measured against real GitHub on 2026-08-23, in a
   repository created moments earlier: `POST /git/blobs` answers

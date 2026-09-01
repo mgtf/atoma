@@ -350,7 +350,10 @@ chain); `X-Forwarded-For` is ignored by default.
 An optional GitHub App (`ATOMA_GITHUB_APP_ID`, slug, private key, webhook
 secret and token encryption key) lets an org:admin connect an installation
 separately from login. Register setup at `${origin}/auth/github/setup` and
-webhooks at `${origin}/webhooks/github`. Admitted members can then create
+webhooks at `${origin}/webhooks/github` —
+[`docs/github-app-setup.md`](docs/github-app-setup.md) is the full procedure,
+including the three repository permissions to grant and the two App settings
+that are hard requirements. Admitted members can then create
 organisation-scoped projects and start runs; a delivered, validated artifact
 manifest is published into one idempotent GitHub repository. Gated `/api/runs`
 lists that organisation's project traces from
