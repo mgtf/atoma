@@ -376,6 +376,11 @@ const PUSH_ROUTE_SOURCES: Record<PlatformEventKind, PushRouteSource | null> = {
   },
   'push.subscribed': null,
   'push.unsubscribed': null,
+  // A preview is something a member is watching while they watch it. A push
+  // would arrive on the device already showing the thing it is about.
+  'preview.started': null,
+  'preview.stopped': null,
+  'preview.failed': null,
 };
 
 /** Every consumer sees a total per-locale table; source omissions mean EN fallback. */

@@ -80,6 +80,8 @@ import { ProjectStore } from '../projects/store.js';
 import { DEFAULT_PROJECTS_ROOT, ProjectRunCoordinator } from '../projects/coordinator.js';
 import { GitHubPublisher } from '../projects/publisher.js';
 import { ProjectHttpError, ProjectService, roleAtLeast } from '../projects/service.js';
+import { PreviewStore } from '../preview/store.js';
+import { recordDeliveredPreview } from '../preview/service.js';
 import { PushStore } from './push/store.js';
 import { PushNotifier } from './push/notifier.js';
 import {
@@ -616,11 +618,19 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
         ...(resolveUserAccessToken ? { resolveUserAccessToken } : {}),
       })
     : undefined;
+  // Same consolidated product store, opened through its own DDL constant.
+  const previewStore = PreviewStore.open(dbPath);
   const coordinator = new ProjectRunCoordinator({
     store: projectStore,
     dbPath,
     projectsRoot: PROJECTS_ROOT,
     ...(publisher ? { publisher } : {}),
+    // Describe the deliverable while the workspace is still this run's. The
+    // adapter stays one call wide; `src/preview/service.ts` owns what a
+    // preview is.
+    describeDeliveredPreview: (subject) => {
+      recordDeliveredPreview(previewStore, subject);
+    },
     // Accounts choose their own per-tier models in Settings; without a gate
     // there are no accounts and the operator's host pins are the only pins.
     ...(AUTH?.store
@@ -687,6 +697,14 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
   // drivers could ever move. Recover them BEFORE any new run can start,
   // and say so — silent reaping hides the crash from the operator.
   const recovered = coordinator.reconcileInterrupted();
+  // Previews die with the process that launched them, so a row left in a live
+  // state describes containers that no longer exist. Same boot, same rule.
+  const recoveredPreviews = previewStore.reconcileInterrupted();
+  if (recoveredPreviews > 0) {
+    process.stderr.write(
+      `[atoma viz] recovered ${recoveredPreviews} interrupted preview(s) after a restart\n`
+    );
+  }
   if (recovered.runs > 0 || recovered.publications > 0) {
     process.stderr.write(
       `[atoma viz] recovered interrupted project state: ${recovered.runs} run(s) and ${recovered.publications} publication(s) marked failed\n`

@@ -129,8 +129,38 @@ export interface ProjectCoordinatorOptions {
    * `onRunFinished`.
    */
   readonly onSubscriptionTransport?: (info: SubscriptionTransportUse) => void;
+  /**
+   * Describe the delivered workspace for the result preview, at delivery.
+   *
+   * A NARROW COLLABORATOR, like `publisher` and `onRunFinished`, and for the
+   * same reason: the coordinator owns when a run is delivered, not what a
+   * preview is. It supplies the identity and the workspace it already holds;
+   * the caller classifies and stores.
+   *
+   * WHY AT DELIVERY AND NOT ON DEMAND. The workspace is the seed of the next
+   * run, so what it holds is a fact about THIS run only while this run is the
+   * latest; and a classification computed per request would probe the
+   * filesystem on a route a browser polls. Deciding once, here, is what lets
+   * unavailability carry a stable reason.
+   *
+   * FAIL-OPEN, and that is not a shrug: a preview is a convenience over work
+   * that is already delivered and already paid for. This repo has measured
+   * what the other choice costs — a trace-size cap recorded delivered run
+   * `2857a579` as failed and erased $0.84 of stats — so nothing on this path
+   * may downgrade a delivered run. A throw is caught and reported to stderr,
+   * and the missing row reads as `legacy-run`, which is exactly what it is.
+   */
+  readonly describeDeliveredPreview?: (input: DeliveredPreviewSubject) => void;
   readonly cwd?: string;
   readonly timeoutMs?: number;
+}
+
+/** What the coordinator knows about a delivered run's deliverable. */
+export interface DeliveredPreviewSubject {
+  readonly orgId: string;
+  readonly projectId: string;
+  readonly projectRunId: string;
+  readonly workspaceRoot: string;
 }
 
 /** One run allowed through the subscription-transport door. */
@@ -921,6 +951,7 @@ export class ProjectRunCoordinator {
   ) => string | null;
   private readonly platformAdmins?: (principalId: string) => boolean;
   private readonly onSubscriptionTransport?: (info: SubscriptionTransportUse) => void;
+  private readonly describeDeliveredPreview?: (input: DeliveredPreviewSubject) => void;
   private readonly cwd: string;
   private readonly timeoutMs: number;
   private readonly active = new Map<string, ActiveRun>();
@@ -941,6 +972,9 @@ export class ProjectRunCoordinator {
     if (options.platformAdmins) this.platformAdmins = options.platformAdmins;
     if (options.onSubscriptionTransport) {
       this.onSubscriptionTransport = options.onSubscriptionTransport;
+    }
+    if (options.describeDeliveredPreview) {
+      this.describeDeliveredPreview = options.describeDeliveredPreview;
     }
     this.cwd = options.cwd ?? repoRoot();
     this.timeoutMs = projectRunTimeoutMs(this.hostEnv, options.timeoutMs);
@@ -1246,6 +1280,25 @@ export class ProjectRunCoordinator {
         built.manifest
       );
       if (!completed) throw new Error('project run disappeared before artifact persistence');
+      // BEFORE publication and AFTER the run is durably delivered, in its own
+      // guard. The surrounding catch only repairs a row that is still
+      // `running`, so a throw from here would be swallowed silently and the
+      // run would stay delivered with no preview and no explanation; the
+      // explicit stderr line is that explanation.
+      if (this.describeDeliveredPreview) {
+        try {
+          this.describeDeliveredPreview({
+            orgId: reservedRun.orgId,
+            projectId: reservedRun.projectId,
+            projectRunId: reservedRun.projectRunId,
+            workspaceRoot: reservedRun.hostPaths.workspacePath,
+          });
+        } catch (error) {
+          process.stderr.write(
+            `[atoma projects] preview descriptor unavailable for ${reservedRun.projectRunId}: ${String(error)}\n`
+          );
+        }
+      }
       if (this.publisher) {
         await this.publisher.publish({
           project,

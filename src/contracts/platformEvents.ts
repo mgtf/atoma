@@ -125,6 +125,22 @@ export const platformEventKindSchema = z.enum([
   'push.subscribed',
   'push.unsubscribed',
   /**
+   * A member opened, stopped, or failed to open the application a delivered
+   * run produced. JOURNAL ONLY — `PUSH_ROUTES` maps all three to `null`: a
+   * preview is a thing the member is looking at while they look at it, so a
+   * notification about it would arrive while they are already there.
+   *
+   * The rows carry identity, kind, generation and a stable reason, and never
+   * a token, a grant, a URL, a host path, application output or a container
+   * log. `preview.failed` is a WARNING rather than an error: the deliverable
+   * is delivered and published, and only the convenience over it did not come
+   * up — the opposite of `publication.failed`, where the artefact itself is
+   * unreachable.
+   */
+  'preview.started',
+  'preview.stopped',
+  'preview.failed',
+  /**
    * A platform admin broadcast an announcement to subscribers. The ONLY
    * kind whose copy is written by a human at send time rather than frozen
    * in `PUSH_ROUTES`, which is why the row carries the approved text for
@@ -296,6 +312,12 @@ export const PLATFORM_EVENT_SEVERITY: Record<PlatformEventKind, PlatformEventSev
   'platform.announcement': 'security',
   'push.subscribed': 'info',
   'push.unsubscribed': 'info',
+  'preview.started': 'info',
+  'preview.stopped': 'info',
+  // The deliverable is delivered; only the convenience over it failed to come
+  // up. That is a warning, unlike `publication.failed`, where the artefact
+  // itself never reached the tenant's repository.
+  'preview.failed': 'warning',
 };
 
 export function severityForKind(kind: PlatformEventKind): PlatformEventSeverity {

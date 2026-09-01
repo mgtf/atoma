@@ -25,6 +25,8 @@ import {
   SECRET_ENCRYPTION_ENV,
 } from '../auth/secretEncryption.js';
 import { isSubscriptionTransport, ProjectRunCoordinator } from '../projects/coordinator.js';
+import { PreviewStore } from '../preview/store.js';
+import { recordDeliveredPreview } from '../preview/service.js';
 import { GitHubPublisher } from '../projects/publisher.js';
 import { ProjectStateConflict, ProjectStore } from '../projects/store.js';
 import { hostSubscriptionSummary, runPayerDetail } from '../contracts/runPayers.js';
@@ -491,11 +493,19 @@ async function main(): Promise<void> {
     timeoutMs = seconds * 1_000;
   }
 
+  const previewStore = PreviewStore.open(dbPath);
   const coordinator = new ProjectRunCoordinator({
     store: projects,
     dbPath,
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
     ...(publisher ? { publisher } : {}),
+    // Wired exactly as the viz server wires it, for the same reason
+    // publication is: a run started from a terminal must leave the same
+    // record behind as one started from the browser, or "started from a
+    // terminal" quietly means half a product.
+    describeDeliveredPreview: (subject) => {
+      recordDeliveredPreview(previewStore, subject);
+    },
     platformAdmins: (id) => auth.isPlatformAdmin(id),
     tierModelsFor: (id) => auth.modelPins(id),
     // The org levels of the precedence chain, resolved against the SAME
