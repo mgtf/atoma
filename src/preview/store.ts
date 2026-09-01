@@ -499,6 +499,71 @@ export class PreviewStore {
   }
 
   /**
+   * Every preview currently holding runtime, with the project it belongs to.
+   *
+   * Joined against `project_runs` because the instance row is keyed by run and
+   * a sweeper needs the project to read the summary back. Live states only: a
+   * `stopped` or `failed` row owns nothing to reclaim.
+   */
+  listLiveInstances(): Array<{
+    readonly orgId: string;
+    readonly projectId: string;
+    readonly projectRunId: string;
+    readonly generation: number;
+    readonly expiresAt: string | null;
+    readonly lastActivityAt: string | null;
+  }> {
+    return (
+      this.db
+        .prepare(
+          `SELECT i.org_id, i.project_run_id, i.generation, i.expires_at, i.last_activity_at,
+                  r.project_id
+           FROM project_run_preview_instances i
+           JOIN project_runs r
+             ON r.project_run_id = i.project_run_id AND r.org_id = i.org_id
+           WHERE i.state IN ('starting','ready','stopping')
+           ORDER BY i.project_run_id`
+        )
+        .all() as Array<{
+        org_id: string;
+        project_id: string;
+        project_run_id: string;
+        generation: number;
+        expires_at: string | null;
+        last_activity_at: string | null;
+      }>
+    ).map((row) => ({
+      orgId: row.org_id,
+      projectId: row.project_id,
+      projectRunId: row.project_run_id,
+      generation: row.generation,
+      expiresAt: row.expires_at,
+      lastActivityAt: row.last_activity_at,
+    }));
+  }
+
+  /**
+   * How many previews are holding runtime, globally and for one organisation.
+   *
+   * COUNTED FROM THE STORE, never from memory: more than one process writes
+   * this file, and an in-memory count would let each of them believe it was
+   * the only one — which is how a "maximum of four" becomes eight.
+   */
+  countLiveInstances(orgIdInput: string): { readonly global: number; readonly org: number } {
+    const orgId = organisationIdSchema.parse(orgIdInput);
+    const row = this.db
+      .prepare(
+        `SELECT
+           COUNT(*) AS total,
+           SUM(CASE WHEN org_id = ? THEN 1 ELSE 0 END) AS mine
+         FROM project_run_preview_instances
+         WHERE state IN ('starting','ready','stopping')`
+      )
+      .get(orgId) as { total: number; mine: number | null };
+    return { global: row.total, org: row.mine ?? 0 };
+  }
+
+  /**
    * Boot-time crash recovery: no preview survives the process that started it.
    *
    * The runtime objects are gone with the launcher's own reconciliation, so a
