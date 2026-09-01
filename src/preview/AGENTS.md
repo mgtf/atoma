@@ -138,6 +138,53 @@ two consumers, never a second copy that drifts.
 - A heartbeat for a generation that has moved on is not an error. The browser
   is a beat behind, and saying so is the caller's job.
 
+## Bringing one up, and taking it down
+
+The order is the contract, and it is the shape the egress sidecar already
+proved: purge the owner's debris, arm the hard-exit fallback **before** anything
+exists, create, and tear down in reverse.
+
+- **Nothing is exposed before it answers.** Readiness is TWO facts: the
+  application's own `LISTENING_ON_PORT` marker, and then a real request that
+  reaches it through the relay. A route or a claim handed out on the marker
+  alone opens a preview onto a connection refused, and the member reads our
+  timing as their bug.
+- **A failed start leaves nothing behind.** Every exit path — refusal, timeout,
+  crash, an error from the engine — runs the same teardown, because the
+  alternative is a leaked container holding a tenant's bytes. The hard-exit
+  fallback is disarmed only once everything is gone.
+- **Teardown never throws.** Relay, then application, then network, then the
+  ephemeral copy; a step that cannot finish is logged by NAME and the remaining
+  steps still run. One loud failure in the middle would abandon everything
+  after it, which is the opposite of what teardown is for.
+- Failures carry a bounded code from the closed vocabulary the instance row and
+  the browser summary share, so a member reads one word rather than an engine's
+  prose. `copy-limit` is distinct from `internal` on purpose: it is the one
+  failure a member can act on.
+
+## Configuration is all-or-nothing
+
+Resolved once, from the host environment, at boot. Half a configuration is a
+HARD FAILURE, never a silent "disabled": any `ATOMA_PREVIEW_*` variable arms the
+check, so a deployment that set four of the six is told so.
+
+- The image must be **pinned by digest**. A mutable tag is not an identity, and
+  the instance row records the digest that served each generation.
+- `runsc` is the default and production requires it. `runc` needs an explicit
+  `ATOMA_PREVIEW_ALLOW_RUNC_DEV=1` **and** refuses to boot behind the auth
+  gate: a deployment with accounts is a deployment with tenants, and `runc` is
+  not the boundary this feature promises them.
+- The preview domain must not share a registrable domain with the visualizer
+  origin. The check is deliberately CONSERVATIVE — two labels, no Public Suffix
+  List — so it refuses more configurations than strictly necessary, which is
+  the safe direction for a check whose job is keeping a session cookie away
+  from generated code. An origin that will not parse is not proof of safety.
+- Every bound REFUSES rather than falls back. An operator who asked for a
+  two-hour idle bound and silently got fifteen minutes is the defect the
+  project-run timeout already records. Contradictory settings are refused too:
+  a per-org cap above the global one never applies, and an idle bound at or
+  past the hard bound never fires.
+
 ## Egress is requested by a run and approved by a person
 
 - Hosts are exact, lower-case, dotted public DNS names. No wildcards, no
