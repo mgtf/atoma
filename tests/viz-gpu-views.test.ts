@@ -4197,6 +4197,8 @@ describe('attachAtomaMark glass layering', () => {
     expect(source).toContain('mark-cursor-echo');
     expect(source).toContain('paintCursorEcho');
     expect(source).toContain('pointerClip');
+    expect(source.match(/getBoundingClientRect\(/g)).toHaveLength(1);
+    expect(source).toContain('const projection = renderer && (pointer?.active ||');
   });
 
   it('does not overlay a transmitted disc once the shell can draw it', () => {

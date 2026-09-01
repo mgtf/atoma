@@ -23,9 +23,23 @@ import {
 import { effectiveFarAlpha, VIZ_VISUAL_DEPTH } from '../visual-depth.js';
 import { prefersReducedMotion } from './motion.js';
 import { readTuning } from '../tuning-live.js';
+import { ATOMA_MARK_ENV_MIN_SCALE } from './atoma-mark.js';
 
 /** Survives `ambientRoot.removeChildren()` so the aurora is not rebuilt every scene. */
 export const FAR_FIELD_LABEL = 'far-field';
+
+/**
+ * The procedural field is hero scenery, not application chrome. Its
+ * fullscreen fragment shader is deliberately available on the arrival gate
+ * and whenever a future surface presents the crystal at environment-capture
+ * scale, but ordinary views must not keep paying for it behind opaque panels.
+ */
+export function shouldShowFarField(
+  entered: boolean,
+  markVisualScale = 0
+): boolean {
+  return !entered || markVisualScale >= ATOMA_MARK_ENV_MIN_SCALE;
+}
 
 /**
  * How quickly the pointer stain eases on the field. Same lambda the Three.js
