@@ -24,6 +24,7 @@ export const PREVIEW_ENV = {
   image: 'ATOMA_PREVIEW_IMAGE',
   runtime: 'ATOMA_PREVIEW_RUNTIME',
   allowRuncDev: 'ATOMA_PREVIEW_ALLOW_RUNC_DEV',
+  allowHttpDev: 'ATOMA_PREVIEW_ALLOW_HTTP_DEV',
   maxGlobal: 'ATOMA_PREVIEW_MAX_GLOBAL',
   maxPerOrg: 'ATOMA_PREVIEW_MAX_PER_ORG',
   idleMs: 'ATOMA_PREVIEW_IDLE_MS',
@@ -41,6 +42,16 @@ export const PREVIEW_DEFAULTS = {
 
 export interface PreviewConfig {
   readonly domain: string;
+  /**
+   * The scheme a preview URL is built with. `https` everywhere except the
+   * loopback development profile below, and never a caller's choice.
+   */
+  readonly publicScheme: 'https' | 'http';
+  /**
+   * The port a browser reaches the gateway on, when it is not the default for
+   * `publicScheme`. Null in production, where a proxy terminates on 443.
+   */
+  readonly publicPort: number | null;
   readonly gatewayHost: string;
   readonly gatewayPort: number;
   readonly image: string;
@@ -176,6 +187,7 @@ export function snapshotPreviewConfig(
   // Read here rather than at the bottom: the carve-out below is about where
   // the gateway LISTENS, so the value has to exist before the decision.
   const gatewayHost = env[PREVIEW_ENV.gatewayHost]?.trim() || '127.0.0.1';
+  const gatewayPort = boundedInteger(env, PREVIEW_ENV.gatewayPort, 4_311, 1, 65_535);
   if (runtime !== 'runsc') {
     // THE LOUD DEV-ONLY ESCAPE HATCH, and it stays loud: `runsc` is still the
     // default, `runc` still needs this flag written out, and NOTHING ever
@@ -219,6 +231,65 @@ export function snapshotPreviewConfig(
     }
   }
 
+  /**
+   * THE LOOPBACK DEVELOPMENT PROFILE: previews over plain HTTP.
+   *
+   * It exists because the production shape needs wildcard DNS, a wildcard
+   * certificate and a reverse proxy trusted by the operating system — three
+   * pieces of administrator-level setup between a developer and looking at
+   * their own result.
+   *
+   * WHY IT IS SOUND, and it is a browser rule rather than our opinion: W3C
+   * Secure Contexts makes any host that is `localhost` or ends in `.localhost`
+   * POTENTIALLY TRUSTWORTHY. So the grant cookie keeps EVERY attribute it has
+   * in production — `__Host-`, `Secure`, `SameSite=None`, `Partitioned` — and
+   * the browser still stores and returns it, inside the cross-site iframe,
+   * over http. Measured in Chrome 152 rather than reasoned about: the frame
+   * reported `isSecureContext === true` and the cookie survived the bootstrap
+   * page's `location.replace('/')`. Browsers resolve the family to loopback
+   * themselves (RFC 6761 reserves it, so no registrar can ever sell one),
+   * which is what removes the DNS half too.
+   *
+   * WHAT IT COSTS, stated rather than glossed: the claim secret travels as a
+   * cleartext POST body and the grant rides every request in the clear. That
+   * is the exposure already accepted for the visualizer's own
+   * `http://127.0.0.1:5173`, extended to one more loopback port on the same
+   * machine. `Secure` becomes a guarantee about the cookie's SHAPE, not about
+   * the wire.
+   *
+   * FOUR CONDITIONS, ALL OF THEM, and it throws rather than falling back —
+   * the same loudness as the `runc` hatch above, because two shapes for
+   * "dev-only relaxation" is one concept with two definitions:
+   *
+   *   1. the flag, written out exactly;
+   *   2. a `.localhost` domain, which is the part browsers make trustworthy;
+   *   3. a visualizer origin that is PRESENT and loopback — present matters,
+   *      because an absent origin is the ungated caller and must not qualify;
+   *   4. a gateway bound to loopback, so the isolate is not on a public
+   *      interface even if something else is.
+   */
+  const wantsHttp = env[PREVIEW_ENV.allowHttpDev] === '1';
+  if (wantsHttp) {
+    const reasons: string[] = [];
+    if (!domain.endsWith('.localhost')) {
+      reasons.push(`${PREVIEW_ENV.domain}="${domain}" is not under .localhost`);
+    }
+    if (options.visualizerOrigin === undefined) {
+      reasons.push('there is no visualizer origin to prove this deployment is loopback');
+    } else if (!isLoopbackOrigin(options.visualizerOrigin)) {
+      reasons.push(`the visualizer origin ${options.visualizerOrigin} is not loopback`);
+    }
+    if (!isLoopbackHost(gatewayHost)) {
+      reasons.push(`${PREVIEW_ENV.gatewayHost}="${gatewayHost}" is not loopback`);
+    }
+    if (reasons.length > 0) {
+      throw new PreviewConfigError(
+        `${PREVIEW_ENV.allowHttpDev}=1 serves previews in cleartext and is for a single ` +
+          `machine only, so it refuses this deployment: ${reasons.join('; ')}`
+      );
+    }
+  }
+
   const maxGlobal = boundedInteger(env, PREVIEW_ENV.maxGlobal, PREVIEW_DEFAULTS.maxGlobal, 1, 64);
   const maxPerOrg = boundedInteger(env, PREVIEW_ENV.maxPerOrg, PREVIEW_DEFAULTS.maxPerOrg, 1, 64);
   if (maxPerOrg > maxGlobal) {
@@ -247,7 +318,12 @@ export function snapshotPreviewConfig(
   return {
     domain,
     gatewayHost,
-    gatewayPort: boundedInteger(env, PREVIEW_ENV.gatewayPort, 4_311, 1, 65_535),
+    gatewayPort,
+    publicScheme: wantsHttp ? 'http' : 'https',
+    // In production a proxy terminates on 443 and the origin carries no port.
+    // In the dev profile the browser talks to the gateway directly, so the
+    // port it listens on IS part of the origin.
+    publicPort: wantsHttp ? gatewayPort : null,
     image,
     runtime,
     maxGlobal,

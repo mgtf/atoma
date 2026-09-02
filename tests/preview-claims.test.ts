@@ -301,7 +301,12 @@ describe('preview origins', () => {
   });
 
   it('builds an https origin under the preview domain', () => {
-    const origin = previewOrigin('previews.example.net', ORG, RUN, 1);
+    const origin = previewOrigin(
+      { domain: 'previews.example.net', scheme: 'https', port: null },
+      ORG,
+      RUN,
+      1
+    );
     expect(origin).toBe(`https://${previewGenerationHost(ORG, RUN, 1)}.previews.example.net`);
     expect(new URL(origin).protocol).toBe('https:');
   });
@@ -389,6 +394,26 @@ describe('preview gateway header policy', () => {
 
     expect(isSamePreviewRedirect('https://elsewhere.example/', origin)).toBe(false);
     expect(isSamePreviewRedirect('//elsewhere.example/', origin)).toBe(false);
+  });
+
+  it('judges a redirect against the origin the browser actually asked for', () => {
+    // THE ANCHOR CARRIES THE PORT. The gateway used to build it as
+    // `https://` + the port-stripped Host, which refused the application's own
+    // absolute `Location` on any gateway not reached on 443 — a 502 on a
+    // correct redirect, in production as much as under the loopback
+    // development profile where the port is part of the origin by design.
+    const dev = previewOrigin(
+      { domain: 'previews.localhost', scheme: 'http', port: 4311 },
+      ORG,
+      RUN,
+      1
+    );
+    expect(dev).toMatch(/^http:\/\/p[0-9a-f]{32}\.previews\.localhost:4311$/);
+    expect(isSamePreviewRedirect(`${dev}/next`, dev)).toBe(true);
+    // A different port is a different origin, and still refused.
+    expect(isSamePreviewRedirect(`${dev.replace(':4311', ':4312')}/next`, dev)).toBe(false);
+    // So is the same host over the other scheme.
+    expect(isSamePreviewRedirect(`${dev.replace('http:', 'https:')}/next`, dev)).toBe(false);
   });
 
   it('refuses a backslash redirect that a browser resolves off-origin', () => {

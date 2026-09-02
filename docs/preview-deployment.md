@@ -24,10 +24,21 @@ npm run preview:demo
 It runs a loopback-only OAuth provider (so the auth gate has a complete client
 without registering anything), waits for your first login to found an
 organisation, then seeds a project and a DELIVERED run through the SAME store
-calls the coordinator makes. It prints the `.env` block and the Caddy stanza
-you need, and it seeds a **static** deliverable — that branch starts no
-container at all, so it needs neither gVisor nor the preview image. It is the
-whole machinery apart from the isolate, which is the half a laptop can run.
+calls the coordinator makes. It prints the `.env` block, and it seeds a
+**static** deliverable — that branch starts no container at all, so it needs
+neither gVisor nor the preview image. It is the whole machinery apart from the
+isolate, which is the half a laptop can run.
+
+**No proxy, no certificate, no DNS.** `ATOMA_PREVIEW_ALLOW_HTTP_DEV=1` serves
+previews over plain HTTP on `*.previews.localhost`. Browsers resolve that
+family to loopback themselves (RFC 6761 reserves it, so no registrar can sell
+one) and treat it as a SECURE CONTEXT, so the grant cookie keeps every
+attribute it has in production — `__Host-`, `Secure`, `SameSite=None`,
+`Partitioned` — and is still stored inside the cross-site frame. Measured in
+Chrome 152, not assumed. The claim and the grant do travel in the clear on
+this machine, which is why the flag refuses to resolve unless all four hold:
+itself, a `.localhost` domain, a loopback visualizer origin that is PRESENT,
+and a loopback gateway bind.
 
 Two things it cannot substitute, and does not pretend to: the gVisor boundary,
 and executing a run to produce the deliverable (the run host must be POSIX).

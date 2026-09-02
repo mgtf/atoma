@@ -41,13 +41,31 @@ export function previewGenerationHost(
   return `p${digest}`;
 }
 
+/**
+ * Where a browser reaches one generation.
+ *
+ * The scheme and the port come from the resolved configuration rather than
+ * being written here, because the loopback development profile serves plain
+ * HTTP on the gateway's own port while production is HTTPS on 443 behind a
+ * proxy. `snapshotPreviewConfig` is the ONE place that decides which, under
+ * four conditions it refuses to boot without; this function only spends the
+ * answer.
+ */
+export interface PreviewPublicBase {
+  readonly domain: string;
+  readonly scheme: 'https' | 'http';
+  /** Null when it is the default for the scheme, which is production's case. */
+  readonly port: number | null;
+}
+
 export function previewOrigin(
-  domain: string,
+  base: PreviewPublicBase,
   orgId: string,
   projectRunId: string,
   generation: number
 ): string {
-  return `https://${previewGenerationHost(orgId, projectRunId, generation)}.${domain}`;
+  const host = `${previewGenerationHost(orgId, projectRunId, generation)}.${base.domain}`;
+  return `${base.scheme}://${host}${base.port === null ? '' : `:${base.port}`}`;
 }
 
 /** Is this the gateway's own namespace rather than the application's? */

@@ -44,19 +44,18 @@ proved only where a real gVisor runtime exists
   its immutable descriptor.
 - An **in-flight** preview shows a SNAPSHOT of a run still building, taken when
   it was opened and labelled with that moment. It writes NO descriptor row: a
-  descriptor is immutable and records what DELIVERY observed, so carving a
-  moment into one would be a lie about the run.
+  descriptor records what DELIVERY observed, so carving a moment into one would
+  be a lie about the run.
 
-The instance row and the browser summary both carry `source` and `snapshotAt`,
-because a surface that cannot say "as of 14:32" lets a member read a snapshot
-as the present.
+The instance row and the browser summary both carry `source` and `snapshotAt`:
+a surface that cannot say "as of 14:32" lets a member read a snapshot as the
+present.
 
 A torn copy is NOT a defect to eliminate — it is the nature of watching
-unfinished work — and the readiness contract already filters what matters: no
-runnable entry, a server that will not start, a marker that never arrives, a
-probe that goes unanswered. What survives all four starts and answers, and that
-it is incomplete is the information that was asked for. The design and the
-rejected alternatives are in
+unfinished work — and readiness already filters what matters: no runnable
+entry, a server that will not start, a marker that never arrives, a probe that
+goes unanswered. What survives all four starts and answers, and that it is
+incomplete is the information asked for. Design and rejected alternatives:
 [`docs/in-flight-preview-2026-09-02.md`](../../docs/in-flight-preview-2026-09-02.md).
 
 **WHICH of the two a request gets is the HOST's decision, from the run's own
@@ -67,19 +66,18 @@ published result. `queued` is not in flight — nothing has been produced yet.
 
 **The summary must know that status too**, or the control can never appear.
 Availability read from the descriptor and the instance alone answered
-`unavailable`/`legacy-run` for a run nobody had previewed yet; the client hides
-the control for exactly that answer, so the preview could not be asked for,
-therefore never existed, therefore stayed unavailable. `runInFlight` closes
-that loop and still allocates nothing. It is also why `stop` re-reads through
-the service: the manager answers about the instance it just removed and knows
-nothing about the run, so its own summary would take the control away mid-run.
+`unavailable`/`legacy-run` for a run nobody had previewed yet, and the client
+hides the control for exactly that answer — so the preview could not be asked
+for, therefore never existed, therefore stayed unavailable. `runInFlight`
+closes that loop and still allocates nothing. It is also why `stop` re-reads
+through the service, and why the client re-asks on a run-status change: the
+manager knows about the instance, never about the run.
 
 Three rules make it safe: the run's workspace is only ever READ; the COPY is
-what gets classified, never the live workspace, so the classifier sees bytes
-that cannot move under it; and a reopen takes a NEW snapshot on a NEW
-generation rather than reusing one, because a member reopening wants the state
-now. In-flight egress is denied outright — a run has declared no hosts, which
-is the right default for code nobody has finished writing.
+classified, never the live workspace, so the classifier sees bytes that cannot
+move under it; and a reopen takes a NEW snapshot on a NEW generation, because a
+member reopening wants the state now. In-flight egress is denied outright — a
+run has declared no hosts, the right default for unfinished code.
 
 ## The two facts, and why they are separate rows
 
@@ -137,22 +135,20 @@ and is **never restated here**. `resolveWorkspaceFile` and
 `secureReadWorkspaceFile` take the exclusion list as a parameter, defaulting to
 `assertPublishableArtifactPath`, so publication behaviour stays byte-identical.
 
-Only the exclusion differs, and it differs for stated reasons:
+Only the exclusion differs, for stated reasons:
 
-- **classify** may read `.atoma-probes.json` at the workspace ROOT, and nothing
-  else under `.atoma*`. That record is how the host learns what the run built;
-  a nested one was written by something else.
-- **copy** excludes `.atoma*` and secrets but KEEPS `node_modules`: executing a
-  Node deliverable needs its dependencies, and the copy is mounted into an
-  isolate, not handed to anybody.
+- **classify** may read `.atoma-probes.json` at the workspace ROOT and nothing
+  else under `.atoma*` — that record is how the host learns what the run built,
+  and a nested one was written by something else.
+- **copy** excludes `.atoma*` and secrets but KEEPS `node_modules`: a Node
+  deliverable needs its dependencies, and the copy is mounted into an isolate.
 - **serve** excludes `node_modules` too: a static preview is the workspace read
-  through an HTTP surface, and publication does not put a dependency tree on
-  the internet either.
+  through HTTP, and publication does not put a dependency tree on the internet.
 
 `.git` and `secretLike` are refused by all three. Publication and preview are
 the two ways workspace bytes leave the run that made them, so a file
-publication refuses must not become readable by serving it instead — one list,
-two consumers, never a second copy that drifts.
+publication refuses must not become readable by serving it — one list, two
+consumers, never a second copy that drifts.
 
 ## The materialised copy
 
@@ -163,33 +159,33 @@ two consumers, never a second copy that drifts.
   inside the workspace would otherwise pull bytes from outside it into a
   directory about to be mounted into a container.
 - Caps are REFUSALS, not truncations. A copy that silently stopped at the cap
-  would mount half an application and report `ready`, and the member would be
-  debugging our bookkeeping instead of their app.
-- The copy may not nest with its source in either direction: a destination
-  under the source copies the copy, and a source under the destination is
-  erased by a teardown that believes it owns everything below it.
+  would mount half an application and report `ready`, leaving the member to
+  debug our bookkeeping instead of their app.
+- The copy may not nest with its source either way: a destination under the
+  source copies the copy, and a source under the destination is erased by a
+  teardown that believes it owns everything below it.
 
 ## State, generations and liveness
 
 - States are closed and monotonic within a generation:
   `stopped -> starting -> ready -> stopping -> stopped`, with
   `failed` reachable from the live states and leaving on the next explicit open.
-- `generation` is the browser ORIGIN's identity and only ever increases —
-  enforced by a trigger. A restart mints a new origin so stale service workers,
-  storage and caches from a previous generation can never control the next.
+- `generation` is the browser ORIGIN's identity and only ever increases, by
+  trigger. A restart mints a new origin, so a previous generation's service
+  workers, storage and caches can never control the next.
 - `openInstance` reuses `starting`/`ready` rather than starting a second
-  isolate, so two members clicking Preview at the same moment get one.
+  isolate: two members clicking Preview at once get one.
 - Only a trusted UI heartbeat from the authenticated parent extends a preview.
-  Application traffic, polling, SSE and WebSockets never count: abandoned
-  generated code must not keep itself alive.
-- A heartbeat for a generation that has moved on is not an error. The browser
-  is a beat behind, and saying so is the caller's job.
+  Application traffic, polling, SSE and WebSockets never count — abandoned
+  generated code must not keep itself alive. A heartbeat for a generation that
+  has moved on is not an error: the browser is a beat behind, and saying so is
+  the caller's job.
 
 ## Bringing one up, and taking it down
 
-The order is the contract, and it is the shape the egress sidecar already
-proved: purge the owner's debris, arm the hard-exit fallback **before** anything
-exists, create, and tear down in reverse.
+The order is the contract, and it is the shape the egress sidecar proved:
+purge the owner's debris, arm the hard-exit fallback **before** anything
+exists, create, tear down in reverse.
 
 - **Nothing is exposed before it answers.** Readiness is TWO facts: the app's
   own `LISTENING_ON_PORT` marker, then a real request reaching it through the
@@ -238,15 +234,12 @@ tag is not an identity, and `snapshotPreviewConfig` refuses one.
 
 ## Configuration is all-or-nothing
 
-`npm run preview:demo` is the laptop path: a loopback OAuth provider, then a
+`npm run preview:demo` is the laptop path — a loopback OAuth provider, then a
 project and a delivered STATIC run seeded through the coordinator's own store
 calls. Three correct rules stand between a fresh checkout and a clickable
-button — previews need the gate, a project needs an active GitHub installation,
-a run needs a POSIX host — and none is worth weakening for a local look. It
-touches no preview code, so a button that does not work has not been hidden by
-it; `tests/preview-demo-harness.test.ts` pins the one coupling that would break
-silently, the workspace path the harness writes against the one `workspaceOf`
-derives.
+button (the gate, an active GitHub installation, a POSIX run host) and none is
+worth weakening for a local look, so the harness satisfies them instead. It
+touches no preview code, so a button that fails has not been hidden by it.
 
 The OPERATOR view of everything below — host, domain, proxy, cost, egress — is
 [`docs/preview-deployment.md`](../../docs/preview-deployment.md), verified by
@@ -267,6 +260,15 @@ check, so a deployment that set four of the six is told so.
   for. Reachability is the sharper test: a session gates a claim, a claim is
   the only way to reach a preview origin, and a session needs an OAuth round
   trip against THAT origin. Nothing falls back to `runc` on its own.
+- **Cleartext previews, for one machine.** `ATOMA_PREVIEW_ALLOW_HTTP_DEV=1`
+  removes the proxy, the certificate and the DNS. It rests on a BROWSER RULE:
+  W3C Secure Contexts makes any `.localhost` host Potentially Trustworthy, so
+  the grant cookie keeps every attribute and is still stored inside the frame
+  over http (measured, Chrome 152 — see the deployment doc). It costs a
+  cleartext claim and grant on one loopback port, so FOUR conditions hold or it
+  throws: the flag, a `.localhost` domain, a visualizer origin that is PRESENT
+  and loopback — absence is the ungated caller and must never read as privacy
+  — and a loopback gateway bind.
 - The preview domain must not share a registrable domain with the visualizer
   origin. The check is deliberately CONSERVATIVE — two labels, no Public Suffix
   List — so it refuses more than strictly necessary, the safe direction for a
@@ -284,6 +286,11 @@ A preview lives on its own registrable domain, so no Atoma cookie ever reaches
 it — which is exactly why the gateway needs its own way to know the browser in
 front of it was sent by an authenticated member.
 
+- **A self-redirect is judged against the origin THE BROWSER ASKED FOR** —
+  full `Host`, port included — never a scheme written at the call site.
+  Routing stays port-free: a route names a generation, and a generation does
+  not move because a proxy did. Anchoring on `https://` plus the stripped host
+  refused the app's own absolute `Location` on any gateway not on 443.
 - **One host per GENERATION**, derived from `(orgId, runId, generation)`. A
   restart mints a new generation and therefore a new origin, which is what
   makes a previous generation's service workers, storage and caches unable to
@@ -292,12 +299,12 @@ front of it was sent by an authenticated member.
   before it has consulted anything.
 - **A claim is one-time, thirty seconds, and bound to everything it depends
   on** — principal, session, org, run, generation and the exact host. It is
-  CONSUMED BEFORE it is validated, exactly as `consumeOauthState` is, so a
-  leaked value cannot be probed repeatedly for a match. It is stored hashed.
-- **The raw value travels in a URL FRAGMENT.** A fragment is never sent to a
-  server, so it stays out of request lines, access logs and `Referer`. Only a
-  script on the preview origin can read it, hand it back, and erase it — which
-  is the entire reason the gateway serves a bootstrap page of its own.
+  CONSUMED BEFORE validation, as `consumeOauthState` is, so a leaked value
+  cannot be probed for a match. Stored hashed.
+- **The raw value travels in a URL FRAGMENT**, never sent to a server, so it
+  stays out of request lines, access logs and `Referer`. Only a script on the
+  preview origin can read it, hand it back and erase it — the entire reason
+  the gateway serves a bootstrap page of its own.
 - **The grant cookie carries a TOKEN the registry issued, and the registry
   verifies it.** An earlier shape keyed grants by route alone and checked only
   that one existed, which accepted ANY cookie value for as long as some member
@@ -387,11 +394,11 @@ server-side — `previewSummarySchema` deliberately carries neither.
   or container log crosses this boundary, in a response, a journal row or a
   metric. `project_runs.error` already leaked an absolute host path once.
 - Platform events are journal-only: `preview.started`, `preview.stopped`
-  (info) and `preview.failed` (warning), all mapped to `null` in `PUSH_ROUTES`.
-  A preview is something a member is watching while they watch it, so a push
-  would arrive on the device already showing the thing it is about.
-  `preview.failed` is a warning and not an error because the deliverable is
-  delivered and published; only the convenience over it did not come up.
+  (info) and `preview.failed` (warning), all `null` in `PUSH_ROUTES`. A member
+  is watching a preview while they watch it, so a push would arrive on the
+  device already showing the thing it is about. `failed` is a warning, not an
+  error: the deliverable is delivered and published, and only the convenience
+  over it did not come up.
 
 ## The HTTP surface
 
@@ -431,13 +438,13 @@ HERE is what the preview's own shape forces on it.
   target that IS inside it still bubbles, so one click would open the preview
   AND collapse the card. There is no `stopPropagation` precedent in that
   client, and a layout choice is the wrong reason to add one.
-- **The plane REPLACES the canvas rather than floating over it**, and the
-  product tree goes `inert` behind it — which is what exempts it from the
-  grandfathered CSS-skin list: with nothing underneath, there is no pointer
-  light to escape and no hover bubble to bury.
-- **The iframe mounts only in `ready`**, and its `key` is the generation plus
-  the reload nonce. A restart is a NEW ORIGIN and gets a new element; reusing
-  one would carry the previous origin's session history into it.
+- **The plane REPLACES the canvas rather than floating over it**, product tree
+  `inert` behind it — which is what exempts it from the grandfathered CSS-skin
+  list: nothing underneath, so no pointer light to escape and no bubble to
+  bury.
+- **The iframe mounts only in `ready`**, keyed by generation plus reload nonce.
+  A restart is a NEW ORIGIN and gets a new element; reusing one would carry the
+  previous origin's session history into it.
 - **The first load spends the claim; every reload uses the origin root.**
   Re-navigating to a one-time claim lands on "this link has already been used"
   — a reload button that breaks what it reloads. The grant carries the rest.

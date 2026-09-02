@@ -262,6 +262,27 @@ function GpuAppContent({
     previewTarget?.projectRunId ?? null,
     state.view === 'runs' && authed && !!previewTarget
   );
+  // THE RUN'S STATUS IS WHAT MAKES A PREVIEW POSSIBLE, so a change to it must
+  // re-ask. Nothing else will: `usePreviewStatus` stops polling once the state
+  // is `stopped`, which is exactly what a run nobody has previewed reads as,
+  // and `refetchOnWindowFocus` is off. So a run watched from `queued` never
+  // learned it had gone `running`, and the control the member is waiting for
+  // never appeared — the in-flight case, silently unreachable.
+  //
+  // It matters at the other end too. The run row flips to `delivered` BEFORE
+  // the coordinator writes the descriptor, so a summary read in that window
+  // says `available` from the in-flight branch and then sticks: the surface
+  // would keep offering a snapshot of a run that has finished.
+  const previewRunStatus =
+    (projectRunsQuery.data ?? []).find(
+      (run) => run.projectRunId === previewTarget?.projectRunId
+    )?.status ?? null;
+  useEffect(() => {
+    if (!previewTarget || !previewRunStatus) return;
+    void queryClient.invalidateQueries({
+      queryKey: ['viz', 'preview', previewTarget.projectId, previewTarget.projectRunId],
+    });
+  }, [previewRunStatus, previewTarget, queryClient]);
 
   const login = useMemo(
     () =>

@@ -56,6 +56,8 @@ const config: PreviewConfig = {
   domain: DOMAIN,
   gatewayHost: '127.0.0.1',
   gatewayPort: 0,
+  publicScheme: 'https',
+  publicPort: null,
   image: `atoma-preview@sha256:${'a'.repeat(64)}`,
   runtime: 'runsc',
   maxGlobal: 4,

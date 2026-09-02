@@ -80,11 +80,11 @@ import { ProjectStore } from '../projects/store.js';
 import {
   DEFAULT_PROJECTS_ROOT,
   ProjectRunCoordinator,
-  projectRunHostLayout,
 } from '../projects/coordinator.js';
 import { GitHubPublisher } from '../projects/publisher.js';
 import { ProjectHttpError, ProjectService, roleAtLeast } from '../projects/service.js';
 import { PreviewStore } from '../preview/store.js';
+import { PreviewPolicyError } from '../preview/policy.js';
 import { recordDeliveredPreview } from '../preview/service.js';
 import { previewConfigPresent, previewEnabled, snapshotPreviewConfig } from '../preview/config.js';
 import { PreviewClaimRegistry } from '../preview/claims.js';
@@ -820,9 +820,31 @@ const PREVIEW_RUNTIME_PROMISE: Promise<PreviewRuntime | null> = (async () => {
     routes,
     claims,
     config,
-    // HOST-OWNED, never a caller's: the same layout the coordinator writes.
-    workspaceOf: (orgId, projectId, projectRunId) =>
-      projectRunHostLayout(PROJECTS_ROOT, orgId, projectId, projectRunId).workspacePath,
+    /**
+     * HOST-OWNED, never a caller's — and READ, not recomputed.
+     *
+     * The run row already carries the workspace the coordinator chose, behind
+     * a `BEFORE UPDATE` trigger that refuses to let it move. Deriving a second
+     * answer from `PROJECTS_ROOT` made that one row advisory and put three
+     * derivations of one path in the codebase: this one honours
+     * `ATOMA_PROJECTS_ROOT`, `src/cli/projects.ts` passes no root and always
+     * writes the default, and `scripts/preview-demo.mjs` had guessed a third.
+     * They agree only while every process shares one environment — so with the
+     * variable unset the seeded workspace sat in a directory this line never
+     * looked at, the Preview button appeared, and the click failed on an empty
+     * copy with nothing saying which derivation had moved.
+     *
+     * The project is still checked: a run reached through another project's
+     * path is the IDOR the route hierarchy exists to refuse, and the store
+     * row is what settles it.
+     */
+    workspaceOf: (orgId, projectId, projectRunId) => {
+      const run = PROJECTS_RUNTIME.store.getProjectRun(orgId, projectRunId);
+      if (!run || run.projectId !== projectId) {
+        throw new PreviewPolicyError('missing', 'no project run owns this preview');
+      }
+      return run.hostPaths.workspacePath;
+    },
     probe: (hostPort) => probePreviewRelay(hostPort),
     log: (line) => console.error(line),
   });
@@ -832,6 +854,9 @@ const PREVIEW_RUNTIME_PROMISE: Promise<PreviewRuntime | null> = (async () => {
     routes,
     claims,
     visualizerOrigin: AUTH_RUNTIME.publicOrigin.origin,
+    // One resolution of the scheme, shared with the URL the claim is minted
+    // into: two computations from the same environment could disagree.
+    publicScheme: config.publicScheme,
     log: (line) => console.error(line),
   });
   // Idle and hard bounds are enforced HERE rather than in the gateway, because

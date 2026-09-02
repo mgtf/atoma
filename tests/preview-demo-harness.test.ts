@@ -39,18 +39,25 @@ let projectsRoot: string;
 let orgId: string;
 let principalId: string;
 
-function seedEnv(): NodeJS.ProcessEnv {
-  return {
-    ...process.env,
-    ATOMA_DB_PATH: dbPath,
-    ATOMA_PROJECTS_ROOT: projectsRoot,
-  };
+/**
+ * `ATOMA_PROJECTS_ROOT` is OPTIONAL here on purpose.
+ *
+ * Always setting it is what hid the defect this file exists to catch: the
+ * script and the server each derived the workspace path from their own
+ * default, the two defaults differed, and a suite that pinned the variable in
+ * every case could not see it. The unset case is now a test of its own.
+ */
+function seedEnv(withRoot = true): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, ATOMA_DB_PATH: dbPath };
+  if (withRoot) env['ATOMA_PROJECTS_ROOT'] = projectsRoot;
+  else delete env['ATOMA_PROJECTS_ROOT'];
+  return env;
 }
 
-async function seed(): Promise<{ stdout: string; stderr: string }> {
+async function seed(withRoot = true): Promise<{ stdout: string; stderr: string }> {
   return run(process.execPath, [join(REPO, 'node_modules', 'tsx', 'dist', 'cli.mjs'), SCRIPT, '--seed'], {
     cwd: REPO,
-    env: seedEnv(),
+    env: seedEnv(withRoot),
     timeout: 120_000,
   });
 }
@@ -188,6 +195,29 @@ describe('the preview demo harness', () => {
     expect(projectRun.status).toBe('delivered');
   });
 
+  it('records a workspace the SERVER can find with ATOMA_PROJECTS_ROOT unset', async () => {
+    // THE DEFECT THIS PINS, and the reason the variable is optional above: the
+    // script derived the workspace from its own default while the server
+    // derived it from `DEFAULT_PROJECTS_ROOT`, and the two differed. With the
+    // variable unset — the ordinary case — the seed wrote where the server
+    // never looked: the Preview button appeared and the click failed on an
+    // empty copy, with nothing saying which derivation had moved.
+    //
+    // The server now READS the path off the run row, so what this asserts is
+    // the property that makes that safe: the recorded path is where the bytes
+    // actually are.
+    foundOrganisation();
+
+    await seed(false);
+
+    const { runs } = seeded();
+    const projectRun = (runs ?? [])[0]!;
+    expect(existsSync(join(projectRun.hostPaths.workspacePath, 'index.html'))).toBe(true);
+    // And it is the coordinator's own layout, not a third convention.
+    expect(projectRun.hostPaths.workspacePath).toContain(join('.atoma', 'orgs'));
+    rmSync(projectRun.hostPaths.workspacePath, { recursive: true, force: true });
+  });
+
   it('is idempotent enough to run twice: one project, a second run', async () => {
     foundOrganisation();
     await seed();
@@ -211,7 +241,10 @@ describe('the preview demo harness', () => {
     // sharing a registrable domain with the visualizer origin is refused by
     // `snapshotPreviewConfig`, so printing one would be printing a trap.
     expect(stdout).toContain('ATOMA_VIZ_PUBLIC_ORIGIN=http://127.0.0.1:5173');
-    expect(stdout).toContain('ATOMA_PREVIEW_DOMAIN=127.0.0.1.sslip.io');
+    // The three conditions the cleartext profile refuses to resolve without,
+    // printed together — a block missing one is a block that will not boot.
+    expect(stdout).toContain('ATOMA_PREVIEW_DOMAIN=previews.localhost');
+    expect(stdout).toContain('ATOMA_PREVIEW_ALLOW_HTTP_DEV=1');
     expect(stdout).toContain('ATOMA_PREVIEW_GATEWAY_HOST=127.0.0.1');
     // And the image is pinned by digest, because the config refuses a tag.
     expect(stdout).toMatch(/ATOMA_PREVIEW_IMAGE=\S+@sha256:[a-f0-9]{64}/);

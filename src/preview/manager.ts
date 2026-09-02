@@ -437,7 +437,11 @@ export class PreviewManager {
     );
     this.deps.claims.register(claim);
     const origin = previewOrigin(
-      this.deps.config.domain,
+      {
+        domain: this.deps.config.domain,
+        scheme: this.deps.config.publicScheme,
+        port: this.deps.config.publicPort,
+      },
       input.orgId,
       input.projectRunId,
       generation

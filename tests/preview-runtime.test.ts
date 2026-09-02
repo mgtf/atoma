@@ -19,6 +19,7 @@ import {
   startPreview,
   teardownPreview,
 } from '../src/preview/runtime.js';
+import { previewOrigin } from '../src/preview/gateway.js';
 import {
   PREVIEW_ENV,
   PreviewConfigError,
@@ -363,6 +364,8 @@ describe('preview configuration', () => {
     [PREVIEW_ENV.domain]: 'previews.example.net',
     [PREVIEW_ENV.image]: `atoma-preview@${DIGEST}`,
   };
+  const ORG = '33333333-3333-4333-8333-333333333333';
+  const RUN = '11111111-1111-4111-8111-111111111111';
 
   it('refuses a value the gate would not recognise', () => {
     expect(previewEnabled({})).toBe(false);
@@ -472,6 +475,71 @@ describe('preview configuration', () => {
         { visualizerOrigin: 'http://127.0.0.1:5173' }
       )
     ).toThrow(/requires ATOMA_PREVIEW_ALLOW_RUNC_DEV=1/);
+  });
+
+  it('serves previews over plain HTTP only under .localhost, on a loopback machine', () => {
+    // MEASURED, not assumed (Chrome 152): a `.localhost` host is a SECURE
+    // CONTEXT, so the grant cookie keeps every attribute it has in production
+    // — `__Host-`, `Secure`, `SameSite=None`, `Partitioned` — and the browser
+    // still stores and returns it inside the cross-site iframe over http.
+    // That is what lets a developer drop wildcard TLS, wildcard DNS and a
+    // proxy trusted by the operating system.
+    const dev = {
+      ...valid,
+      [PREVIEW_ENV.domain]: 'previews.localhost',
+      [PREVIEW_ENV.allowHttpDev]: '1',
+    };
+    const config = snapshotPreviewConfig(dev, { visualizerOrigin: 'http://127.0.0.1:5173' });
+
+    expect(config.publicScheme).toBe('http');
+    // The port IS part of the origin here: the browser talks to the gateway
+    // directly, with no proxy terminating on 443.
+    expect(config.publicPort).toBe(config.gatewayPort);
+    expect(
+      previewOrigin(
+        { domain: config.domain, scheme: config.publicScheme, port: config.publicPort },
+        ORG,
+        RUN,
+        1
+      )
+    ).toMatch(/^http:\/\/p[0-9a-f]{32}\.previews\.localhost:4311$/);
+  });
+
+  it('refuses cleartext previews for every condition, one at a time', () => {
+    const dev = {
+      ...valid,
+      [PREVIEW_ENV.domain]: 'previews.localhost',
+      [PREVIEW_ENV.allowHttpDev]: '1',
+    };
+    const loopback = { visualizerOrigin: 'http://127.0.0.1:5173' };
+
+    // 2. a domain browsers do not make trustworthy.
+    expect(() =>
+      snapshotPreviewConfig({ ...dev, [PREVIEW_ENV.domain]: 'previews.example.net' }, loopback)
+    ).toThrow(/not under \.localhost/);
+    // 3a. NO visualizer origin at all. An absent origin is the ungated caller,
+    // and absence must never read as proof that a machine is private.
+    expect(() => snapshotPreviewConfig(dev)).toThrow(/no visualizer origin/);
+    // 3b. an origin other people can reach.
+    expect(() =>
+      snapshotPreviewConfig(dev, { visualizerOrigin: 'https://atoma.example.com' })
+    ).toThrow(/is not loopback/);
+    // 4. the isolate listening on every interface.
+    expect(() =>
+      snapshotPreviewConfig({ ...dev, [PREVIEW_ENV.gatewayHost]: '0.0.0.0' }, loopback)
+    ).toThrow(/is not loopback/);
+  });
+
+  it('keeps HTTPS as the only production answer, with no silent fallback', () => {
+    // Without the flag, a `.localhost` domain changes nothing: the relaxation
+    // is never DERIVED from the configuration, only ever asked for out loud.
+    const quiet = { ...valid, [PREVIEW_ENV.domain]: 'previews.localhost' };
+    const config = snapshotPreviewConfig(quiet, { visualizerOrigin: 'http://127.0.0.1:5173' });
+
+    expect(config.publicScheme).toBe('https');
+    expect(config.publicPort).toBeNull();
+    // And the production shape is untouched by any of this.
+    expect(snapshotPreviewConfig(valid).publicScheme).toBe('https');
   });
 
   it('refuses a bound it cannot honour rather than falling back', () => {

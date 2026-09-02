@@ -39,12 +39,23 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+/**
+ * The subject this harness's identity is keyed by.
+ *
+ * Deliberately unissuable: no OIDC provider mints a subject shaped like this,
+ * so a store seeded by the demo can never be joined to a real person's login.
+ */
+const DEMO_SUBJECT = 'atoma-preview-demo:local-operator';
 const CLIENT_ID = 'atoma-preview-demo';
 const CLIENT_SECRET = 'atoma-preview-demo-secret';
 const PROVIDER_PORT = Number(process.env['ATOMA_PREVIEW_DEMO_PROVIDER_PORT'] ?? 4319);
 const DB_PATH = path.resolve(process.env['ATOMA_DB_PATH'] ?? './atoma.db');
+// The coordinator's own default (`DEFAULT_PROJECTS_ROOT`), not a guess. The
+// server reads the path this script RECORDS on the run row, so the two agree
+// by construction now — but a demo whose files land somewhere a real run's
+// never would is a demo that teaches the wrong layout.
 const PROJECTS_ROOT = path.resolve(
-  process.env['ATOMA_PROJECTS_ROOT'] ?? path.join(homedir(), '.atoma', 'projects')
+  process.env['ATOMA_PROJECTS_ROOT'] ?? path.join(homedir(), '.atoma')
 );
 const SLUG = 'preview-demo';
 
@@ -79,14 +90,15 @@ function envBlock() {
   return `# --- npm run preview:demo (development only) ---
 ATOMA_VIZ_AUTH=1
 ATOMA_VIZ_PUBLIC_ORIGIN=http://127.0.0.1:5173
-ATOMA_AUTH_GITHUB_CLIENT_ID=${CLIENT_ID}
-ATOMA_AUTH_GITHUB_CLIENT_SECRET=${CLIENT_SECRET}
-ATOMA_AUTH_GITHUB_AUTHORIZE_URL=http://127.0.0.1:${PROVIDER_PORT}/authorize
-ATOMA_AUTH_GITHUB_TOKEN_URL=http://127.0.0.1:${PROVIDER_PORT}/token
-ATOMA_AUTH_GITHUB_USERINFO_URL=http://127.0.0.1:${PROVIDER_PORT}/userinfo
+ATOMA_AUTH_GOOGLE_CLIENT_ID=${CLIENT_ID}
+ATOMA_AUTH_GOOGLE_CLIENT_SECRET=${CLIENT_SECRET}
+ATOMA_AUTH_GOOGLE_AUTHORIZE_URL=http://127.0.0.1:${PROVIDER_PORT}/authorize
+ATOMA_AUTH_GOOGLE_TOKEN_URL=http://127.0.0.1:${PROVIDER_PORT}/token
+ATOMA_AUTH_GOOGLE_USERINFO_URL=http://127.0.0.1:${PROVIDER_PORT}/userinfo
 
 ATOMA_PREVIEW=1
-ATOMA_PREVIEW_DOMAIN=127.0.0.1.sslip.io
+ATOMA_PREVIEW_DOMAIN=previews.localhost
+ATOMA_PREVIEW_ALLOW_HTTP_DEV=1
 ATOMA_PREVIEW_IMAGE=atoma-preview@sha256:${'0'.repeat(64)}
 ATOMA_PREVIEW_GATEWAY_HOST=127.0.0.1
 ATOMA_PREVIEW_GATEWAY_PORT=4311`;
@@ -167,8 +179,21 @@ function startProvider(port) {
         }
         // ONE identity, always. A second login is the same person, so the
         // organisation founded by the first is the one you come back to.
-        response.writeHead(200, { 'content-type': 'application/json' });
-        response.end(JSON.stringify({ id: 900_001, name: 'Preview Demo', login: 'preview-demo' }));
+        //
+        // AND IT IS NOT A GITHUB IDENTITY. `completeLogin` joins on
+        // `(provider, subject)` alone, and a GitHub subject is a decimal user
+        // id — so a store seeded under `github` with `900001` would admit the
+        // REAL GitHub user #900001 as this organisation's founding owner the
+        // day the deployment is pointed at a real client. The `google` shape
+        // takes any non-whitespace subject, so this one can be a string no
+        // provider will ever issue.
+        response.writeHead(200, {
+          'content-type': 'application/json',
+          'cache-control': 'no-store',
+        });
+        response.end(
+          JSON.stringify({ sub: DEMO_SUBJECT, name: 'Preview Demo', email_verified: false })
+        );
         return;
       }
       response.writeHead(404).end();
@@ -339,34 +364,35 @@ async function seed() {
       });
 
     const goal = 'a one-page deliverable, for looking at';
-    const created = projects.createProjectRun({
-      orgId: viewer.orgId,
-      projectId: project.projectId,
-      principalId: viewer.principalId,
-      request: { goal, idempotencyKey: `preview-demo-${randomUUID()}` },
-      hostPaths: (() => {
-        // The paths the SERVER will derive. `workspaceOf` in src/viz/server.ts
-        // recomputes this layout rather than reading the stored row, so a copy
-        // written anywhere else would be a copy the preview never finds.
-        const runId = randomUUID();
-        const layout = projectRunHostLayout(PROJECTS_ROOT, viewer.orgId, project.projectId, runId);
-        return {
-          workspacePath: layout.workspacePath,
-          runsPath: layout.runsPath,
-          logPath: layout.logPath,
-        };
-      })(),
-    });
-    if (!created) throw new Error('the store refused the seeded run');
-    const run = created.run;
-
-    // The layout the store recorded is authoritative from here.
+    // RESERVE THE ID FIRST, then derive the paths from it, then hand both to
+    // the store — the coordinator's own sequence (`startProjectRun`). Letting
+    // the store pick the id and deriving paths from a THROWAWAY one recorded a
+    // workspace keyed to a run that does not exist, which the server then read
+    // and found empty.
+    const projectRunId = randomUUID();
     const layout = projectRunHostLayout(
       PROJECTS_ROOT,
       viewer.orgId,
       project.projectId,
-      run.projectRunId
+      projectRunId
     );
+    const created = projects.createProjectRun({
+      orgId: viewer.orgId,
+      projectId: project.projectId,
+      principalId: viewer.principalId,
+      projectRunId,
+      request: { goal, idempotencyKey: `preview-demo-${randomUUID()}` },
+      hostPaths: {
+        workspacePath: layout.workspacePath,
+        runsPath: layout.runsPath,
+        logPath: layout.logPath,
+      },
+    });
+    if (!created) throw new Error('the store refused the seeded run');
+    const run = created.run;
+    if (run.projectRunId !== projectRunId) {
+      throw new Error('the store assigned a different run id than the one reserved');
+    }
     mkdirSync(layout.workspacePath, { recursive: true });
     mkdirSync(layout.runsPath, { recursive: true });
     writeFileSync(path.join(layout.workspacePath, 'index.html'), PAGE, 'utf8');
@@ -495,18 +521,15 @@ binds loopback, and why you must not point a reachable deployment at it.
 
 ${envBlock()}
 
-2. Terminate TLS for the preview origins. The grant cookie is __Host- and
-   Secure, so this leg cannot be plain HTTP. Caddy, no certificate to obtain:
+2. Nothing. No proxy, no certificate, no DNS.
 
-     *.127.0.0.1.sslip.io:443 {
-       tls internal
-       reverse_proxy 127.0.0.1:4311 {
-         header_up Host {host}
-       }
-     }
-
-   *.127.0.0.1.sslip.io resolves any prefix to 127.0.0.1 with no local DNS.
-   Run \`caddy trust\` once so the browser accepts its internal CA.
+   ATOMA_PREVIEW_ALLOW_HTTP_DEV=1 serves previews over plain HTTP on
+   *.previews.localhost. Browsers resolve that family to loopback themselves
+   and treat it as a SECURE CONTEXT, so the grant cookie keeps every attribute
+   it has in production and is still stored inside the frame. It travels in
+   the clear on this machine — which is why the flag refuses to resolve unless
+   the domain is under .localhost AND the visualizer origin is loopback AND
+   the gateway is bound to loopback.
 
 3. In another terminal: npm run viz:gpu
    Wait for "[atoma viz] preview gateway on 4311". If it says previews are off,

@@ -46,7 +46,19 @@ export const SUBSYSTEM_LINE_BUDGET = 500;
 // catalog contract). Splitting it further would mean inventing sub-subsystems
 // that no agent opens on its own, so it carries a named, explicit exception
 // rather than a silently raised global budget.
-export const SUBSYSTEM_LINE_BUDGET_OVERRIDES = new Map([['src/viz/AGENTS.md', 600]]);
+// src/preview is the second, for the same reason and on the same terms: one
+// subtree that owns deliverable classification, the byte policy, the
+// materialised copy, instance state and generations, container lifecycle, its
+// own image, an all-or-nothing configuration with two named development
+// profiles, the origin/claim/grant protocol, the response policy, egress
+// approval, the HTTP surface and the client surface. There is no sub-subsystem
+// an agent opens on its own, so the alternative to this line was shaving
+// sentences until rules lost the reasons they exist for — the exact failure
+// the 2026-08-23 note above records.
+export const SUBSYSTEM_LINE_BUDGET_OVERRIDES = new Map([
+  ['src/viz/AGENTS.md', 600],
+  ['src/preview/AGENTS.md', 560],
+]);
 
 /**
  * The line budget for one subsystem doc. The override Map is keyed in POSIX,

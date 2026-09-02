@@ -89,6 +89,12 @@ export interface PreviewGatewayOptions {
   readonly claims: PreviewClaimRegistry;
   /** The exact visualizer origin allowed to frame every preview. */
   readonly visualizerOrigin: string;
+  /**
+   * The scheme browsers reach this gateway on. `https` in production, behind
+   * a terminating proxy; `http` only in the loopback development profile,
+   * which `snapshotPreviewConfig` refuses to resolve without four conditions.
+   */
+  readonly publicScheme?: 'https' | 'http';
   readonly log?: (line: string) => void;
 }
 
@@ -198,9 +204,24 @@ export function startPreviewGateway(
   );
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const host = (req.headers.host ?? '').split(':')[0]?.toLowerCase() ?? '';
+    const rawHost = (req.headers.host ?? '').toLowerCase();
+    // Routing is by HOST ALONE, port stripped: a route names a generation, and
+    // a generation does not change because a proxy moved a port.
+    const host = rawHost.split(':')[0] ?? '';
     const route = opts.routes.get(host);
     if (!route) return refuse(res);
+    /**
+     * The anchor a self-redirect is judged against, derived from THE REQUEST
+     * — the full `Host` header, port included — rather than from configuration.
+     *
+     * Two reasons, and the second is not hypothetical. It cannot be falsified
+     * by misconfiguration: whatever the browser actually asked for is what the
+     * application is allowed to redirect within. And an anchor that hardcoded
+     * `https://` plus the port-stripped host refused every absolute
+     * self-redirect from a gateway not reached on 443 — a 502 on the
+     * application's own `Location`, in production as much as in development.
+     */
+    const requestOrigin = `${opts.publicScheme ?? 'https'}://${rawHost}`;
 
     let pathname: string;
     try {
@@ -271,7 +292,7 @@ export function startPreviewGateway(
     });
 
     if (route.kind === 'static') return serveStatic(route, pathname, policy, res);
-    return proxyToRelay(route, req, res, policy, host);
+    return proxyToRelay(route, req, res, policy, requestOrigin);
   }
 
   function serveStatic(
@@ -315,7 +336,8 @@ export function startPreviewGateway(
     req: IncomingMessage,
     res: ServerResponse,
     policy: Record<string, string>,
-    host: string
+    /** The full origin the browser asked for; see `requestOrigin` above. */
+    requestOrigin: string
   ): void {
     const port = route.upstreamPort;
     if (port === undefined) return refuse(res);
@@ -330,7 +352,7 @@ export function startPreviewGateway(
       (up) => {
         const returned = sanitizeResponseHeaders(up.headers);
         const location = up.headers['location'];
-        if (typeof location === 'string' && !isSamePreviewRedirect(location, `https://${host}`)) {
+        if (typeof location === 'string' && !isSamePreviewRedirect(location, requestOrigin)) {
           // An application that could redirect the frame anywhere could
           // navigate a member off a surface they believe is theirs.
           log('[preview-gateway] refused an off-origin redirect from the application');

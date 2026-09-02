@@ -89,8 +89,10 @@ function checkConfig(env: NodeJS.ProcessEnv): DoctorCheck[] {
       // WHAT ACTUALLY MATTERS IS A SECURE CONTEXT, not the scheme.
       //
       // The grant cookie is `__Host-` + `Secure` + `SameSite=None` +
-      // `Partitioned`, and it is set on the PREVIEW origin, which is always
-      // https by construction. What the visualizer's own origin decides is
+      // `Partitioned`, and it is set on the PREVIEW origin — whose own
+      // trustworthiness `checkPreviewScheme` reports separately, since the
+      // development profile may serve it over http on a reserved `.localhost`
+      // name. What the visualizer's own origin decides is
       // whether the browser will keep a partitioned third-party cookie for the
       // frame it embeds — and browsers treat loopback as trustworthy, so
       // `http://127.0.0.1` works while `http://atoma.internal` would not.
@@ -168,6 +170,55 @@ function checkConfig(env: NodeJS.ProcessEnv): DoctorCheck[] {
     });
   }
   return checks;
+}
+
+/** The visualizer origin, or nothing — the caller has already reported a bad one. */
+function safeVisualizerOrigin(env: NodeJS.ProcessEnv): string | undefined {
+  try {
+    return authPublicOrigin(env).origin;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * IS THE PREVIEW ORIGIN ITSELF A PLACE A BROWSER WILL TRUST?
+ *
+ * This is the check that keeps the loopback development profile honest, and it
+ * is about the PREVIEW origin rather than the visualizer's — the grant cookie
+ * is set there. HTTPS is trustworthy anywhere. Plain HTTP is trustworthy only
+ * under `.localhost`, which W3C Secure Contexts makes Potentially Trustworthy
+ * and RFC 6761 reserves so no registrar can ever sell one; everywhere else the
+ * browser refuses a `__Host-`/`Secure` cookie and every preview 404s with
+ * nothing in the logs.
+ *
+ * `snapshotPreviewConfig` already refuses that combination at boot, so a
+ * failure here means doctor and the server disagree — which is itself the
+ * finding.
+ */
+function checkPreviewScheme(config: { publicScheme: string; domain: string; publicPort: number | null }): DoctorCheck {
+  const port = config.publicPort === null ? '' : `:${config.publicPort}`;
+  const where = `${config.publicScheme}://*.${config.domain}${port}`;
+  if (config.publicScheme === 'https') {
+    return {
+      id: 'preview-scheme',
+      label: 'Preview origin',
+      status: 'pass',
+      detail: `${where} — a proxy must terminate wildcard TLS in front of the gateway`,
+    };
+  }
+  const reserved = config.domain.endsWith('.localhost');
+  return {
+    id: 'preview-scheme',
+    label: 'Preview origin',
+    status: reserved ? 'warn' : 'fail',
+    detail: reserved
+      ? `${where} — cleartext, on a reserved loopback name a browser treats as a secure context`
+      : `${where} — cleartext on a name browsers do NOT trust`,
+    remedy: reserved
+      ? 'Development only: the claim and the grant cookie travel in the clear. Any deployment anyone else reaches needs HTTPS and a real preview domain.'
+      : 'Unset ATOMA_PREVIEW_ALLOW_HTTP_DEV, or move the preview domain under .localhost. Outside that family a browser stores no __Host- cookie over http.',
+  };
 }
 
 /**
@@ -376,16 +427,25 @@ export async function diagnosePreview(
   deps: DoctorDependencies
 ): Promise<DoctorCheck[]> {
   const checks = checkConfig(env);
+  const gated = vizAuthEnabled(env) ? safeVisualizerOrigin(env) : undefined;
   if (checks.some((check) => check.id === 'preview-config' && check.status === 'fail')) {
     return checks;
   }
   let config;
   try {
-    config = previewEnabled(env) ? snapshotPreviewConfig(env) : null;
+    // THE SAME INPUTS THE SERVER USES, visualizer origin included. Resolving
+    // it without one would let doctor and the server compute different
+    // schemes from identical environment — and the scheme is exactly what the
+    // loopback development profile turns on.
+    config = previewEnabled(env)
+      ? snapshotPreviewConfig(env, gated ? { visualizerOrigin: gated } : {})
+      : null;
   } catch {
     return checks;
   }
   if (!config) return checks;
+
+  checks.push(checkPreviewScheme(config));
 
   checks.push(await checkRuntime(config.runtime, deps));
   const image = await checkImage(config.image, deps);
