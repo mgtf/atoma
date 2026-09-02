@@ -162,7 +162,17 @@ export function usePreviewStatus(
       if (!projectId || !runId) throw new Error('project and run ids are required');
       return api.previewStatus(projectId, runId);
     },
-    refetchInterval: (query) => (query.state.data?.state === 'starting' ? 1_500 : false),
+    // TWO cadences, for two questions. While a generation is BUILDING the
+    // member is watching a spinner and 1.5s is what makes it feel answered.
+    // While one is READY the question is the opposite — has it stopped
+    // underneath me? — and a slow poll is what takes a dead iframe down
+    // instead of leaving it looking like the app. A GET allocates nothing, so
+    // neither cadence can spend an organisation's quota.
+    refetchInterval: (query) => {
+      const state = query.state.data?.state;
+      if (state === 'starting' || state === 'stopping') return 1_500;
+      return state === 'ready' ? 15_000 : false;
+    },
     staleTime: 1_000,
   });
 }

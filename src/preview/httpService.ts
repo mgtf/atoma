@@ -58,6 +58,22 @@ export interface PreviewOpenResponse {
 export class PreviewHttpService {
   constructor(private readonly deps: PreviewHttpDeps) {}
 
+  /**
+   * Is this run still going?
+   *
+   * THE HOST DECIDES, never the caller. A request may ASK for an in-flight
+   * preview, but whether one is what it gets is a fact about the run: a
+   * delivered run has a descriptor and gets its delivered preview, and a
+   * running one gets a snapshot of the moment. Taking the client's word would
+   * let a caller ask for a snapshot of a finished run and be served one that
+   * silently disagrees with the result it published.
+   *
+   * `queued` is NOT in flight: nothing has been produced to snapshot yet.
+   */
+  private runInFlight(viewer: Viewer, projectRunId: string): boolean {
+    return this.deps.projects.getProjectRun(viewer.orgId, projectRunId)?.status === 'running';
+  }
+
   /** The run, bound to the project named in the path, or a 404. */
   private boundRun(viewer: Viewer, projectId: string, projectRunId: string): void {
     const run = this.deps.projects.getProjectRun(viewer.orgId, projectRunId);
@@ -75,7 +91,9 @@ export class PreviewHttpService {
   /** GET — status only. Allocates nothing, ever. */
   status(viewer: Viewer, projectId: string, projectRunId: string): PreviewSummary {
     this.boundRun(viewer, projectId, projectRunId);
-    return this.deps.manager.status(viewer.orgId, projectId, projectRunId);
+    return this.deps.manager.status(viewer.orgId, projectId, projectRunId, {
+      runInFlight: this.runInFlight(viewer, projectRunId),
+    });
   }
 
   /**
@@ -95,8 +113,12 @@ export class PreviewHttpService {
     this.boundRun(viewer, projectId, projectRunId);
     // `Viewer` carries no session id; see `PreviewClaimBinding.sessionId`.
     const opener = { principalId: viewer.principalId, sessionId: null };
+    // The caller ASKS; the run's own status ANSWERS. `inFlight` is a
+    // willingness to accept a snapshot, not an assertion about the run, so a
+    // request for one on a delivered run gets the delivered preview.
+    const inFlight = options.inFlight === true && this.runInFlight(viewer, projectRunId);
     try {
-      const opened = options.inFlight
+      const opened = inFlight
         ? await this.deps.manager.openInFlight({ orgId: viewer.orgId, projectId, projectRunId, opener })
         : await this.deps.manager.open({ orgId: viewer.orgId, projectId, projectRunId, opener });
       if (!opened.url) {
@@ -125,14 +147,21 @@ export class PreviewHttpService {
     // A heartbeat for a generation that has moved on is NOT an error: the
     // browser is a beat behind, and the summary it gets back tells it so.
     this.deps.manager.heartbeat(viewer.orgId, projectRunId, generation, viewer.principalId);
-    return this.deps.manager.status(viewer.orgId, projectId, projectRunId);
+    return this.deps.manager.status(viewer.orgId, projectId, projectRunId, {
+      runInFlight: this.runInFlight(viewer, projectRunId),
+    });
   }
 
   /** POST stop. */
   async stop(viewer: Viewer, projectId: string, projectRunId: string): Promise<PreviewSummary> {
     this.requireMember(viewer, 'stop previews');
     this.boundRun(viewer, projectId, projectRunId);
-    return this.deps.manager.stop(viewer.orgId, projectId, projectRunId, 'manual');
+    await this.deps.manager.stop(viewer.orgId, projectId, projectRunId, 'manual');
+    // Re-read with the run's status in hand. The manager answers about the
+    // INSTANCE it just removed and knows nothing about the run, so its own
+    // summary would tell a member who stopped a snapshot of a live run that
+    // there is now nothing to preview — and take the control away mid-run.
+    return this.status(viewer, projectId, projectRunId);
   }
 
   /**

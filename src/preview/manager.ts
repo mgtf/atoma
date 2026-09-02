@@ -107,8 +107,18 @@ export class PreviewManager {
     return `preview-${projectRunId}-${generation}`;
   }
 
-  status(orgId: string, projectId: string, projectRunId: string): PreviewSummary {
-    return readPreviewSummary(this.deps.store, { orgId, projectId, projectRunId });
+  status(
+    orgId: string,
+    projectId: string,
+    projectRunId: string,
+    options: { readonly runInFlight?: boolean } = {}
+  ): PreviewSummary {
+    return readPreviewSummary(this.deps.store, {
+      orgId,
+      projectId,
+      projectRunId,
+      runInFlight: options.runInFlight,
+    });
   }
 
   /**

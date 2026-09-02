@@ -61,13 +61,26 @@ export function previewSummary(input: {
   readonly descriptor: PreviewDescriptor | null;
   readonly instance: PreviewInstance | null;
   readonly approvedHosts: readonly string[];
+  /**
+   * Whether the run is still going. Without it this projection could only
+   * describe previews that ALREADY EXIST, and a run in flight was told it had
+   * nothing to preview until something had already previewed it — a control
+   * that could never appear, so a preview that could never be asked for.
+   */
+  readonly runInFlight?: boolean;
 }): PreviewSummary {
   const { descriptor, instance } = input;
   // AN IN-FLIGHT PREVIEW HAS NO DESCRIPTOR, by contract: a descriptor is
   // immutable and describes what DELIVERY observed, while a snapshot is a
   // moment. Reading its absence as `legacy-run` would describe a run that is
   // building right now as one delivered before the feature existed.
-  const inFlight = instance?.source === 'in-flight';
+  //
+  // A run that is STILL GOING is previewable for the same reason and one step
+  // earlier: nothing has been observed yet, and the answer is "ask and find
+  // out" rather than "there is nothing here". What the snapshot then contains
+  // is decided by classifying the COPY, which is the only honest moment to
+  // decide it.
+  const inFlight = instance?.source === 'in-flight' || input.runInFlight === true;
   const requestedHosts = descriptor?.requestedHosts ?? [];
   const { allowed, blocked } = effectiveEgressHosts(requestedHosts, input.approvedHosts);
   return previewSummarySchema.parse({
@@ -90,12 +103,18 @@ export function previewSummary(input: {
 /** Read a run's complete preview state in one place. */
 export function readPreviewSummary(
   store: PreviewStore,
-  input: { readonly orgId: string; readonly projectId: string; readonly projectRunId: string }
+  input: {
+    readonly orgId: string;
+    readonly projectId: string;
+    readonly projectRunId: string;
+    readonly runInFlight?: boolean;
+  }
 ): PreviewSummary {
   const descriptor = store.getDescriptor(input.orgId, input.projectRunId);
   return previewSummary({
     descriptor,
     instance: store.getInstance(input.orgId, input.projectRunId),
     approvedHosts: store.listApprovedHosts(input.orgId, input.projectId),
+    runInFlight: input.runInFlight,
   });
 }

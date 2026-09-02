@@ -59,6 +59,24 @@ starts and answers, and that it is incomplete is the information that was
 asked for. The design and the rejected alternatives are in
 [`docs/in-flight-preview-2026-09-02.md`](../../docs/in-flight-preview-2026-09-02.md).
 
+**WHICH of the two a request gets is the HOST's decision, from the run's own
+status.** A caller may ASK for an in-flight preview; `inFlight` is a
+willingness to accept a snapshot, never an assertion about the run. A running
+run gets a snapshot, a delivered one gets its delivered preview, and a caller
+asking for a snapshot of a finished run is not served one that silently
+disagrees with the result it published. `queued` is not in flight — nothing has
+been produced to snapshot yet.
+
+**The summary must know that status too**, or the control can never appear.
+Availability read from the descriptor and the instance alone answered
+`unavailable`/`legacy-run` for a run nobody had previewed yet; the client hides
+the control for exactly that answer, so the preview could not be asked for,
+therefore never came to exist, therefore stayed unavailable. `runInFlight`
+closes that loop, and reading it still allocates nothing. The same flag is why
+`stop` re-reads through the service: the manager answers about the instance it
+just removed and knows nothing about the run, so its own summary would take the
+control away mid-run.
+
 Three rules make it safe: the run's workspace is only ever READ; the COPY is
 what gets classified, never the live workspace, so the classifier sees bytes
 that cannot move under it; and a reopen takes a NEW snapshot on a NEW

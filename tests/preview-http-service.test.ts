@@ -181,6 +181,34 @@ function seedDeliveredRun(a: Actor, projectId: string, key: string): string {
   return run.projectRunId;
 }
 
+/** A run still going: a workspace being written, and NO descriptor. */
+function seedRunningRun(a: Actor, projectId: string, key: string): string {
+  const workspace = join(root, `ws-${key}`);
+  mkdirSync(workspace, { recursive: true });
+  writeFileSync(join(workspace, 'index.html'), '<h1>half built</h1>');
+  const run = projects.createProjectRun({
+    orgId: a.orgId,
+    projectId,
+    principalId: a.principalId,
+    request: { goal: 'build', idempotencyKey: key },
+    hostPaths: {
+      workspacePath: workspace,
+      runsPath: join(root, 'traces'),
+      logPath: join(root, 'run.log'),
+    },
+  })!.run;
+  workspaces.set(run.projectRunId, workspace);
+  // A run is `queued` when it is created and `running` once the host starts
+  // it. Only the second has anything to snapshot.
+  projects.transitionProjectRun({
+    orgId: a.orgId,
+    projectRunId: run.projectRunId,
+    from: 'queued',
+    to: 'running',
+  });
+  return run.projectRunId;
+}
+
 beforeEach(() => {
   workspaces.clear();
   claimsNow = 1_000;
@@ -442,5 +470,62 @@ describe('preview egress approvals', () => {
     const aliceProject = seedProject(alice, 'site');
 
     expect(() => service.listEgress(viewerFor(bob), aliceProject)).toThrow(ProjectHttpError);
+  });
+});
+
+describe('a run still in flight', () => {
+  it('offers a preview BEFORE one exists, or the control could never appear', () => {
+    // THE CHICKEN AND EGG THIS PINS: availability was read from the descriptor
+    // and the instance alone, so a run that had never been previewed answered
+    // `unavailable`/`legacy-run`. The client hides the control for exactly
+    // that answer — so the preview could not be asked for, and therefore never
+    // came to exist, and therefore stayed unavailable.
+    const alice = actor('alice');
+    const projectId = seedProject(alice, 'site');
+    const runId = seedRunningRun(alice, projectId, 'k-live');
+
+    const summary = service.status(viewerFor(alice), projectId, runId);
+
+    expect(summary.availability).toBe('available');
+    // Not a legacy run: the absence of a descriptor means something else here.
+    expect(summary.reason).toBeNull();
+    // And reading still allocated nothing.
+    expect(summary.state).toBe('stopped');
+    expect(summary.generation).toBe(0);
+  });
+
+  it('serves a SNAPSHOT for a running run and the DELIVERED preview for a finished one', async () => {
+    const alice = actor('alice');
+    const projectId = seedProject(alice, 'site');
+    const live = seedRunningRun(alice, projectId, 'k-live');
+    const done = seedDeliveredRun(alice, projectId, 'k-done');
+
+    // The same request on both. `inFlight` is a willingness to accept a
+    // snapshot, never an assertion about the run: the HOST decides which of
+    // the two this is, from the run's own status.
+    const snapshot = await service.open(viewerFor(alice), projectId, live, { inFlight: true });
+    const delivered = await service.open(viewerFor(alice), projectId, done, { inFlight: true });
+
+    expect(snapshot.body.summary.source).toBe('in-flight');
+    expect(snapshot.body.summary.snapshotAt).not.toBeNull();
+    // A caller asking for a snapshot of a finished run gets the delivered
+    // preview instead of one that silently disagrees with the published
+    // result.
+    expect(delivered.body.summary.source).toBe('delivered');
+    expect(delivered.body.summary.snapshotAt).toBeNull();
+  });
+
+  it('keeps the control after a stop, because the run is still going', async () => {
+    const alice = actor('alice');
+    const projectId = seedProject(alice, 'site');
+    const runId = seedRunningRun(alice, projectId, 'k-live');
+    await service.open(viewerFor(alice), projectId, runId, { inFlight: true });
+
+    const stopped = await service.stop(viewerFor(alice), projectId, runId);
+
+    // The manager answers about the INSTANCE it just removed and knows nothing
+    // about the run; taking its word would remove the control mid-run.
+    expect(stopped.state).toBe('stopped');
+    expect(stopped.availability).toBe('available');
   });
 });
