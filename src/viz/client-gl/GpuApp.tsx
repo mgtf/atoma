@@ -535,10 +535,11 @@ function GpuAppContent({
     }
   }, [githubInstallationsQuery.data, projectBusy, queryClient, t]);
 
-  // THE PREVIEW SESSION. Three pieces of local state, and none of them may go
-  // anywhere else: `previewUrl` carries a one-time claim in its fragment, so
-  // it is a credential — never the store (which a devtools reader can dump),
-  // never a query cache, never a log line.
+  // THE PREVIEW SESSION, and it lives HERE rather than in the store on
+  // purpose: `previewUrl` carries a one-time claim in its fragment, so it is a
+  // credential — never the store (which a devtools reader can dump), never a
+  // query cache, never a log line. Nothing on the canvas reads any of it, so
+  // there is no shared transition for the store to own either.
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewStatus, setPreviewStatus] = useState<PreviewPlaneStatus>('idle');
