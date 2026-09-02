@@ -622,7 +622,11 @@ function GpuAppContent({
   const stopPreview = useCallback(async (): Promise<void> => {
     if (!previewTarget) return;
     const { projectId, projectRunId } = previewTarget;
-    setPreviewUrl(null);
+    // The plane goes with it. Stopping IS "I am done looking", and leaving it
+    // up would also race the claim effect below: the status poll lags the
+    // stop, so a plane still open against a summary that still says `ready`
+    // would immediately ask for a new claim on the preview just stopped.
+    closePreview();
     try {
       await api.stopPreview(projectId, projectRunId);
     } catch (error) {
@@ -661,6 +665,18 @@ function GpuAppContent({
       window.clearInterval(timer);
     };
   }, [previewOpen, previewSummary?.generation, previewSummary?.state, previewTarget]);
+
+  // A generation someone ELSE was building has become ready, and this browser
+  // holds no claim for it: `open` answered 202 because another caller was
+  // already starting it, so there was no URL to hand over. Without this the
+  // plane sits on its placeholder for a preview that is running and reachable.
+  // ONE ask, and it cannot loop: a success sets the URL and a failure sets the
+  // error status, and both falsify the guard.
+  useEffect(() => {
+    if (!previewOpen || previewUrl || previewStatus !== 'idle') return;
+    if (previewSummary?.state !== 'ready') return;
+    void requestPreview('open');
+  }, [previewOpen, previewStatus, previewSummary?.state, previewUrl, requestPreview]);
 
   // A preview that stopped underneath the plane — idle expiry, a restart
   // elsewhere, an operator stop — takes its frame down with it rather than
