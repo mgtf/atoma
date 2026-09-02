@@ -734,7 +734,7 @@
   "announce.sentAll": "Dikirim ke setiap organisasi.",
   "announce.error": "Pengumuman tidak dapat dikirim.",
   "announce.emptySegment": "Tidak ada organisasi yang cocok dengan segmen ini.",
-  "app.documentTitle": "Atoma — visualisator run",
+  "app.documentTitle": "Atoma — Orkestrasi Agen AI yang Dapat Diperiksa",
   "settings.username": "Nama pengguna Anda",
   "settings.inheritOrg": "Default organisasi ({{fallback}})",
   "settings.orgDefaults": "Default organisasi per tier",

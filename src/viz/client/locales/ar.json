@@ -733,7 +733,7 @@
   "announce.sentAll": "أُرسل إلى كل مؤسسة.",
   "announce.error": "تعذّر إرسال الإعلان.",
   "announce.emptySegment": "لا توجد مؤسسة تطابق هذه الشريحة.",
-  "app.documentTitle": "Atoma — عارض run المرئي",
+  "app.documentTitle": "Atoma — تنسيق وكلاء الذكاء الاصطناعي القابل للفحص",
   "settings.username": "اسم المستخدم الخاص بك",
   "settings.inheritOrg": "إعداد المؤسسة الافتراضي ({{fallback}})",
   "settings.orgDefaults": "إعدادات المؤسسة الافتراضية لكل tier",

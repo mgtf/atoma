@@ -734,7 +734,7 @@
   "announce.sentAll": "已发送给所有组织。",
   "announce.error": "无法发送公告。",
   "announce.emptySegment": "没有符合此细分条件的组织。",
-  "app.documentTitle": "Atoma — run 可视化工具",
+  "app.documentTitle": "Atoma — 可检查的 AI 智能体编排",
   "settings.username": "您的用户名",
   "settings.inheritOrg": "组织默认设置（{{fallback}}）",
   "settings.orgDefaults": "各层的组织默认设置",

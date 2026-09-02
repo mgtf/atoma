@@ -734,7 +734,7 @@
   "announce.sentAll": "An alle Organisationen gesendet.",
   "announce.error": "Die Ankündigung konnte nicht gesendet werden.",
   "announce.emptySegment": "Keine Organisation entspricht diesem Segment.",
-  "app.documentTitle": "Atoma — run-Visualisierung",
+  "app.documentTitle": "Atoma — Überprüfbare Orchestrierung von KI-Agenten",
   "settings.username": "Ihr Benutzername",
   "settings.inheritOrg": "Organisationsstandard ({{fallback}})",
   "settings.orgDefaults": "Organisationsstandards je Tier",

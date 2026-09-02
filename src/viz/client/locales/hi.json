@@ -734,7 +734,7 @@
   "announce.sentAll": "हर संगठन को भेजा गया।",
   "announce.error": "घोषणा भेजी नहीं जा सकी।",
   "announce.emptySegment": "इस सेगमेंट से कोई संगठन मेल नहीं खाता।",
-  "app.documentTitle": "Atoma — run विज़ुअलाइज़र",
+  "app.documentTitle": "Atoma — निरीक्षण योग्य AI एजेंट ऑर्केस्ट्रेशन",
   "settings.username": "आपका उपयोगकर्ता नाम",
   "settings.inheritOrg": "संगठन का डिफ़ॉल्ट ({{fallback}})",
   "settings.orgDefaults": "प्रत्येक tier के लिए संगठन के डिफ़ॉल्ट",

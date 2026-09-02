@@ -734,7 +734,7 @@
   "announce.sentAll": "প্রতিটি সংস্থায় পাঠানো হয়েছে।",
   "announce.error": "ঘোষণাটি পাঠানো যায়নি।",
   "announce.emptySegment": "এই সেগমেন্টের সঙ্গে কোনো সংস্থা মেলে না।",
-  "app.documentTitle": "Atoma — run ভিজুয়ালাইজার",
+  "app.documentTitle": "Atoma — পরিদর্শনযোগ্য AI এজেন্ট অর্কেস্ট্রেশন",
   "settings.username": "আপনার ব্যবহারকারীর নাম",
   "settings.inheritOrg": "সংস্থার ডিফল্ট ({{fallback}})",
   "settings.orgDefaults": "প্রতি tier-এ সংস্থার ডিফল্ট",
