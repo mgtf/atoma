@@ -51,7 +51,9 @@ A missing runtime or image reports the isolation as NOT PROBED rather than
 skipping the line: an unprobed boundary is not a verified one. The Docker seam
 is injected like the rest of doctor's, so the suite can diagnose the two
 machines this repository cannot have at once. The preconditions themselves
-belong to [`src/preview`](../preview/AGENTS.md).
+belong to [`src/preview`](../preview/AGENTS.md). `npm run preview:demo` is the
+laptop counterpart — the harness that makes the surface clickable where doctor
+can only report that it cannot be.
 
 ## Burn-in and friction
 

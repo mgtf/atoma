@@ -9,6 +9,7 @@
     "build:worker": "docker build -f docker/worker.Dockerfile -t atoma-worker:latest .",
     "build:worker:dev": "npm run build && npm run build:worker",
     "build:preview": "docker build -f docker/preview.Dockerfile -t atoma-preview:latest .",
+    "preview:demo": "tsx scripts/preview-demo.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.all.json --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

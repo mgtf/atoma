@@ -1,6 +1,7 @@
 import type { IncomingMessage } from 'node:http';
 import { AuthStore, type Viewer } from './store.js';
 import { parseCookieHeader, SESSION_COOKIE } from './sessions.js';
+import { isLoopbackHost } from './providers.js';
 
 /**
  * THE GATE — one resolver from an HTTP request to a Viewer.
@@ -55,8 +56,7 @@ export function authPublicOrigin(env: NodeJS.ProcessEnv = process.env): URL {
   } catch {
     throw new Error(`${VIZ_PUBLIC_ORIGIN_ENV} must be an absolute http(s) origin`);
   }
-  const loopback = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]';
-  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) {
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && isLoopbackHost(url.hostname))) {
     throw new Error(`${VIZ_PUBLIC_ORIGIN_ENV} must use https (http is allowed only on loopback)`);
   }
   if (url.username || url.password || url.pathname !== '/' || url.search || url.hash) {

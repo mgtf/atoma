@@ -86,7 +86,7 @@ import { GitHubPublisher } from '../projects/publisher.js';
 import { ProjectHttpError, ProjectService, roleAtLeast } from '../projects/service.js';
 import { PreviewStore } from '../preview/store.js';
 import { recordDeliveredPreview } from '../preview/service.js';
-import { previewEnabled, snapshotPreviewConfig } from '../preview/config.js';
+import { previewConfigPresent, previewEnabled, snapshotPreviewConfig } from '../preview/config.js';
 import { PreviewClaimRegistry } from '../preview/claims.js';
 import {
   PreviewRouteTable,
@@ -772,6 +772,31 @@ interface PreviewRuntime {
   readonly claims: PreviewClaimRegistry;
 }
 
+/**
+ * Why previews are off, in one sentence, or null when they are on.
+ *
+ * SEPARATE FROM THE CONSTRUCTION because silence was the whole defect: a
+ * deployment missing `ATOMA_VIZ_AUTH` booted cleanly, printed nothing about
+ * previews, and then answered a plain 404 on every preview route — the route
+ * block lives inside the gated section, so there was not even the 503 the
+ * design promises. An operator had no way to tell "I never asked for this"
+ * from "I asked and it did not happen".
+ */
+function previewOffReason(): string | null {
+  if (previewEnabled(process.env)) {
+    if (!AUTH_RUNTIME) {
+      return 'the visualizer auth gate is off, and a preview belongs to an organisation’s run — set ATOMA_VIZ_AUTH=1';
+    }
+    if (!PROJECTS_RUNTIME) return 'org-scoped project storage is unavailable';
+    return null;
+  }
+  // Half a configuration must never read as "off": an operator who set the
+  // domain and the image but not the switch wanted previews.
+  return previewConfigPresent(process.env)
+    ? 'ATOMA_PREVIEW is unset while other ATOMA_PREVIEW_* variables are set — set ATOMA_PREVIEW=1, or remove them'
+    : 'ATOMA_PREVIEW is not set';
+}
+
 const PREVIEW_RUNTIME_PROMISE: Promise<PreviewRuntime | null> = (async () => {
   if (!PROJECTS_RUNTIME || !AUTH_RUNTIME) return null;
   if (!previewEnabled(process.env)) return null;
@@ -834,7 +859,17 @@ void PREVIEW_RUNTIME_PROMISE.then((runtime) => {
   PREVIEW_RUNTIME = runtime;
   if (runtime) {
     console.error(`[atoma viz] preview gateway on ${runtime.gateway.port}`);
+    return;
   }
+  // `previewEnabled` throws on a value it does not recognise, and this line
+  // must not be the thing that takes the server down.
+  let reason: string;
+  try {
+    reason = previewOffReason() ?? 'unknown';
+  } catch (error) {
+    reason = String(error);
+  }
+  console.error(`[atoma viz] previews are off: ${reason}`);
 }).catch((error: unknown) => {
   // A configuration this deployment asked for and cannot have is a hard fact,
   // not a degraded mode: previews stay off and the reason is printed once.

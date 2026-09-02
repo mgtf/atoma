@@ -1199,3 +1199,7 @@ html.atoma-cursor-active * {
   color: #9fb4d4;
   font: 12px/1.5 ui-sans-serif, system-ui, sans-serif;
 }
+
+.gpu-preview-stalled {
+  color: #f0c674;
+}

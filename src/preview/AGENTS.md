@@ -54,28 +54,25 @@ as the present.
 A torn copy is NOT a defect to eliminate — it is the nature of watching
 unfinished work — and the readiness contract already filters what matters: no
 runnable entry, a server that will not start, a marker that never arrives, a
-probe that goes unanswered. What survives all four is an application that
-starts and answers, and that it is incomplete is the information that was
-asked for. The design and the rejected alternatives are in
+probe that goes unanswered. What survives all four starts and answers, and that
+it is incomplete is the information that was asked for. The design and the
+rejected alternatives are in
 [`docs/in-flight-preview-2026-09-02.md`](../../docs/in-flight-preview-2026-09-02.md).
 
 **WHICH of the two a request gets is the HOST's decision, from the run's own
-status.** A caller may ASK for an in-flight preview; `inFlight` is a
-willingness to accept a snapshot, never an assertion about the run. A running
-run gets a snapshot, a delivered one gets its delivered preview, and a caller
-asking for a snapshot of a finished run is not served one that silently
-disagrees with the result it published. `queued` is not in flight — nothing has
-been produced to snapshot yet.
+status.** `inFlight` is a willingness to accept a snapshot, never an assertion
+about the run: a running run gets one, a delivered run gets its delivered
+preview, and nobody is served a snapshot that silently disagrees with a
+published result. `queued` is not in flight — nothing has been produced yet.
 
 **The summary must know that status too**, or the control can never appear.
 Availability read from the descriptor and the instance alone answered
 `unavailable`/`legacy-run` for a run nobody had previewed yet; the client hides
 the control for exactly that answer, so the preview could not be asked for,
-therefore never came to exist, therefore stayed unavailable. `runInFlight`
-closes that loop, and reading it still allocates nothing. The same flag is why
-`stop` re-reads through the service: the manager answers about the instance it
-just removed and knows nothing about the run, so its own summary would take the
-control away mid-run.
+therefore never existed, therefore stayed unavailable. `runInFlight` closes
+that loop and still allocates nothing. It is also why `stop` re-reads through
+the service: the manager answers about the instance it just removed and knows
+nothing about the run, so its own summary would take the control away mid-run.
 
 Three rules make it safe: the run's workspace is only ever READ; the COPY is
 what gets classified, never the live workspace, so the classifier sees bytes
@@ -194,27 +191,24 @@ The order is the contract, and it is the shape the egress sidecar already
 proved: purge the owner's debris, arm the hard-exit fallback **before** anything
 exists, create, and tear down in reverse.
 
-- **Nothing is exposed before it answers.** Readiness is TWO facts: the
-  application's own `LISTENING_ON_PORT` marker, and then a real request that
-  reaches it through the relay. A route or a claim handed out on the marker
-  alone opens a preview onto a connection refused, and the member reads our
-  timing as their bug.
+- **Nothing is exposed before it answers.** Readiness is TWO facts: the app's
+  own `LISTENING_ON_PORT` marker, then a real request reaching it through the
+  relay. A claim handed out on the marker alone opens a preview onto a
+  connection refused, and the member reads our timing as their bug.
 - **A failed start leaves nothing behind.** Every exit path — refusal, timeout,
   crash, an error from the engine — runs the same teardown, because the
   alternative is a leaked container holding a tenant's bytes. The hard-exit
   fallback is disarmed only once everything is gone.
-- **Teardown never throws.** Relay, then application, then network, then the
-  ephemeral copy; a step that cannot finish is logged by NAME and the remaining
-  steps still run. One loud failure in the middle would abandon everything
-  after it, which is the opposite of what teardown is for.
+- **Teardown never throws.** Relay, application, network, then the ephemeral
+  copy; a step that cannot finish is logged by NAME and the rest still run. One
+  loud failure midway would abandon everything after it.
 - Failures carry a bounded code from the closed vocabulary the instance row and
   the browser summary share, so a member reads one word rather than an engine's
-  prose. `copy-limit` is distinct from `internal` on purpose: it is the one
-  failure a member can act on.
+  prose. `copy-limit` is distinct from `internal`: it is the one a member can
+  act on.
 - Teardown ends with a SWEEP BY OWNER, not only by the handles it collected.
-  Measured: a `startUnit` that created a container and then threw on a later
-  step left it running with no handle for teardown to name, and the leak
-  survived the failure it was supposed to clean up after.
+  Measured: a `startUnit` that created a container then threw on a later step
+  left it running with no handle to name, and the leak survived the failure.
 
 ## The image holds nothing of atoma
 
@@ -223,14 +217,12 @@ non-root user, and that is the whole file. The process it starts is not our
 code — it is whatever a run produced — so every line of atoma reachable from
 inside it is a line a member's generated application inherits. The worker image
 is the OPPOSITE guard: that one must contain everything it imports, and
-`tests/container-image-closure.test.ts` now asserts both directions.
-
-Three absences are deliberate:
+`tests/container-image-closure.test.ts` asserts both directions. Three absences
+are deliberate:
 
 - **No `npm install` layer.** A deliverable brings its own `node_modules` in
-  the copied workspace or it does not run. Installing at open time would put a
-  network operation on a member's click, in a container that has no egress to
-  perform it.
+  the copied workspace or it does not run; installing at open time would put a
+  network operation on a member's click, in a container with no egress for it.
 - **No apt layer.** The worker installs python3 and chromium because TOOLS need
   them; nothing here runs a tool, and every package is surface the generated
   code inherits.
@@ -241,12 +233,20 @@ Three absences are deliberate:
 
 Its uid is 10002, one above the worker's 10001: the same host process mounts
 both, and a shared uid would let a file written for one be written by the
-other.
-
-Production pins the image BY DIGEST, which means pushing it to a registry — a
-mutable tag is not an identity, and `snapshotPreviewConfig` refuses one.
+other. Production pins the image BY DIGEST, which means pushing it — a mutable
+tag is not an identity, and `snapshotPreviewConfig` refuses one.
 
 ## Configuration is all-or-nothing
+
+`npm run preview:demo` is the laptop path: a loopback OAuth provider, then a
+project and a delivered STATIC run seeded through the coordinator's own store
+calls. Three correct rules stand between a fresh checkout and a clickable
+button — previews need the gate, a project needs an active GitHub installation,
+a run needs a POSIX host — and none is worth weakening for a local look. It
+touches no preview code, so a button that does not work has not been hidden by
+it; `tests/preview-demo-harness.test.ts` pins the one coupling that would break
+silently, the workspace path the harness writes against the one `workspaceOf`
+derives.
 
 The OPERATOR view of everything below — host, domain, proxy, cost, egress — is
 [`docs/preview-deployment.md`](../../docs/preview-deployment.md), verified by
@@ -259,19 +259,24 @@ check, so a deployment that set four of the six is told so.
 - The image must be **pinned by digest**. A mutable tag is not an identity, and
   the instance row records the digest that served each generation.
 - `runsc` is the default and production requires it. `runc` needs an explicit
-  `ATOMA_PREVIEW_ALLOW_RUNC_DEV=1` **and** refuses to boot behind the auth
-  gate: a deployment with accounts is a deployment with tenants, and `runc` is
-  not the boundary this feature promises them.
+  `ATOMA_PREVIEW_ALLOW_RUNC_DEV=1` **and** a deployment nobody else can reach:
+  the visualizer's public origin AND the gateway's bind must both be loopback.
+  The rule is "a deployment with TENANTS never gets `runc`", and testing it as
+  "is the gate on?" made the hatch UNREACHABLE — previews REQUIRE the gate, so
+  it was refused on every machine including the one-person laptop it exists
+  for. Reachability is the sharper test: a session gates a claim, a claim is
+  the only way to reach a preview origin, and a session needs an OAuth round
+  trip against THAT origin. Nothing falls back to `runc` on its own.
 - The preview domain must not share a registrable domain with the visualizer
   origin. The check is deliberately CONSERVATIVE — two labels, no Public Suffix
-  List — so it refuses more configurations than strictly necessary, which is
-  the safe direction for a check whose job is keeping a session cookie away
-  from generated code. An origin that will not parse is not proof of safety.
-- Every bound REFUSES rather than falls back. An operator who asked for a
+  List — so it refuses more than strictly necessary, the safe direction for a
+  check whose job is keeping a session cookie away from generated code. An
+  origin that will not parse is not proof of safety.
+- Every bound REFUSES rather than falls back — an operator who asked for a
   two-hour idle bound and silently got fifteen minutes is the defect the
-  project-run timeout already records. Contradictory settings are refused too:
-  a per-org cap above the global one never applies, and an idle bound at or
-  past the hard bound never fires.
+  project-run timeout already records. Contradictory settings too: a per-org
+  cap above the global one never applies, and an idle bound at or past the hard
+  bound never fires.
 
 ## The origin, and who may open it
 
@@ -281,10 +286,10 @@ front of it was sent by an authenticated member.
 
 - **One host per GENERATION**, derived from `(orgId, runId, generation)`. A
   restart mints a new generation and therefore a new origin, which is what
-  makes stale service workers, storage and caches from a previous generation
-  unable to control the next. No amount of cache-busting on one origin gives
-  that. The host is derived rather than stored because the gateway must route
-  from the `Host` header alone, before it has consulted anything.
+  makes a previous generation's service workers, storage and caches unable to
+  control the next — no cache-busting on one origin gives that. It is derived
+  rather than stored because the gateway routes from the `Host` header alone,
+  before it has consulted anything.
 - **A claim is one-time, thirty seconds, and bound to everything it depends
   on** — principal, session, org, run, generation and the exact host. It is
   CONSUMED BEFORE it is validated, exactly as `consumeOauthState` is, so a
@@ -299,15 +304,14 @@ front of it was sent by an authenticated member.
   held a live grant on that origin. A cookie must be a credential, never a
   flag.
 - **A grant lasts five minutes and only the PARENT'S HEARTBEAT extends it**,
-  through `renewRun`, which matches on the binding rather than on the token.
-  It has to: the token is a cookie on the preview origin, which the control
-  plane can neither read nor be sent — that separation is the whole reason for
-  the separate registrable domain. Renewal is scoped to the beating principal,
-  so one member watching cannot keep another's credential alive after they
-  closed the tab. Wiring this was not optional: with the container's idle TTL
-  at fifteen minutes and the grant at five, every viewing session was capped at
-  five minutes and ended in the generic 404 below with a healthy container
-  behind it.
+  through `renewRun`, which matches on the BINDING rather than the token: the
+  token is a cookie on the preview origin, which the control plane can neither
+  read nor be sent, and that separation is the whole reason for the separate
+  domain. Renewal is scoped to the beating principal, so one member cannot keep
+  another's credential alive after they closed the tab. Wiring it was not
+  optional — against a fifteen-minute idle TTL, every viewing session was
+  capped at five and ended in the 404 below with a healthy container behind
+  it.
 - **One generic 404 for every negative answer** — unknown host, expired claim,
   forged token, wrong organisation, stopped preview. Telling them apart tells
   an unauthenticated caller which generation hosts exist and which
@@ -422,28 +426,27 @@ The GPU client's contract is in [`src/viz`](../viz/AGENTS.md); what belongs
 HERE is what the preview's own shape forces on it.
 
 - **The control is a SIBLING of the run summary card, on `ctx.root`.** A parent
-  `hitArea` PRUNES its whole subtree, so a control drawn inside the card but
-  outside its rectangle would be unreachable rather than merely covered; and a
-  nested target that IS inside it still bubbles, so one click would open the
-  preview AND collapse the card. There is no `stopPropagation` precedent in
-  that client and a layout choice is the wrong reason to add one.
+  `hitArea` PRUNES its whole subtree, so a control inside the card but outside
+  its rectangle would be unreachable rather than merely covered; and a nested
+  target that IS inside it still bubbles, so one click would open the preview
+  AND collapse the card. There is no `stopPropagation` precedent in that
+  client, and a layout choice is the wrong reason to add one.
 - **The plane REPLACES the canvas rather than floating over it**, and the
-  product tree goes `inert` behind it. That is what exempts it from the
+  product tree goes `inert` behind it — which is what exempts it from the
   grandfathered CSS-skin list: with nothing underneath, there is no pointer
   light to escape and no hover bubble to bury.
 - **The iframe mounts only in `ready`**, and its `key` is the generation plus
   the reload nonce. A restart is a NEW ORIGIN and gets a new element; reusing
   one would carry the previous origin's session history into it.
-- **The first load spends the claim; every reload after it uses the origin
-  root.** Re-navigating to a one-time claim lands on "this link has already
-  been used" — a reload button that breaks what it reloads. The grant cookie
-  is what carries the second visit.
+- **The first load spends the claim; every reload uses the origin root.**
+  Re-navigating to a one-time claim lands on "this link has already been used"
+  — a reload button that breaks what it reloads. The grant carries the rest.
 - **`allow-same-origin` IS granted to the frame.** Withholding it puts the app
   in an OPAQUE origin, where the gateway's own `default-src 'self'` matches
-  nothing and every separate script or stylesheet is blocked — the feature
-  would not work for any deliverable built from more than one file. The
-  isolation is the separate registrable domain carrying no Atoma cookie, not
-  the sandbox flag. `allow-popups` stays absent.
+  nothing and every separate script or stylesheet is blocked — nothing built
+  from more than one file would work. The isolation is the separate registrable
+  domain carrying no Atoma cookie, not the sandbox flag. `allow-popups` stays
+  absent.
 - **NO "open in a new tab", and it is not an omission.** The grant cookie is
   `Partitioned`, keyed to the visualizer as the embedding site, so a TOP-LEVEL
   tab on the preview origin is a different partition and would arrive with no
@@ -451,16 +454,19 @@ HERE is what the preview's own shape forces on it.
   Making it work means minting a second claim for a top-level context, which
   is a decision about what a claim binds.
 - **NO per-row Preview button in the Projects run list**, which the design
-  §14 asked for. Eligibility is a decision the manager makes per run, so an
-  honest row control needs a status query PER ROW; without one the row would
-  offer a button that fails after the click — the exact thing the same
-  paragraph forbids. The row already navigates to the run detail, where the
-  control has real state. Reopening this means a batch status route, not a
-  button.
+  §14 asked for. Eligibility is decided per run, so an honest row control needs
+  a status query PER ROW; without one the row offers a button that fails after
+  the click — the exact thing the same paragraph forbids. The row already
+  navigates to the run detail, where the control has real state. Reopening this
+  means a batch status route, not a button.
 - **The heartbeat beats only while the plane is up**, at one minute — inside
   both clocks it feeds. That is D6 made mechanical: the generated app's own
   traffic never reaches it, so an abandoned tab full of polling code cannot
   keep its own container alive.
+- **A frame that loads nothing SAYS so** after ten seconds. Cross-origin,
+  `onError` never fires and `onLoad` fires even for the browser's error page,
+  so a timer expiring with no load is all the parent can observe — a false
+  negative beats a chrome reporting `ready` over a blank rectangle.
 
 ## The service is the seam
 

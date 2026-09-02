@@ -203,6 +203,9 @@ separately billed `OPENAI_API_KEY`. The full contract is in
   faster, or the arms to stop measuring frame time — not a longer timeout.
 - `npm run build:worker` consumes an existing `dist/`; the source path is
   `npm run build:worker:dev`.
+- `npm run preview:demo` is DEVELOPMENT TOOLING, never a release path: a
+  loopback OAuth provider plus a seeded project and delivered static run, so
+  the preview surface is clickable on a machine that cannot execute a run.
 - `npm run build:preview` builds the preview runtime image. It consumes no
   `dist/` because it contains none: the process it starts is a run's own
   deliverable, not ours. Production pins it by DIGEST, which means pushing it —

@@ -277,9 +277,28 @@ function authUrlProblem(raw: string): string | null {
   return 'must use HTTPS (plain HTTP is allowed only for loopback hosts)';
 }
 
-function isLoopbackHost(hostname: string): boolean {
+/**
+ * A host that can only ever mean THIS machine.
+ *
+ * Exported because three subsystems ask the same question and each had written
+ * its own answer: this file's HTTPS exemption, the gate's public-origin rule,
+ * and the preview's development-runtime carve-out. The bracketed IPv6 form is
+ * what `URL.hostname` actually returns, so it is what the comparison uses.
+ */
+export function isLoopbackHost(hostname: string): boolean {
   const normalized = hostname.toLowerCase();
   return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '[::1]';
+}
+
+/** The same question about a whole origin. An unparseable one is not loopback. */
+export function isLoopbackOrigin(origin: string): boolean {
+  try {
+    return isLoopbackHost(new URL(origin).hostname);
+  } catch {
+    // Consistent with `previewDomainCollides`: a string we cannot parse is
+    // never treated as proof of safety.
+    return false;
+  }
 }
 
 function isProviderId(id: string): id is ProviderId {

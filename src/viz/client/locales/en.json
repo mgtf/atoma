@@ -661,6 +661,7 @@
   "preview.status.stopping": "Stopping the preview…",
   "preview.status.stopped": "The preview is stopped.",
   "preview.status.failed": "The preview could not start.",
+  "preview.stalled": "Nothing has loaded yet. The app is running — so this is usually the preview domain: check that it resolves and that its certificate is trusted.",
   "preview.expires": "This preview stops on its own once you stop watching it.",
   "preview.error.quota": "Too many previews are running right now. Try again in a moment.",
   "preview.error.unavailable": "This run has nothing to preview.",

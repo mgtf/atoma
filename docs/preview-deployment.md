@@ -15,6 +15,30 @@ This document is the OPERATOR side. The subsystem contract is
 [`src/preview/AGENTS.md`](../src/preview/AGENTS.md); the design of record is
 [`docs/result-preview-design-2026-08-28.md`](result-preview-design-2026-08-28.md).
 
+## Trying it on a laptop first
+
+```bash
+npm run preview:demo
+```
+
+It runs a loopback-only OAuth provider (so the auth gate has a complete client
+without registering anything), waits for your first login to found an
+organisation, then seeds a project and a DELIVERED run through the SAME store
+calls the coordinator makes. It prints the `.env` block and the Caddy stanza
+you need, and it seeds a **static** deliverable — that branch starts no
+container at all, so it needs neither gVisor nor the preview image. It is the
+whole machinery apart from the isolate, which is the half a laptop can run.
+
+Two things it cannot substitute, and does not pretend to: the gVisor boundary,
+and executing a run to produce the deliverable (the run host must be POSIX).
+
+`node` deliverables need a container, and therefore `runsc` — or, on a machine
+whose engine cannot register it, `ATOMA_PREVIEW_RUNTIME=runc` with
+`ATOMA_PREVIEW_ALLOW_RUNC_DEV=1`. That combination boots ONLY when the
+visualizer's public origin and the gateway's bind are both loopback: a machine
+nobody else can log in to has no tenants to hand a weaker sandbox. Anything
+else — an HTTPS origin, a LAN address, a gateway on `0.0.0.0` — still refuses.
+
 ## What this is not
 
 A compose reference for a containerised control plane. That topology — atoma

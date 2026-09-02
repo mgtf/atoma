@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import '@testing-library/jest-dom/vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { createElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -175,6 +175,41 @@ describe('the preview plane', () => {
 
     await userEvent.keyboard('{Escape}');
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('says so when the frame has loaded nothing at all', async () => {
+    // THE FRAME IS CROSS-ORIGIN: `onError` effectively never fires and
+    // `onLoad` fires even for the browser's own error page, so a timer that
+    // expires with no load is the only thing this document can observe. Before
+    // it, a failed DNS lookup or an untrusted certificate left the chrome
+    // cheerfully reporting "ready" over a blank rectangle.
+    vi.useFakeTimers();
+    try {
+      render(plane());
+      expect(screen.queryByText(/Nothing has loaded yet/i)).toBeNull();
+      act(() => {
+        vi.advanceTimersByTime(11_000);
+      });
+      expect(screen.getByText(/Nothing has loaded yet/i)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stays quiet once the frame reports a load', () => {
+    vi.useFakeTimers();
+    try {
+      const { container } = render(plane());
+      act(() => {
+        container.querySelector('iframe')!.dispatchEvent(new Event('load'));
+      });
+      act(() => {
+        vi.advanceTimersByTime(11_000);
+      });
+      expect(screen.queryByText(/Nothing has loaded yet/i)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('renders nothing at all when closed', () => {

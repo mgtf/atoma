@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { VizPreviewSummary } from '../client/types.js';
 
 /**
@@ -30,6 +30,15 @@ import type { VizPreviewSummary } from '../client/types.js';
  */
 
 export type PreviewPlaneStatus = 'idle' | 'opening' | 'error';
+
+/**
+ * How long the frame may show nothing before the chrome says so.
+ *
+ * Generous on purpose: the host answered `ready` only after its own readiness
+ * probe succeeded, so what remains is one HTTP round trip plus the gateway's
+ * claim exchange. Ten seconds of blank is a problem, not a slow app.
+ */
+const FRAME_LOAD_GRACE_MS = 10_000;
 
 export function PreviewPlane({
   open,
@@ -65,6 +74,10 @@ export function PreviewPlane({
   onStop: () => void;
 }) {
   const closeRef = useRef<HTMLButtonElement | null>(null);
+  // Did the frame ever finish a navigation? See `stalled` below for what this
+  // can and cannot prove.
+  const [loaded, setLoaded] = useState(false);
+  const [stalled, setStalled] = useState(false);
 
   // Focus lands on the toolbar's first control on entry. Restoring it on exit
   // is the CALLER's job, not this component's: the control that opened the
@@ -89,6 +102,22 @@ export function PreviewPlane({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [onClose, open]);
+
+  // THE FRAME IS CROSS-ORIGIN, so this is the ONLY thing the parent document
+  // can observe about it. `onError` effectively never fires for a frame, and
+  // `onLoad` fires even for the browser's own error page — so a timer that
+  // expires with no load at all is a TRUE POSITIVE for "nothing happened",
+  // and a browser that rendered an error page is a false negative we cannot
+  // close from here. Worth saying anyway: without it a failed DNS lookup or an
+  // untrusted certificate left the chrome cheerfully reporting "ready" over a
+  // blank rectangle, which is the least debuggable thing this surface can do.
+  useEffect(() => {
+    setLoaded(false);
+    setStalled(false);
+    if (!open || !url) return;
+    const timer = window.setTimeout(() => setStalled(true), FRAME_LOAD_GRACE_MS);
+    return () => window.clearTimeout(timer);
+  }, [open, url, reloadNonce, summary?.generation]);
 
   if (!open) return null;
 
@@ -156,6 +185,9 @@ export function PreviewPlane({
       <div className="gpu-preview-status" aria-live="polite" aria-atomic="true">
         <span>{statusLine}</span>
         <span className="gpu-preview-provenance">{provenance}</span>
+        {ready && stalled && !loaded ? (
+          <span className="gpu-preview-stalled">{t('preview.stalled')}</span>
+        ) : null}
       </div>
       <div className="gpu-preview-stage">
         {ready ? (
@@ -183,6 +215,7 @@ export function PreviewPlane({
             sandbox="allow-scripts allow-same-origin allow-forms"
             referrerPolicy="no-referrer"
             allow=""
+            onLoad={() => setLoaded(true)}
           />
         ) : (
           <p className="gpu-preview-placeholder">{statusLine}</p>

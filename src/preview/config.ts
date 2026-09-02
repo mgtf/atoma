@@ -1,4 +1,5 @@
 import { previewRuntimeSchema, type PreviewRuntime } from '../contracts/preview.js';
+import { isLoopbackHost, isLoopbackOrigin } from '../auth/providers.js';
 
 /**
  * WHAT A DEPLOYMENT MUST STATE BEFORE IT MAY RUN PREVIEWS.
@@ -172,18 +173,48 @@ export function snapshotPreviewConfig(
     throw new PreviewConfigError(`${PREVIEW_ENV.runtime} must be runsc or runc`);
   }
   const runtime = runtimeParsed.data;
+  // Read here rather than at the bottom: the carve-out below is about where
+  // the gateway LISTENS, so the value has to exist before the decision.
+  const gatewayHost = env[PREVIEW_ENV.gatewayHost]?.trim() || '127.0.0.1';
   if (runtime !== 'runsc') {
-    // THE LOUD DEV-ONLY ESCAPE HATCH. Two conditions, and the second is the
-    // one that matters: a deployment with accounts is a deployment with
-    // tenants, and `runc` is not the boundary this feature promises them.
+    // THE LOUD DEV-ONLY ESCAPE HATCH, and it stays loud: `runsc` is still the
+    // default, `runc` still needs this flag written out, and NOTHING ever
+    // falls back to `runc` when `runsc` is missing — that failure surfaces as
+    // a refusal to start, not as a weaker sandbox.
     if (env[PREVIEW_ENV.allowRuncDev] !== '1') {
       throw new PreviewConfigError(
         `${PREVIEW_ENV.runtime}=${runtime} requires ${PREVIEW_ENV.allowRuncDev}=1; production requires gVisor and there is no silent fallback`
       );
     }
-    if (options.visualizerOrigin) {
+    // WHAT CHANGED, AND WHY IT IS NOT A WEAKENING.
+    //
+    // The rule this enforces is "a deployment with TENANTS never gets `runc`",
+    // and the original test for that was "is the auth gate on?". That test was
+    // too coarse in one direction and it made the hatch UNREACHABLE: previews
+    // REQUIRE the gate, so `runc` was refused everywhere, on every machine —
+    // including the one-person laptop the hatch exists for. A developer whose
+    // engine cannot register gVisor (Docker Desktop cannot) had no way to run
+    // the feature at all.
+    //
+    // The sharper test is REACHABILITY, and a loopback public origin settles
+    // it: the session is what gates a claim, a claim is the only way to reach
+    // a preview origin, and a session can only be obtained by completing an
+    // OAuth round trip against THAT origin. An origin nobody else can resolve
+    // is an origin nobody else can log in to, so there are no other tenants to
+    // hand a weaker sandbox to. The gateway's own bind is checked as well, so
+    // the isolate is not listening on a public interface either.
+    //
+    // An HTTPS origin, a LAN address, any public hostname, or a gateway bound
+    // to 0.0.0.0 still throws. This is the same loopback exemption the auth
+    // gate and the provider registry already make, using their definition.
+    const reachableGate =
+      options.visualizerOrigin !== undefined &&
+      !(isLoopbackOrigin(options.visualizerOrigin) && isLoopbackHost(gatewayHost));
+    if (reachableGate) {
       throw new PreviewConfigError(
-        `${PREVIEW_ENV.allowRuncDev} refuses to boot behind the auth gate: it is a development escape hatch, never a production fallback`
+        `${PREVIEW_ENV.allowRuncDev} refuses to boot behind a REACHABLE auth gate ` +
+          `(origin ${options.visualizerOrigin}, gateway ${gatewayHost}): it is a development ` +
+          'escape hatch for a single-operator machine, never a production fallback'
       );
     }
   }
@@ -215,7 +246,7 @@ export function snapshotPreviewConfig(
 
   return {
     domain,
-    gatewayHost: env[PREVIEW_ENV.gatewayHost]?.trim() || '127.0.0.1',
+    gatewayHost,
     gatewayPort: boundedInteger(env, PREVIEW_ENV.gatewayPort, 4_311, 1, 65_535),
     image,
     runtime,

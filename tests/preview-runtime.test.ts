@@ -409,13 +409,69 @@ describe('preview configuration', () => {
         [PREVIEW_ENV.allowRuncDev]: '1',
       }).runtime
     ).toBe('runc');
-    // With the gate on, never — a deployment with accounts has tenants.
+    // Behind a REACHABLE gate, never — a deployment other people can log in to
+    // is a deployment with tenants.
     expect(() =>
       snapshotPreviewConfig(
         { ...valid, [PREVIEW_ENV.runtime]: 'runc', [PREVIEW_ENV.allowRuncDev]: '1' },
         { visualizerOrigin: 'https://app.example.com' }
       )
-    ).toThrow(/refuses to boot behind the auth gate/);
+    ).toThrow(/refuses to boot behind a REACHABLE auth gate/);
+  });
+
+  it('lets one operator run runc on a machine nobody else can reach', () => {
+    // THE HATCH WAS UNREACHABLE. Previews REQUIRE the auth gate, and the gate
+    // being on was the whole test, so `runc` was refused on every machine
+    // including the one-person laptop the hatch exists for — and Docker
+    // Desktop cannot register gVisor, so the feature could not be run at all.
+    //
+    // A loopback public origin settles reachability: a session is what gates a
+    // claim, a claim is the only way to reach a preview origin, and a session
+    // needs an OAuth round trip against THAT origin. Nobody else can resolve
+    // it, so there are no other tenants.
+    const dev = { ...valid, [PREVIEW_ENV.runtime]: 'runc', [PREVIEW_ENV.allowRuncDev]: '1' };
+
+    for (const origin of ['http://127.0.0.1:5173', 'http://localhost:5173', 'http://[::1]:5173']) {
+      expect(snapshotPreviewConfig(dev, { visualizerOrigin: origin }).runtime).toBe('runc');
+    }
+  });
+
+  it('still refuses runc for every origin or bind that is not loopback', () => {
+    const dev = { ...valid, [PREVIEW_ENV.runtime]: 'runc', [PREVIEW_ENV.allowRuncDev]: '1' };
+
+    // A LAN address is not this machine, and neither is a public name.
+    for (const origin of ['http://192.168.1.20:5173', 'https://atoma.example.com']) {
+      expect(() => snapshotPreviewConfig(dev, { visualizerOrigin: origin })).toThrow(
+        /REACHABLE auth gate/
+      );
+    }
+    // Loopback origin, but the isolate itself listening on every interface.
+    expect(() =>
+      snapshotPreviewConfig(
+        { ...dev, [PREVIEW_ENV.gatewayHost]: '0.0.0.0' },
+        { visualizerOrigin: 'http://127.0.0.1:5173' }
+      )
+    ).toThrow(/REACHABLE auth gate/);
+    // An origin that will not parse never reaches the runtime branch at all:
+    // `previewDomainCollides` already treats it as a collision, so it is
+    // refused one check earlier. Unparseable is never proof of safety in
+    // either place.
+    expect(() => snapshotPreviewConfig(dev, { visualizerOrigin: 'not-a-url' })).toThrow(
+      /separate registrable domain/
+    );
+  });
+
+  it('never falls back to runc on its own', () => {
+    // The carve-out widens WHO may ask for runc, never WHEN it is chosen.
+    expect(snapshotPreviewConfig(valid, { visualizerOrigin: 'http://127.0.0.1:5173' }).runtime).toBe(
+      'runsc'
+    );
+    expect(() =>
+      snapshotPreviewConfig(
+        { ...valid, [PREVIEW_ENV.runtime]: 'runc' },
+        { visualizerOrigin: 'http://127.0.0.1:5173' }
+      )
+    ).toThrow(/requires ATOMA_PREVIEW_ALLOW_RUNC_DEV=1/);
   });
 
   it('refuses a bound it cannot honour rather than falling back', () => {
