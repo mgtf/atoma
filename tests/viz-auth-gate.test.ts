@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { generateKeyPairSync, randomBytes } from 'node:crypto';
+import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11,6 +11,8 @@ import { AuthStore, sha256Hex, type OrgRole } from '../src/auth/store.js';
 import { pkceChallenge } from '../src/auth/oidc.js';
 import { MAX_LOGOUT_SESSION_CANDIDATES } from '../src/auth/values.js';
 import { GITHUB_COPY } from '../src/github/http.js';
+import { ProjectStore } from '../src/projects/store.js';
+import { projectRunHostLayout } from '../src/projects/coordinator.js';
 import { sleepInhibitorHint } from '../src/sentinel/resident.js';
 
 /**
@@ -538,6 +540,93 @@ describe('viz auth gate (process level)', () => {
       db.close();
     }
   });
+
+  it('names the project run behind every project-corpus entry of /api/runs', async () => {
+    // THE PREVIEW IS KEYED BY (project, project run); the Runs view is keyed
+    // by trace id. The client used to join the two through the SELECTED
+    // project's run list — which is empty after a reload or an arrival through
+    // the Runs tab, so a live run showed its summary card and no Preview
+    // control (measured 2026-09-02). The index entry now names its own project
+    // AND project run, and this is the seam that proves it: a real server, a
+    // real login, and the JSON a browser receives.
+    const instance = tempInstance();
+    // 43 canonical base64url characters, the only shape the login accepts.
+    const invitation = 'R'.repeat(43);
+    createInvitation(instance.dbPath, invitation, 'org:member');
+
+    // Seed one delivered project run into the bootstrapped organisation, the
+    // way the coordinator writes it: a row whose recorded paths are where the
+    // trace actually is.
+    const projectsRoot = join(instance.root, 'projects');
+    const seeded = (() => {
+      const db = new Database(instance.dbPath);
+      try {
+        const orgId = db.prepare('SELECT org_id FROM auth_organisations').pluck().get() as string;
+        const principalId = db.prepare('SELECT principal_id FROM auth_principals').pluck().get() as string;
+        const projects = new ProjectStore(db);
+        const project = projects.createProject({
+          orgId,
+          principalId,
+          project: {
+            name: 'Index carries the run',
+            slug: 'index-carries-the-run',
+            initialPrompt: '',
+            family: 'build',
+            repositoryTarget: { installationId: '999000002', owner: 'local', name: 'x', visibility: 'private' },
+          },
+        });
+        const projectRunId = randomUUID();
+        const layout = projectRunHostLayout(projectsRoot, orgId, project.projectId, projectRunId);
+        const created = projects.createProjectRun({
+          orgId,
+          projectId: project.projectId,
+          principalId,
+          projectRunId,
+          request: { goal: 'a run the index must attribute', idempotencyKey: 'k-index' },
+          hostPaths: {
+            workspacePath: layout.workspacePath,
+            runsPath: layout.runsPath,
+            logPath: layout.logPath,
+          },
+        });
+        if (!created) throw new Error('seed refused');
+        mkdirSync(layout.runsPath, { recursive: true });
+        writeFileSync(
+          join(layout.runsPath, `${projectRunId}.json`),
+          JSON.stringify({
+            id: projectRunId,
+            label: 'a run the index must attribute',
+            startedAt: '2026-09-02T12:00:00.000Z',
+            events: [],
+          })
+        );
+        return { projectId: project.projectId, projectRunId };
+      } finally {
+        db.close();
+      }
+    })();
+
+    const provider = await startFakeProvider({ port: await freePort(), subject: 303 });
+    const port = await freePort();
+    const base = `http://127.0.0.1:${port}`;
+    // Teardown is the suite's: `startViz` and `startFakeProvider` register
+    // what they start, and `afterEach` reaps it.
+    const running = startViz([...instance.args, '--port', String(port)], providerEnv(provider, base));
+    await waitReady(running, `${base}/auth/whoami`);
+    const jar = new CookieJar();
+    const login = await fetchWithJar(jar, `${base}/auth/login?provider=github&invite=${invitation}`);
+    expect(login.status).toBe(200);
+
+    const runs = await fetch(`${base}/api/runs`, { headers: { cookie: jar.header(base)! } });
+    expect(runs.status).toBe(200);
+    const entries = (await runs.json()) as Array<Record<string, unknown>>;
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      id: seeded.projectRunId,
+      projectId: seeded.projectId,
+      projectRunId: seeded.projectRunId,
+    });
+  }, 120_000);
 
   it('reserves operator surfaces and the admin control plane to a CLI-granted platform admin', async () => {
     const instance = tempInstance();

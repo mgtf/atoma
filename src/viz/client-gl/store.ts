@@ -140,9 +140,19 @@ export function projectGuidanceOpen(preference: boolean | null): boolean {
  */
 export function previewTargetForRun(
   runs: readonly { readonly projectId: string; readonly projectRunId: string; readonly traceId: string | null }[],
-  selectedRunId: string | null
+  selectedRunId: string | null,
+  index: readonly { readonly id: string; readonly projectId?: string; readonly projectRunId?: string }[] = []
 ): { readonly projectId: string; readonly projectRunId: string } | null {
   if (!selectedRunId) return null;
+  // THE INDEX ENTRY FIRST. It names its own project, so the join needs no
+  // selected project and no project-run list — both of which are empty after
+  // a reload, or when the viewer arrived through the Runs tab. Measured on a
+  // live run: summary card drawn, run `running`, and no Preview control,
+  // because nothing in this view knew which project the run belonged to.
+  const entry = index.find((candidate) => candidate.id === selectedRunId);
+  if (entry?.projectId) {
+    return { projectId: entry.projectId, projectRunId: entry.projectRunId ?? entry.id };
+  }
   const match = runs.find(
     (run) => run.traceId === selectedRunId || run.projectRunId === selectedRunId
   );

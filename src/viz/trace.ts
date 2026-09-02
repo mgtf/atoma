@@ -365,6 +365,13 @@ export interface VizRunIndexEntry {
   calls?: number;
   /** Present when the index row is a project run (gated viz). */
   projectId?: string;
+  /**
+   * The project run this trace belongs to, for entries from the project
+   * corpus. The trace's own `id` happens to equal it today, but that is the
+   * runner's convention, not a contract — and the preview is keyed by THIS
+   * id, so the index carries it rather than letting a reader assume.
+   */
+  projectRunId?: string;
   projectName?: string;
   projectSlug?: string;
 }

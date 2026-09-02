@@ -252,8 +252,8 @@ function GpuAppContent({
   // else — the runs index, a burn-in row, a deep link — has no project run to
   // preview, and the control below stays absent rather than guessing one.
   const previewTarget = useMemo(
-    () => previewTargetForRun(projectRunsQuery.data ?? [], state.selectedRunId),
-    [projectRunsQuery.data, state.selectedRunId]
+    () => previewTargetForRun(projectRunsQuery.data ?? [], state.selectedRunId, runsQuery.data ?? []),
+    [projectRunsQuery.data, runsQuery.data, state.selectedRunId]
   );
   // READS ONLY. A GET allocates nothing server-side, which is what makes it
   // safe to poll from a tab a viewer left open on a run.

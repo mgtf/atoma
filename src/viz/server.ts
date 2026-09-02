@@ -1304,6 +1304,7 @@ function listOrganisationRunIndex(orgId: string): VizRunIndexEntry[] {
     entries.push({
       ...summary,
       projectId: row.projectId,
+      projectRunId: row.id,
       projectName: row.projectName,
       projectSlug: row.projectSlug,
     });
@@ -1320,6 +1321,7 @@ function listAllRunIndex(): VizRunIndexEntry[] {
     entries.push({
       ...summary,
       projectId: row.projectId,
+      projectRunId: row.id,
       projectName: row.projectName,
       projectSlug: row.projectSlug,
     });

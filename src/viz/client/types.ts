@@ -12,6 +12,7 @@ export interface RunIndexEntry {
   costUsd?: number;
   calls?: number;
   projectId?: string;
+  projectRunId?: string;
   projectName?: string;
   projectSlug?: string;
 }

@@ -363,6 +363,31 @@ describe('full-GL Zustand scene state', () => {
     expect(previewTargetForRun(runs, null)).toBeNull();
     expect(previewTargetForRun([], 'trace-1')).toBeNull();
   });
+
+  it('resolves the target from the runs INDEX first, with no project selected at all', () => {
+    // MEASURED ON A LIVE RUN: summary card drawn, run `running`, and no
+    // Preview control — because the join above needs the selected project's
+    // run list, and after a reload or an arrival through the Runs tab there is
+    // no selected project and therefore no list. The index entry names its own
+    // project, so it is the source that is always there.
+    const index = [
+      { id: 'trace-9', projectId: 'p9', projectRunId: 'run-9' },
+      // A legacy entry with no projectRunId: the trace id IS the run id by
+      // the runner's convention, and the fallback says so.
+      { id: 'trace-8', projectId: 'p8' },
+      // An operator-corpus run: no project, so nothing to preview.
+      { id: 'trace-7' },
+    ];
+
+    expect(previewTargetForRun([], 'trace-9', index)).toEqual({ projectId: 'p9', projectRunId: 'run-9' });
+    expect(previewTargetForRun([], 'trace-8', index)).toEqual({ projectId: 'p8', projectRunId: 'trace-8' });
+    expect(previewTargetForRun([], 'trace-7', index)).toBeNull();
+    // The index wins over the list when both know the run.
+    const runs = [{ projectId: 'p-list', projectRunId: 'run-list', traceId: 'trace-9' }];
+    expect(previewTargetForRun(runs, 'trace-9', index)).toEqual({ projectId: 'p9', projectRunId: 'run-9' });
+    // And the list still answers when the index has nothing.
+    expect(previewTargetForRun(runs, 'trace-9', [])).toEqual({ projectId: 'p-list', projectRunId: 'run-list' });
+  });
 });
 
 describe('full-GL event cards preserve trace metadata', () => {
