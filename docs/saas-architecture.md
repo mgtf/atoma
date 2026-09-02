@@ -189,6 +189,10 @@ Other production gaps are:
 
 **The next code decision is hardened SQLite versus PostgreSQL.**
 
+The dated analysis and recommended PostgreSQL migration shape are recorded in
+[PostgreSQL migration analysis — 2026-09-02](postgresql-migration-analysis-2026-09-02.md).
+It is an input to this gate, not an accepted owner decision by itself.
+
 It precedes the trust split. `atom_trust`, `skill_trust`, platform body,
 approval and scoped lifecycle-event tables must not be added under a
 “temporary” backend assumption. Every table created before the choice adds a
