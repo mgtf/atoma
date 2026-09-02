@@ -273,6 +273,12 @@ instance-global, while the operator skill store and burn-in surfaces answer only
 platform admin also reads every organisation's projects and traces and manages organisations
 and invitations from the Admin tab.
 
+Supported web results can be opened from Runs as an ephemeral **Preview**. A delivered run opens
+the result that was classified at delivery; a run still in progress opens a timestamped snapshot,
+clearly labelled as non-final. Preview is a review surface, not a deployment: it never mutates the
+run workspace, stops when nobody is watching, and gives generated code no network access unless an
+organisation admin explicitly approves hosts requested by the delivered project.
+
 ## Why a technical buyer should look closer
 
 - **Every claim is auditable.** Each run leaves a full JSON trace: every model call with its
@@ -283,6 +289,11 @@ and invitations from the Admin tab.
   page in a real browser, and cross-checks the machine-readable record of the commands the worker
   ran. It never re-runs those commands itself — that was considered and rejected, and the reason
   is written down. This costs no tokens and it runs *even on the most-trusted path*.
+- **Generated applications stay outside the control plane.** Preview origins live on a separate
+  registrable domain and use short-lived, one-time claims. Node previews run in an ephemeral
+  container with a read-only root filesystem; static previews need no application container. The
+  gateway strips credentials and application-supplied security headers, then imposes its own
+  frame, cookie and cross-origin policy.
 - **The engineering record is unusually explicit.** `AGENTS.md` keeps the
   cross-cutting contracts and routes to a per-subsystem `AGENTS.md` beside the
   code it governs, and to an archived record documenting not only what the
@@ -309,21 +320,22 @@ git clone https://github.com/mgtf/atoma.git
 cd atoma
 nvm install && nvm use            # or provide an equivalent supported Node version
 npm ci
-npm run release:check             # checks + audit + build + compiled MCP/doctor smokes
+npm run release:check             # checks + audit + build + compiled MCP/auth/doctor smokes
 npm run doctor                    # quota-free Node, provider and optional Docker preflight
 
 # one real task, pick your auth:
-ANTHROPIC_API_KEY=... npm run run:build "a Node CLI that converts CSV to JSON"
-ATOMA_LLM=claude-cli  npm run run:build "…"    # Claude subscription, no API key
+ANTHROPIC_API_KEY=... npm run run:build -- "a Node CLI that converts CSV to JSON"
+ATOMA_LLM=claude-cli  npm run run:build -- "…"    # Claude subscription, no API key
 env -u OPENAI_API_KEY ZAI_API_KEY=... ATOMA_LLM=ollama \
   ATOMA_MODEL_L1=zai:glm-4.5-air \
   ATOMA_MODEL_L2=codex:gpt-5.4-mini ATOMA_MODEL_L3=codex:gpt-5.6-sol \
-  npm run run:build "…"                         # ChatGPT supervisors + Z.ai executor
+  npm run run:build -- "…"                      # ChatGPT supervisors + Z.ai executor
 
 npm run viz                       # HMR UI :5173; API :4111 redirects its root there
                                   # (gated: also hosts the sentinel watch in-process)
 npm run viz:mui                   # frozen DOM/MUI fallback (bugfixes only)
 npm run viz:serve                 # compiled visualizer after npm run build
+npm run viz:smoke                 # real-browser proof of the compiled GPU client
 npm run skills -- list            # what it learned, and what it refused to compile
 npm run burnin                    # regenerate the economics table above
 ```
@@ -382,17 +394,34 @@ The default visualizer is a full-GPU React 19 client: one PixiJS context
 renders the component system and ambient field through WebGPU with a
 deterministic WebGL fallback. A left rail opens on Projects, where an
 authenticated member creates a project and starts work; Runs replays that
-work live, and the in-product Docs view explains the system and its main
-operational surfaces. Zustand owns scene/UI state and TanStack Query owns API
-state. Pixi draws the scene; a small DOM bridge owns browser-native controls
-and accessibility, including inputs, selects, links, forms, login/navigation
-fallbacks and the push-permission dialog. The previous MUI client remains
-available through `npm run viz:mui` but is frozen: it receives bugfixes, not
-features.
+work live and can open the application it produced, including a snapshot while
+the run is still in flight. The in-product Docs view explains the member
+workflow and its boundaries. Zustand owns scene/UI state and TanStack Query
+owns API state. Pixi draws the scene; a small DOM bridge owns browser-native
+controls and accessibility, including inputs, selects, links, forms,
+login/navigation fallbacks, the preview iframe and the push-permission dialog.
+The previous MUI client remains available through `npm run viz:mui` but is
+frozen: it receives bugfixes, not features.
 The compiled visualizer is installable as an **Atoma** PWA; its service worker
 will cache only cacheable application-shell and static responses. It always
 excludes live `/api/*`, authentication `/auth/*`, GitHub `/webhooks/*`, and
 every response marked `Cache-Control: no-store`.
+
+### Optional result previews
+
+`npm run preview:demo` is the development-only way to inspect the complete
+authenticated UI on a laptop without executing a paid run: it starts a
+loopback OAuth provider and seeds a project with a delivered static app through
+the production store path. It deliberately does not stand in for container
+isolation or for a real run.
+
+A production preview host is Linux with Docker Engine 28+ and gVisor registered
+as the `runsc` runtime. It also needs a separate wildcard preview domain and a
+runtime-only image built with `npm run build:preview`, pushed and configured by
+immutable digest. `npm run doctor -- --preview` exercises the selected engine
+and proves the container's read-only filesystem and closed network without any
+model call. The complete proxy, DNS, image and environment contract is in
+[`docs/preview-deployment.md`](docs/preview-deployment.md).
 
 A local release keeps its learned state beside the checkout: `atoma.db`,
 `skills/` and `runs/`. Build artefacts live under `~/.atoma/workspaces/build`;
@@ -401,7 +430,7 @@ skills directory together: `npm run backup -- --dest <off-machine mount>`
 snapshots the store (SQLite online backup, WAL-safe), the skill tree, the run
 traces and the local archives into one dated directory and prunes old
 snapshots (`--keep`, default 14). None of that state is regenerable from the
-repository. Docker is optional: `npm run build:worker` enables
+repository. Docker is optional for the core runner: `npm run build:worker` enables
 the isolated backend and proxied egress paths from compiled `dist/`. Proxied
 egress requires Docker Engine 28+ so its private bridge can remove both host
 gateway addresses; plain container isolation (`--network none`) works on older
@@ -423,7 +452,8 @@ configured;
 benchmark and registry/skill mutation-oriented operator CLIs remain source-only.
 See [`CHANGELOG.md`](CHANGELOG.md) and the
 [`v0.1.0 release soak`](docs/release-soak-v0.1.0.md), followed by the
-[`v0.1.1 container/egress acceptance matrix`](docs/release-acceptance-v0.1.1.md).
+[`v0.1.1 container/egress acceptance matrix`](docs/release-acceptance-v0.1.1.md)
+and [`v0.1.3 release acceptance`](docs/release-acceptance-v0.1.3.md).
 
 A fresh clone starts with **no learned state at all** — the catalogue, the recipes and the
 traces are runtime data, deliberately not committed. What you clone is the framework; the
@@ -469,9 +499,10 @@ process group is confirmed gone and the trace has closed.
 
 What exists: the full three-tier loop, the learning and compilation lifecycle, sandboxed
 execution with opt-in container isolation and proxied egress, an append-only audit ledger with
-integrity checking, a web console with optional multi-organisation login, and a measurement
-harness. A first login creates a personal organisation unless it redeems an invitation to an
-existing one.
+integrity checking, a web console with optional multi-organisation login, project launch and
+GitHub publication, ephemeral previews of delivered or in-flight web results, a mechanical live
+watch, platform notifications, and a measurement harness. A first login creates a personal
+organisation unless it redeems an invitation to an existing one.
 
 What does not: full tenant isolation or a hosted service. Authenticated projects, their run
 workspaces, traces and project skills are scoped to the viewer's active organisation; the
