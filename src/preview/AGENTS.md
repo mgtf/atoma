@@ -19,10 +19,11 @@ Design of record:
 under the deployment shape fixed in
 [`docs/deployment-docker-launcher-2026-08-28.md`](../../docs/deployment-docker-launcher-2026-08-28.md).
 Built: classification, byte policy, instance state, the container runtime, the
-claim and origin model, the gateway, and the manager that orders them. NOT
-built: the HTTP routes and the GPU client surface, so nothing here is reachable
-from a browser yet. The Node path's isolation is proved only where a real gVisor
-runtime exists (`tests/preview-isolation.test.ts`, and the manual CI job).
+claim and origin model, the gateway, the manager that orders them, and the
+gated HTTP surface. NOT built: the GPU client, so a member cannot yet click
+Preview — the routes answer, nothing calls them. The Node path's isolation is
+proved only where a real gVisor runtime exists
+(`tests/preview-isolation.test.ts`, and the manual CI job).
 
 ## What this is, and what it is not
 
@@ -325,6 +326,33 @@ server-side — `previewSummarySchema` deliberately carries neither.
   would arrive on the device already showing the thing it is about.
   `preview.failed` is a warning and not an error because the deliverable is
   delivered and published; only the convenience over it did not come up.
+
+## The HTTP surface
+
+Five routes under the gated project hierarchy, and every decision lives in
+`httpService.ts` rather than in the transport — a decision made in a route
+handler is a decision the CLI cannot reach.
+
+- **Reading allocates nothing.** `org:viewer` may see whether a preview exists
+  and what state it is in; a GET never starts a container, because a route that
+  allocated compute on a read would let a tab left open spend an organisation's
+  quota. A test asserts no instance row appears.
+- **Writing is `org:member`+ and bound to the viewer's ACTIVE organisation**,
+  exactly as `cancel` and `publish` are. A platform admin reading across
+  organisations still writes only in its own.
+- **The run must be under the project named in the path.** A run of another
+  project in the same organisation is a 404, or the REST hierarchy is a lie.
+- Statuses mean one thing each: `202` while a generation is still building,
+  with the retry delay, because the alternative is holding a request open for
+  the length of a container start; `409` for a run whose state is the reason;
+  `429` for capacity, with `Retry-After`, and never by evicting someone else;
+  `503` when the deployment has no preview runtime at all, which is an
+  operator's problem and not the member's.
+- Egress approval is `org:admin`+ and accepts ONLY hosts a delivered run of
+  that project actually requested — an approval for a host nobody asked for is
+  a standing permission nobody reviewed. Changing the set stops the project's
+  live previews, so the next generation gets a coherent policy rather than a
+  running one whose rules changed underneath it.
 
 ## The service is the seam
 

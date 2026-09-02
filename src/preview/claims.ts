@@ -40,7 +40,17 @@ export const PREVIEW_GRANT_TTL_MS = 300_000;
 
 export interface PreviewClaimBinding {
   readonly principalId: string;
-  readonly sessionId: string;
+  /**
+   * The session a claim was minted for, WHERE THE TRANSPORT KNOWS IT.
+   *
+   * Null today from the HTTP path: `Viewer` carries no session id, and
+   * inventing one from the principal would be a field lying about what it
+   * binds. What the session dimension would add is narrow — a claim lives
+   * thirty seconds and is one-time, and logout already revokes every grant a
+   * principal holds through `revokePrincipal` — so the gap is recorded rather
+   * than papered over, and the field is here for the day the gate exposes it.
+   */
+  readonly sessionId: string | null;
   readonly orgId: string;
   readonly projectRunId: string;
   readonly generation: number;

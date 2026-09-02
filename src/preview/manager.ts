@@ -1,11 +1,11 @@
-import type { PreviewSummary } from '../contracts/preview.js';
+import type { PreviewErrorCode, PreviewSummary } from '../contracts/preview.js';
 import type { ContainerLauncher } from '../contracts/launcher.js';
 import { mintPreviewClaim, PreviewClaimRegistry } from './claims.js';
 import type { PreviewConfig } from './config.js';
 import { previewGenerationHost, previewOrigin } from './gateway.js';
 import { PreviewRouteTable } from './gatewayServer.js';
 import { classifyDeliveredWorkspace } from './descriptor.js';
-import { materializePreviewWorkspace } from './policy.js';
+import { materializePreviewWorkspace, PreviewPolicyError } from './policy.js';
 import { startPreview, teardownPreview, PreviewRuntimeError } from './runtime.js';
 import { effectiveEgressHosts, PreviewStateConflict, PreviewStore } from './store.js';
 import { readPreviewSummary } from './service.js';
@@ -43,6 +43,19 @@ export interface PreviewManagerDeps {
   readonly log?: (line: string) => void;
 }
 
+/**
+ * One mapping from a failure to the bounded code a member reads.
+ *
+ * The STATIC path copies without going through `startPreview`, so its policy
+ * failures would otherwise escape unmapped and surface as a 500 — a member
+ * told "internal error" for a workspace that is simply too large to copy.
+ */
+function previewErrorCodeFor(error: unknown): PreviewErrorCode {
+  if (error instanceof PreviewRuntimeError) return error.code;
+  if (error instanceof PreviewPolicyError) return error.code === 'limit' ? 'copy-limit' : 'internal';
+  return 'internal';
+}
+
 export class PreviewQuotaError extends Error {
   constructor(
     readonly scope: 'org' | 'global',
@@ -72,7 +85,8 @@ export interface OpenedPreview {
 
 export interface PreviewOpener {
   readonly principalId: string;
-  readonly sessionId: string;
+  /** Null where the transport does not know it; see `PreviewClaimBinding`. */
+  readonly sessionId: string | null;
 }
 
 export class PreviewManager {
@@ -223,7 +237,7 @@ export class PreviewManager {
 
       return this.claimFor(input, generation, descriptor.requestedHosts);
     } catch (error) {
-      const code = error instanceof PreviewRuntimeError ? error.code : 'internal';
+      const code = previewErrorCodeFor(error);
       try {
         this.deps.store.markFailed({
           orgId: input.orgId,
@@ -375,7 +389,7 @@ export class PreviewManager {
 
       return this.claimFor(input, generation, []);
     } catch (error) {
-      const code = error instanceof PreviewRuntimeError ? error.code : 'internal';
+      const code = previewErrorCodeFor(error);
       try {
         store.markFailed({
           orgId: input.orgId,

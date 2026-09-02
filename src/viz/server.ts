@@ -1,4 +1,4 @@
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { basename, extname, relative, resolve, join } from 'node:path';
@@ -77,11 +77,26 @@ import {
 import { GitHubStore, isGitHubConnectState } from '../github/store.js';
 import { persistGitHubUserTokens, resolveGitHubUserAccessToken } from '../github/tokens.js';
 import { ProjectStore } from '../projects/store.js';
-import { DEFAULT_PROJECTS_ROOT, ProjectRunCoordinator } from '../projects/coordinator.js';
+import {
+  DEFAULT_PROJECTS_ROOT,
+  ProjectRunCoordinator,
+  projectRunHostLayout,
+} from '../projects/coordinator.js';
 import { GitHubPublisher } from '../projects/publisher.js';
 import { ProjectHttpError, ProjectService, roleAtLeast } from '../projects/service.js';
 import { PreviewStore } from '../preview/store.js';
 import { recordDeliveredPreview } from '../preview/service.js';
+import { previewEnabled, snapshotPreviewConfig } from '../preview/config.js';
+import { PreviewClaimRegistry } from '../preview/claims.js';
+import {
+  PreviewRouteTable,
+  startPreviewGateway,
+  type RunningPreviewGateway,
+} from '../preview/gatewayServer.js';
+import { PreviewManager } from '../preview/manager.js';
+import { PreviewHttpService } from '../preview/httpService.js';
+import { DockerLauncher } from '../launcher/docker.js';
+import { DEFAULT_WORKER_IMAGE } from '../tools/containerExecutor.js';
 import { PushStore } from './push/store.js';
 import { PushNotifier } from './push/notifier.js';
 import {
@@ -732,6 +747,121 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
     resolveUserAccessToken,
   };
 })();
+
+/**
+ * THE PREVIEW RUNTIME, hosted here for the same reason the watch is.
+ *
+ * A preview needs four things that must agree: a launcher to build isolates, a
+ * gateway serving its own origins, a claim registry deciding who may look, and
+ * a route table joining the two. Splitting them across processes would give
+ * four places for them to disagree; the gateway in particular holds its claims
+ * and routes IN MEMORY on purpose, because both must die with a restart —
+ * "on gateway restart all grants and hosts fail closed, users reopen
+ * explicitly".
+ *
+ * NULL UNLESS THE DEPLOYMENT ASKED FOR IT. `previewEnabled` is a tri-state
+ * that refuses a value it does not recognise, and `snapshotPreviewConfig`
+ * refuses half a configuration — so a deployment either has previews or is
+ * told exactly what is missing. It also needs the auth gate: a preview belongs
+ * to an organisation, and an organisation is meaningless without a viewer.
+ */
+interface PreviewRuntime {
+  readonly service: PreviewHttpService;
+  readonly manager: PreviewManager;
+  readonly gateway: RunningPreviewGateway;
+  readonly claims: PreviewClaimRegistry;
+}
+
+const PREVIEW_RUNTIME_PROMISE: Promise<PreviewRuntime | null> = (async () => {
+  if (!PROJECTS_RUNTIME || !AUTH_RUNTIME) return null;
+  if (!previewEnabled(process.env)) return null;
+  const config = snapshotPreviewConfig(process.env, {
+    visualizerOrigin: AUTH_RUNTIME.publicOrigin.origin,
+  });
+  const previewStore = PreviewStore.open(DBS[0]!.path);
+  // No preview survives the process that started it, so a row left in a live
+  // state describes containers that are gone.
+  previewStore.reconcileInterrupted();
+  const claims = new PreviewClaimRegistry();
+  const routes = new PreviewRouteTable();
+  const launcher = new DockerLauncher({
+    image: DEFAULT_WORKER_IMAGE,
+    previewImage: config.image,
+    previewRuntime: config.runtime,
+  });
+  const manager = new PreviewManager({
+    store: previewStore,
+    launcher,
+    routes,
+    claims,
+    config,
+    // HOST-OWNED, never a caller's: the same layout the coordinator writes.
+    workspaceOf: (orgId, projectId, projectRunId) =>
+      projectRunHostLayout(PROJECTS_ROOT, orgId, projectId, projectRunId).workspacePath,
+    probe: (hostPort) => probePreviewRelay(hostPort),
+    log: (line) => console.error(line),
+  });
+  const gateway = await startPreviewGateway({
+    host: config.gatewayHost,
+    port: config.gatewayPort,
+    routes,
+    claims,
+    visualizerOrigin: AUTH_RUNTIME.publicOrigin.origin,
+    log: (line) => console.error(line),
+  });
+  // Idle and hard bounds are enforced HERE rather than in the gateway, because
+  // the gateway sees only traffic and traffic is exactly what must not keep a
+  // preview alive.
+  const sweep = setInterval(() => {
+    void manager.sweepExpired().catch(() => undefined);
+    claims.sweep();
+  }, 30_000);
+  sweep.unref?.();
+  return {
+    service: new PreviewHttpService({
+      manager,
+      store: previewStore,
+      projects: PROJECTS_RUNTIME.store,
+    }),
+    manager,
+    gateway,
+    claims,
+  };
+})();
+
+let PREVIEW_RUNTIME: PreviewRuntime | null = null;
+void PREVIEW_RUNTIME_PROMISE.then((runtime) => {
+  PREVIEW_RUNTIME = runtime;
+  if (runtime) {
+    console.error(`[atoma viz] preview gateway on ${runtime.gateway.port}`);
+  }
+}).catch((error: unknown) => {
+  // A configuration this deployment asked for and cannot have is a hard fact,
+  // not a degraded mode: previews stay off and the reason is printed once.
+  console.error(`[atoma viz] previews are unavailable: ${String(error)}`);
+});
+
+/**
+ * One request through the relay, which is what turns "a process bound a port"
+ * into "a member will find something there".
+ */
+function probePreviewRelay(hostPort: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const request = httpRequest(
+      { host: '127.0.0.1', port: hostPort, path: '/', method: 'GET', timeout: 2_000 },
+      (response) => {
+        response.resume();
+        resolve((response.statusCode ?? 0) > 0);
+      }
+    );
+    request.on('error', () => resolve(false));
+    request.on('timeout', () => {
+      request.destroy();
+      resolve(false);
+    });
+    request.end();
+  });
+}
 
 /**
  * THE MECHANICAL WATCH, hosted here.
@@ -3077,6 +3207,140 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           200,
           await PROJECTS_RUNTIME.projects.cancelProjectRun(viewer, projectId, projectRunId)
         );
+      } catch (error) {
+        if (error instanceof ProjectHttpError) {
+          sendJson(res, error.status, { error: error.message });
+          return;
+        }
+        throw error;
+      }
+      return;
+    }
+
+    // PREVIEW. Five thin blocks: authenticate, check same-origin on a
+    // mutation, and call the service. Every decision — roles, org binding,
+    // which status a failure maps to — lives in `src/preview/httpService.ts`,
+    // because a decision made here would be a decision the CLI cannot reach.
+    const previewRoute = pathname.match(
+      /^\/api\/projects\/([^/]+)\/runs\/([^/]+)\/preview(?:\/(open|heartbeat|stop|restart))?$/
+    );
+    if (previewRoute) {
+      if (!viewer) {
+        sendJson(res, 401, { error: 'authentication required' });
+        return;
+      }
+      const preview = PREVIEW_RUNTIME;
+      if (!preview) {
+        // A deployment that has not configured previews, or could not start
+        // the gateway. An operator's problem, and never the member's fault.
+        sendJson(res, 503, { error: 'previews are not available on this deployment' });
+        return;
+      }
+      const projectId = decodePathComponent(previewRoute[1]!);
+      const projectRunId = decodePathComponent(previewRoute[2]!);
+      const action = previewRoute[3];
+      if (!projectId || !projectRunId) {
+        sendJson(res, 400, { error: 'bad project run id' });
+        return;
+      }
+      try {
+        if (!action) {
+          if (!methodAllowed(req, res, 'GET')) return;
+          sendJson(res, 200, preview.service.status(viewer, projectId, projectRunId));
+          return;
+        }
+        if (!methodAllowed(req, res, 'POST')) return;
+        if (!sameOrigin(req, res)) return;
+        let body: unknown;
+        try {
+          body = JSON.parse((await readBodyBounded(req, 4_096)).toString('utf8') || '{}');
+        } catch {
+          sendJson(res, 400, { error: 'request body is not valid JSON' });
+          return;
+        }
+        const inFlight = (body as { inFlight?: unknown }).inFlight === true;
+        if (action === 'open' || action === 'restart') {
+          const answered =
+            action === 'open'
+              ? await preview.service.open(viewer, projectId, projectRunId, { inFlight })
+              : await preview.service.restart(viewer, projectId, projectRunId, { inFlight });
+          if (answered.body.retryAfterSeconds !== undefined) {
+            res.setHeader('retry-after', String(answered.body.retryAfterSeconds));
+          }
+          sendJson(res, answered.status, answered.body);
+          return;
+        }
+        if (action === 'heartbeat') {
+          const generation = Number((body as { generation?: unknown }).generation);
+          if (!Number.isInteger(generation) || generation <= 0) {
+            sendJson(res, 400, { error: 'a heartbeat names the generation it is for' });
+            return;
+          }
+          sendJson(
+            res,
+            200,
+            preview.service.heartbeat(viewer, projectId, projectRunId, generation)
+          );
+          return;
+        }
+        sendJson(res, 200, await preview.service.stop(viewer, projectId, projectRunId));
+      } catch (error) {
+        if (error instanceof ProjectHttpError) {
+          // A capacity refusal carries the delay: a caller that retried
+          // immediately would spend the quota it is waiting for.
+          if (error.status === 429) res.setHeader('retry-after', '30');
+          sendJson(res, error.status, { error: error.message });
+          return;
+        }
+        throw error;
+      }
+      return;
+    }
+
+    const previewEgress = pathname.match(/^\/api\/projects\/([^/]+)\/preview-egress$/);
+    if (previewEgress) {
+      if (!viewer) {
+        sendJson(res, 401, { error: 'authentication required' });
+        return;
+      }
+      const preview = PREVIEW_RUNTIME;
+      if (!preview) {
+        sendJson(res, 503, { error: 'previews are not available on this deployment' });
+        return;
+      }
+      const projectId = decodePathComponent(previewEgress[1]!);
+      if (!projectId) {
+        sendJson(res, 400, { error: 'bad project id' });
+        return;
+      }
+      try {
+        if (req.method === 'GET') {
+          sendJson(res, 200, preview.service.listEgress(viewer, projectId));
+          return;
+        }
+        if (req.method === 'PUT') {
+          if (!sameOrigin(req, res)) return;
+          let body: unknown;
+          try {
+            body = JSON.parse((await readBodyBounded(req, 4_096)).toString('utf8') || '{}');
+          } catch {
+            sendJson(res, 400, { error: 'request body is not valid JSON' });
+            return;
+          }
+          const hosts = (body as { hosts?: unknown }).hosts;
+          if (!Array.isArray(hosts)) {
+            sendJson(res, 400, { error: 'expected a hosts array' });
+            return;
+          }
+          sendJson(res, 200, await preview.service.replaceEgress(viewer, projectId, hosts));
+          return;
+        }
+        res.writeHead(405, {
+          allow: 'GET, PUT',
+          'content-length': '0',
+          'cache-control': 'no-store',
+        });
+        res.end();
       } catch (error) {
         if (error instanceof ProjectHttpError) {
           sendJson(res, error.status, { error: error.message });
