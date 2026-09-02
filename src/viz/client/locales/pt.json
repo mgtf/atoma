@@ -734,7 +734,7 @@
   "announce.sentAll": "Enviado para todas as organizações.",
   "announce.error": "Não foi possível enviar o anúncio.",
   "announce.emptySegment": "Nenhuma organização corresponde a este segmento.",
-  "app.documentTitle": "Atoma — visualizador de run",
+  "app.documentTitle": "Atoma — Orquestração inspecionável de agentes de IA",
   "settings.username": "O seu nome de utilizador",
   "settings.inheritOrg": "Predefinição da organização ({{fallback}})",
   "settings.orgDefaults": "Predefinições da organização por tier",

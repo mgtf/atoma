@@ -734,7 +734,7 @@
   "announce.sentAll": "Отправлено всем организациям.",
   "announce.error": "Не удалось отправить объявление.",
   "announce.emptySegment": "Ни одна организация не соответствует этому сегменту.",
-  "app.documentTitle": "Atoma — визуализатор run",
+  "app.documentTitle": "Atoma — прозрачная оркестрация ИИ-агентов",
   "settings.username": "Ваше имя пользователя",
   "settings.inheritOrg": "По умолчанию для организации ({{fallback}})",
   "settings.orgDefaults": "Настройки организации по умолчанию для каждого tier",

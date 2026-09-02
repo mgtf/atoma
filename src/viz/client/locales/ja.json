@@ -734,7 +734,7 @@
   "announce.sentAll": "すべての組織に送信しました。",
   "announce.error": "お知らせを送信できませんでした。",
   "announce.emptySegment": "このセグメントに一致する組織はありません。",
-  "app.documentTitle": "Atoma — runビジュアライザー",
+  "app.documentTitle": "Atoma — 検証可能なAIエージェントオーケストレーション",
   "settings.username": "ユーザー名",
   "settings.inheritOrg": "組織のデフォルト（{{fallback}}）",
   "settings.orgDefaults": "tierごとの組織のデフォルト",
