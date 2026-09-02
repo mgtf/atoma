@@ -187,6 +187,63 @@ jobs:
       - run: npm ci
       - run: npm run viz:smoke
 
+  preview-runtime:
+    name: Preview isolation under gVisor (manual)
+    # MANUAL AND NON-GATING, deliberately, and for the same reason `viz:smoke`
+    # left `release:check` on 2026-08-24: this is the one check here whose
+    # subject is an ENVIRONMENT rather than the change under test. gVisor is a
+    # third-party runtime installed from an external apt repository at job
+    # time, so a red run can mean the repository moved, not that the preview
+    # broke. Making it required would let someone else's outage block a
+    # merge.
+    #
+    # It exists because everything else about the preview runtime is asserted
+    # at the COMMAND level — what the launcher would tell the engine to do —
+    # and that is the right test for a flag and no test at all of the
+    # boundary. A preview runs a tenant's model-authored application in a
+    # member's browser session; `runsc` is what the design requires in
+    # production and forbids falling back from silently, so the promise needs
+    # a real sandbox to be worth anything.
+    #
+    # No `/dev/kvm` is needed: gVisor's default platform since mid-2023 is
+    # systrap, which traps syscalls through seccomp rather than hardware
+    # virtualisation, and GitHub-hosted runners do not expose KVM.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Install gVisor
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y apt-transport-https ca-certificates curl gnupg
+          curl -fsSL https://gvisor.dev/archive.key             | sudo gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main"             | sudo tee /etc/apt/sources.list.d/gvisor.list > /dev/null
+          sudo apt-get update
+          sudo apt-get install -y runsc
+          sudo runsc install
+          sudo systemctl restart docker
+      - name: Prove the runtime is registered before trusting it
+        run: |
+          set -euo pipefail
+          docker info --format '{{json .Runtimes}}' | grep -q '"runsc"'
+          docker run --rm --runtime=runsc hello-world
+      - run: npm run build:worker:dev
+      - name: Preview isolation
+        run: npx vitest run tests/preview-isolation.test.ts
+        env:
+          # Absence becomes a hard failure HERE and nowhere else: the suite
+          # skips this file everywhere a contributor lacks gVisor, and a job
+          # that installed it must never report a skip as a pass.
+          CI_REQUIRE_PREVIEW_RUNTIME: "1"
+
   worker:
     name: Fresh worker image
     needs: core
