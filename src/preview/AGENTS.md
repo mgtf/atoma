@@ -216,7 +216,41 @@ exists, create, and tear down in reverse.
   step left it running with no handle for teardown to name, and the leak
   survived the failure it was supposed to clean up after.
 
+## The image holds nothing of atoma
+
+`docker/preview.Dockerfile` (`npm run build:preview`) is a Node runtime and a
+non-root user, and that is the whole file. The process it starts is not our
+code — it is whatever a run produced — so every line of atoma reachable from
+inside it is a line a member's generated application inherits. The worker image
+is the OPPOSITE guard: that one must contain everything it imports, and
+`tests/container-image-closure.test.ts` now asserts both directions.
+
+Three absences are deliberate:
+
+- **No `npm install` layer.** A deliverable brings its own `node_modules` in
+  the copied workspace or it does not run. Installing at open time would put a
+  network operation on a member's click, in a container that has no egress to
+  perform it.
+- **No apt layer.** The worker installs python3 and chromium because TOOLS need
+  them; nothing here runs a tool, and every package is surface the generated
+  code inherits.
+- **No ENTRYPOINT and no CMD.** The launcher passes `--entrypoint node` and the
+  one start command the profile allows. An image command would wrap or replace
+  it, and a preview that could choose its own command would be a remote shell
+  with a nice name.
+
+Its uid is 10002, one above the worker's 10001: the same host process mounts
+both, and a shared uid would let a file written for one be written by the
+other.
+
+Production pins the image BY DIGEST, which means pushing it to a registry — a
+mutable tag is not an identity, and `snapshotPreviewConfig` refuses one.
+
 ## Configuration is all-or-nothing
+
+The OPERATOR view of everything below — host, domain, proxy, cost, egress — is
+[`docs/preview-deployment.md`](../../docs/preview-deployment.md), verified by
+`npm run doctor -- --preview` ([`src/cli`](../cli/AGENTS.md)).
 
 Resolved once, from the host environment, at boot. Half a configuration is a
 HARD FAILURE, never a silent "disabled": any `ATOMA_PREVIEW_*` variable arms the

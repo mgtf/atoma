@@ -31,6 +31,28 @@ container. A pre-T4 store (no `atom_id` column) is a hard failure — the schema
 is the schema and `CREATE TABLE IF NOT EXISTS` will not migrate it. Do not add
 remote completion calls to doctor.
 
+`--preview` is OPT-IN because it is the one check here that ALLOCATES rather
+than observes: it starts a real container. Two things make it different from
+every other check, and both are the reason it exists.
+
+- **It asks the HOST, not the container.** `docker inspect
+  .HostConfig.Runtime` on a unit doctor started is the only trustworthy answer
+  to "is this really gVisor?" — a process inside a sandbox can be told anything
+  about its own sandbox, so a check that asked it would be asking the thing
+  under test. For the same reason the runtime list comes from `docker info`,
+  never from `$PATH`: gVisor installed is not gVisor registered, and that is
+  exactly the gap a Docker Desktop machine falls into.
+- **The passing result is a REFUSAL.** The root filesystem must reject a write
+  and a `--network none` container must fail to resolve a name. A probe that
+  only proved a container starts would pass on a container with no isolation at
+  all.
+
+A missing runtime or image reports the isolation as NOT PROBED rather than
+skipping the line: an unprobed boundary is not a verified one. The Docker seam
+is injected like the rest of doctor's, so the suite can diagnose the two
+machines this repository cannot have at once. The preconditions themselves
+belong to [`src/preview`](../preview/AGENTS.md).
+
 ## Burn-in and friction
 
 - Burn-in CSVs belong to exactly one writer/schema. Refuse foreign headers

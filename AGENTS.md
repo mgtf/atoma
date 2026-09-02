@@ -112,6 +112,7 @@ npm run build
 npm run release:check
 npm run doctor
 npm run doctor -- --container
+npm run doctor -- --preview
 npm run doctor:dev
 npm run auth -- list
 npm run auth -- invite --role org:owner --ttl-hours 24
@@ -202,6 +203,10 @@ separately billed `OPENAI_API_KEY`. The full contract is in
   faster, or the arms to stop measuring frame time — not a longer timeout.
 - `npm run build:worker` consumes an existing `dist/`; the source path is
   `npm run build:worker:dev`.
+- `npm run build:preview` builds the preview runtime image. It consumes no
+  `dist/` because it contains none: the process it starts is a run's own
+  deliverable, not ours. Production pins it by DIGEST, which means pushing it —
+  a mutable tag is not an identity, and the configuration refuses one.
 - Release archives contain no stores, skills, traces, workspaces, or secrets.
 - Checksums must be generated inside the release directory so they name the
   downloadable basename, and must be verified before extraction.

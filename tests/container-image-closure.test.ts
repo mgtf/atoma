@@ -184,3 +184,59 @@ describe('worker image closure — everything the worker imports must be in the 
     );
   });
 });
+
+/**
+ * The PREVIEW image is the opposite guard: the worker's must CONTAIN
+ * everything it imports, and this one must contain NOTHING of ours.
+ *
+ * The process it starts is not our code. It is whatever a run produced, and
+ * every line of atoma reachable from inside it is a line a member's generated
+ * application inherits. The isolation lives in the launcher's flags; the image
+ * only has to stay empty.
+ */
+describe('preview image — it must hold nothing of atoma', () => {
+  const preview = readFileSync(resolve(REPO, 'docker/preview.Dockerfile'), 'utf8');
+  // The INSTRUCTIONS, not the prose. This file explains at length why it
+  // installs nothing, and an assertion that read the comments would fail on
+  // its own rationale.
+  const instructions = preview
+    .split(/\r?\n/)
+    .filter((line) => !line.trim().startsWith('#'))
+    .join('\n');
+
+  it('copies no compiled output, no source and no package manifest', () => {
+    const copies = [...instructions.matchAll(/^COPY\s+(.+)$/gm)].map((m) => m[1]!.trim());
+    expect(copies).toEqual([]);
+  });
+
+  it('installs nothing', () => {
+    // No `npm install` layer: a deliverable brings its own node_modules in the
+    // copied workspace or it does not run. Installing at open time would put a
+    // network operation on a member's click, in a container with no egress.
+    // No apt layer either: every package is surface the generated code gets.
+    expect(instructions).not.toMatch(/npm\s+(install|ci)/);
+    expect(instructions).not.toMatch(/apt-get\s+install/);
+  });
+
+  it('runs as a non-root user distinct from the worker’s', () => {
+    // Both images are mounted by the same host process; a shared uid would let
+    // a file written for one be written by the other.
+    const previewUid = /useradd.*-u (\d+)/.exec(preview)?.[1];
+    const workerUid = /useradd.*-u (\d+)/.exec(dockerfile)?.[1];
+    expect(previewUid).toBeDefined();
+    expect(previewUid).not.toBe(workerUid);
+    expect(preview).toMatch(/^USER preview$/m);
+  });
+
+  it('declares no command of its own', () => {
+    // The launcher passes `--entrypoint node` and the ONE start command the
+    // profile allows. An ENTRYPOINT here would wrap it, and a preview that
+    // could choose its own command would be a remote shell with a nice name.
+    expect(preview).toMatch(/^ENTRYPOINT \[\]$/m);
+    expect(preview).toMatch(/^CMD \[\]$/m);
+  });
+
+  it('is built by a script, so an operator does not hand-write the build', () => {
+    expect(rootPkg.scripts?.['build:preview']).toContain('docker/preview.Dockerfile');
+  });
+});
