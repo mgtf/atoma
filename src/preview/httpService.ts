@@ -124,7 +124,7 @@ export class PreviewHttpService {
     this.boundRun(viewer, projectId, projectRunId);
     // A heartbeat for a generation that has moved on is NOT an error: the
     // browser is a beat behind, and the summary it gets back tells it so.
-    this.deps.manager.heartbeat(viewer.orgId, projectRunId, generation);
+    this.deps.manager.heartbeat(viewer.orgId, projectRunId, generation, viewer.principalId);
     return this.deps.manager.status(viewer.orgId, projectId, projectRunId);
   }
 

@@ -9,7 +9,7 @@ import type { Viewer } from '../src/auth/store.js';
 import { ProjectHttpError } from '../src/projects/service.js';
 import { ProjectStore } from '../src/projects/store.js';
 import { PreviewStore } from '../src/preview/store.js';
-import { PreviewClaimRegistry } from '../src/preview/claims.js';
+import { PREVIEW_GRANT_TTL_MS, PreviewClaimRegistry } from '../src/preview/claims.js';
 import { PreviewRouteTable } from '../src/preview/gatewayServer.js';
 import { PreviewManager } from '../src/preview/manager.js';
 import { PreviewHttpService } from '../src/preview/httpService.js';
@@ -98,6 +98,9 @@ let db: Database.Database;
 let projects: ProjectStore;
 let previews: PreviewStore;
 let service: PreviewHttpService;
+// A fake clock, so the grant's five minutes are asserted rather than slept.
+let claims: PreviewClaimRegistry;
+let claimsNow = 1_000;
 let manager: PreviewManager;
 const workspaces = new Map<string, string>();
 
@@ -180,6 +183,8 @@ function seedDeliveredRun(a: Actor, projectId: string, key: string): string {
 
 beforeEach(() => {
   workspaces.clear();
+  claimsNow = 1_000;
+  claims = new PreviewClaimRegistry(() => claimsNow);
   root = mkdtempSync(join(tmpdir(), 'atoma-preview-http-'));
   db = new Database(join(root, 'product.db'));
   db.pragma('foreign_keys = ON');
@@ -190,7 +195,7 @@ beforeEach(() => {
     store: previews,
     launcher: new WorkspaceOnlyLauncher(join(root, 'copies')),
     routes: new PreviewRouteTable(),
-    claims: new PreviewClaimRegistry(),
+    claims,
     config,
     // The host owns this mapping; the test records what it seeded.
     workspaceOf: (_o, _p, runId) => workspaces.get(runId) ?? join(root, 'absent'),
@@ -353,6 +358,32 @@ describe('preview heartbeat', () => {
     expect(
       service.heartbeat(viewerFor(alice), projectId, runId, generation + 1).generation
     ).toBe(generation);
+  });
+
+  it('renews the grant the browser holds, not only the container clock', async () => {
+    // THE DEFECT THIS PINS: the heartbeat extended the instance's activity and
+    // nothing else, while the grant on the preview origin expired after five
+    // minutes. Every viewing session was therefore capped at five minutes and
+    // ended in the gateway's one generic 404 with a healthy container behind
+    // it. Crossing service → manager → registry is the point: the renewal is
+    // wired at the seam, and a unit test of the registry alone missed it.
+    const alice = actor('alice');
+    const projectId = seedProject(alice, 'site');
+    const runId = seedDeliveredRun(alice, projectId, 'k1');
+    const opened = await service.open(viewerFor(alice), projectId, runId);
+    const generation = opened.body.summary.generation;
+    const host = new URL(opened.body.url!).hostname;
+    const secret = new URL(opened.body.url!).hash.slice(1);
+    const redeemed = claims.redeem(secret, host);
+    expect(redeemed.ok).toBe(true);
+    const token = redeemed.ok ? redeemed.token : '';
+    const route = { orgId: viewerFor(alice).orgId, projectRunId: runId, generation, host };
+
+    claimsNow += PREVIEW_GRANT_TTL_MS - 1;
+    service.heartbeat(viewerFor(alice), projectId, runId, generation);
+    claimsNow += PREVIEW_GRANT_TTL_MS - 1;
+
+    expect(claims.authorise(token, route)).not.toBeNull();
   });
 
   it('refuses a viewer', async () => {

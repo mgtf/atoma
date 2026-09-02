@@ -440,15 +440,36 @@ export class PreviewManager {
     };
   }
 
-  /** The trusted UI heartbeat. Application traffic never reaches this. */
-  heartbeat(orgId: string, projectRunId: string, generation: number): boolean {
+  /**
+   * The trusted UI heartbeat. Application traffic never reaches this.
+   *
+   * TWO clocks are extended, not one, and they answer different questions: the
+   * instance's activity decides how long the CONTAINER lives, and the caller's
+   * grant decides how long its BROWSER may keep reaching it. Extending only
+   * the first capped every viewing session at the grant's five minutes with a
+   * healthy container behind a generic 404.
+   *
+   * A heartbeat for a generation that has moved on extends NEITHER: `touched`
+   * is null and the grants of a superseded generation were revoked when it
+   * was superseded.
+   */
+  heartbeat(
+    orgId: string,
+    projectRunId: string,
+    generation: number,
+    principalId?: string
+  ): boolean {
     const touched = this.deps.store.touchActivity({
       orgId,
       projectRunId,
       generation,
       now: new Date(this.now()),
     });
-    return touched !== null;
+    if (touched === null) return false;
+    if (principalId) {
+      this.deps.claims.renewRun({ principalId, orgId, projectRunId, generation });
+    }
+    return true;
   }
 
   /** Stop one preview and remove everything it owns. */

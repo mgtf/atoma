@@ -96,6 +96,8 @@ export function DomBridge({
   announcementsEnabled = false,
   orgModelsForm = null,
   domOverlaysVeiled = false,
+  preview = null,
+  onActivate,
 }: {
   runs: RunIndexEntry[];
   releaseVersion: string;
@@ -135,6 +137,18 @@ export function DomBridge({
   orgModelsForm?: ReactNode;
   /** Shared veil state applied to every DOM overlay (see overlaysInert below). */
   domOverlaysVeiled?: boolean;
+  /**
+   * The selected run's preview state, mirrored from the GL control.
+   *
+   * A MIRROR, not a second control: it dispatches the SAME activation ids
+   * through the SAME `onActivate` the canvas uses, so a keyboard member and a
+   * pointer member travel one code path. Reproducing the decision here — when
+   * the control appears, what it is called — would be the second definition
+   * this file exists to avoid.
+   */
+  preview?: { state: string; availability: string } | null;
+  /** The one activation channel, shared with the canvas. */
+  onActivate?: (id: string) => void;
 }) {
   const view = useGpuStore((state) => state.view);
   const sceneCameraMode = useGpuStore((state) => state.sceneCameraMode);
@@ -280,6 +294,30 @@ export function DomBridge({
                 {project.name}
               </button>
             ))}
+          </section>
+        ) : null}
+        {view === 'runs' && preview && preview.availability === 'available' && onActivate ? (
+          <section aria-label={t('preview.region')}>
+            <button
+              type="button"
+              onClick={() => onActivate('run.preview.open')}
+              disabled={preview.state === 'starting'}
+            >
+              {t(
+                preview.state === 'ready'
+                  ? 'preview.open'
+                  : preview.state === 'starting'
+                    ? 'preview.starting'
+                    : preview.state === 'failed'
+                      ? 'preview.retry'
+                      : 'preview.start'
+              )}
+            </button>
+            {preview.state === 'ready' ? (
+              <button type="button" onClick={() => onActivate('run.preview.stop')}>
+                {t('preview.stop')}
+              </button>
+            ) : null}
           </section>
         ) : null}
         {view === 'docs' ? (

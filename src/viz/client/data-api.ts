@@ -19,6 +19,8 @@ import type {
   VizSentinelSnapshot,
   VizGitHubInstallation,
   VizProject,
+  VizPreviewOpen,
+  VizPreviewSummary,
   VizProjectRun,
   VizRun,
 } from './types.js';
@@ -57,6 +59,34 @@ export const api = {
     fetchJson<VizProjectRun[]>(`/api/projects/${encodeURIComponent(projectId)}/runs`),
   githubInstallations: () =>
     fetchJson<VizGitHubInstallation[]>('/api/github/installations'),
+  // PREVIEW. A GET allocates nothing on the server, which is why status may be
+  // polled while a generation starts; every other verb is a mutation.
+  previewStatus: (projectId: string, runId: string) =>
+    fetchJson<VizPreviewSummary>(
+      `/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/preview`
+    ),
+  openPreview: (projectId: string, runId: string, body: { inFlight?: boolean } = {}) =>
+    mutateJson<VizPreviewOpen>(
+      `/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/preview/open`,
+      body
+    ),
+  restartPreview: (projectId: string, runId: string, body: { inFlight?: boolean } = {}) =>
+    mutateJson<VizPreviewOpen>(
+      `/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/preview/restart`,
+      body
+    ),
+  stopPreview: (projectId: string, runId: string) =>
+    mutateJson<VizPreviewSummary>(
+      `/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/preview/stop`,
+      {}
+    ),
+  // The TRUSTED heartbeat: it names the generation it is for, so a browser one
+  // beat behind extends nothing rather than the wrong thing.
+  previewHeartbeat: (projectId: string, runId: string, generation: number) =>
+    mutateJson<VizPreviewSummary>(
+      `/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/preview/heartbeat`,
+      { generation }
+    ),
   createProject: (body: {
     name: string;
     slug: string;

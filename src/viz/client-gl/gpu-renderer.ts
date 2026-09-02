@@ -32,6 +32,7 @@ import type {
   VizOrganisation,
   VizNotification,
   VizPlatformEvent,
+  VizPreviewSummary,
   VizSentinelSnapshot,
   VizGitHubInstallation,
   VizProject,
@@ -178,6 +179,12 @@ export interface GpuDataSnapshot {
   accountModels: VizAccountModels | null;
   /** Last failed account write, already bounded by the server. */
   accountError: string | null;
+  /**
+   * Preview state for the SELECTED run, or null when this deployment serves no
+   * preview for it. Server data, not UI state: it is the manager's state
+   * machine read back, and the client never invents a transition of its own.
+   */
+  preview: VizPreviewSummary | null;
   /**
    * Non-null when the gate is on and this browser holds no session: the
    * arrival gate offers these providers instead of Continue, and `notice`

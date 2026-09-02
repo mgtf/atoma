@@ -226,6 +226,52 @@ export class PreviewClaimRegistry {
     return grant;
   }
 
+  /**
+   * Extend every grant this principal holds on ONE generation.
+   *
+   * This is what the parent's heartbeat calls, and it is BY BINDING rather
+   * than by token on purpose: the grant token is a cookie on the preview
+   * origin, which the control plane can neither read nor be sent — that
+   * separation is the whole reason the preview lives on its own registrable
+   * domain. So the parent proves the right to extend the way it proves
+   * everything else, with its own authenticated session, and the registry
+   * matches on the binding that session establishes.
+   *
+   * SCOPED TO THE PRINCIPAL. Two members may watch one generation, each with
+   * their own grant; A's heartbeat must not keep B's credential alive after B
+   * closed the tab. B's own grant then lapses on its own five-minute clock
+   * while the container's idle TTL, which is a different question, governs the
+   * container.
+   *
+   * Without this the grant was a HARD five-minute cap on watching anything:
+   * the heartbeat kept the container alive for its full idle TTL while the
+   * credential in front of it expired, and the member got the gateway's one
+   * generic 404 with a preview still running behind it.
+   */
+  renewRun(
+    binding: Pick<PreviewClaimBinding, 'principalId' | 'orgId' | 'projectRunId' | 'generation'>
+  ): number {
+    const at = this.now();
+    let renewed = 0;
+    for (const [key, grant] of this.grants) {
+      if (at > grant.expiresAt) {
+        this.grants.delete(key);
+        continue;
+      }
+      if (
+        grant.binding.principalId !== binding.principalId ||
+        grant.binding.orgId !== binding.orgId ||
+        grant.binding.projectRunId !== binding.projectRunId ||
+        grant.binding.generation !== binding.generation
+      ) {
+        continue;
+      }
+      this.grants.set(key, { binding: grant.binding, expiresAt: at + PREVIEW_GRANT_TTL_MS });
+      renewed += 1;
+    }
+    return renewed;
+  }
+
   /** The authenticated parent's heartbeat is the ONLY thing that extends one. */
   renew(
     token: string,

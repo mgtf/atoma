@@ -196,6 +196,56 @@ describe('preview grants', () => {
     expect(registry.renew(token(redeemed), key)).toBeNull();
   });
 
+  it('renews by binding, so the parent can extend a grant it can never read', () => {
+    // The grant token is a cookie on the PREVIEW origin. The control plane is
+    // not sent it and cannot read it, so a heartbeat that could only renew by
+    // token could not renew at all — and every viewing session was capped at
+    // the grant's five minutes with a healthy container behind it.
+    const { registry, advance, now } = clockedRegistry();
+    const claim = mintPreviewClaim(binding(), now());
+    registry.register(claim);
+    const redeemed = registry.redeem(claim.secret, HOST);
+    const key = { orgId: ORG, projectRunId: RUN, generation: 1, host: HOST };
+    const beat = { principalId: 'principal-1', orgId: ORG, projectRunId: RUN, generation: 1 };
+
+    advance(PREVIEW_GRANT_TTL_MS - 1);
+    expect(registry.renewRun(beat)).toBe(1);
+    advance(PREVIEW_GRANT_TTL_MS - 1);
+    expect(registry.authorise(token(redeemed), key)).not.toBeNull();
+  });
+
+  it('renews only the grant of the principal that is beating', () => {
+    const { registry, advance, now } = clockedRegistry();
+    const mine = mintPreviewClaim(binding(), now());
+    const theirs = mintPreviewClaim(binding({ principalId: 'principal-2' }), now());
+    registry.register(mine);
+    registry.register(theirs);
+    const myToken = token(registry.redeem(mine.secret, HOST));
+    const theirToken = token(registry.redeem(theirs.secret, HOST));
+    const key = { orgId: ORG, projectRunId: RUN, generation: 1, host: HOST };
+
+    advance(PREVIEW_GRANT_TTL_MS - 1);
+    // One member watching must not keep another member's credential alive
+    // after that member closed the tab.
+    expect(
+      registry.renewRun({ principalId: 'principal-1', orgId: ORG, projectRunId: RUN, generation: 1 })
+    ).toBe(1);
+    advance(2);
+    expect(registry.authorise(myToken, key)).not.toBeNull();
+    expect(registry.authorise(theirToken, key)).toBeNull();
+  });
+
+  it('renews nothing for a generation that has moved on', () => {
+    const { registry, now } = clockedRegistry();
+    const claim = mintPreviewClaim(binding(), now());
+    registry.register(claim);
+    registry.redeem(claim.secret, HOST);
+
+    expect(
+      registry.renewRun({ principalId: 'principal-1', orgId: ORG, projectRunId: RUN, generation: 2 })
+    ).toBe(0);
+  });
+
   it('revokes every grant and claim for one run, in one call', () => {
     const { registry, now } = clockedRegistry();
     const live = mintPreviewClaim(binding(), now());

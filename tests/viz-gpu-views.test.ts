@@ -686,6 +686,7 @@ function makeData(overrides: Partial<GpuDataSnapshot> = {}): GpuDataSnapshot {
     organisation: null,
     accountModels: null,
     accountError: null,
+    preview: null,
     login: null,
     loading: false,
     error: null,
@@ -4582,6 +4583,77 @@ describe('drawRuns behavior', () => {
       expect(picker.x + picker.width).toBeLessThan(pane.leftX + pane.leftWidth);
       expect(picker.y).toBeGreaterThan(pane.top);
       expect(picker.y + picker.height).toBeLessThan(pane.top + 48);
+    }
+  });
+
+  it('offers the preview beside the run summary, never inside its toggle', () => {
+    const event = makeLlmEvent('selected', { role: 'execute' });
+    const ctx = createRecordingCtx();
+    drawRuns(
+      ctx,
+      makeSnapshot(
+        {},
+        {
+          run: makeRun([event]),
+          preview: {
+            availability: 'available',
+            kind: 'node',
+            reason: null,
+            state: 'ready',
+            generation: 2,
+            source: 'delivered',
+            snapshotAt: null,
+            readyAt: null,
+            expiresAt: null,
+            errorCode: null,
+            requestedHosts: [],
+            allowedHosts: [],
+            blockedHosts: [],
+          },
+        }
+      ),
+      WIDTH,
+      HEIGHT
+    );
+
+    const open = ctx.buttons.find((button) => button.id === 'run.preview.open');
+    const stop = ctx.buttons.find((button) => button.id === 'run.preview.stop');
+    expect(open).toBeDefined();
+    expect(stop).toBeDefined();
+    // A SIBLING of the summary card, on the root, and never a child of it: a
+    // parent `hitArea` prunes its whole subtree, and a nested target that IS
+    // inside it still bubbles — one click would open the preview AND collapse
+    // the card.
+    const toggle = ctx.metrics.hitTargets.find((target) => target.id === 'run.summary.toggle');
+    expect(toggle).toBeDefined();
+    expect(open!.y).toBeGreaterThanOrEqual(toggle!.y + toggle!.height);
+  });
+
+  it('offers no preview control for a run this deployment cannot preview', () => {
+    const event = makeLlmEvent('selected', { role: 'execute' });
+    for (const preview of [
+      null,
+      {
+        availability: 'unavailable' as const,
+        kind: null,
+        reason: 'no-deliverable',
+        state: 'stopped' as const,
+        generation: 0,
+        source: 'delivered' as const,
+        snapshotAt: null,
+        readyAt: null,
+        expiresAt: null,
+        errorCode: null,
+        requestedHosts: [],
+        allowedHosts: [],
+        blockedHosts: [],
+      },
+    ]) {
+      const ctx = createRecordingCtx();
+      drawRuns(ctx, makeSnapshot({}, { run: makeRun([event]), preview }), WIDTH, HEIGHT);
+      // A control that fails after the click is worse than a stated absence,
+      // and the reason was decided at delivery, not here.
+      expect(ctx.buttons.some((button) => button.id.startsWith('run.preview.'))).toBe(false);
     }
   });
 

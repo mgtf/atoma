@@ -230,6 +230,39 @@ export interface VizProject {
   updatedAt: string;
 }
 
+/**
+ * What the browser learns about a run's preview — the server's
+ * `previewSummarySchema`, restated here as a wire shape like every other type
+ * in this file. It carries no host path, container id, image digest, runtime
+ * or token: the server's projection is an ALLOWLIST for exactly that reason,
+ * and mirroring more here would invite a future field to cross by accident.
+ */
+export interface VizPreviewSummary {
+  availability: 'available' | 'unavailable';
+  kind: 'static' | 'node' | null;
+  reason: string | null;
+  state: 'stopped' | 'starting' | 'ready' | 'stopping' | 'failed';
+  generation: number;
+  /** `delivered` describes a finished run; `in-flight` a snapshot of one building. */
+  source: 'delivered' | 'in-flight';
+  /** When that snapshot was taken. Null for a delivered preview. */
+  snapshotAt: string | null;
+  readyAt: string | null;
+  expiresAt: string | null;
+  errorCode: string | null;
+  requestedHosts: string[];
+  allowedHosts: string[];
+  blockedHosts: string[];
+}
+
+/** What an open returns: the summary, and a claim URL only when one is ready. */
+export interface VizPreviewOpen {
+  summary: VizPreviewSummary;
+  /** Carries a one-time claim in its fragment. Never store or log it. */
+  url?: string;
+  retryAfterSeconds?: number;
+}
+
 export interface VizProjectRun {
   projectRunId: string;
   projectId: string;

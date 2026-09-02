@@ -142,6 +142,31 @@ export function useProjects(active: boolean) {
   });
 }
 
+/**
+ * One run's preview state.
+ *
+ * POLLS ONLY WHILE A GENERATION IS BUILDING. A `ready` preview changes state
+ * through the member's own actions, and an idle tab that kept asking would be
+ * a tab spending an organisation's quota on nothing — the same reason the
+ * server refuses to allocate on a GET.
+ */
+export function usePreviewStatus(
+  projectId: string | null,
+  runId: string | null,
+  active: boolean
+) {
+  return useQuery({
+    queryKey: ['viz', 'preview', projectId, runId],
+    enabled: active && !!projectId && !!runId,
+    queryFn: () => {
+      if (!projectId || !runId) throw new Error('project and run ids are required');
+      return api.previewStatus(projectId, runId);
+    },
+    refetchInterval: (query) => (query.state.data?.state === 'starting' ? 1_500 : false),
+    staleTime: 1_000,
+  });
+}
+
 export function useProjectRuns(projectId: string | null, active: boolean) {
   return useQuery({
     queryKey: ['viz', 'project', projectId, 'runs'],

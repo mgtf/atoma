@@ -246,6 +246,16 @@ front of it was sent by an authenticated member.
   that one existed, which accepted ANY cookie value for as long as some member
   held a live grant on that origin. A cookie must be a credential, never a
   flag.
+- **A grant lasts five minutes and only the PARENT'S HEARTBEAT extends it**,
+  through `renewRun`, which matches on the binding rather than on the token.
+  It has to: the token is a cookie on the preview origin, which the control
+  plane can neither read nor be sent — that separation is the whole reason for
+  the separate registrable domain. Renewal is scoped to the beating principal,
+  so one member watching cannot keep another's credential alive after they
+  closed the tab. Wiring this was not optional: with the container's idle TTL
+  at fifteen minutes and the grant at five, every viewing session was capped at
+  five minutes and ended in the generic 404 below with a healthy container
+  behind it.
 - **One generic 404 for every negative answer** — unknown host, expired claim,
   forged token, wrong organisation, stopped preview. Telling them apart tells
   an unauthenticated caller which generation hosts exist and which
@@ -353,6 +363,52 @@ handler is a decision the CLI cannot reach.
   a standing permission nobody reviewed. Changing the set stops the project's
   live previews, so the next generation gets a coherent policy rather than a
   running one whose rules changed underneath it.
+
+## The client surface
+
+The GPU client's contract is in [`src/viz`](../viz/AGENTS.md); what belongs
+HERE is what the preview's own shape forces on it.
+
+- **The control is a SIBLING of the run summary card, on `ctx.root`.** A parent
+  `hitArea` PRUNES its whole subtree, so a control drawn inside the card but
+  outside its rectangle would be unreachable rather than merely covered; and a
+  nested target that IS inside it still bubbles, so one click would open the
+  preview AND collapse the card. There is no `stopPropagation` precedent in
+  that client and a layout choice is the wrong reason to add one.
+- **The plane REPLACES the canvas rather than floating over it**, and the
+  product tree goes `inert` behind it. That is what exempts it from the
+  grandfathered CSS-skin list: with nothing underneath, there is no pointer
+  light to escape and no hover bubble to bury.
+- **The iframe mounts only in `ready`**, and its `key` is the generation plus
+  the reload nonce. A restart is a NEW ORIGIN and gets a new element; reusing
+  one would carry the previous origin's session history into it.
+- **The first load spends the claim; every reload after it uses the origin
+  root.** Re-navigating to a one-time claim lands on "this link has already
+  been used" — a reload button that breaks what it reloads. The grant cookie
+  is what carries the second visit.
+- **`allow-same-origin` IS granted to the frame.** Withholding it puts the app
+  in an OPAQUE origin, where the gateway's own `default-src 'self'` matches
+  nothing and every separate script or stylesheet is blocked — the feature
+  would not work for any deliverable built from more than one file. The
+  isolation is the separate registrable domain carrying no Atoma cookie, not
+  the sandbox flag. `allow-popups` stays absent.
+- **NO "open in a new tab", and it is not an omission.** The grant cookie is
+  `Partitioned`, keyed to the visualizer as the embedding site, so a TOP-LEVEL
+  tab on the preview origin is a different partition and would arrive with no
+  grant at all — the member would get the generic 404 on their own preview.
+  Making it work means minting a second claim for a top-level context, which
+  is a decision about what a claim binds.
+- **NO per-row Preview button in the Projects run list**, which the design
+  §14 asked for. Eligibility is a decision the manager makes per run, so an
+  honest row control needs a status query PER ROW; without one the row would
+  offer a button that fails after the click — the exact thing the same
+  paragraph forbids. The row already navigates to the run detail, where the
+  control has real state. Reopening this means a batch status route, not a
+  button.
+- **The heartbeat beats only while the plane is up**, at one minute — inside
+  both clocks it feeds. That is D6 made mechanical: the generated app's own
+  traffic never reaches it, so an abandoned tab full of polling code cannot
+  keep its own container alive.
 
 ## The service is the seam
 
