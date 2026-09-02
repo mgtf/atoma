@@ -6,6 +6,7 @@ import {
   snapshotPreviewConfig,
 } from '../preview/config.js';
 import { authPublicOrigin, vizAuthEnabled } from '../auth/gate.js';
+import { isLoopbackOrigin } from '../auth/providers.js';
 import type { DoctorCheck, DoctorDependencies } from './doctor.js';
 
 /**
@@ -85,23 +86,41 @@ function checkConfig(env: NodeJS.ProcessEnv): DoctorCheck[] {
     try {
       const origin = authPublicOrigin(env);
       visualizerOrigin = origin.origin;
-      const https = origin.origin.startsWith('https://');
+      // WHAT ACTUALLY MATTERS IS A SECURE CONTEXT, not the scheme.
+      //
+      // The grant cookie is `__Host-` + `Secure` + `SameSite=None` +
+      // `Partitioned`, and it is set on the PREVIEW origin, which is always
+      // https by construction. What the visualizer's own origin decides is
+      // whether the browser will keep a partitioned third-party cookie for the
+      // frame it embeds — and browsers treat loopback as trustworthy, so
+      // `http://127.0.0.1` works while `http://atoma.internal` would not.
+      //
+      // The gate itself already refuses remote plain HTTP, so the third case
+      // is defensive rather than reachable. Saying it out loud is still worth
+      // a line: this is the check an operator reads when previews 404 with
+      // nothing in the logs.
+      const secure = origin.origin.startsWith('https://');
+      const trustworthy = secure || isLoopbackOrigin(origin.origin);
       checks.push({
         id: 'preview-origin',
         label: 'Preview public origin',
-        status: https ? 'pass' : 'fail',
-        detail: https
+        status: secure ? 'pass' : trustworthy ? 'warn' : 'fail',
+        detail: secure
           ? `visualizer on ${origin.origin}`
-          : `visualizer on ${origin.origin}, which is not HTTPS`,
-        ...(https
+          : trustworthy
+            ? `visualizer on ${origin.origin} — a secure context because it is loopback, so the preview grant cookie is kept`
+            : `visualizer on ${origin.origin}, which is neither HTTPS nor loopback`,
+        ...(secure
           ? {}
-          : {
-              // The grant cookie is `__Host-` + `Secure`, so a browser will not
-              // store it at all over plain HTTP. The preview would 404 on
-              // every load with nothing in the logs to explain it.
-              remedy:
-                'Serve the visualizer over HTTPS. The preview grant cookie is Secure and __Host- prefixed; a browser stores neither over http://.',
-            }),
+          : trustworthy
+            ? {
+                remedy:
+                  'Fine for one machine. Any deployment other people reach needs HTTPS, or the browser drops the partitioned grant cookie and every preview 404s.',
+              }
+            : {
+                remedy:
+                  'Serve the visualizer over HTTPS. Outside loopback a plain-HTTP page is not a secure context, so the browser will not keep the preview grant cookie.',
+              }),
       });
     } catch (error) {
       checks.push({

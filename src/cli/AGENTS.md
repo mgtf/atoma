@@ -42,6 +42,12 @@ every other check, and both are the reason it exists.
   under test. For the same reason the runtime list comes from `docker info`,
   never from `$PATH`: gVisor installed is not gVisor registered, and that is
   exactly the gap a Docker Desktop machine falls into.
+- **The origin check is about a SECURE CONTEXT, not a scheme.** The grant
+  cookie is set on the PREVIEW origin, which is HTTPS by construction; what the
+  visualizer's own origin decides is whether the browser keeps a partitioned
+  third-party cookie for the frame it embeds. Loopback is trustworthy, so it
+  warns rather than fails — a check that failed there would tell an operator
+  their working development setup was broken.
 - **The passing result is a REFUSAL.** The root filesystem must reject a write
   and a `--network none` container must fail to resolve a name. A probe that
   only proved a container starts would pass on a container with no isolation at

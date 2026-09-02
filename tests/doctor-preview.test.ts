@@ -136,16 +136,31 @@ describe('doctor --preview', () => {
     expect(origin.detail).toContain('auth gate');
   });
 
-  it('refuses a plain-HTTP origin, because the grant cookie cannot exist there', async () => {
-    // The gate itself already refuses http on a REMOTE host; loopback is the
-    // one it allows, and it is exactly where an operator tries previews first.
+  it('accepts a loopback origin, which IS a secure context, with a caveat', async () => {
+    // WHAT MATTERS IS THE SECURE CONTEXT, not the scheme. The grant cookie is
+    // set on the PREVIEW origin, which is https by construction; the
+    // visualizer's own origin decides whether the browser keeps a partitioned
+    // third-party cookie for the frame it embeds, and browsers treat loopback
+    // as trustworthy. A check that failed here would tell an operator their
+    // working development setup was broken.
     const checks = await run({ ...GATED_ENV, ATOMA_VIZ_PUBLIC_ORIGIN: 'http://localhost:5173' });
 
     const origin = find(checks, 'preview-origin');
-    expect(origin.status).toBe('fail');
-    // The failure mode without this check is silent: a __Host- Secure cookie
-    // is simply not stored, so every preview 404s with nothing in the logs.
-    expect(origin.remedy).toContain('__Host-');
+    expect(origin.status).toBe('warn');
+    expect(origin.detail).toContain('secure context');
+    // And it still says what changes the moment anyone else is meant to reach it.
+    expect(origin.remedy).toContain('HTTPS');
+    // A warning must not sink the whole report.
+    expect(checks.some((check) => check.id === 'preview-origin' && check.status === 'fail')).toBe(
+      false
+    );
+  });
+
+  it('passes an HTTPS origin without a caveat', async () => {
+    const checks = await run(GATED_ENV);
+
+    expect(find(checks, 'preview-origin').status).toBe('pass');
+    expect(find(checks, 'preview-origin').remedy).toBeUndefined();
   });
 
   it('refuses a preview domain sharing a registrable domain with the visualizer', async () => {

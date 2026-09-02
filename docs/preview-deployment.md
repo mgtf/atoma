@@ -154,9 +154,11 @@ ATOMA_PREVIEW_GATEWAY_PORT=4311
 
 The auth gate is a PRECONDITION, not a companion setting: a preview belongs to
 an organisation's run, and there are no organisations without the gate. The
-public origin must be HTTPS — the grant cookie is `__Host-` and `Secure`, and a
-browser stores neither over `http://`, so previews would 404 with nothing in
-the logs to explain it. Doctor names both.
+public origin must be a SECURE CONTEXT: HTTPS anywhere anyone else can reach,
+or loopback, which browsers already treat as trustworthy. The grant cookie is
+`SameSite=None; Partitioned`, so it is the visualizer's own context that
+decides whether the browser keeps it for the frame — get this wrong and every
+preview 404s with nothing in the logs to explain it. Doctor names both.
 
 There is no partial mode: half a configuration is a hard failure at boot rather
 than a silent "disabled".
