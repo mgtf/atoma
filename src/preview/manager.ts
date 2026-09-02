@@ -325,14 +325,18 @@ export class PreviewManager {
     try {
       const workspace = await this.deps.launcher.createWorkspace(ownerId);
       if (!workspace.hostPath) throw new PreviewRuntimeError('internal', 'no host-side copy');
+      const sourceRoot = this.deps.workspaceOf(input.orgId, input.projectId, input.projectRunId);
       materializePreviewWorkspace({
-        sourceRoot: this.deps.workspaceOf(input.orgId, input.projectId, input.projectRunId),
+        sourceRoot,
         destinationRoot: workspace.hostPath,
         limits: { maxBytes: this.deps.config.copyMaxBytes },
       });
 
-      // Classified from the COPY. Its bytes cannot move under the classifier.
-      const classified = classifyDeliveredWorkspace(workspace.hostPath);
+      // Classified from the COPY — its bytes cannot move under the classifier —
+      // with the probe manifest read from the SOURCE, because the copy policy
+      // strips it: classifying the copy alone made every Node deliverable in
+      // flight `unsupported-deliverable`.
+      const classified = classifyDeliveredWorkspace(workspace.hostPath, { manifestRoot: sourceRoot });
       if (classified.availability !== 'available') {
         throw new PreviewUnavailableError(classified.unavailableReason ?? 'unavailable');
       }
@@ -372,9 +376,10 @@ export class PreviewManager {
           },
           {
             ownerId,
-            // The copy the classifier just read, NOT the live workspace: the
-            // isolate must mount the bytes that were described.
-            sourceWorkspace: workspace.hostPath,
+            // The copy the classifier just read, handed over AS IS: the isolate
+            // mounts exactly the bytes that were described, and nothing
+            // recreates the directory it is about to mount.
+            preparedWorkspace: workspace,
             entry: classified.entry ?? '',
           }
         );

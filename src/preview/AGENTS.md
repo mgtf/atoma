@@ -79,6 +79,17 @@ move under it; and a reopen takes a NEW snapshot on a NEW generation, because a
 member reopening wants the state now. In-flight egress is denied outright — a
 run has declared no hosts, the right default for unfinished code.
 
+Two seams of that path were wrong and are pinned by `tests/preview-end-to-end`
+(measured on a live run, 2026-09-02). The COPY policy strips every `.atoma*`
+file, the probe manifest included, so a classifier reading the manifest FROM
+THE COPY never saw one: `kinds` was empty and a Node deliverable in flight was
+`unsupported-deliverable` by construction. The manifest is read from the SOURCE
+through the CLASSIFY policy while every file check stays on the frozen copy —
+the policy split is intact, only the read moved. And the copy is handed to
+`startPreview` as a `preparedWorkspace`, used as is: passing it back as a
+`sourceWorkspace` under the same owner id made `createWorkspace` recreate that
+very directory EMPTY before copying from it.
+
 ## The two facts, and why they are separate rows
 
 - A **descriptor** is what delivery OBSERVED: immutable, one per delivered run,

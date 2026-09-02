@@ -2,13 +2,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import { request as httpRequest } from 'node:http';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AUTH_TABLES_DDL } from '../src/auth/store.js';
 import { ProjectStore } from '../src/projects/store.js';
 import { PreviewStore } from '../src/preview/store.js';
 import { PreviewClaimRegistry } from '../src/preview/claims.js';
+import { previewGenerationHost } from '../src/preview/gateway.js';
 import { PreviewRouteTable, startPreviewGateway, type RunningPreviewGateway } from '../src/preview/gatewayServer.js';
 import { PreviewManager, PreviewQuotaError, PreviewUnavailableError } from '../src/preview/manager.js';
 import { recordDeliveredPreview } from '../src/preview/service.js';
@@ -98,7 +99,15 @@ class WorkspaceOnlyLauncher implements ContainerLauncher {
     return true;
   }
   async startUnit(spec: LauncherUnitSpec): Promise<LauncherUnitHandle> {
-    return { kind: spec.kind, ownerId: spec.ownerId, name: this.unitName(spec.kind, spec.ownerId) };
+    // The relay is the one unit the engine publishes on loopback; without a
+    // port here the Node path stops at "not published on a reachable port".
+    // The manager's injected probe answers readiness, so nothing listens on it.
+    return {
+      kind: spec.kind,
+      ownerId: spec.ownerId,
+      name: this.unitName(spec.kind, spec.ownerId),
+      ...(spec.kind === 'preview-ingress' ? { hostPort: 49_154 } : {}),
+    };
   }
   async awaitUnitReady(): Promise<void> {}
   async stopUnit(): Promise<void> {}
@@ -338,6 +347,80 @@ describe('previewing a delivered artifact, end to end', () => {
     // A generation that has moved on is not an error; the browser is a beat
     // behind and the caller says so.
     expect(previewManager.heartbeat(orgId, projectRunId, opened.summary.generation + 1)).toBe(false);
+  });
+
+  it('classifies a Node deliverable in flight from the SOURCE manifest, not the stripped copy', async () => {
+    // MEASURED ON A LIVE RUN (2026-09-02, snapshot at 16:49): the member
+    // clicked Preview mid-run and got `unsupported-deliverable`. The in-flight
+    // path copies under the COPY policy, which strips every `.atoma*` file —
+    // the probe manifest included — and then classified the copy. `kinds` was
+    // therefore always empty, so a Node deliverable in flight could never be
+    // anything but unsupported; only an `index.html` already on disk classified.
+    //
+    // The manifest is host-observed evidence the CLASSIFY policy admits at the
+    // workspace root, so it is read from the SOURCE while every file check
+    // stays on the frozen copy. This workspace has NO index.html on purpose.
+    const building = join(root, 'in-flight-node');
+    mkdirSync(building, { recursive: true });
+    writeFileSync(join(building, 'server.js'), 'require("http").createServer().listen(8080);');
+    writeFileSync(
+      join(building, '.atoma-probes.json'),
+      JSON.stringify({
+        version: 1,
+        entries: [{ probe: 'http', method: 'GET', path: '/', status: 200, entry: 'server.js' }],
+      })
+    );
+
+    const run = projects.createProjectRun({
+      orgId,
+      projectId,
+      principalId,
+      request: { goal: 'an API, in progress', idempotencyKey: 'live-node-1' },
+      hostPaths: {
+        workspacePath: building,
+        runsPath: join(root, 'traces'),
+        logPath: join(root, 'run.log'),
+      },
+    })!.run;
+
+    const routes = new PreviewRouteTable();
+    const claims = new PreviewClaimRegistry();
+    const previewManager = new PreviewManager({
+      store: previews,
+      launcher: new WorkspaceOnlyLauncher(join(root, 'copies')),
+      routes,
+      claims,
+      config,
+      workspaceOf: () => building,
+      probe: async () => true,
+      log: () => undefined,
+    });
+
+    const opened = await previewManager.openInFlight({
+      orgId,
+      projectId,
+      projectRunId: run.projectRunId,
+      opener: { principalId, sessionId: 'session-1' },
+    });
+
+    expect(opened.summary.state).toBe('ready');
+    expect(opened.summary.source).toBe('in-flight');
+    // `kind` on the SUMMARY comes from the descriptor, and an in-flight preview
+    // has none by contract; what proves the Node path was taken is the route
+    // the gateway would serve this generation from.
+    const host = `${previewGenerationHost(orgId, run.projectRunId, opened.summary.generation)}.${config.domain}`;
+    const route = routes.get(host);
+    expect(route?.kind).toBe('node');
+    expect(route?.upstreamPort).toBe(49_154);
+    // And the copy the isolate mounts still carries NO manifest: the policy
+    // split is intact, only the classifier's manifest read moved.
+    const copies = join(root, 'copies');
+    const copied = readdirSync(copies).map((owner) => join(copies, owner));
+    expect(copied.length).toBeGreaterThan(0);
+    for (const copy of copied) {
+      expect(existsSync(join(copy, '.atoma-probes.json'))).toBe(false);
+      expect(existsSync(join(copy, 'server.js'))).toBe(true);
+    }
   });
 
   it('previews a run that is STILL BUILDING, from a snapshot of the moment', async () => {

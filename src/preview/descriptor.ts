@@ -124,10 +124,31 @@ function usableEntry(workspaceRoot: string, candidate: string | null): string | 
  * runs inside the delivery path and a run must never be un-delivered by the
  * host failing to describe it.
  */
-export function classifyDeliveredWorkspace(workspaceRoot: string): PreviewClassification {
+export function classifyDeliveredWorkspace(
+  workspaceRoot: string,
+  options: {
+    /**
+     * Where the probe manifest is read from, when it is not `workspaceRoot`.
+     *
+     * The in-flight path classifies a COPY, so the bytes cannot move under the
+     * classifier — but the copy is made under the COPY policy, which excludes
+     * every `.atoma*` file, the manifest included. Reading the manifest from
+     * the copy therefore found nothing, `kinds` was empty, and a Node
+     * deliverable in flight was `unsupported-deliverable` by construction:
+     * only an `index.html` already on disk could ever classify. Measured on a
+     * live run (2026-09-02, snapshot at 16:49).
+     *
+     * The manifest is host-observed evidence and the CLASSIFY policy admits
+     * it at the workspace root, so it is read from the SOURCE through that
+     * policy, while every file check below stays on the frozen copy. A torn
+     * read mid-write is `manifest-unreadable`, a bounded answer for a moment.
+     */
+    readonly manifestRoot?: string;
+  } = {}
+): PreviewClassification {
   let manifestRaw: string | null;
   try {
-    manifestRaw = readPreviewClassifierFile(workspaceRoot, PROBE_MANIFEST_FILENAME);
+    manifestRaw = readPreviewClassifierFile(options.manifestRoot ?? workspaceRoot, PROBE_MANIFEST_FILENAME);
   } catch {
     // The jail refused, the file changed under the read, or the workspace is
     // not a directory any more. All three mean the same to a member.

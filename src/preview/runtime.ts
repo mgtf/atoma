@@ -68,8 +68,23 @@ export interface PreviewRuntimeDeps {
 export interface StartPreviewInput {
   /** Opaque per-generation identity; every engine object is named from it. */
   readonly ownerId: string;
-  /** The delivered workspace. Read-only, and never mutated. */
-  readonly sourceWorkspace: string;
+  /**
+   * The delivered workspace, to be COPIED into a launcher workspace here.
+   * Read-only, and never mutated. Exactly one of this and `preparedWorkspace`.
+   */
+  readonly sourceWorkspace?: string;
+  /**
+   * A launcher workspace ALREADY holding the filtered copy — the in-flight
+   * path's case, where the copy was made first so the classifier could read
+   * frozen bytes. It is used as is: no second `createWorkspace`, no second
+   * copy. Before this existed the in-flight path handed its copy back as
+   * `sourceWorkspace` under the SAME owner id; `createWorkspace` then
+   * recreated that very directory EMPTY before copying from it, so every Node
+   * deliverable in flight failed with "could not be copied" — the source had
+   * just been deleted by the step meant to receive it. Measured 2026-09-02.
+   * Teardown owns it from here like any workspace it created.
+   */
+  readonly preparedWorkspace?: LauncherWorkspaceHandle;
   /** Workspace-relative entry the descriptor resolved. */
   readonly entry: string;
 }
@@ -156,30 +171,42 @@ export async function startPreview(
   // creation itself can fail while the old objects are still durable.
   launcher.armHardExitCleanup('preview', input.ownerId);
 
-  try {
-    created.workspace = await launcher.createWorkspace(input.ownerId);
-  } catch {
-    return fail('internal', 'the preview workspace could not be created');
+  if ((input.sourceWorkspace === undefined) === (input.preparedWorkspace === undefined)) {
+    return fail('internal', 'a preview starts from exactly one of a source workspace or a prepared copy');
   }
-
-  const destination = created.workspace.hostPath;
-  if (!destination) {
-    // A backend that hands back no path needs a streaming copy, which is a
-    // different mechanism, not a fallback to guessing where the bytes go.
-    return fail('internal', 'this launcher backend cannot receive a host-side copy');
-  }
-  try {
-    materializePreviewWorkspace({
-      sourceRoot: input.sourceWorkspace,
-      destinationRoot: destination,
-      ...(deps.copyMaxBytes ? { limits: { maxBytes: deps.copyMaxBytes } } : {}),
-      ...(deps.copyOwnership ? { ownership: deps.copyOwnership } : {}),
-    });
-  } catch (error) {
-    if (error instanceof PreviewPolicyError && error.code === 'limit') {
-      return fail('copy-limit', 'the delivered workspace is larger than a preview may copy');
+  if (input.preparedWorkspace) {
+    // The copy exists and was classified; the only thing to check is that this
+    // backend gave it a host path the engine can mount.
+    created.workspace = input.preparedWorkspace;
+    if (!created.workspace.hostPath) {
+      return fail('internal', 'this launcher backend cannot receive a host-side copy');
     }
-    return fail('internal', 'the delivered workspace could not be copied');
+  } else {
+    try {
+      created.workspace = await launcher.createWorkspace(input.ownerId);
+    } catch {
+      return fail('internal', 'the preview workspace could not be created');
+    }
+
+    const destination = created.workspace.hostPath;
+    if (!destination) {
+      // A backend that hands back no path needs a streaming copy, which is a
+      // different mechanism, not a fallback to guessing where the bytes go.
+      return fail('internal', 'this launcher backend cannot receive a host-side copy');
+    }
+    try {
+      materializePreviewWorkspace({
+        sourceRoot: input.sourceWorkspace!,
+        destinationRoot: destination,
+        ...(deps.copyMaxBytes ? { limits: { maxBytes: deps.copyMaxBytes } } : {}),
+        ...(deps.copyOwnership ? { ownership: deps.copyOwnership } : {}),
+      });
+    } catch (error) {
+      if (error instanceof PreviewPolicyError && error.code === 'limit') {
+        return fail('copy-limit', 'the delivered workspace is larger than a preview may copy');
+      }
+      return fail('internal', 'the delivered workspace could not be copied');
+    }
   }
 
   let internal: LauncherNetworkHandle;
