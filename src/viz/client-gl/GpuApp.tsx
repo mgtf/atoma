@@ -59,6 +59,7 @@ import {
 import {
   isRoutableView,
   nextRunFilters,
+  previewTargetForRun,
   projectSelectionAfterActivate,
   projectSelectionAfterProjects,
   useGpuStore,
@@ -217,7 +218,15 @@ function GpuAppContent({
   // the runs view then rendered an error banner instead of its list — the
   // wheel handler fails closed on scrollMax, so scrolling died with it.
   const authed = authSnapshot !== null;
-  const projectsQuery = useProjects(state.view === 'projects' && authed);
+  // Enabled on Runs too, and not for the Runs list: it is the ONLY way to
+  // resolve the project a selected run belongs to, and the preview is keyed by
+  // (project, project run) while this view is keyed by trace id. Gated on the
+  // Projects view alone, a member who RELOADED the page while watching their
+  // run had no project list in cache and therefore no preview control — the
+  // one moment the control matters most.
+  const projectsQuery = useProjects(
+    (state.view === 'projects' || state.view === 'runs') && authed
+  );
   const githubInstallationsQuery = useGithubInstallations(state.view === 'projects' && authed);
   // Resolved on EVERY view, not only Projects. A member reaches a run's detail
   // by clicking it in its project, and the preview below is keyed by (project,
@@ -242,14 +251,10 @@ function GpuAppContent({
   // The project run behind the selected trace. A run reached from anywhere
   // else — the runs index, a burn-in row, a deep link — has no project run to
   // preview, and the control below stays absent rather than guessing one.
-  const previewTarget = useMemo(() => {
-    const runId = state.selectedRunId;
-    if (!runId) return null;
-    const match = (projectRunsQuery.data ?? []).find(
-      (run) => run.traceId === runId || run.projectRunId === runId
-    );
-    return match ? { projectId: match.projectId, projectRunId: match.projectRunId } : null;
-  }, [projectRunsQuery.data, state.selectedRunId]);
+  const previewTarget = useMemo(
+    () => previewTargetForRun(projectRunsQuery.data ?? [], state.selectedRunId),
+    [projectRunsQuery.data, state.selectedRunId]
+  );
   // READS ONLY. A GET allocates nothing server-side, which is what makes it
   // safe to poll from a tab a viewer left open on a run.
   const previewQuery = usePreviewStatus(

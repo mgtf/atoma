@@ -145,10 +145,12 @@ export function useProjects(active: boolean) {
 /**
  * One run's preview state.
  *
- * POLLS ONLY WHILE A GENERATION IS BUILDING. A `ready` preview changes state
- * through the member's own actions, and an idle tab that kept asking would be
- * a tab spending an organisation's quota on nothing — the same reason the
- * server refuses to allocate on a GET.
+ * TWO CADENCES, for two questions. While a generation is BUILDING the member
+ * is watching a spinner, so 1.5s is what makes it feel answered. While one is
+ * READY the question is the opposite — has it stopped underneath me? — and a
+ * slow poll is what takes a dead iframe down instead of leaving it looking
+ * like the app. Neither can spend an organisation's quota: the server refuses
+ * to allocate on a GET, by contract.
  */
 export function usePreviewStatus(
   projectId: string | null,
