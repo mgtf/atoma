@@ -1089,7 +1089,7 @@ function GpuAppContent({
   }, [activate, state.sceneCameraMode, state.selectedRunId, state.view]);
 
   return (
-    <main className="gpu-app">
+    <main className="gpu-app" data-entered={state.entered ? 'true' : 'false'}>
       {/* The product tree goes INERT behind an open preview, not merely
           hidden: `inert` takes the whole subtree out of focus order, hit
           testing and the accessibility tree in one attribute, so a tab press

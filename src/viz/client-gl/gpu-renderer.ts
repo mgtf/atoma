@@ -3558,7 +3558,7 @@ export class GpuRenderer {
 
     const back = new Graphics();
     back.poly(facePoints.map((value, index) => value + (index % 2 === 0 ? extrusionX : extrusionY)));
-    back.fill({ color: mixColor(0x091426, accent, 0.18), alpha: 0.98 });
+    back.fill({ color: mixColor(0x10243b, accent, 0.18), alpha: 0.98 });
     underlayContainer.addChild(back);
 
     // Solid right and lower walls connect the rear slab to the face. Their
@@ -3570,7 +3570,7 @@ export class GpuRenderer {
       width + extrusionX, height - chamfer + extrusionY,
       width, height - chamfer,
     ]);
-    rightWall.fill({ color: mixColor(0x071326, accent, 0.14), alpha: 0.98 });
+    rightWall.fill({ color: mixColor(0x0d2035, accent, 0.14), alpha: 0.98 });
     underlayContainer.addChild(rightWall);
 
     const lowerWall = new Graphics();
@@ -3580,7 +3580,7 @@ export class GpuRenderer {
       width - chamfer + extrusionX, height + extrusionY,
       chamfer + extrusionX, height + extrusionY,
     ]);
-    lowerWall.fill({ color: mixColor(0x050f20, accent, 0.1), alpha: 0.98 });
+    lowerWall.fill({ color: mixColor(0x0a1a2c, accent, 0.1), alpha: 0.98 });
     underlayContainer.addChild(lowerWall);
 
     const aura = new Graphics();
@@ -3599,7 +3599,7 @@ export class GpuRenderer {
     underlayContainer.addChild(aura);
 
     const faceColor = mixColor(
-      selected ? 0x172a49 : 0x111a2b,
+      selected ? 0x203b61 : 0x192a43,
       accent,
       selected ? 0.23 : 0.13
     );
@@ -3646,7 +3646,7 @@ export class GpuRenderer {
       width - chamfer - 3, height - 2.5,
       chamfer + 3, height - 2.5,
     ]);
-    lowerBevel.fill({ color: 0x02050b, alpha: 0.42 });
+    lowerBevel.fill({ color: 0x07111d, alpha: 0.42 });
     container.addChild(lowerBevel);
 
     const rail = new Graphics();

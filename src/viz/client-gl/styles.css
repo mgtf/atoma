@@ -26,6 +26,11 @@ button, input, textarea, select { font: inherit; }
   inset: 0;
 }
 
+/* Keep the arrival field on its deep black receiver. Once inside the product,
+   a static blue-night matte separates the raised surfaces without bringing
+   back the procedural grid or another render pass. */
+.gpu-app[data-entered="true"] { background: #0d1726; }
+
 .gpu-scene-camera {
   /* scene-camera.ts bakes target, optical anchor and perspective into one
      matrix3d, all in viewport coordinates from this origin. */
@@ -142,8 +147,8 @@ html.atoma-cursor-active * {
    The GL shadows swing with the pointer light; CSS cannot, so these are its
    resting values. */
 .gpu-panel-skin {
-  background: rgba(17, 24, 39, .94);
-  border: 1px solid rgba(38, 51, 74, .9);
+  background: rgba(24, 41, 65, .94);
+  border: 1px solid rgba(66, 99, 134, .9);
   border-radius: 8px;
   box-shadow:
     4px 6px 14px rgba(1, 4, 10, .36),
@@ -192,7 +197,7 @@ html.atoma-cursor-active * {
   border: 1px solid rgba(110, 168, 255, .62);
   border-radius: 7px;
   outline: 0;
-  background: rgba(11, 17, 30, .96);
+  background: rgba(24, 41, 65, .96);
   color: #e6edf7;
   box-shadow:
     0 0 0 1px rgba(110, 168, 255, .1),
@@ -367,7 +372,7 @@ html.atoma-cursor-active * {
   max-width: 100%;
   border: 1px solid rgba(110, 168, 255, .62);
   border-radius: 7px;
-  background: rgba(11, 17, 30, .96);
+  background: rgba(24, 41, 65, .96);
   color: #e6edf7;
   padding: 6px 12px;
   font: 12px/1.2 ui-sans-serif, system-ui, sans-serif;
@@ -457,7 +462,7 @@ html.atoma-cursor-active * {
 .gpu-scene-tuning__header button {
   border: 1px solid rgba(110, 168, 255, .35);
   border-radius: 7px;
-  background: rgba(11, 17, 30, .96);
+  background: rgba(24, 41, 65, .96);
   color: #a9b5ca;
   padding: 3px 10px;
   font: 700 9px/1.2 ui-sans-serif, system-ui, sans-serif;
@@ -502,8 +507,8 @@ html.atoma-cursor-active * {
   width: min(340px, calc(100vw - 40px));
   padding: 12px 14px;
   box-sizing: border-box;
-  background: rgba(11, 17, 30, .96);
-  border: 1px solid rgba(38, 51, 74, .9);
+  background: rgba(24, 41, 65, .96);
+  border: 1px solid rgba(66, 99, 134, .9);
   border-radius: 8px;
   color: #e6edf7;
   font: 12px/1.45 ui-sans-serif, system-ui, sans-serif;
@@ -527,7 +532,7 @@ html.atoma-cursor-active * {
 .gpu-push-prompt-actions button {
   border: 1px solid rgba(110, 168, 255, .62);
   border-radius: 7px;
-  background: rgba(11, 17, 30, .96);
+  background: rgba(24, 41, 65, .96);
   color: #e6edf7;
   padding: 6px 12px;
   font: 12px/1.2 ui-sans-serif, system-ui, sans-serif;
@@ -567,7 +572,7 @@ html.atoma-cursor-active * {
   white-space: normal;
   border: 1px solid rgba(110, 168, 255, .72);
   border-radius: 8px;
-  background: rgba(11, 17, 30, .98);
+  background: rgba(24, 41, 65, .98);
   box-shadow: 0 18px 42px rgba(0, 0, 0, .5);
 }
 
@@ -616,7 +621,7 @@ html.atoma-cursor-active * {
   border: 1px solid rgba(110, 168, 255, .62);
   border-radius: 6px;
   padding: 6px 9px;
-  background: #111827;
+  background: #182941;
   color: #e6edf7;
 }
 
@@ -644,7 +649,7 @@ html.atoma-cursor-active * {
 
 .gpu-a11y-bridge:focus-within .gpu-docs-topic-nav button[aria-current="page"] {
   border-color: #6ea8ff;
-  background: #243a5d;
+  background: #2b4668;
 }
 
 .gpu-a11y-bridge:focus-within .gpu-docs-article,
@@ -744,7 +749,7 @@ html.atoma-cursor-active * {
   padding: 8px 16px;
   border: 1px solid #6ea8ff;
   border-radius: 8px;
-  background: #162033;
+  background: #223754;
   color: #e6edf7;
   cursor: pointer;
 }
@@ -805,7 +810,7 @@ html.atoma-cursor-active * {
 .gpu-settings-actions button {
   border: 1px solid rgba(110, 168, 255, .62);
   border-radius: 7px;
-  background: rgba(11, 17, 30, .96);
+  background: rgba(24, 41, 65, .96);
   color: #e6edf7;
   padding: 6px 12px;
   font: 12px/1.2 ui-sans-serif, system-ui, sans-serif;
@@ -1073,7 +1078,7 @@ html.atoma-cursor-active * {
 .gpu-announce-actions button {
   border: 1px solid rgba(110, 168, 255, .62);
   border-radius: 7px;
-  background: rgba(11, 17, 30, .96);
+  background: rgba(24, 41, 65, .96);
   color: #e6edf7;
   padding: 6px 12px;
   font: 12px/1.2 ui-sans-serif, system-ui, sans-serif;

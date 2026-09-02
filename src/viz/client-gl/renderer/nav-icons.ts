@@ -1,4 +1,4 @@
-import { Container, Sprite, Texture } from 'pixi.js';
+import { CanvasSource, Container, Sprite, Texture } from 'pixi.js';
 import type { Group, WebGLRenderer } from 'three';
 import { pointerLightFalloff } from '../pointer-light.js';
 
@@ -51,6 +51,7 @@ const MODEL_FILE: Readonly<Record<NavIconKind, string>> = {
 export const NAV_ICON_RENDER_SIZE = 34;
 export const NAV_ICON_OUTSIDE_GAP = 10;
 export const NAV_ICON_SOURCE_SIZE = 128;
+const NAV_ICON_TARGET_OPAQUE_PIXELS = 4_200;
 export const NAV_ICON_SPIN_RADIANS_PER_MS = 0.00155;
 export const NAV_ICON_MATERIAL = {
   color: 0xd3a126,
@@ -200,8 +201,8 @@ export function navIconOpticalScale(
   const spanScale = 112 / span;
   // Dense solids (cube/book) read heavier than equally tall open shapes
   // (folder/fire). Area therefore participates alongside the outer bounds.
-  const areaScale = Math.sqrt(4200 / opaquePixels);
-  return Math.min(1.25, Math.max(0.68, Math.min(spanScale, areaScale)));
+  const areaScale = Math.sqrt(NAV_ICON_TARGET_OPAQUE_PIXELS / opaquePixels);
+  return Math.min(1.25, Math.max(0.47, Math.min(spanScale, areaScale)));
 }
 
 function measureSilhouette(context: CanvasRenderingContext2D): {
@@ -280,16 +281,20 @@ function createMeshTexture(
   const output = document.createElement('canvas');
   output.width = NAV_ICON_SOURCE_SIZE;
   output.height = NAV_ICON_SOURCE_SIZE;
-  const context = output.getContext('2d', { alpha: true });
+  const context = output.getContext('2d', { alpha: true, willReadFrequently: true });
   if (!context) throw new Error(`Could not create the ${kind} navigation mesh canvas`);
-  const texture = Texture.from(output);
+  const texture = new Texture({
+    source: new CanvasSource({ resource: output, autoGenerateMipmaps: true }),
+  });
   texture.label = `nav-mesh-${kind}`;
   const shadowOutput = document.createElement('canvas');
   shadowOutput.width = NAV_ICON_SOURCE_SIZE;
   shadowOutput.height = NAV_ICON_SOURCE_SIZE;
   const shadowContext = shadowOutput.getContext('2d', { alpha: true });
   if (!shadowContext) throw new Error(`Could not create the ${kind} shadow-mask canvas`);
-  const shadowTexture = Texture.from(shadowOutput);
+  const shadowTexture = new Texture({
+    source: new CanvasSource({ resource: shadowOutput, autoGenerateMipmaps: true }),
+  });
   shadowTexture.label = `nav-mesh-shadow-${kind}`;
 
   let lastAt = Number.NEGATIVE_INFINITY;
@@ -345,6 +350,16 @@ function createMeshTexture(
   lastAt = Number.NEGATIVE_INFINITY;
   lastRotation = Number.NaN;
   render(0, { keyX: -0.35, keyY: 0.8, light: 0 }, 1, true);
+  const normalised = measureSilhouette(context);
+  const correction = Math.sqrt(
+    NAV_ICON_TARGET_OPAQUE_PIXELS / Math.max(1, normalised.opaquePixels)
+  );
+  if (Math.abs(1 - correction) > 0.02) {
+    opticalSize.scale.multiplyScalar(correction);
+    lastAt = Number.NEGATIVE_INFINITY;
+    lastRotation = Number.NaN;
+    render(0, { keyX: -0.35, keyY: 0.8, light: 0 }, 2, true);
+  }
   return { texture, shadowTexture, render };
 }
 
