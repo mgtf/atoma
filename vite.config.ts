@@ -39,6 +39,8 @@ export default defineConfig({
       '/api': `http://127.0.0.1:${apiPort}`,
       '/auth': `http://127.0.0.1:${apiPort}`,
       '/webhooks': `http://127.0.0.1:${apiPort}`,
+      '/robots.txt': `http://127.0.0.1:${apiPort}`,
+      '/sitemap.xml': `http://127.0.0.1:${apiPort}`,
     },
   },
 });

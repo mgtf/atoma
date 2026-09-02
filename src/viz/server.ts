@@ -140,6 +140,7 @@ import {
   type SentinelHealth,
 } from '../sentinel/resident.js';
 import { peekSentinelWatch } from '../sentinel/lease.js';
+import { injectAppShellSeo, robotsTxt, sitemapXml } from './seo.js';
 // The MCP run lease, read for CONTEXT only (which pid holds the run slot) and
 // never as a detector. `src/sentinel/watch.ts` already reaches for it, so this
 // adds a name, not a dependency.
@@ -1022,6 +1023,7 @@ function loginPage(message?: string, invitationToken?: string): string {
   return `<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><title>${escapeHtml(AUTH_COPY.pageTitle)}</title>
+<meta name="robots" content="noindex, nofollow">
 <style>
 body{font-family:ui-monospace,monospace;background:#0b0f14;color:#d8e2ec;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
 .card{background:#11161d;border:1px solid #223041;border-radius:12px;padding:32px 40px;max-width:420px}
@@ -3151,7 +3153,10 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       send(res, 500, 'viz client missing at ' + UI_HTML_PATH, 'text/plain; charset=utf-8');
       return;
     }
-    const html = readFileSync(UI_HTML_PATH);
+    const html = injectAppShellSeo(
+      readFileSync(UI_HTML_PATH, 'utf8'),
+      AUTH_RUNTIME?.publicOrigin ?? null
+    );
     // `no-cache` permits the service worker's offline copy while requiring
     // normal HTTP caches to revalidate. With the gate on, the login-capable
     // shell also pins that it cannot be framed.
@@ -3166,6 +3171,34 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       return;
     }
     send(res, 200, html, 'text/html; charset=utf-8', 'no-cache');
+    return;
+  }
+
+  if (pathname === '/robots.txt') {
+    if (!methodAllowed(req, res, 'GET')) return;
+    send(
+      res,
+      200,
+      robotsTxt(AUTH_RUNTIME?.publicOrigin ?? null),
+      'text/plain; charset=utf-8',
+      'public, max-age=3600'
+    );
+    return;
+  }
+
+  if (pathname === '/sitemap.xml') {
+    if (!methodAllowed(req, res, 'GET')) return;
+    if (!AUTH_RUNTIME) {
+      send(res, 404, 'not found', 'text/plain; charset=utf-8');
+      return;
+    }
+    send(
+      res,
+      200,
+      sitemapXml(AUTH_RUNTIME.publicOrigin),
+      'application/xml; charset=utf-8',
+      'public, max-age=3600'
+    );
     return;
   }
 

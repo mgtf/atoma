@@ -204,6 +204,8 @@ export function DomBridge({
         role="application"
         aria-label="Atoma"
       >
+        <h1>Atoma</h1>
+        <p>{t('welcome.tagline')}</p>
         <span data-release-version={releaseVersion}>
           {t('welcome.version', { version: releaseVersion })}
         </span>

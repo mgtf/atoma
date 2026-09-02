@@ -200,6 +200,7 @@ try {
       '/icons/atoma-192.png',
       '/icons/atoma-512.png',
       '/icons/atoma-maskable-512.png',
+      '/og-card.png',
       '/sw.js',
     ]) {
       const staticResponse = await fetch(`http://127.0.0.1:${port}${path}`);

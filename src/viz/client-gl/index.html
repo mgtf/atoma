@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <!-- Pre-JS fallback only; `applyDocumentLocale` replaces it from the
        catalog once the locale is known (2026-08-27, 3.13). -->
-  <title>Atoma — run visualizer</title>
+  <title>Atoma — Inspectable AI Agent Orchestration</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#070b13" />
   <meta name="application-name" content="Atoma" />
@@ -15,9 +15,24 @@
   <link rel="icon" href="/favicon.ico" sizes="32x32" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <link rel="manifest" href="/manifest.webmanifest" />
+  <!-- Filled at request time from the deployment's validated public origin. -->
+  <!-- ATOMA_DEPLOYMENT_SEO -->
+  <style>
+    .atoma-static-landing { box-sizing: border-box; display: grid; min-height: 100vh; place-content: center; gap: 18px; padding: 32px; background: #070b13; color: #e6edf7; text-align: center; font: 16px/1.55 ui-sans-serif, system-ui, sans-serif; }
+    .atoma-static-landing h1 { margin: 0; color: #f8fbff; font-size: clamp(42px, 9vw, 76px); letter-spacing: -.04em; }
+    .atoma-static-landing p { max-width: 700px; margin: 0 auto; color: #a9b5ca; }
+    .atoma-static-landing a { width: fit-content; margin: 8px auto 0; padding: 11px 20px; border: 1px solid #6ea8ff; border-radius: 8px; color: #e6edf7; text-decoration: none; }
+  </style>
 </head>
 <body>
-  <div id="root"></div>
+  <div id="root">
+    <main class="atoma-static-landing">
+      <h1>Atoma</h1>
+      <p>An agent platform that pays the frontier model once per task, not once per step.</p>
+      <p>Specialized AI agents plan, execute, and verify cost-aware software delivery with an inspectable record of every run.</p>
+      <a href="/auth/login">Sign in to Atoma</a>
+    </main>
+  </div>
   <script type="module" src="/main.tsx"></script>
 </body>
 </html>

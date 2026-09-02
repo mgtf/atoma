@@ -1405,6 +1405,17 @@ describe('viz auth gate (process level)', () => {
     const shell = await root.text();
     expect(shell).not.toContain(AUTH_COPY.pageTitle);
     expect(shell).toContain('<script');
+    expect(shell).toContain('<title>Atoma — Inspectable AI Agent Orchestration</title>');
+    expect(shell).toContain(`rel="canonical" href="${base}/"`);
+    expect(shell).toContain(`property="og:image" content="${base}/og-card.png"`);
+    expect(shell).toContain('type="application/ld+json"');
+    expect(shell).toContain('name="robots" content="index, follow, max-image-preview:large"');
+    const robots = await fetch(`${base}/robots.txt`);
+    expect(robots.status).toBe(200);
+    expect(await robots.text()).toContain(`Sitemap: ${base}/sitemap.xml`);
+    const sitemap = await fetch(`${base}/sitemap.xml`);
+    expect(sitemap.headers.get('content-type')).toContain('application/xml');
+    expect(await sitemap.text()).toContain(`<loc>${base}/</loc>`);
     // The capability probe tells the shell which providers to offer, without
     // a session and without a 401 that would loop it back here.
     const anonWhoami = await fetch(`${base}/auth/whoami`);
@@ -1419,6 +1430,7 @@ describe('viz auth gate (process level)', () => {
     expect(fallback.status).toBe(200);
     const fallbackPage = await fallback.text();
     expect(fallbackPage).toContain(`<title>${AUTH_COPY.pageTitle}</title>`);
+    expect(fallbackPage).toContain('name="robots" content="noindex, nofollow"');
     expect(fallbackPage).toContain(`invite=${invitation}`);
 
     const poisoned = await fetch(`${base}/auth/login?provider=github`, {
