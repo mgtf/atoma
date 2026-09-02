@@ -992,5 +992,6 @@
   "preview.expires": "Esta vista previa se detiene automáticamente cuando dejas de verla.",
   "preview.error.quota": "Hay demasiadas vistas previas en ejecución en este momento. Inténtalo de nuevo en unos instantes.",
   "preview.error.unavailable": "Este run no tiene nada que previsualizar.",
-  "preview.error.generic": "No se pudo abrir la vista previa."
+  "preview.error.generic": "No se pudo abrir la vista previa.",
+  "preview.stalled": "Aún no se ha cargado nada. La aplicación está en ejecución, así que normalmente se debe al dominio de vista previa: comprueba que se resuelva y que su certificado sea de confianza."
 }

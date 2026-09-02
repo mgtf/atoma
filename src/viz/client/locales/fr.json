@@ -992,5 +992,6 @@
   "preview.expires": "Cet aperçu s’arrête automatiquement dès que tu ne le regardes plus.",
   "preview.error.quota": "Trop d’aperçus sont en cours d’exécution. Réessaie dans un instant.",
   "preview.error.unavailable": "Ce run n’a rien à prévisualiser.",
-  "preview.error.generic": "L’aperçu n’a pas pu être ouvert."
+  "preview.error.generic": "L’aperçu n’a pas pu être ouvert.",
+  "preview.stalled": "Rien n’a encore été chargé. L’app fonctionne — il s’agit donc généralement du domaine d’aperçu : vérifie qu’il se résout et que son certificat est approuvé."
 }

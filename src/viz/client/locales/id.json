@@ -992,5 +992,6 @@
   "preview.expires": "Pratinjau ini berhenti secara otomatis setelah Anda berhenti melihatnya.",
   "preview.error.quota": "Terlalu banyak pratinjau yang sedang berjalan. Coba lagi sebentar lagi.",
   "preview.error.unavailable": "Tidak ada yang dapat dipratinjau dalam run ini.",
-  "preview.error.generic": "Pratinjau tidak dapat dibuka."
+  "preview.error.generic": "Pratinjau tidak dapat dibuka.",
+  "preview.stalled": "Belum ada yang dimuat. Aplikasi sedang berjalan — jadi biasanya masalahnya ada pada domain pratinjau: pastikan domain dapat diakses dan sertifikatnya dipercaya."
 }
