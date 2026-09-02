@@ -31,6 +31,17 @@ Neighbours:
   reach host services through the bridge address. Fail closed on older engines.
 - The worker receives an allowlisted environment, not a spread parent env.
   Credentials and control-plane store paths never cross the boundary.
+- THE HOST CREATES THE MOUNT SOURCE before the engine is asked for it. A
+  bind-mount source that does not exist is created by the DAEMON, as root; the
+  worker then runs as the host user and finds `/workspace` unwritable, and the
+  L1 agent — told nothing — improvises in `/tmp`, so the deliverable never
+  lands where delivery, publication and the preview look for it. Measured on
+  the first real containerised project run (2026-09-02). The local sandbox
+  creates its own root; in container mode that sandbox lives INSIDE the worker
+  and cannot create the host directory it is mounted from, and the operator
+  path never saw this because its workspace persists across runs while a
+  project run gets a fresh path every time. `tests/container-executor-lifecycle`
+  asserts the property at the seam: the source is a directory at spawn time.
 - Network allowlists compare parsed hostnames; lookalikes and IP literals fail.
 - Cleanup is mandatory on success, failure, timeout, signal, and hard-exit paths.
   Network teardown races need bounded retry.
