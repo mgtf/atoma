@@ -12,13 +12,15 @@ import {
 export const DEFAULT_WORKER_IMAGE = 'atoma-worker:latest';
 export type ContainerSpawn = typeof spawn;
 
-/** Match bind-mount ownership on native Linux; Docker Desktop also accepts it. */
-export function hostContainerUser(): string | undefined {
-  const uid = process.getuid?.();
-  const gid = process.getgid?.();
-  if (uid === undefined || gid === undefined || uid === 0) return undefined;
-  return `${uid}:${gid}`;
-}
+/**
+ * Match bind-mount ownership on native Linux; Docker Desktop also accepts it.
+ *
+ * ONE definition, in `src/launcher`, which is the component that owns
+ * container concerns. Re-exported here under the name this subsystem's
+ * callers and tests already use.
+ */
+import { hostContainerUser } from '../launcher/docker.js';
+export { hostContainerUser };
 
 /**
  * `docker run` arguments that carry the isolation. Exported so a test can

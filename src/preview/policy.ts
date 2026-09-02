@@ -1,4 +1,5 @@
 import {
+  chownSync,
   closeSync,
   constants,
   fstatSync,
@@ -219,6 +220,23 @@ export function previewWorkspaceHasFile(workspaceRoot: string, relativePath: str
 
 /* ─────────────────────────── the materialised copy ────────────────────────── */
 
+/**
+ * Who must be able to READ the copy.
+ *
+ * A container that cannot read its own entry file dies with
+ * MODULE_NOT_FOUND — measured against a real daemon. The copy is written by
+ * this process, so the ordinary answer is to run the container as this
+ * process's own uid, exactly as the worker backend already does. Only when
+ * the control plane is ROOT is there no uid to match, and then the copy is
+ * chowned to the fixed non-root identity the container will use — never
+ * widened to world-readable, which would be the other way to make it work and
+ * the wrong one on a shared host.
+ */
+export interface PreviewCopyOwnership {
+  readonly uid: number;
+  readonly gid: number;
+}
+
 export interface PreviewCopyLimits {
   readonly maxBytes: number;
   readonly maxFiles: number;
@@ -303,6 +321,8 @@ export function materializePreviewWorkspace(input: {
   readonly sourceRoot: string;
   readonly destinationRoot: string;
   readonly limits?: Partial<PreviewCopyLimits>;
+  /** Set only where the caller is root; see `PreviewCopyOwnership`. */
+  readonly ownership?: PreviewCopyOwnership;
 }): PreviewCopyResult {
   const limits = { ...DEFAULT_PREVIEW_COPY_LIMITS, ...(input.limits ?? {}) };
   for (const [name, value] of Object.entries(limits)) {
@@ -347,9 +367,9 @@ export function materializePreviewWorkspace(input: {
       );
     }
     const absoluteSource = relative === '' ? source : path.join(source, relative);
-    mkdirSync(relative === '' ? destination : path.join(destination, relative), {
-      recursive: true,
-    });
+    const madeDirectory = relative === '' ? destination : path.join(destination, relative);
+    mkdirSync(madeDirectory, { recursive: true });
+    if (input.ownership) chownSync(madeDirectory, input.ownership.uid, input.ownership.gid);
     for (const dirent of readdirSync(absoluteSource, { withFileTypes: true })) {
       const childRelative = relative === '' ? dirent.name : `${relative}/${dirent.name}`;
       try {
@@ -392,10 +412,9 @@ export function materializePreviewWorkspace(input: {
       // Count what was ACTUALLY copied, not what `lstat` predicted. A file
       // that grew between the two would otherwise let the copy exceed a cap
       // the caller was told it respected.
-      bytes += copyRegularFileNoFollow(
-        childSource,
-        path.join(destination, ...childRelative.split('/'))
-      );
+      const written = path.join(destination, ...childRelative.split('/'));
+      bytes += copyRegularFileNoFollow(childSource, written);
+      if (input.ownership) chownSync(written, input.ownership.uid, input.ownership.gid);
       if (bytes > limits.maxBytes) {
         throw new PreviewPolicyError(
           'limit',

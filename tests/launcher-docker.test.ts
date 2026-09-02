@@ -282,8 +282,10 @@ describe('launcher preview profiles', () => {
     expect(args[args.indexOf('--user') + 1]).not.toBe('0:0');
     expect(args[args.indexOf('--memory') + 1]).toBe(args[args.indexOf('--memory-swap') + 1]);
     expect(args).toContain('--pids-limit');
-    // The start command is EXACTLY `node <entry>` — never a shell.
-    expect(args.slice(-3)).toEqual(['preview-image@sha256:abc', 'node', 'server.js']);
+    // The start command is EXACTLY `node <entry>` — never a shell, and never
+    // whatever the image's own ENTRYPOINT would have wrapped it with.
+    expect(args[args.indexOf('--entrypoint') + 1]).toBe('node');
+    expect(args.slice(-2)).toEqual(['preview-image@sha256:abc', 'server.js']);
     // Exactly one mount, and it is the launcher-owned workspace.
     const mounts = args.filter((a, i) => args[i - 1] === '-v');
     expect(mounts).toEqual([`/var/lib/atoma/previews/${launcherObjectId('prev-1')}:/workspace`]);
@@ -317,7 +319,10 @@ describe('launcher preview profiles', () => {
     // than accepted, which is what makes it impossible to point elsewhere.
     expect(args).toContain(`ATOMA_PREVIEW_UPSTREAM_HOST=${launcher.unitName('preview-app', 'prev-1')}`);
     expect(args).toContain('ATOMA_PREVIEW_UPSTREAM_PORT=8080');
-    expect(args.slice(-3)).toEqual(['worker-image', 'node', '/app/dist/tools/previewIngress.js']);
+    // `--entrypoint node` makes the command exact whatever the image
+    // declares: an image ENTRYPOINT would otherwise wrap it.
+    expect(args[args.indexOf('--entrypoint') + 1]).toBe('node');
+    expect(args.slice(-2)).toEqual(['worker-image', '/app/dist/tools/previewIngress.js']);
     expect(relay.hostPort).toBe(49154);
   });
 

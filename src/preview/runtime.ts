@@ -55,6 +55,11 @@ export interface PreviewRuntimeDeps {
    */
   readonly probe: (hostPort: number) => Promise<boolean>;
   readonly copyMaxBytes?: number;
+  /**
+   * Who must own the copy so the container can read it. Null where the
+   * container already runs as this process's uid, which is the ordinary case.
+   */
+  readonly copyOwnership?: { readonly uid: number; readonly gid: number } | null;
   /** Readiness budget for the application's own marker. Design D8: 60 s. */
   readonly readyTimeoutMs?: number;
   readonly log?: (line: string) => void;
@@ -162,6 +167,7 @@ export async function startPreview(
       sourceRoot: input.sourceWorkspace,
       destinationRoot: destination,
       ...(deps.copyMaxBytes ? { limits: { maxBytes: deps.copyMaxBytes } } : {}),
+      ...(deps.copyOwnership ? { ownership: deps.copyOwnership } : {}),
     });
   } catch (error) {
     if (error instanceof PreviewPolicyError && error.code === 'limit') {

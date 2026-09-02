@@ -81,6 +81,21 @@ const PREVIEW_RELAY_MEMORY = '128m';
 const PREVIEW_RELAY_CPUS = '0.25';
 const PREVIEW_RELAY_PIDS = '32';
 
+/**
+ * The uid:gid a container should run as so it can read a host-owned bind
+ * mount. Undefined when the process is root, where matching is meaningless
+ * and a fixed non-root identity plus a chown is the right answer instead.
+ *
+ * One definition, here, because this is a container concern; `src/tools`
+ * re-exports it under the name its existing callers use.
+ */
+export function hostContainerUser(): string | undefined {
+  const uid = process.getuid?.();
+  const gid = process.getgid?.();
+  if (uid === undefined || gid === undefined || uid === 0) return undefined;
+  return `${uid}:${gid}`;
+}
+
 /** Docker-safe, collision-resistant suffix for every per-owner object name. */
 export function launcherObjectId(ownerId: string): string {
   const readable = ownerId.replace(/[^A-Za-z0-9_.-]/g, '-').slice(0, 30) || 'run';
@@ -361,6 +376,7 @@ export class DockerLauncher implements ContainerLauncher {
   private readonly previewImage: string;
   private readonly previewRuntime: string;
   private readonly previewUser: string;
+  private readonly runningAsRoot: boolean;
   private readonly workspaceRoot: string;
   private readonly runDocker: AsyncDockerRunner;
   private readonly waitUntilReady: ((name: string) => Promise<void>) | undefined;
@@ -371,7 +387,13 @@ export class DockerLauncher implements ContainerLauncher {
     this.image = options.image;
     this.previewImage = options.previewImage ?? options.image;
     this.previewRuntime = options.previewRuntime ?? 'runsc';
-    this.previewUser = options.previewUser ?? '10001:10001';
+    // MATCH THE BIND MOUNT'S OWNER. The copy is written by this process, so
+    // a container running as anyone else cannot read it — measured: the app
+    // died with MODULE_NOT_FOUND on its own entry file. As root there is no
+    // uid to match, so a fixed non-root identity is used and the copy is
+    // chowned to it instead.
+    this.previewUser = options.previewUser ?? hostContainerUser() ?? '10001:10001';
+    this.runningAsRoot = process.getuid?.() === 0;
     this.workspaceRoot = options.workspaceRoot ?? path.join(homedir(), '.atoma', 'previews');
     this.runDocker = options.runDocker ?? defaultDocker;
     this.waitUntilReady = options.waitUntilReady;
@@ -619,6 +641,11 @@ export class DockerLauncher implements ContainerLauncher {
         `/tmp:rw,noexec,nosuid,size=${PREVIEW_TMP_SIZE}`,
         '--tmpfs',
         `/data:rw,noexec,nosuid,size=${PREVIEW_DATA_SIZE}`,
+        // EXACTLY `node <entry>`, whatever the image declares. An image
+        // ENTRYPOINT would otherwise wrap the one start command this profile
+        // is allowed to run, and the design's D7 is that there is no other.
+        '--entrypoint',
+        'node',
         '--log-opt',
         `max-size=${PREVIEW_LOG_MAX_SIZE}`,
         '--log-opt',
@@ -642,7 +669,6 @@ export class DockerLauncher implements ContainerLauncher {
         '-w',
         '/workspace',
         this.previewImage,
-        'node',
         spec.entry,
       ]);
       return { kind: spec.kind, ownerId: spec.ownerId, name };
@@ -682,8 +708,9 @@ export class DockerLauncher implements ContainerLauncher {
       `ATOMA_PREVIEW_UPSTREAM_HOST=${this.unitName('preview-app', spec.ownerId)}`,
       '-e',
       `ATOMA_PREVIEW_UPSTREAM_PORT=${PREVIEW_APP_PORT}`,
-      this.image,
+      '--entrypoint',
       'node',
+      this.image,
       '/app/dist/tools/previewIngress.js',
     ]);
     for (const extra of extraNetworks) {
@@ -709,6 +736,14 @@ export class DockerLauncher implements ContainerLauncher {
 
   private workspacePath(ownerId: LauncherOwnerId): string {
     return path.join(this.workspaceRoot, launcherObjectId(ownerId));
+  }
+
+  /** The numeric identity a preview container runs as, for a root-side chown. */
+  previewOwnership(): { readonly uid: number; readonly gid: number } | null {
+    if (!this.runningAsRoot) return null;
+    const [uid = '', gid = ''] = this.previewUser.split(':');
+    const parsed = { uid: Number(uid), gid: Number(gid) };
+    return Number.isInteger(parsed.uid) && Number.isInteger(parsed.gid) ? parsed : null;
   }
 
   async createWorkspace(ownerId: LauncherOwnerId): Promise<LauncherWorkspaceHandle> {
