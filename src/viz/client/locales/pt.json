@@ -992,5 +992,6 @@
   "preview.expires": "Esta pré-visualização para automaticamente quando deixar de a ver.",
   "preview.error.quota": "Há demasiadas pré-visualizações em execução neste momento. Tente novamente dentro de instantes.",
   "preview.error.unavailable": "Este run não tem nada para pré-visualizar.",
-  "preview.error.generic": "Não foi possível abrir a pré-visualização."
+  "preview.error.generic": "Não foi possível abrir a pré-visualização.",
+  "preview.stalled": "Ainda não foi carregado nada. A aplicação está em execução — normalmente, isto deve-se ao domínio da pré-visualização: verifique se o domínio é resolvido e se o respetivo certificado é de confiança."
 }

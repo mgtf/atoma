@@ -992,5 +992,6 @@
   "preview.expires": "停止查看后，此预览会自动停止。",
   "preview.error.quota": "当前运行的预览过多，请稍后重试。",
   "preview.error.unavailable": "此 run 没有可预览的内容。",
-  "preview.error.generic": "无法打开预览。"
+  "preview.error.generic": "无法打开预览。",
+  "preview.stalled": "尚未加载任何内容。应用正在运行，因此这通常是预览域名的问题：请检查该域名能否正常解析，以及其证书是否受 trust。"
 }

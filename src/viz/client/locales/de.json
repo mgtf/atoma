@@ -992,5 +992,6 @@
   "preview.expires": "Diese Vorschau wird automatisch beendet, sobald Sie sie nicht mehr ansehen.",
   "preview.error.quota": "Derzeit werden zu viele Vorschauen ausgeführt. Versuchen Sie es gleich noch einmal.",
   "preview.error.unavailable": "Für diesen run gibt es keine Vorschau.",
-  "preview.error.generic": "Die Vorschau konnte nicht geöffnet werden."
+  "preview.error.generic": "Die Vorschau konnte nicht geöffnet werden.",
+  "preview.stalled": "Noch wurde nichts geladen. Die App läuft – meist liegt es daher an der Vorschau-Domain: Prüfen Sie, ob sie aufgelöst wird und ihr Zertifikat vertrauenswürdig ist."
 }
