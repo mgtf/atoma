@@ -41,7 +41,7 @@ rather than an addition to a backend.
 
 The kind vocabularies are CLOSED and hold exactly what a backend implements. A
 member with no implementation is a promise the type system makes and the
-runtime breaks; the preview profiles join when the preview runtime lands.
+runtime breaks.
 
 ## It must stay swappable
 
@@ -148,6 +148,25 @@ what a member is still connected to.
 A mount string is a wire value for the engine, and the engine speaks POSIX, so
 a host path is converted rather than passed through — a developer host with
 backslash separators would otherwise hand Docker one unreadable component.
+
+Three of these were MEASURED against a real container rather than reasoned
+about, and each was wrong before it was measured:
+
+- **The relay needs a PUBLISHABLE leg.** Docker publishes no port at all for a
+  container whose only network is `--internal` — `docker port` answers "No
+  public port published" — so a relay attached to the isolate's network alone
+  listens where nothing can reach it. It is created on the publishable network
+  and the internal one is connected after, which is also why the design says
+  it is the one component on both.
+- **The container must be able to READ the mount.** The copy is written by the
+  control-plane process, so a container running as anyone else dies with
+  MODULE_NOT_FOUND on its own entry file. `hostContainerUser()` — the helper
+  the worker backend already used for exactly this — is the default; as root
+  there is no uid to match, so the copy is chowned to the fixed non-root
+  identity instead of being widened to world-readable.
+- **The command must not be the image's.** `--entrypoint node` is passed
+  explicitly, because an image ENTRYPOINT would otherwise wrap the one start
+  command the profile is allowed to run.
 
 ## Workspaces: the launcher issues, the caller fills
 

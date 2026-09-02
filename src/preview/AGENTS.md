@@ -18,8 +18,11 @@ Design of record:
 [`docs/result-preview-design-2026-08-28.md`](../../docs/result-preview-design-2026-08-28.md),
 under the deployment shape fixed in
 [`docs/deployment-docker-launcher-2026-08-28.md`](../../docs/deployment-docker-launcher-2026-08-28.md).
-What is built so far is the classification, policy and state half; the
-isolation runtime, the gateway and the client surface are not implemented.
+Built: classification, byte policy, instance state, the container runtime, the
+claim and origin model, the gateway, and the manager that orders them. NOT
+built: the HTTP routes and the GPU client surface, so nothing here is reachable
+from a browser yet. The Node path's isolation is proved only where a real gVisor
+runtime exists (`tests/preview-isolation.test.ts`, and the manual CI job).
 
 ## What this is, and what it is not
 
@@ -189,6 +192,10 @@ exists, create, and tear down in reverse.
   the browser summary share, so a member reads one word rather than an engine's
   prose. `copy-limit` is distinct from `internal` on purpose: it is the one
   failure a member can act on.
+- Teardown ends with a SWEEP BY OWNER, not only by the handles it collected.
+  Measured: a `startUnit` that created a container and then threw on a later
+  step left it running with no handle for teardown to name, and the leak
+  survived the failure it was supposed to clean up after.
 
 ## Configuration is all-or-nothing
 
