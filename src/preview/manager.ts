@@ -477,7 +477,28 @@ export class PreviewManager {
       ownerId,
       {
         workspace: { ownerId, id: ownerId },
-        network: { family: 'preview', kind: 'internal', ownerId, name: this.deps.launcher.networkName({ family: 'preview', kind: 'internal', ownerId }) },
+        networks: [
+          {
+            family: 'preview',
+            kind: 'internal',
+            ownerId,
+            name: this.deps.launcher.networkName({
+              family: 'preview',
+              kind: 'internal',
+              ownerId,
+            }),
+          },
+          {
+            family: 'preview',
+            kind: 'uplink',
+            ownerId,
+            name: this.deps.launcher.networkName({
+              family: 'preview',
+              kind: 'uplink',
+              ownerId,
+            }),
+          },
+        ],
         app: { kind: 'preview-app', ownerId, name: this.deps.launcher.unitName('preview-app', ownerId) },
         relay: { kind: 'preview-ingress', ownerId, name: this.deps.launcher.unitName('preview-ingress', ownerId) },
       }

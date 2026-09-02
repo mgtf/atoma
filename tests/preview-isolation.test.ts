@@ -162,12 +162,20 @@ describeRunsc('preview isolation, against a real gVisor sandbox', () => {
       const relayName = launcher.unitName('preview-ingress', ownerId);
       created.app = { kind: 'preview-app', ownerId, name: appName };
       created.relay = { kind: 'preview-ingress', ownerId, name: relayName };
-      created.network = {
-        family: 'preview',
-        kind: 'internal',
-        ownerId,
-        name: launcher.networkName({ family: 'preview', kind: 'internal', ownerId }),
-      };
+      created.networks = [
+        {
+          family: 'preview',
+          kind: 'internal',
+          ownerId,
+          name: launcher.networkName({ family: 'preview', kind: 'internal', ownerId }),
+        },
+        {
+          family: 'preview',
+          kind: 'uplink',
+          ownerId,
+          name: launcher.networkName({ family: 'preview', kind: 'uplink', ownerId }),
+        },
+      ];
       created.workspace = { ownerId, id: launcherObjectId(ownerId) };
 
       // THE RUNTIME, READ FROM THE HOST. Never a claim from inside the

@@ -76,7 +76,8 @@ export interface StartPreviewInput {
 
 interface Created {
   workspace?: LauncherWorkspaceHandle;
-  network?: LauncherNetworkHandle;
+  /** The internal network, and the publishable one the relay is reached on. */
+  networks?: LauncherNetworkHandle[];
   app?: LauncherUnitHandle;
   relay?: LauncherUnitHandle;
 }
@@ -114,12 +115,17 @@ export async function teardownPreview(
   if (created.app) {
     await attempt('application', () => deps.launcher.stopUnit(created.app!, 'caller-requested'));
   }
-  if (created.network) {
-    await attempt('network', () => deps.launcher.removeNetwork(created.network!));
+  for (const network of created.networks ?? []) {
+    await attempt('network', () => deps.launcher.removeNetwork(network));
   }
   if (created.workspace) {
     await attempt('workspace copy', () => deps.launcher.removeWorkspace(created.workspace!));
   }
+  // A FINAL SWEEP BY OWNER, because handles only cover what we managed to
+  // record. MEASURED: `startUnit` that created a container and then threw on a
+  // later step left it running with no handle for teardown to remove. Purging
+  // by owner is exactly the operation that does not depend on our bookkeeping.
+  await attempt('remaining objects', () => deps.launcher.purgeOwner('preview', ownerId));
   deps.launcher.disarmHardExitCleanup('preview', ownerId);
 }
 
@@ -176,12 +182,24 @@ export async function startPreview(
     return fail('internal', 'the delivered workspace could not be copied');
   }
 
+  let internal: LauncherNetworkHandle;
+  let publishable: LauncherNetworkHandle;
   try {
-    created.network = await launcher.createNetwork({
+    // The isolate's network carries no route out and no host gateway; the
+    // second one exists ONLY so the relay can be published on loopback, and
+    // nothing but the relay ever joins it.
+    internal = await launcher.createNetwork({
       family: 'preview',
       kind: 'internal',
       ownerId: input.ownerId,
     });
+    created.networks = [internal];
+    publishable = await launcher.createNetwork({
+      family: 'preview',
+      kind: 'uplink',
+      ownerId: input.ownerId,
+    });
+    created.networks = [internal, publishable];
   } catch {
     return fail('runtime-unavailable', 'the preview network could not be created');
   }
@@ -194,7 +212,7 @@ export async function startPreview(
         entry: input.entry,
         workspace: { ownerId: created.workspace.ownerId, id: created.workspace.id },
       },
-      [created.network]
+      [internal]
     );
   } catch {
     // The engine refusing to start this unit is most often a missing image or
@@ -213,7 +231,10 @@ export async function startPreview(
   try {
     created.relay = await launcher.startUnit(
       { kind: 'preview-ingress', ownerId: input.ownerId },
-      [created.network]
+      // PUBLISHABLE FIRST: a container whose only network is `--internal` gets
+      // no published port, so the leg the gateway reaches it on has to be the
+      // one it is created with. The internal leg is connected after.
+      [publishable, internal]
     );
     await launcher.awaitUnitReady(created.relay);
   } catch {

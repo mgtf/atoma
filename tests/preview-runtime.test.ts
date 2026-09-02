@@ -172,6 +172,10 @@ describe('preview start order', () => {
       // teardown can make creation itself fail while old objects are durable.
       'arm:preview:prev-1',
       'createWorkspace',
+      // TWO networks: the isolate's, and the publishable one the relay is
+      // reached on. A container whose only network is `--internal` gets no
+      // published port at all.
+      'createNetwork',
       'createNetwork',
       'start:preview-app',
       'ready:preview-app',
@@ -298,12 +302,14 @@ describe('preview teardown', () => {
     const launcher = new FakeLauncher();
     const created = {
       workspace: { ownerId: 'prev-1', id: 'prev-1', hostPath: join(workspaces, 'prev-1') },
-      network: {
-        family: 'preview' as const,
-        kind: 'internal' as const,
-        ownerId: 'prev-1',
-        name: 'net',
-      },
+      networks: [
+        {
+          family: 'preview' as const,
+          kind: 'internal' as const,
+          ownerId: 'prev-1',
+          name: 'net',
+        },
+      ],
       app: { kind: 'preview-app' as const, ownerId: 'prev-1', name: 'app' },
       relay: { kind: 'preview-ingress' as const, ownerId: 'prev-1', name: 'relay' },
     };
@@ -317,6 +323,10 @@ describe('preview teardown', () => {
       'stop:preview-app',
       'removeNetwork',
       'removeWorkspace',
+      // A final sweep by OWNER, because handles only cover what was recorded:
+      // a `startUnit` that created a container and then threw on a later step
+      // leaves one behind that no handle names.
+      'purge:preview:prev-1',
       'disarm:preview:prev-1',
     ]);
   });
@@ -329,12 +339,9 @@ describe('preview teardown', () => {
 
     await expect(
       teardownPreview({ launcher }, 'prev-1', {
-        network: {
-          family: 'preview',
-          kind: 'internal',
-          ownerId: 'prev-1',
-          name: 'net',
-        },
+        networks: [
+          { family: 'preview' as const, kind: 'internal' as const, ownerId: 'prev-1', name: 'net' },
+        ],
         app: { kind: 'preview-app', ownerId: 'prev-1', name: 'app' },
         relay: { kind: 'preview-ingress', ownerId: 'prev-1', name: 'relay' },
       })
@@ -346,7 +353,7 @@ describe('preview teardown', () => {
   it('is safe on a partial creation', async () => {
     const launcher = new FakeLauncher();
     await expect(teardownPreview({ launcher }, 'prev-1', {})).resolves.toBeUndefined();
-    expect(launcher.calls).toEqual(['disarm:preview:prev-1']);
+    expect(launcher.calls).toEqual(['purge:preview:prev-1', 'disarm:preview:prev-1']);
   });
 });
 

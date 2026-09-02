@@ -413,7 +413,13 @@ export class DockerLauncher implements ContainerLauncher {
 
   networkName(spec: LauncherNetworkSpec): string {
     const id = launcherObjectId(spec.ownerId);
-    if (spec.family === 'preview') return `atoma-preview-net-${id}`;
+    if (spec.family === 'preview') {
+      // TWO networks, and the relay is the only thing on both. MEASURED: a
+      // container attached ONLY to an `--internal` network gets no published
+      // port at all — `docker port` answers "No public port published" — so a
+      // relay without a publishable leg listens where nothing can reach it.
+      return spec.kind === 'internal' ? `atoma-preview-net-${id}` : `atoma-preview-pub-${id}`;
+    }
     return spec.kind === 'internal' ? `atoma-egress-${id}` : `atoma-uplink-${id}`;
   }
 
@@ -441,7 +447,10 @@ export class DockerLauncher implements ContainerLauncher {
           this.unitName('preview-ingress', ownerId),
           this.unitName('preview-app', ownerId),
         ],
-        networks: [this.networkName({ family, kind: 'internal', ownerId })],
+        networks: [
+          this.networkName({ family, kind: 'internal', ownerId }),
+          this.networkName({ family, kind: 'uplink', ownerId }),
+        ],
       };
     }
     return {
