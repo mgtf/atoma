@@ -11,6 +11,7 @@
  * billable request.
  */
 import { execFile } from 'node:child_process';
+import { diagnosePreview } from './doctorPreview.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -81,6 +82,8 @@ export interface DoctorDependencies {
 export interface ParsedDoctorOptions {
   readonly help: boolean;
   readonly mode: ToolBackendMode;
+  /** Add the preview preconditions, including a REAL container probe. */
+  readonly preview: boolean;
   readonly error?: string;
 }
 
@@ -93,10 +96,12 @@ usage:
   npm run doctor
   npm run doctor -- --container
   npm run doctor -- --egress
+  npm run doctor -- --preview
 
 flags:
   --container / --no-container   require or disable the Docker worker path
   --egress / --no-egress         select proxied egress (implies container)
+  --preview                      add the result-preview preconditions
   --help                         show this help
 
 The same ATOMA_LLM, ATOMA_MODEL_L1/L2/L3, ATOMA_CONTAINER and ATOMA_EGRESS
@@ -113,6 +118,7 @@ export function parseDoctorOptions(
     '--no-container',
     '--egress',
     '--no-egress',
+    '--preview',
     '--help',
     '-h',
   ]);
@@ -120,6 +126,7 @@ export function parseDoctorOptions(
   return {
     help: argv.includes('--help') || argv.includes('-h'),
     mode: resolveToolBackendMode(argv, env),
+    preview: argv.includes('--preview'),
     ...(unknown ? { error: `unknown doctor argument "${unknown}"` } : {}),
   };
 }
@@ -577,6 +584,12 @@ export async function diagnoseDoctor(args: {
   readonly mode: ToolBackendMode;
   readonly env?: NodeJS.ProcessEnv;
   readonly dependencies?: Partial<DoctorDependencies>;
+  /**
+   * OPT-IN, because it starts a real container. Every other check here is
+   * observation; this one allocates, so an operator asks for it rather than
+   * paying for it on every `npm run doctor`.
+   */
+  readonly preview?: boolean;
 }): Promise<DoctorReport> {
   const env = args.env ?? process.env;
   const deps = { ...defaultDependencies(), ...args.dependencies };
@@ -739,6 +752,9 @@ export async function diagnoseDoctor(args: {
   // worker image, which ships its own python3, so the host's is irrelevant.
   if (!args.mode.container) checks.push(await checkPython(deps));
   checks.push(...(await checkDocker(args.mode.container, deps, args.mode.egress)));
+  // LAST, and only when asked: it starts a real container, so it is the one
+  // check here that allocates rather than observes.
+  if (args.preview) checks.push(...(await diagnosePreview(env, deps)));
   if (args.mode.egress) {
     checks.push({
       id: 'egress',
@@ -789,7 +805,7 @@ async function main(): Promise<void> {
     process.exitCode = 2;
     return;
   }
-  const report = await diagnoseDoctor({ mode: parsed.mode });
+  const report = await diagnoseDoctor({ mode: parsed.mode, preview: parsed.preview });
   console.log(renderDoctorReport(report));
   process.exitCode = report.ready ? 0 : 1;
 }
