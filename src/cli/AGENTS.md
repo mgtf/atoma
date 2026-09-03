@@ -61,6 +61,16 @@ belong to [`src/preview`](../preview/AGENTS.md). `npm run preview:demo` is the
 laptop counterpart — the harness that makes the surface clickable where doctor
 can only report that it cannot be.
 
+## Deployment preflight
+
+- `deploy:preflight` is quota-free and read-only unless `--hold` is explicit.
+  Hold mode takes the machine-global run lease without stale recovery, checks
+  queued/running project rows and live preview rows, then keeps the lease until
+  its supervising deploy process releases it. The hold process also removes
+  the admission marker when its parent disappears, so an untrappable host
+  activator death cannot leave every write on 503. Existing work always blocks
+  an activation; deployment never reaps it.
+
 ## Burn-in and friction
 
 - Burn-in CSVs belong to exactly one writer/schema. Refuse foreign headers

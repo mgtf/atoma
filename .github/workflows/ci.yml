@@ -32,6 +32,30 @@ jobs:
       - run: npm ci
       - run: npm run release:check
 
+      - name: Package the exact main revision for deployment
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="atoma-${GITHUB_SHA}"
+          mkdir -p "deployment/${root}"
+          cp -R dist docker scripts deploy "deployment/${root}/"
+          cp package.json package-lock.json .env.example "deployment/${root}/"
+          printf '%s\n' "${GITHUB_SHA}" > "deployment/${root}/REVISION"
+          tar -C deployment -czf "deployment/${root}.tar.gz" "${root}"
+          (cd deployment && sha256sum "${root}.tar.gz" > "${root}.tar.gz.sha256")
+
+      - name: Upload immutable deployment artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: atoma-deploy-${{ github.sha }}
+          path: |
+            deployment/atoma-${{ github.sha }}.tar.gz
+            deployment/atoma-${{ github.sha }}.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
+
   i18n:
     name: Translate blank locale values
     # The auto-translation half of the locale pipeline (the manual half is the

@@ -1,0 +1,20 @@
+[Unit]
+Description=Atoma control plane and visualizer
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=atoma
+Group=atoma
+WorkingDirectory=/opt/atoma/current
+EnvironmentFile=/etc/atoma/atoma.env
+ExecStart=/usr/bin/node /opt/atoma/current/dist/viz/server.js --host 127.0.0.1 --port 4111
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

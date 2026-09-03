@@ -30,6 +30,10 @@ is the wrong machine to measure frame time on.
 `npm run viz`, `doctor:dev` and `auth:dev` fill unset keys from checkout `.env`
 so a local GitHub-gated visualizer does not need a shell export. Compiled
 `viz:serve` does not load `.env`: production injects the process environment.
+`ATOMA_DEPLOY_LOCK_PATH` is a host-owned drain marker: while it exists the
+server keeps reads available but refuses new mutating requests and stateful
+OAuth GETs with 503, so an automatic activation cannot race newly admitted
+runtime or identity state.
 
 `viz:shot` captures a PNG of the rendered client (logged-in via stubs or
 anonymous) for visual review after UI edits — [docs/viz-screenshot.md](../../docs/viz-screenshot.md).

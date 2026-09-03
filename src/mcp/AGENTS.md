@@ -24,6 +24,9 @@ Neighbours:
   or workspace paths.
 - Runs are serialized by both in-memory state and the SQLite lease. A second
   start is refused; stale lease recovery must validate PIDs/PGIDs safely.
+- Deployment takes that same slot through `acquireRunLeaseWithoutRecovery`.
+  Unlike run admission it NEVER recovers an existing row: activation waits
+  rather than deciding that an in-flight owner is disposable.
 - Cancellation is a state, not successful completion. Signal the whole validated
   child group, bound termination, and retain trace/status evidence.
 - `finishRun` must free the in-memory slot in `finally` even if lease deletion

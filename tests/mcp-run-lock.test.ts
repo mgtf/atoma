@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import Database from 'better-sqlite3';
 import {
   acquireRunLease,
+  acquireRunLeaseWithoutRecovery,
   peekRunLease,
   processFingerprint,
   RunLockBusyError,
@@ -135,6 +136,25 @@ describe('MCP cross-process run lease', () => {
     expect(owner.run_id).toBe('new-run');
     db.close();
     recovered.release();
+  });
+
+  it('lets a deployment claim only an empty slot and never recover a stale owner', async () => {
+    seedStale('unfinished-run');
+
+    expect(() => acquireRunLeaseWithoutRecovery('deployment:revision', lockPath)).toThrow(
+      /will not recover or interrupt/
+    );
+    expect(peekRunLease(lockPath)?.runId).toBe('unfinished-run');
+
+    const db = inspect();
+    db.prepare('DELETE FROM mcp_run_lease').run();
+    db.close();
+    const deployment = acquireRunLeaseWithoutRecovery('deployment:revision', lockPath);
+    try {
+      await expect(acquireRunLease('new-run', lockPath)).rejects.toThrow(/deployment:revision/);
+    } finally {
+      deployment.release();
+    }
   });
 
   it('migrates an existing lease store before recording process fingerprints', async () => {

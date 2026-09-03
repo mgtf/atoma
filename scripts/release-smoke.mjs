@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer as createNetServer } from 'node:net';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -17,6 +18,7 @@ if (!existsSync(entry)) {
 if (!existsSync(vizEntry) || !existsSync(vizIndex)) {
   throw new Error('compiled viz server/client missing (run npm run build first)');
 }
+const smokeRoot = mkdtempSync(join(tmpdir(), 'atoma-release-smoke-'));
 
 const freePort = async () =>
   await new Promise((resolvePort, rejectPort) => {
@@ -148,7 +150,7 @@ try {
   // EXPLICIT --dir and --db. The compiled server defaults `--dir` from
   // ATOMA_RUNS_DIR and now hosts a resident watch, so an inherited variable
   // would aim this smoke at whatever corpus the machine happens to have.
-  const vizRuns = join(root, 'smoke-runs');
+  const vizRuns = join(smokeRoot, 'runs');
   const viz = spawn(
     process.execPath,
     [
@@ -156,7 +158,7 @@ try {
       '--host', '127.0.0.1',
       '--port', String(port),
       '--dir', vizRuns,
-      '--db', join(root, 'smoke-store.db'),
+      '--db', join(smokeRoot, 'store.db'),
     ],
     { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] }
   );
@@ -219,11 +221,18 @@ try {
       vizExited,
       new Promise((resolveWait) => setTimeout(resolveWait, 2_000)),
     ]);
-    if (viz.exitCode === null) viz.kill('SIGKILL');
+    if (viz.exitCode === null) {
+      viz.kill('SIGKILL');
+      await Promise.race([
+        vizExited,
+        new Promise((resolveWait) => setTimeout(resolveWait, 2_000)),
+      ]);
+    }
   }
   process.stdout.write(
     `release smoke ok: ${tools.length} MCP tools, ${prompts.length} prompts with completions, JSON-only stdout, compiled viz UI/API\n`
   );
 } finally {
   if (child.exitCode === null) child.kill('SIGKILL');
+  rmSync(smokeRoot, { recursive: true, force: true });
 }

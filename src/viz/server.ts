@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { basename, extname, relative, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { requestWaitsForDeployment } from './deployment.js';
 import Database from 'better-sqlite3';
 import { SkillRegistry } from '../skills/registry.js';
 import { readBoundedRunFile, sortRunIndex, summarizeTraceFile } from './runIndex.js';
@@ -1750,6 +1751,15 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
     return;
   }
   const pathname = url.pathname;
+
+  // The host creates this marker before taking the run lease. Reads stay up
+  // while a deployment drains, but no new durable write, run or preview may
+  // enter the gap between the preflight and systemd stopping this generation.
+  if (requestWaitsForDeployment(req.method, pathname)) {
+    res.setHeader('retry-after', '30');
+    sendJson(res, 503, { error: 'deployment in progress; retry this request shortly' });
+    return;
+  }
 
   if (pathname === '/webhooks/github') {
     if (!methodAllowed(req, res, 'POST')) return;

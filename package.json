@@ -21,6 +21,7 @@
     "mcp:dev": "tsx src/mcp/stdio.ts",
     "doctor": "node dist/cli/doctor.js",
     "doctor:dev": "tsx src/cli/doctor.ts",
+    "deploy:preflight": "node dist/cli/deploy-preflight.js",
     "auth": "node dist/cli/auth.js",
     "auth:dev": "tsx src/cli/auth.ts",
     "projects": "node dist/cli/projects.js",

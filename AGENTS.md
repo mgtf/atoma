@@ -114,6 +114,7 @@ npm run doctor
 npm run doctor -- --container
 npm run doctor -- --preview
 npm run doctor:dev
+npm run deploy:preflight            # read-only; exits 75 while a run/preview is live
 npm run auth -- list
 npm run auth -- invite --role org:owner --ttl-hours 24
 npm run auth -- grant-admin --principal <id-or-email>

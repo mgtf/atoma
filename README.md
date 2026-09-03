@@ -423,6 +423,11 @@ and proves the container's read-only filesystem and closed network without any
 model call. The complete proxy, DNS, image and environment contract is in
 [`docs/preview-deployment.md`](docs/preview-deployment.md).
 
+Deploying the compiled control plane after a successful GitHub CI run is
+documented in [`docs/automatic-deployment.md`](docs/automatic-deployment.md).
+The workflow is inert until the production environment and the explicit
+repository-level enable switch are configured.
+
 A local release keeps its learned state beside the checkout: `atoma.db`,
 `skills/` and `runs/`. Build artefacts live under `~/.atoma/workspaces/build`;
 the MCP run lease is `~/.atoma/mcp-run-lock.db`. Back up the database and

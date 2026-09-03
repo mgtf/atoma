@@ -352,6 +352,63 @@ export async function acquireRunLease(
 }
 
 /**
+ * Claim the run slot only when it is already empty.
+ *
+ * This is the deployment drain primitive, not run-start recovery. A deploy
+ * must never decide that an existing owner is stale and reap its process
+ * group merely so new code can be activated. Any row -- live, stale or
+ * unverifiable -- is therefore busy. The normal run path above remains the
+ * sole recovery path and retains its fingerprint checks and visible
+ * `recovered` result.
+ */
+export function acquireRunLeaseWithoutRecovery(
+  runId: string,
+  path = mcpRunLockPath()
+): RunLease {
+  const db = openLockDb(path);
+  const owner: RunLockOwner = {
+    token: randomUUID(),
+    runId,
+    ownerPid: process.pid,
+    acquiredAt: new Date().toISOString(),
+  };
+  const ownerFingerprint = processFingerprint(owner.ownerPid);
+  const read = db.prepare('SELECT * FROM mcp_run_lease WHERE singleton = 1');
+  const insert = db.prepare(
+    `INSERT INTO mcp_run_lease
+      (singleton, token, run_id, owner_pid, child_pgid, acquired_at,
+       owner_fingerprint, child_fingerprint)
+     VALUES (1, ?, ?, ?, NULL, ?, ?, NULL)`
+  );
+
+  try {
+    const existing = db.transaction(() => {
+      const held = read.get() as LeaseRow | undefined;
+      if (held) return held;
+      insert.run(
+        owner.token,
+        owner.runId,
+        owner.ownerPid,
+        owner.acquiredAt,
+        ownerFingerprint
+      );
+      return undefined;
+    }).immediate();
+    if (existing) {
+      const held = toOwner(existing);
+      throw new RunLockBusyError(
+        `the run slot is occupied (${held.runId}, pid ${held.ownerPid}, since ${held.acquiredAt}); deployment will not recover or interrupt it`,
+        held
+      );
+    }
+    return makeLease(db, path, owner);
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+}
+
+/**
  * READ-ONLY view of the lease row, for status reporting.
  *
  * WHY IT EXISTS: run records are in-memory only, so after a server restart
