@@ -55,3 +55,9 @@ benchmark/.scratch/
 # output keyed to the interpreter version that produced it, never source.
 __pycache__/
 *.pyc
+
+# Archify render output (`npm run docs:architecture -- --render`). The IR under
+# docs/ir/ is the reviewable source; the HTML is its build product and re-pins a
+# fresh commit SHA on every render, so committing it would churn ~700KB per run.
+/docs/architecture.html
+/docs/ir/.render/
