@@ -61,7 +61,7 @@ describe('viz visual depth contract', () => {
     // The bubble is chrome, not lit surface: the pointer light must not smear
     // the text a reader opened it to read.
     expect(renderer).not.toMatch(/this\.tooltipRoot\.filters\s*=/);
-    expect(renderer).toMatch(/drawAmbientGrid\(\s*this\.ambientRoot/);
+    expect(renderer).not.toMatch(/drawAmbientGrid/);
     expect(renderer).toMatch(/this\.stage\.filters = \[filter\]/);
     expect(renderer).not.toMatch(/this\.ambientRoot\.filters\s*=/);
     expect(renderer).not.toMatch(/this\.markRoot\.filters\s*=/);
@@ -69,6 +69,8 @@ describe('viz visual depth contract', () => {
     expect(renderer).toMatch(/createFarField\(/);
     expect(renderer).toMatch(/FAR_FIELD_LABEL/);
     expect(renderer).toMatch(/ticker\.add\(this\.tickFarField\)/);
+    expect(renderer).toMatch(/ticker\.remove\(this\.tickFarField\)/);
+    expect(renderer).toMatch(/setFarFieldActive\(shouldShowFarField\(\s*snapshot\.state\.entered/);
   });
 
   it('routes every raised surface through the shared cast-shadow painter', () => {

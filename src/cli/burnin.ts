@@ -32,6 +32,7 @@ import {
   referencedProviderNames,
   resolveBaseProviderKind,
 } from '../run/providers.js';
+import { runHostSupported, unsupportedRunHostMessage } from '../run/platform.js';
 import {
   parseRunStatsEpilogue,
   type RunStats,
@@ -558,9 +559,12 @@ export function spawnRun(opts: {
    * test seam: no test should wait three minutes to see the branch fire.
    */
   readonly hardKillMarginMs?: number;
+  /** Run host, for the platform refusal below. A test seam; defaults to this one. */
+  readonly platform?: NodeJS.Platform;
 }): Promise<string> {
   const { goal, timeoutMs, logPath } = opts;
   const hardKillMarginMs = opts.hardKillMarginMs ?? DEFAULT_HARD_KILL_MARGIN_MS;
+  const platform = opts.platform ?? process.platform;
   return new Promise((resolveRun, rejectRun) => {
     // Ahead of the spawn: the write below happens on the settle path, and a
     // throw there is what used to strand the promise.
@@ -568,6 +572,25 @@ export function spawnRun(opts: {
       mkdirSync(dirname(resolve(logPath)), { recursive: true });
     } catch {
       /* the write is guarded too — a log we cannot keep must not lose the run */
+    }
+    // THE RUN HOST CONTRACT, enforced where runs start (see run/platform.ts).
+    // Everything below this line assumes POSIX: `npm` as an executable, a
+    // detached process GROUP, and `process.kill(-pid)`. On a host without
+    // them a run died with a bare `spawn npm ENOENT` several processes deep
+    // — or worse, reported a successful cancellation over orphans that kept
+    // running. Refuse through the SAME shape as any other spawn that never
+    // happened, so every caller (burn-in CSV, project coordinator, MCP run
+    // record) reads outcome 'error' with the reason in the log instead of
+    // learning a new failure mode.
+    if (!runHostSupported(platform)) {
+      const refusal = `\n--- spawn failed --- ${unsupportedRunHostMessage(platform)}\n`;
+      try {
+        writeFileSync(logPath, refusal, 'utf8');
+      } catch {
+        /* an unwritable log must not strand the caller — see the docstring */
+      }
+      resolveRun(refusal);
+      return;
     }
     const child = spawn(
       'npm',

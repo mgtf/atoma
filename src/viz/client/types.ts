@@ -1,3 +1,5 @@
+import type { AccountSubscriptionsResponse } from '../../contracts/accountSubscriptions.js';
+
 export interface RunIndexEntry {
   id: string;
   label: string;
@@ -12,6 +14,7 @@ export interface RunIndexEntry {
   costUsd?: number;
   calls?: number;
   projectId?: string;
+  projectRunId?: string;
   projectName?: string;
   projectSlug?: string;
 }
@@ -230,6 +233,39 @@ export interface VizProject {
   updatedAt: string;
 }
 
+/**
+ * What the browser learns about a run's preview — the server's
+ * `previewSummarySchema`, restated here as a wire shape like every other type
+ * in this file. It carries no host path, container id, image digest, runtime
+ * or token: the server's projection is an ALLOWLIST for exactly that reason,
+ * and mirroring more here would invite a future field to cross by accident.
+ */
+export interface VizPreviewSummary {
+  availability: 'available' | 'unavailable';
+  kind: 'static' | 'node' | null;
+  reason: string | null;
+  state: 'stopped' | 'starting' | 'ready' | 'stopping' | 'failed';
+  generation: number;
+  /** `delivered` describes a finished run; `in-flight` a snapshot of one building. */
+  source: 'delivered' | 'in-flight';
+  /** When that snapshot was taken. Null for a delivered preview. */
+  snapshotAt: string | null;
+  readyAt: string | null;
+  expiresAt: string | null;
+  errorCode: string | null;
+  requestedHosts: string[];
+  allowedHosts: string[];
+  blockedHosts: string[];
+}
+
+/** What an open returns: the summary, and a claim URL only when one is ready. */
+export interface VizPreviewOpen {
+  summary: VizPreviewSummary;
+  /** Carries a one-time claim in its fragment. Never store or log it. */
+  url?: string;
+  retryAfterSeconds?: number;
+}
+
 export interface VizProjectRun {
   projectRunId: string;
   projectId: string;
@@ -290,6 +326,12 @@ export interface VizOrganisation {
   pendingInvitations: number | null;
 }
 
+/** Picker capabilities only; detailed connection state comes from its own endpoint. */
+export interface VizPersonalSubscriptionCapabilities {
+  claude: boolean;
+  codex: boolean;
+}
+
 /** Per-tier model pins plus the labels the account page needs to show. */
 export interface VizAccountModels {
   pins: { l1: string | null; l2: string | null; l3: string | null };
@@ -297,7 +339,7 @@ export interface VizAccountModels {
   defaults: { l1: string; l2: string; l3: string };
   catalog: VizLlmCatalogEntry[];
   /**
-   * The operator's own Claude login, offered per tier. ABSENT MEANS NOT
+   * Legacy singular offer for the operator's Claude login. ABSENT MEANS NOT
    * OFFERED — the inverse of `ollamaAvailable`'s tolerant default, and
    * deliberately so: an unknown endpoint is a dormant choice, an unknown
    * PAYER is somebody's money. `reason` present means offered-but-unusable,
@@ -308,6 +350,18 @@ export interface VizAccountModels {
     family: VizLlmCatalogEntry;
     reason?: 'undeclared' | 'other-organisation';
   };
+  /** All Claude/ChatGPT machine-bound subscriptions offered to this requester. */
+  hostSubscriptions?: Array<{
+    family: VizLlmCatalogEntry;
+    reason?: 'undeclared' | 'other-organisation';
+  }>;
+  /**
+   * Personal provider logins currently usable by this account. Detailed
+   * connection/device-code state lives on `/api/account/subscriptions`; this
+   * compact capability only decides whether a personal family may be picked.
+   * Optional so an older server remains a safe "not connected".
+   */
+  personalSubscriptions?: VizPersonalSubscriptionCapabilities;
   /**
    * Whether the deployment declared an Ollama endpoint (OLLAMA_BASE_URL).
    * Ollama runs on the OPERATOR's infrastructure — orgs pick its models,
@@ -318,6 +372,9 @@ export interface VizAccountModels {
   ollamaAvailable?: boolean;
 }
 
+/** The secret-free self-care projection from `/api/account/subscriptions`. */
+export type VizAccountSubscriptions = AccountSubscriptionsResponse;
+
 /** One provider family the server offers for tier/model selection. */
 export interface VizLlmCatalogEntry {
   id: string;
@@ -326,7 +383,7 @@ export interface VizLlmCatalogEntry {
   credentialEnvVar: string | null;
   /** True when the model list reflects an inventory we cannot enumerate statically. */
   suggestive: boolean;
-  models: Array<{ id: string; label: string }>;
+  models: Array<{ id: string; label: string; tiers?: Array<1 | 2 | 3> }>;
 }
 
 /** One configured org provider key: presence and timestamp, never material. */

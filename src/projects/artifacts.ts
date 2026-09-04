@@ -107,7 +107,16 @@ export function normalizeArtifactPath(raw: string, maxPathChars = DEFAULT_ARTIFA
   return canonical;
 }
 
-function secretLike(segment: string): boolean {
+/**
+ * Filenames that usually hold a credential.
+ *
+ * EXPORTED because the result preview must apply the same list when it
+ * materialises a workspace copy: publication and preview are two ways for
+ * workspace bytes to leave the run that made them, and a file this refuses to
+ * publish must not become readable by serving it instead. One list, two
+ * consumers — never a second copy that drifts.
+ */
+export function secretLike(segment: string): boolean {
   const lower = segment.toLowerCase();
   if (lower === '.env' || (lower.startsWith('.env.') && !lower.endsWith('.example'))) return true;
   if (
@@ -169,17 +178,33 @@ function sameIdentity(a: Stats, b: Stats): boolean {
   );
 }
 
-interface WorkspacePath {
+export interface WorkspacePath {
   readonly root: string;
   readonly realRoot: string;
   readonly canonical: string;
   readonly absolute: string;
 }
 
-function resolveWorkspaceFile(
+/**
+ * Which canonical paths a caller refuses, as a parameter.
+ *
+ * The PATH JAIL below — traversal, every symlink component, the real-path
+ * re-check — is one rule and must never be written twice. What legitimately
+ * differs between callers is the EXCLUSION LIST: publication refuses
+ * `.atoma-*` because a probe manifest is not a deliverable, while the preview
+ * classifier must READ `.atoma-probes.json` to learn what the run built. So
+ * the jail is shared and the exclusion is injected.
+ *
+ * The default is `assertPublishableArtifactPath`, so every existing
+ * publication call site keeps byte-identical behaviour.
+ */
+export type WorkspacePathPolicy = (canonicalPath: string) => void;
+
+export function resolveWorkspaceFile(
   workspaceRoot: string,
   declaredPath: string,
-  limits: ArtifactLimits
+  limits: ArtifactLimits,
+  assertPath: WorkspacePathPolicy = assertPublishableArtifactPath
 ): WorkspacePath {
   const root = path.resolve(workspaceRoot);
   let rootStat: Stats;
@@ -193,7 +218,7 @@ function resolveWorkspaceFile(
   }
   const realRoot = realpathSync(root);
   const canonical = normalizeArtifactPath(declaredPath, limits.maxPathChars);
-  assertPublishableArtifactPath(canonical);
+  assertPath(canonical);
   const absolute = path.resolve(root, ...canonical.split('/'));
   const lexicalRelative = path.relative(root, absolute);
   if (lexicalRelative.startsWith('..') || path.isAbsolute(lexicalRelative)) {
@@ -225,17 +250,28 @@ function resolveWorkspaceFile(
   return { root, realRoot, canonical, absolute };
 }
 
-interface ReadArtifact {
+export interface ReadArtifact {
   readonly file: ArtifactFile;
   readonly bytes: Buffer;
 }
 
-function secureRead(
+/**
+ * Read one workspace file through a stable file descriptor, refusing anything
+ * that changes underneath the read.
+ *
+ * Exported for the result preview, which needs exactly these guarantees on
+ * `.atoma-probes.json` and `package.json` — a classifier that decided a run's
+ * kind from a file swapped mid-read would persist an immutable descriptor
+ * about bytes that never existed. `assertPath` is the only axis a caller may
+ * vary; see `WorkspacePathPolicy`.
+ */
+export function secureReadWorkspaceFile(
   workspaceRoot: string,
   declaredPath: string,
-  limits: ArtifactLimits
+  limits: ArtifactLimits,
+  assertPath: WorkspacePathPolicy = assertPublishableArtifactPath
 ): ReadArtifact {
-  const target = resolveWorkspaceFile(workspaceRoot, declaredPath, limits);
+  const target = resolveWorkspaceFile(workspaceRoot, declaredPath, limits, assertPath);
   const before = lstatSync(target.absolute);
   if (!before.isFile()) {
     throw new ArtifactPolicyError('special', `artifact is not a regular file: ${target.canonical}`);
@@ -335,7 +371,7 @@ export function buildArtifactManifest(input: {
   const files: ArtifactFile[] = [];
   let totalBytes = 0;
   for (const declaredPath of canonical) {
-    const read = secureRead(input.workspaceRoot, declaredPath, limits);
+    const read = secureReadWorkspaceFile(input.workspaceRoot, declaredPath, limits);
     totalBytes += read.file.size;
     if (totalBytes > limits.maxTotalBytes) {
       throw new ArtifactPolicyError(
@@ -388,7 +424,11 @@ export function readManifestArtifact(input: {
   readonly limits?: Partial<ArtifactLimits>;
 }): Buffer {
   const expected = artifactFileSchema.parse(input.expected);
-  const actual = secureRead(input.workspaceRoot, expected.path, resolvedLimits(input.limits));
+  const actual = secureReadWorkspaceFile(
+    input.workspaceRoot,
+    expected.path,
+    resolvedLimits(input.limits)
+  );
   if (JSON.stringify(actual.file) !== JSON.stringify(expected)) {
     throw new ArtifactPolicyError('changed', `artifact no longer matches its manifest: ${expected.path}`);
   }

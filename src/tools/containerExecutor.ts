@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { mkdirSync } from 'node:fs';
 import type { Tool, ToolExecutor } from '../core/types.js';
 import {
   drainLines,
@@ -12,13 +13,15 @@ import {
 export const DEFAULT_WORKER_IMAGE = 'atoma-worker:latest';
 export type ContainerSpawn = typeof spawn;
 
-/** Match bind-mount ownership on native Linux; Docker Desktop also accepts it. */
-export function hostContainerUser(): string | undefined {
-  const uid = process.getuid?.();
-  const gid = process.getgid?.();
-  if (uid === undefined || gid === undefined || uid === 0) return undefined;
-  return `${uid}:${gid}`;
-}
+/**
+ * Match bind-mount ownership on native Linux; Docker Desktop also accepts it.
+ *
+ * ONE definition, in `src/launcher`, which is the component that owns
+ * container concerns. Re-exported here under the name this subsystem's
+ * callers and tests already use.
+ */
+import { hostContainerUser } from '../launcher/docker.js';
+export { hostContainerUser };
 
 /**
  * `docker run` arguments that carry the isolation. Exported so a test can
@@ -158,6 +161,36 @@ export class ContainerToolExecutor implements ToolExecutor {
     if (this.readyPromise) return this.readyPromise;
     this.readyPromise = new Promise<void>((resolve, reject) => {
       const user = this.opts.containerUser ?? hostContainerUser();
+      // THE HOST CREATES THE MOUNT SOURCE, before the engine sees it.
+      //
+      // A bind-mount source that does not exist is created BY THE DAEMON, as
+      // root. The worker then runs as the host user (`hostContainerUser`) and
+      // finds `/workspace` owned by root, mode 755: every write is refused,
+      // and the L1 agent — which is told nothing about the reason — improvises
+      // in `/tmp`, so the deliverable never lands where delivery, publication
+      // and the preview look for it. Measured on a real project run
+      // (2026-09-02): `drwxr-xr-x root root workspace` beside siblings owned by
+      // the host user, `ln: Permission denied` in the worker log, and an
+      // artifact manifest naming a file that did not exist.
+      //
+      // The local sandbox creates its root itself; in container mode that
+      // sandbox lives INSIDE the worker and cannot create the host directory
+      // it is mounted from. The operator path never hit this because its
+      // workspace persists across runs; a project run gets a fresh path every
+      // time, so every containerised project run on a fresh workspace was
+      // read-only to its own agent.
+      try {
+        mkdirSync(this.opts.workspaceHostPath, { recursive: true });
+      } catch (error) {
+        reject(
+          new Error(
+            `cannot create the worker workspace on the host at ${this.opts.workspaceHostPath}: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          )
+        );
+        return;
+      }
       const args = workerRunArgs({
         image: this.opts.image ?? DEFAULT_WORKER_IMAGE,
         workspaceHostPath: this.opts.workspaceHostPath,

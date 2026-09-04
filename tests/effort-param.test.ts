@@ -91,3 +91,35 @@ describe('claude-cli transport: upstream 5xx text is retried, then thrown (web-t
     expect(isCliTransportErrorText('{"reasoning": "API Error: 529 mentioned in prose"}')).toBe(false);
   });
 });
+
+describe('claude-cli transport: an account refusal is named, not parsed', () => {
+  it('recognises the refusals the tool actually emits, and nothing looser', async () => {
+    const { isCliQuotaRefusalText } = await import('../src/core/llmClaudeCli.js');
+    // MEASURED on a live project run, 2026-09-02. Before this the refusal
+    // reached `parseTwoJson`, so the run died as `no JSON object found` with
+    // the real cause — and the reset time — buried in the head of a parse
+    // error.
+    expect(
+      isCliQuotaRefusalText(
+        "You've hit your individual spend limit · run /usage-credits to ask your admin " +
+          'for a higher limit · your session limit resets 6:50pm (Europe/Bucharest)'
+      )
+    ).toBe(true);
+    expect(isCliQuotaRefusalText('Claude usage limit reached. Your limit will reset at 7pm.')).toBe(
+      true
+    );
+
+    // A plan that DISCUSSES limits is not a refusal: the phrase has to be in
+    // the head of the reply, which is where the CLI puts a refusal because it
+    // passes one through as the whole turn.
+    expect(
+      isCliQuotaRefusalText(
+        `{"reasoning": "${'x'.repeat(220)} the spend limit of the API", "plan": []}`
+      )
+    ).toBe(false);
+    expect(isCliQuotaRefusalText('{"plan": ["document the rate limit policy"]}')).toBe(false);
+    // And it is not the transient guard's job: an overload is retried, a limit
+    // that resets in hours is not.
+    expect(isCliQuotaRefusalText('API Error: 529 Overloaded')).toBe(false);
+  });
+});

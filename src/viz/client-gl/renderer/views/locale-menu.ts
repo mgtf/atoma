@@ -6,7 +6,8 @@ import { GPU_COLORS, GPU_LAYOUT } from '../../theme.js';
 const EDGE = 12;
 const PANEL_WIDTH = 224;
 const PANEL_PAD = 8;
-const ROW_HEIGHT = 30;
+const ITEM_HEIGHT = 28;
+const ITEM_GAP = 6;
 const ANCHOR_GAP = 6;
 
 export interface LocaleMenuAnchor {
@@ -58,7 +59,9 @@ export function localeMenuLayout(
   anchor: LocaleMenuAnchor
 ): LocaleMenuLayout {
   const width = Math.min(PANEL_WIDTH, Math.max(180, viewportWidth - EDGE * 2));
-  const height = SUPPORTED_LOCALES.length * ROW_HEIGHT + PANEL_PAD * 2;
+  const height = SUPPORTED_LOCALES.length * ITEM_HEIGHT +
+    Math.max(0, SUPPORTED_LOCALES.length - 1) * ITEM_GAP +
+    PANEL_PAD * 2;
   return {
     ...anchoredMenuPosition(viewportWidth, viewportHeight, anchor, width, height),
     width,
@@ -91,7 +94,7 @@ export function drawLocaleMenu(
     layout.y,
     layout.width,
     layout.height,
-    0x0c1321,
+    GPU_COLORS.panel,
     GPU_COLORS.primary,
     GPU_LAYOUT.radius,
     2
@@ -104,9 +107,9 @@ export function drawLocaleMenu(
       'menuitemradio',
       LOCALE_NAMES[locale],
       layout.x + PANEL_PAD,
-      layout.y + PANEL_PAD + index * ROW_HEIGHT,
+      layout.y + PANEL_PAD + index * (ITEM_HEIGHT + ITEM_GAP),
       layout.width - PANEL_PAD * 2,
-      ROW_HEIGHT - 2,
+      ITEM_HEIGHT,
       locale === snapshot.state.locale,
       snapshot.onActivate,
       GPU_COLORS.primary

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import Database from 'better-sqlite3';
 import { runBackup, SNAPSHOT_PREFIX } from '../src/cli/backup.js';
@@ -102,6 +102,31 @@ describe('state backup CLI', () => {
     await expect(
       runBackup(opts({ dest: join(root, 'fake-repo', 'backups'), repoRoot: join(root, 'fake-repo') }))
     ).rejects.toThrow(/inside the repository/);
+  });
+
+  it('resolves the archive tier against the real home, not an empty HOME', async () => {
+    // `join(process.env['HOME'] ?? '', '.atoma', 'archive')` resolved to the
+    // RELATIVE `.atoma/archive` wherever HOME is unset — always on Windows —
+    // so `existsSync` was false and the tier was skipped under a line reading
+    // "backup complete". Deleting HOME reproduces that state on any host:
+    // `homedir()` still answers an absolute path (passwd entry on POSIX,
+    // USERPROFILE on win32), an empty-string join never can.
+    const saved = process.env['HOME'];
+    delete process.env['HOME'];
+    try {
+      const res = await runBackup({ ...opts(), archiveDir: undefined });
+      const archive = res.skipped.find((entry) => entry.startsWith('archive'));
+      // Nothing here has an ~/.atoma/archive, so a skip is the right outcome;
+      // WHICH path it skipped is the assertion.
+      expect(archive).toBeDefined();
+      const named = /archive \((.*) missing\)/.exec(archive!)?.[1] ?? '';
+      expect(named, archive).not.toBe('');
+      expect(isAbsolute(named), `archive tier resolved to a relative path: ${named}`).toBe(true);
+      expect(named).toContain('.atoma');
+    } finally {
+      if (saved === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = saved;
+    }
   });
 
   it('a missing store is a loud skip, never a silent empty snapshot', async () => {

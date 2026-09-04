@@ -106,6 +106,26 @@ describe('the GL overlay stack', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('lets the preview plane paint its own frame, because it REPLACES the canvas', () => {
+    const plane = readFileSync(join(GL_ROOT, 'PreviewPlane.tsx'), 'utf8');
+    const app = readFileSync(join(GL_ROOT, 'GpuApp.tsx'), 'utf8');
+    const styles = readFileSync(join(GL_ROOT, 'styles.css'), 'utf8');
+
+    // It is not an overlay OVER the canvas, so the grandfathered-skin rule
+    // does not reach it — but it must not smuggle the skin in either.
+    expect(plane.includes('gpu-panel-skin')).toBe(false);
+    // What earns that exemption: the product tree goes INERT behind it, so
+    // there is nothing underneath competing for the pointer light or buried
+    // under a frame. Take this away and the plane becomes exactly the
+    // CSS-framed overlay the list above closes.
+    expect(app).toMatch(/inert=\{previewOpen\}/);
+    // And it covers the viewport rather than floating in it.
+    const rule = styles.match(/\.gpu-preview-plane\s*\{[^}]*\}/);
+    expect(rule).not.toBeNull();
+    expect(rule![0]).toContain('position: fixed');
+    expect(rule![0]).toContain('inset: 0');
+  });
+
   it('keeps the reference pattern honest: the project form skin stays neutralised', () => {
     const styles = readFileSync(join(GL_ROOT, 'styles.css'), 'utf8');
     const neutraliser = styles.match(/\.gpu-project-form\.gpu-panel-skin\s*\{[^}]*\}/);

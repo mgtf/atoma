@@ -36,6 +36,20 @@ async function freePort() {
 const ENVIRONMENT_CONSOLE = [
   'No available adapters.',
   'GL Driver Message (OpenGL, Performance',
+  // Chrome on WINDOWS, warning that it ignores the `powerPreference` Pixi
+  // passes to `requestAdapter()` — a documented Chromium limitation
+  // (crbug.com/369219127), not anything this application does or can stop
+  // doing. Measured 2026-09-02: on a real Windows GPU every substantive
+  // assertion passed (1 canvas, webgpu backend, no uncaptured device errors,
+  // 16.7ms mean frame, zero missed scroll frames, graphics contexts and
+  // buffers identical before and after) and the run failed on this line
+  // alone (its OWN timing budget then failed separately, at 19.2ms scroll P95
+  // against a 12ms bar calibrated on the author's Metal machine — a
+  // calibration fact, deliberately left untouched). It arrives twice, as the
+  // message and then as its own stack, which is why the stack prefix is listed
+  // beside it. REMOVE BOTH when the Chromium bug closes.
+  'powerPreference option is currently ignored',
+  'at visit (pptr:evaluate;readTimelineCardMaterials',
 ];
 
 function isEnvironmentNoise(text) {

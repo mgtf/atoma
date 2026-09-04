@@ -10,6 +10,7 @@ import { makeAnthropicClient } from '../src/run/auth.js';
 import { RunnerConfigError } from '../src/core/errors.js';
 import { AnthropicLlmClient } from '../src/core/llm.js';
 import { ClaudeCliLlmClient } from '../src/core/llmClaudeCli.js';
+import { CodexCliLlmClient } from '../src/core/llmCodexCli.js';
 import { OllamaLlmClient } from '../src/core/llmOllama.js';
 import type Anthropic from '@anthropic-ai/sdk';
 
@@ -38,11 +39,17 @@ describe('the child re-checks what the parent authorised', () => {
     expect(() =>
       assertTransportHonoursCredentials('anthropic', { ATOMA_MODEL_L2: 'claude-cli:sonnet' })
     ).toThrow(/cannot honour a supplied credential snapshot/);
-    // `codex:` is never authorisable — it is not a payer this feature can name.
+    // The parent may authorise the ChatGPT-backed Codex route on a supervisor tier.
     expect(() =>
       assertTransportHonoursCredentials('anthropic', {
-        ATOMA_MODEL_L3: 'codex:gpt-5',
+        ATOMA_MODEL_L3: 'codex:gpt-5.6-sol',
         ATOMA_SUBSCRIPTION_TIERS: 'l3',
+      })
+    ).not.toThrow();
+    expect(() =>
+      assertTransportHonoursCredentials('anthropic', {
+        ATOMA_MODEL_L3: 'codex:gpt-5.6-sol',
+        ATOMA_SUBSCRIPTION_TIERS: 'l2',
       })
     ).toThrow(/cannot honour a supplied credential snapshot/);
   });
@@ -58,10 +65,11 @@ describe('the child re-checks what the parent authorised', () => {
 });
 
 describe('base provider selection — one rule for runner and curriculum', () => {
-  it('defaults to Anthropic and recognises Ollama', () => {
+  it('defaults to Anthropic and recognises Z.ai and Ollama', () => {
     expect(resolveBaseProviderKind()).toBe('anthropic');
     expect(resolveBaseProviderKind('ANTHROPIC')).toBe('anthropic');
     expect(resolveBaseProviderKind('ollama')).toBe('ollama');
+    expect(resolveBaseProviderKind('ZAI')).toBe('zai');
   });
 
   it('normalises both Claude subscription aliases', () => {
@@ -147,6 +155,15 @@ describe('makeBaseClient — ONE construction switch for runner and curriculum',
     const fake = { messages: { create: async () => ({}) } } as unknown as Anthropic;
     expect(makeBaseClient('anthropic', { anthropic: fake })).toBeInstanceOf(AnthropicLlmClient);
   });
+
+  it('builds Z.ai as the base provider from the injected snapshot', () => {
+    expect(() => makeBaseClient('zai', { env: {} })).toThrow(/ZAI_API_KEY/);
+    expect(
+      makeBaseClient('zai', {
+        env: { ZAI_API_KEY: 'zai-key-from-snapshot' },
+      })
+    ).toBeInstanceOf(AnthropicLlmClient);
+  });
 });
 
 describe('makeAnthropicClient — credentials are a per-run value, not process state', () => {
@@ -199,6 +216,14 @@ describe('makeAnthropicClient — credentials are a per-run value, not process s
         ZAI_API_KEY: 'zai-key-from-snapshot',
       });
       expect(Object.keys(built)).toEqual(['zai']);
+
+      // Codex construction takes the same snapshot so CODEX_HOME can bind a
+      // run to one principal profile instead of the ambient host login.
+      const codex = buildReferencedProviders({
+        ATOMA_MODEL_L2: 'codex:gpt-5.6-terra',
+        CODEX_HOME: '/profiles/principal-a/codex',
+      });
+      expect(codex['codex']).toBeInstanceOf(CodexCliLlmClient);
     } finally {
       if (previous === undefined) delete process.env['ATOMA_MODEL_L1'];
       else process.env['ATOMA_MODEL_L1'] = previous;

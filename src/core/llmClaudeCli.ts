@@ -109,6 +109,42 @@ export function isCliTransportErrorText(text: string): boolean {
 }
 
 /**
+ * The phrasings the CLI uses when the ACCOUNT, not the request, is what
+ * refused. LISTED rather than pattern-matched: each is a string observed from
+ * the tool, and a loose match on "limit" would swallow a plan that mentions
+ * one.
+ */
+const CLI_QUOTA_REFUSALS = [
+  // Measured on a live project run, 2026-09-02: "You've hit your individual
+  // spend limit · run /usage-credits to ask your admin for a higher limit ·
+  // your session limit resets 6:50pm (Europe/Bucharest)".
+  'spend limit',
+  'usage limit reached',
+] as const;
+
+/**
+ * True when a CLI "assistant text" is the account's own refusal.
+ *
+ * SEPARATE FROM THE 5xx GUARD ABOVE, and it must be: that one retries after
+ * three seconds because an overload is transient by definition, while a spend
+ * or usage limit resets HOURS later. Retrying buys nothing, and the second
+ * failure reads exactly like the first.
+ *
+ * It is separate from the PARSER too, which is what made it worth naming. A
+ * refusal arrives as ordinary assistant text, so `parseTwoJson` was handed a
+ * sentence and the run died as `no JSON object found` — the real cause visible
+ * only inside the head of a parse error, and the reset time buried with it. A
+ * quota refusal is an operator fact with a deadline in it; it should say so.
+ *
+ * ANCHORED to the head of the reply. The CLI passes a refusal through as the
+ * WHOLE turn, so a plan that merely discusses a spend limit is not one.
+ */
+export function isCliQuotaRefusalText(text: string): boolean {
+  const head = text.trimStart().slice(0, 200).toLowerCase();
+  return CLI_QUOTA_REFUSALS.some((phrase) => head.includes(phrase));
+}
+
+/**
  * INACTIVITY ceiling on a claude-cli call — the clock measures SILENCE,
  * not total duration, and every stream message or tool invocation resets
  * it. A hang is the absence of progress; a long call is not.
@@ -154,6 +190,18 @@ export class ClaudeCliLlmClient implements LlmClient {
     // pause; a second occurrence throws a real transport error so metrics
     // record an error call instead of a parser crash far from the cause.
     const first = await this.completeOnce(req);
+    // THE ACCOUNT REFUSED, which is not a transport blip. Checked before the
+    // retry below, because a limit that resets in hours is not waited out in
+    // three seconds; and before the caller's parser, because the refusal is
+    // ordinary assistant text that a parser reports as malformed JSON.
+    if (isCliQuotaRefusalText(first.text)) {
+      throw attachPartialUsage(
+        new Error(
+          `claude-cli refused the call — the account's limit is reached: ${first.text.trim().slice(0, 300)}`
+        ),
+        [first.usage]
+      );
+    }
     if (!isCliTransportErrorText(first.text)) return first;
     await new Promise((r) => setTimeout(r, 3000));
     const second = await this.completeOnce(req);

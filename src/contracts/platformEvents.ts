@@ -96,15 +96,18 @@ export const platformEventKindSchema = z.enum([
    * differently.
    */
   'run.host_subscription',
+  /** A run spent the requesting principal's own connected provider quota. */
+  'run.principal_subscription',
   /**
-   * A platform admin armed or cleared a per-tier host-subscription pin in
-   * their own Settings. SECURITY, and journaled at the moment of the CHOICE
-   * rather than only at the runs that follow it: the pin is what makes the
-   * operator's own login spendable on a tier, and "who decided that, and
-   * when" is a question the run rows cannot answer — they are written by
-   * whoever launches, which may be someone else entirely.
+   * An account armed, changed or cleared a per-tier host/personal
+   * subscription pin in Settings. SECURITY, and journaled at the moment of
+   * the CHOICE rather than only at the runs that follow it: the run rows may
+   * be written later by a different launcher.
    */
   'principal.subscription_pin',
+  /** Self-care connection lifecycle; detail names only the provider. */
+  'principal.subscription_connected',
+  'principal.subscription_disconnected',
   'admin.granted',
   'admin.revoked',
   'invitation.created',
@@ -124,6 +127,22 @@ export const platformEventKindSchema = z.enum([
   'server.recovered',
   'push.subscribed',
   'push.unsubscribed',
+  /**
+   * A member opened, stopped, or failed to open the application a delivered
+   * run produced. JOURNAL ONLY — `PUSH_ROUTES` maps all three to `null`: a
+   * preview is a thing the member is looking at while they look at it, so a
+   * notification about it would arrive while they are already there.
+   *
+   * The rows carry identity, kind, generation and a stable reason, and never
+   * a token, a grant, a URL, a host path, application output or a container
+   * log. `preview.failed` is a WARNING rather than an error: the deliverable
+   * is delivered and published, and only the convenience over it did not come
+   * up — the opposite of `publication.failed`, where the artefact itself is
+   * unreachable.
+   */
+  'preview.started',
+  'preview.stopped',
+  'preview.failed',
   /**
    * A platform admin broadcast an announcement to subscribers. The ONLY
    * kind whose copy is written by a human at send time rather than frozen
@@ -279,7 +298,10 @@ export const PLATFORM_EVENT_SEVERITY: Record<PlatformEventKind, PlatformEventSev
   'run.anomaly': 'warning',
   'security.flagged': 'security',
   'run.host_subscription': 'security',
+  'run.principal_subscription': 'security',
   'principal.subscription_pin': 'security',
+  'principal.subscription_connected': 'security',
+  'principal.subscription_disconnected': 'security',
   'admin.granted': 'security',
   'admin.revoked': 'security',
   'invitation.created': 'security',
@@ -296,6 +318,12 @@ export const PLATFORM_EVENT_SEVERITY: Record<PlatformEventKind, PlatformEventSev
   'platform.announcement': 'security',
   'push.subscribed': 'info',
   'push.unsubscribed': 'info',
+  'preview.started': 'info',
+  'preview.stopped': 'info',
+  // The deliverable is delivered; only the convenience over it failed to come
+  // up. That is a warning, unlike `publication.failed`, where the artefact
+  // itself never reached the tenant's repository.
+  'preview.failed': 'warning',
 };
 
 export function severityForKind(kind: PlatformEventKind): PlatformEventSeverity {

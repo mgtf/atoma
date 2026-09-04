@@ -93,22 +93,25 @@ Neighbours:
 - `runPayers.ts` is the ONE answer, and it is PER TIER. Four rows — `base`,
   `l1`, `l2`, `l3` — each naming the selection, the provider that served it,
   the payer kind and the chain level it came from. A run may spend the
-  operator's own Claude login on some tiers while others bill an
+  operator's own Claude or ChatGPT login on some tiers while others bill an
   organisation's key, and `run.host_subscription` used to be a whole-run fact
   with no `detail` at all.
 - `base` IS A ROW. Every call carrying no `provider:` prefix reaches the
   default client, so a three-row ledger names the tiers and stays silent about
   the account that paid for everything else — the omission finding 2.2
   punished on 2026-08-27.
-- The stored spelling is the NON-ROUTABLE sentinel `host-subscription:<alias>`,
-  never `claude-cli:`, which is the exact string two independent guards exist
-  to refuse. It becomes a transport only inside the coordinator, downstream of
-  the authority check.
+- The stored spellings are NON-ROUTABLE sentinels:
+  `host-subscription:<alias>` for Claude and
+  `chatgpt-subscription:<model>` for host Codex, plus
+  `principal-chatgpt-subscription:<model>` for requester Codex, never their CLI
+  route prefixes. They become transports only inside the coordinator,
+  downstream of the matching authority/profile check; both ChatGPT families
+  are L2/L3-only.
 - Nothing here carries a secret: a payer names a KIND and, for a key, its
   provider. This detail is journaled beside `project_runs.error`, which is
   served to tenants.
-- One summary string, `hostSubscriptionSummary`, rendered by both emitters.
-  They used to word the same fact differently.
+- Summary helpers distinguish host and requester subscription spend; both use
+  the same structured `runPayerDetail` ledger.
 
 ## Publication receipts
 

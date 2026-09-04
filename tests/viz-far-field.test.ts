@@ -5,6 +5,7 @@ import {
   FAR_FIELD_GLSL_VERTEX,
   FAR_FIELD_UNIFORMS,
   FAR_FIELD_WGSL,
+  shouldShowFarField,
 } from '../src/viz/client-gl/renderer/far-field.js';
 import {
   MARK_CAUSTIC_MAX_POINTS,
@@ -53,6 +54,13 @@ function fieldCast(
 describe('far-field shader contract', () => {
   const wgslVertexInput = FAR_FIELD_WGSL.split('struct VertexInput')[1]
     ?.split('}')[0] ?? '';
+
+  it('limits the expensive field to the welcome or a hero-scale crystal', () => {
+    expect(shouldShowFarField(false)).toBe(true);
+    expect(shouldShowFarField(true)).toBe(false);
+    expect(shouldShowFarField(true, 3.99)).toBe(false);
+    expect(shouldShowFarField(true, 4)).toBe(true);
+  });
 
   it('keeps backticks out of the shader sources', () => {
     for (const [name, source] of Object.entries({

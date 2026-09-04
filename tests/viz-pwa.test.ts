@@ -14,6 +14,12 @@ function pngSize(path: string): { width: number; height: number } {
   };
 }
 
+function pngColorType(path: string): number {
+  const bytes = readFileSync(path);
+  expect(bytes.subarray(1, 4).toString('ascii')).toBe('PNG');
+  return bytes.readUInt8(25);
+}
+
 describe('Atoma visualizer PWA assets', () => {
   const manifest = JSON.parse(
     readFileSync('src/viz/public/manifest.webmanifest', 'utf8')
@@ -69,6 +75,25 @@ describe('Atoma visualizer PWA assets', () => {
       width: 180,
       height: 180,
     });
+    expect(pngSize('src/viz/public/icons/atoma-github-app-1024.png')).toEqual({
+      width: 1024,
+      height: 1024,
+    });
+  });
+
+  it('keeps general-purpose icons transparent and the maskable icon full-bleed', () => {
+    expect(favicon).not.toMatch(/<rect|id="bg"/);
+    for (const path of [
+      'src/viz/public/icons/atoma-192.png',
+      'src/viz/public/icons/atoma-512.png',
+      'src/viz/public/apple-touch-icon.png',
+      'src/viz/public/icons/atoma-github-app-1024.png',
+    ]) {
+      // PNG colour type 6 is true-colour with an alpha channel.
+      expect(pngColorType(path), path).toBe(6);
+    }
+    // Maskable icons must be opaque: user agents otherwise choose a solid fill.
+    expect(pngColorType('src/viz/public/icons/atoma-maskable-512.png')).toBe(2);
   });
 
   it('uses the one-crystal rank mark in both clients', () => {
@@ -95,7 +120,7 @@ describe('Atoma visualizer PWA assets', () => {
     expect(serviceWorker).toContain("cache-control");
     expect(serviceWorker).toContain("no-store");
     expect(serviceWorker).toContain('request.mode === \'navigate\'');
-    expect(serviceWorker).toContain('atoma-viz-shell-v3');
+    expect(serviceWorker).toContain('atoma-viz-shell-v4');
     // A dev-session worker must not cache Vite's rewritten module URLs.
     expect(serviceWorker).toContain('isDevModuleGraph');
     expect(serviceWorker).toContain("url.pathname.startsWith('/@')");
@@ -118,6 +143,7 @@ describe('Atoma visualizer PWA assets', () => {
       'src/viz/public/icons/atoma-192.png',
       'src/viz/public/icons/atoma-512.png',
       'src/viz/public/icons/atoma-maskable-512.png',
+      'src/viz/public/icons/atoma-github-app-1024.png',
       'src/viz/public/apple-touch-icon.png',
     ]) {
       expect(existsSync(path), path).toBe(true);

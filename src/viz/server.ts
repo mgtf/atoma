@@ -1,8 +1,9 @@
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { basename, extname, relative, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { requestWaitsForDeployment } from './deployment.js';
 import Database from 'better-sqlite3';
 import { SkillRegistry } from '../skills/registry.js';
 import { readBoundedRunFile, sortRunIndex, summarizeTraceFile } from './runIndex.js';
@@ -17,11 +18,20 @@ import { authPublicOrigin, openAuthGate, vizAuthEnabled } from '../auth/gate.js'
 import { AUTH_COPY } from '../auth/copy.js';
 import { snapshotProviderRegistry, type ProviderConfig } from '../auth/providers.js';
 import { fetchAvatarImage } from '../auth/avatar.js';
-import { HOST_SUBSCRIPTION_FAMILY, LLM_PROVIDER_CATALOG } from '../core/providerCatalog.js';
+import {
+  HOST_SUBSCRIPTION_FAMILIES,
+  HOST_SUBSCRIPTION_FAMILY,
+  LLM_PROVIDER_CATALOG,
+} from '../core/providerCatalog.js';
 import {
   hostSubscriptionSummary,
   isHostSubscriptionSelection,
+  isPrincipalSubscriptionSelection,
+  ledgerTouchesPrincipalSubscription,
+  ledgerTouchesSubscription,
+  principalSubscriptionSummary,
   runPayerDetail,
+  selectionsMixCodexOwners,
 } from '../contracts/runPayers.js';
 import { operatorTierDefaults } from '../contracts/tierModels.js';
 import {
@@ -35,6 +45,13 @@ import {
   type Viewer,
 } from '../auth/store.js';
 import { resolveSecretEncryption, SECRET_ENCRYPTION_ENV } from '../auth/secretEncryption.js';
+import {
+  AccountSubscriptionService,
+  ACCOUNT_PROFILES_ROOT_ENV,
+  CodexSubscriptionCapacityError,
+  CodexSubscriptionConflictError,
+  CodexSubscriptionUnavailableError,
+} from '../auth/subscriptionProfiles.js';
 import {
   buildAuthorizeUrl,
   exchangeCode,
@@ -77,9 +94,26 @@ import {
 import { GitHubStore, isGitHubConnectState } from '../github/store.js';
 import { persistGitHubUserTokens, resolveGitHubUserAccessToken } from '../github/tokens.js';
 import { ProjectStore } from '../projects/store.js';
-import { DEFAULT_PROJECTS_ROOT, ProjectRunCoordinator } from '../projects/coordinator.js';
+import {
+  DEFAULT_PROJECTS_ROOT,
+  ProjectRunCoordinator,
+} from '../projects/coordinator.js';
 import { GitHubPublisher } from '../projects/publisher.js';
 import { ProjectHttpError, ProjectService, roleAtLeast } from '../projects/service.js';
+import { PreviewStore } from '../preview/store.js';
+import { PreviewPolicyError } from '../preview/policy.js';
+import { recordDeliveredPreview } from '../preview/service.js';
+import { previewConfigPresent, previewEnabled, snapshotPreviewConfig } from '../preview/config.js';
+import { PreviewClaimRegistry } from '../preview/claims.js';
+import {
+  PreviewRouteTable,
+  startPreviewGateway,
+  type RunningPreviewGateway,
+} from '../preview/gatewayServer.js';
+import { PreviewManager } from '../preview/manager.js';
+import { PreviewHttpService } from '../preview/httpService.js';
+import { DockerLauncher } from '../launcher/docker.js';
+import { DEFAULT_WORKER_IMAGE } from '../tools/containerExecutor.js';
 import { PushStore } from './push/store.js';
 import { PushNotifier } from './push/notifier.js';
 import {
@@ -116,12 +150,14 @@ import {
   sentinelCostAlertFromEnv,
   sentinelIntervalFromEnv,
   startResidentSentinel,
+  sleepInhibitorHint,
   unarmedSentinelHealth,
   vizSentinelEnabled,
   type ResidentSentinel,
   type SentinelHealth,
 } from '../sentinel/resident.js';
 import { peekSentinelWatch } from '../sentinel/lease.js';
+import { injectAppShellSeo, robotsTxt, sitemapXml } from './seo.js';
 // The MCP run lease, read for CONTEXT only (which pid holds the run slot) and
 // never as a detector. `src/sentinel/watch.ts` already reaches for it, so this
 // adds a name, not a dependency.
@@ -413,6 +449,45 @@ const emit: (input: Parameters<PlatformEventLog['append']>[0]) => void = (input)
   EVENTS?.append(input);
 };
 
+/**
+ * PERSONAL PROVIDER PROFILES. Only authenticated deployments have principals,
+ * so the profile authority follows the auth gate. Credential bytes stay in
+ * provider-owned private directories; callbacks journal only provider names.
+ */
+const ACCOUNT_SUBSCRIPTIONS: AccountSubscriptionService | null = AUTH?.store
+  ? new AccountSubscriptionService({
+      auth: AUTH.store,
+      sourceEnv: process.env,
+      ...(process.env[ACCOUNT_PROFILES_ROOT_ENV]?.trim()
+        ? { profilesRoot: process.env[ACCOUNT_PROFILES_ROOT_ENV].trim() }
+        : {}),
+      onConnected: ({ principalId, orgId }) => {
+        emit({
+          kind: 'principal.subscription_connected',
+          actorType: 'principal',
+          actorId: principalId,
+          orgId,
+          summary: 'Personal Codex subscription connected',
+          detail: { provider: 'codex' },
+        });
+      },
+      onDisconnected: ({ principalId, orgId }) => {
+        emit({
+          kind: 'principal.subscription_disconnected',
+          actorType: 'principal',
+          actorId: principalId,
+          orgId,
+          summary: 'Personal Codex subscription disconnected',
+          detail: { provider: 'codex' },
+        });
+      },
+    })
+  : null;
+
+// Closing is synchronous at this boundary: pending profile app-servers receive
+// SIGTERM before Node exits. A startup reconciliation handles hard crashes.
+process.once('exit', () => ACCOUNT_SUBSCRIPTIONS?.close());
+
 if (AUTH?.store) {
   const sweepTimer = setInterval(() => {
     try {
@@ -553,6 +628,13 @@ interface ProjectsRuntime {
   readonly githubStore: GitHubStore;
   readonly githubConfig: GitHubAppConfig | null;
   readonly githubClient: GitHubAppClient | null;
+  /**
+   * ONE construction of the viewer-token resolver, shared by the publisher and
+   * by the setup callback that must corroborate an untrusted `installation_id`
+   * against the connecting user. Null only when there is no GitHub login
+   * provider, in which case no user token can exist to resolve.
+   */
+  readonly resolveUserAccessToken: ((principalId: string) => Promise<string>) | null;
 }
 
 const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
@@ -589,28 +671,38 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
     : null;
   const githubProvider = AUTH_RUNTIME.providers.find((provider) => provider.id === 'github');
   const appConfig = githubConfig;
+  const resolveUserAccessToken =
+    appConfig && githubProvider
+      ? (principalId: string): Promise<string> =>
+          resolveGitHubUserAccessToken({
+            github: githubStore,
+            config: appConfig,
+            provider: githubProvider,
+            principalId,
+          })
+      : null;
   const publisher = appConfig && githubClient
     ? new GitHubPublisher({
         client: githubClient,
         github: githubStore,
         store: projectStore,
         events: emit,
-        resolveUserAccessToken: githubProvider
-          ? (principalId) =>
-              resolveGitHubUserAccessToken({
-                github: githubStore,
-                config: appConfig,
-                provider: githubProvider,
-                principalId,
-              })
-          : undefined,
+        ...(resolveUserAccessToken ? { resolveUserAccessToken } : {}),
       })
     : undefined;
+  // Same consolidated product store, opened through its own DDL constant.
+  const previewStore = PreviewStore.open(dbPath);
   const coordinator = new ProjectRunCoordinator({
     store: projectStore,
     dbPath,
     projectsRoot: PROJECTS_ROOT,
     ...(publisher ? { publisher } : {}),
+    // Describe the deliverable while the workspace is still this run's. The
+    // adapter stays one call wide; `src/preview/service.ts` owns what a
+    // preview is.
+    describeDeliveredPreview: (subject) => {
+      recordDeliveredPreview(previewStore, subject);
+    },
     // Accounts choose their own per-tier models in Settings; without a gate
     // there are no accounts and the operator's host pins are the only pins.
     ...(AUTH?.store
@@ -634,23 +726,43 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
     ...(AUTH?.store
       ? { platformAdmins: (principalId: string) => AUTH.store!.isPlatformAdmin(principalId) }
       : {}),
-    // A run billed to the host's own login session is journaled, never
-    // pushed. Same one-delivery-path rule as `onRunFinished`: no audit-free
-    // side channel.
+    ...(ACCOUNT_SUBSCRIPTIONS
+      ? {
+          principalCodexProfileFor: (principalId: string) =>
+            ACCOUNT_SUBSCRIPTIONS.codexProfileForRun(principalId),
+        }
+      : {}),
+    // A run billed to a host or requester login is journaled, never pushed.
+    // Same one-delivery-path rule as `onRunFinished`: no audit-free side
+    // channel.
     onSubscriptionTransport: (use) => {
-      emit({
-        kind: 'run.host_subscription',
-        actorType: 'principal',
-        actorId: use.principalId,
-        orgId: use.orgId,
-        projectId: use.projectId,
-        runId: use.projectRunId,
-        // ONE summary and one detail shape, shared with the CLI emitter: the
-        // two used to word the same fact differently, so the row read
-        // differently depending on which surface started the run.
-        summary: hostSubscriptionSummary(use.payers),
-        detail: runPayerDetail(use.payers),
-      });
+      if (ledgerTouchesSubscription(use.payers)) {
+        emit({
+          kind: 'run.host_subscription',
+          actorType: 'principal',
+          actorId: use.principalId,
+          orgId: use.orgId,
+          projectId: use.projectId,
+          runId: use.projectRunId,
+          // ONE summary and one detail shape, shared with the CLI emitter: the
+          // two used to word the same fact differently, so the row read
+          // differently depending on which surface started the run.
+          summary: hostSubscriptionSummary(use.payers),
+          detail: runPayerDetail(use.payers),
+        });
+      }
+      if (ledgerTouchesPrincipalSubscription(use.payers)) {
+        emit({
+          kind: 'run.principal_subscription',
+          actorType: 'principal',
+          actorId: use.principalId,
+          orgId: use.orgId,
+          projectId: use.projectId,
+          runId: use.projectRunId,
+          summary: principalSubscriptionSummary(use.payers),
+          detail: runPayerDetail(use.payers),
+        });
+      }
     },
     // The terminal-run hook JOURNALS; the router turns that row into pushes.
     // There is deliberately no direct notifier call here any more — one
@@ -677,6 +789,14 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
   // drivers could ever move. Recover them BEFORE any new run can start,
   // and say so — silent reaping hides the crash from the operator.
   const recovered = coordinator.reconcileInterrupted();
+  // Previews die with the process that launched them, so a row left in a live
+  // state describes containers that no longer exist. Same boot, same rule.
+  const recoveredPreviews = previewStore.reconcileInterrupted();
+  if (recoveredPreviews > 0) {
+    process.stderr.write(
+      `[atoma viz] recovered ${recoveredPreviews} interrupted preview(s) after a restart\n`
+    );
+  }
   if (recovered.runs > 0 || recovered.publications > 0) {
     process.stderr.write(
       `[atoma viz] recovered interrupted project state: ${recovered.runs} run(s) and ${recovered.publications} publication(s) marked failed\n`
@@ -694,8 +814,191 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
     github: githubStore,
     events: emit,
   });
-  return { store: projectStore, projects, coordinator, githubStore, githubConfig, githubClient };
+  return {
+    store: projectStore,
+    projects,
+    coordinator,
+    githubStore,
+    githubConfig,
+    githubClient,
+    resolveUserAccessToken,
+  };
 })();
+
+/**
+ * THE PREVIEW RUNTIME, hosted here for the same reason the watch is.
+ *
+ * A preview needs four things that must agree: a launcher to build isolates, a
+ * gateway serving its own origins, a claim registry deciding who may look, and
+ * a route table joining the two. Splitting them across processes would give
+ * four places for them to disagree; the gateway in particular holds its claims
+ * and routes IN MEMORY on purpose, because both must die with a restart —
+ * "on gateway restart all grants and hosts fail closed, users reopen
+ * explicitly".
+ *
+ * NULL UNLESS THE DEPLOYMENT ASKED FOR IT. `previewEnabled` is a tri-state
+ * that refuses a value it does not recognise, and `snapshotPreviewConfig`
+ * refuses half a configuration — so a deployment either has previews or is
+ * told exactly what is missing. It also needs the auth gate: a preview belongs
+ * to an organisation, and an organisation is meaningless without a viewer.
+ */
+interface PreviewRuntime {
+  readonly service: PreviewHttpService;
+  readonly manager: PreviewManager;
+  readonly gateway: RunningPreviewGateway;
+  readonly claims: PreviewClaimRegistry;
+}
+
+/**
+ * Why previews are off, in one sentence, or null when they are on.
+ *
+ * SEPARATE FROM THE CONSTRUCTION because silence was the whole defect: a
+ * deployment missing `ATOMA_VIZ_AUTH` booted cleanly, printed nothing about
+ * previews, and then answered a plain 404 on every preview route — the route
+ * block lives inside the gated section, so there was not even the 503 the
+ * design promises. An operator had no way to tell "I never asked for this"
+ * from "I asked and it did not happen".
+ */
+function previewOffReason(): string | null {
+  if (previewEnabled(process.env)) {
+    if (!AUTH_RUNTIME) {
+      return 'the visualizer auth gate is off, and a preview belongs to an organisation’s run — set ATOMA_VIZ_AUTH=1';
+    }
+    if (!PROJECTS_RUNTIME) return 'org-scoped project storage is unavailable';
+    return null;
+  }
+  // Half a configuration must never read as "off": an operator who set the
+  // domain and the image but not the switch wanted previews.
+  return previewConfigPresent(process.env)
+    ? 'ATOMA_PREVIEW is unset while other ATOMA_PREVIEW_* variables are set — set ATOMA_PREVIEW=1, or remove them'
+    : 'ATOMA_PREVIEW is not set';
+}
+
+const PREVIEW_RUNTIME_PROMISE: Promise<PreviewRuntime | null> = (async () => {
+  if (!PROJECTS_RUNTIME || !AUTH_RUNTIME) return null;
+  if (!previewEnabled(process.env)) return null;
+  const config = snapshotPreviewConfig(process.env, {
+    visualizerOrigin: AUTH_RUNTIME.publicOrigin.origin,
+  });
+  const previewStore = PreviewStore.open(DBS[0]!.path);
+  // No preview survives the process that started it, so a row left in a live
+  // state describes containers that are gone.
+  previewStore.reconcileInterrupted();
+  const claims = new PreviewClaimRegistry();
+  const routes = new PreviewRouteTable();
+  const launcher = new DockerLauncher({
+    image: DEFAULT_WORKER_IMAGE,
+    previewImage: config.image,
+    previewRuntime: config.runtime,
+  });
+  const manager = new PreviewManager({
+    store: previewStore,
+    launcher,
+    routes,
+    claims,
+    config,
+    /**
+     * HOST-OWNED, never a caller's — and READ, not recomputed.
+     *
+     * The run row already carries the workspace the coordinator chose, behind
+     * a `BEFORE UPDATE` trigger that refuses to let it move. Deriving a second
+     * answer from `PROJECTS_ROOT` made that one row advisory and put three
+     * derivations of one path in the codebase: this one honours
+     * `ATOMA_PROJECTS_ROOT`, `src/cli/projects.ts` passes no root and always
+     * writes the default, and `scripts/preview-demo.mjs` had guessed a third.
+     * They agree only while every process shares one environment — so with the
+     * variable unset the seeded workspace sat in a directory this line never
+     * looked at, the Preview button appeared, and the click failed on an empty
+     * copy with nothing saying which derivation had moved.
+     *
+     * The project is still checked: a run reached through another project's
+     * path is the IDOR the route hierarchy exists to refuse, and the store
+     * row is what settles it.
+     */
+    workspaceOf: (orgId, projectId, projectRunId) => {
+      const run = PROJECTS_RUNTIME.store.getProjectRun(orgId, projectRunId);
+      if (!run || run.projectId !== projectId) {
+        throw new PreviewPolicyError('missing', 'no project run owns this preview');
+      }
+      return run.hostPaths.workspacePath;
+    },
+    probe: (hostPort) => probePreviewRelay(hostPort),
+    log: (line) => console.error(line),
+  });
+  const gateway = await startPreviewGateway({
+    host: config.gatewayHost,
+    port: config.gatewayPort,
+    routes,
+    claims,
+    visualizerOrigin: AUTH_RUNTIME.publicOrigin.origin,
+    // One resolution of the scheme, shared with the URL the claim is minted
+    // into: two computations from the same environment could disagree.
+    publicScheme: config.publicScheme,
+    log: (line) => console.error(line),
+  });
+  // Idle and hard bounds are enforced HERE rather than in the gateway, because
+  // the gateway sees only traffic and traffic is exactly what must not keep a
+  // preview alive.
+  const sweep = setInterval(() => {
+    void manager.sweepExpired().catch(() => undefined);
+    claims.sweep();
+  }, 30_000);
+  sweep.unref?.();
+  return {
+    service: new PreviewHttpService({
+      manager,
+      store: previewStore,
+      projects: PROJECTS_RUNTIME.store,
+    }),
+    manager,
+    gateway,
+    claims,
+  };
+})();
+
+let PREVIEW_RUNTIME: PreviewRuntime | null = null;
+void PREVIEW_RUNTIME_PROMISE.then((runtime) => {
+  PREVIEW_RUNTIME = runtime;
+  if (runtime) {
+    console.error(`[atoma viz] preview gateway on ${runtime.gateway.port}`);
+    return;
+  }
+  // `previewEnabled` throws on a value it does not recognise, and this line
+  // must not be the thing that takes the server down.
+  let reason: string;
+  try {
+    reason = previewOffReason() ?? 'unknown';
+  } catch (error) {
+    reason = String(error);
+  }
+  console.error(`[atoma viz] previews are off: ${reason}`);
+}).catch((error: unknown) => {
+  // A configuration this deployment asked for and cannot have is a hard fact,
+  // not a degraded mode: previews stay off and the reason is printed once.
+  console.error(`[atoma viz] previews are unavailable: ${String(error)}`);
+});
+
+/**
+ * One request through the relay, which is what turns "a process bound a port"
+ * into "a member will find something there".
+ */
+function probePreviewRelay(hostPort: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const request = httpRequest(
+      { host: '127.0.0.1', port: hostPort, path: '/', method: 'GET', timeout: 2_000 },
+      (response) => {
+        response.resume();
+        resolve((response.statusCode ?? 0) > 0);
+      }
+    );
+    request.on('error', () => resolve(false));
+    request.on('timeout', () => {
+      request.destroy();
+      resolve(false);
+    });
+    request.end();
+  });
+}
 
 /**
  * THE MECHANICAL WATCH, hosted here.
@@ -796,6 +1099,7 @@ function loginPage(message?: string, invitationToken?: string): string {
   return `<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><title>${escapeHtml(AUTH_COPY.pageTitle)}</title>
+<meta name="robots" content="noindex, nofollow">
 <style>
 body{font-family:ui-monospace,monospace;background:#0b0f14;color:#d8e2ec;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
 .card{background:#11161d;border:1px solid #223041;border-radius:12px;padding:32px 40px;max-width:420px}
@@ -1024,12 +1328,38 @@ function namesHostSubscription(pins: unknown): boolean {
   );
 }
 
+/** Does a submitted account pin set name the requester's own subscription? */
+function namesPrincipalSubscription(pins: unknown): boolean {
+  if (!pins || typeof pins !== 'object') return false;
+  return Object.values(pins as Record<string, unknown>).some(
+    (value) => typeof value === 'string' && isPrincipalSubscriptionSelection(value)
+  );
+}
+
+function isAnyAccountSubscriptionSelection(value: string): boolean {
+  return isHostSubscriptionSelection(value) || isPrincipalSubscriptionSelection(value);
+}
+
 /** The tiers a saved pin set arms the subscription on, in tier order. */
 function subscriptionTiersOf(pins: { l1: string | null; l2: string | null; l3: string | null }): string[] {
   return (['l1', 'l2', 'l3'] as const).filter((tier) => {
     const value = pins[tier];
-    return typeof value === 'string' && isHostSubscriptionSelection(value);
+    return typeof value === 'string' && isAnyAccountSubscriptionSelection(value);
   });
+}
+
+/** Non-secret stored choices, used so switching Claude ↔ ChatGPT is journaled too. */
+function subscriptionSelectionsOf(
+  pins: { l1: string | null; l2: string | null; l3: string | null }
+): Record<string, string> {
+  return Object.fromEntries(
+    (['l1', 'l2', 'l3'] as const).flatMap((tier) => {
+      const value = pins[tier];
+      return typeof value === 'string' && isAnyAccountSubscriptionSelection(value)
+        ? [[tier, value] as const]
+        : [];
+    })
+  );
 }
 
 function listOperatorRunIndex(): VizRunIndexEntry[] {
@@ -1078,6 +1408,7 @@ function listOrganisationRunIndex(orgId: string): VizRunIndexEntry[] {
     entries.push({
       ...summary,
       projectId: row.projectId,
+      projectRunId: row.id,
       projectName: row.projectName,
       projectSlug: row.projectSlug,
     });
@@ -1094,6 +1425,7 @@ function listAllRunIndex(): VizRunIndexEntry[] {
     entries.push({
       ...summary,
       projectId: row.projectId,
+      projectRunId: row.id,
       projectName: row.projectName,
       projectSlug: row.projectSlug,
     });
@@ -1500,7 +1832,7 @@ function invitationTokenFrom(value: string | null): string | null {
 function methodAllowed(
   req: import('node:http').IncomingMessage,
   res: import('node:http').ServerResponse,
-  method: 'GET' | 'POST' | 'PATCH' | 'PUT'
+  method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
 ): boolean {
   if (req.method === method) return true;
   res.writeHead(405, { allow: method, 'content-length': '0', 'cache-control': 'no-store' });
@@ -1520,6 +1852,15 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
     return;
   }
   const pathname = url.pathname;
+
+  // The host creates this marker before taking the run lease. Reads stay up
+  // while a deployment drains, but no new durable write, run or preview may
+  // enter the gap between the preflight and systemd stopping this generation.
+  if (requestWaitsForDeployment(req.method, pathname)) {
+    res.setHeader('retry-after', '30');
+    sendJson(res, 503, { error: 'deployment in progress; retry this request shortly' });
+    return;
+  }
 
   if (pathname === '/webhooks/github') {
     if (!methodAllowed(req, res, 'POST')) return;
@@ -1691,6 +2032,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
             installationId: url.searchParams.get('installation_id'),
             client: PROJECTS_RUNTIME.githubClient,
             homePath: '/',
+            events: emit,
           }),
           [clearCookie(OAUTH_TX_COOKIE, AUTH_RUNTIME.secureCookies, '/auth')]
         );
@@ -1948,6 +2290,11 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           viewer,
           github: PROJECTS_RUNTIME.githubStore,
           config: PROJECTS_RUNTIME.githubConfig,
+          // Send an admin with no stored GitHub authorization to acquire one
+          // first: the setup callback cannot verify the installation without
+          // their token, and a flow whose callback cannot verify must not
+          // start. Passing the path is what arms that hop.
+          authorizePath: '/auth/github/authorize',
         })
       );
       return;
@@ -1960,7 +2307,11 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         sendAuthHtml(res, 401, githubNoticePage(GITHUB_COPY.authenticationRequired));
         return;
       }
-      if (!PROJECTS_RUNTIME?.githubConfig || !PROJECTS_RUNTIME.githubClient) {
+      if (
+        !PROJECTS_RUNTIME?.githubConfig ||
+        !PROJECTS_RUNTIME.githubClient ||
+        !PROJECTS_RUNTIME.resolveUserAccessToken
+      ) {
         sendAuthHtml(res, 503, githubNoticePage(GITHUB_COPY.notConfigured));
         return;
       }
@@ -1973,7 +2324,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           state: url.searchParams.get('state'),
           installationId: url.searchParams.get('installation_id'),
           setupAction: url.searchParams.get('setup_action'),
-          authorizePath: '/auth/github/authorize',
+          resolveUserAccessToken: PROJECTS_RUNTIME.resolveUserAccessToken,
           homePath: '/',
           events: emit,
         })
@@ -2108,17 +2459,150 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
     // resolved session, the deployment's declaration, and whether the
     // viewer's ACTIVE organisation is the declared one. The picker greys the
     // family when it is offered-but-unusable and hides it entirely otherwise.
-    const hostSubscriptionOffer = (): { family: unknown; reason?: string } | undefined => {
+    const hostSubscriptionOffers = (): Array<{ family: unknown; reason?: string }> | undefined => {
       if (!viewer.platformAdmin) return undefined;
       const declared = process.env['ATOMA_HOST_SUBSCRIPTION_ORG']?.trim();
       if (!declared) {
-        return { family: HOST_SUBSCRIPTION_FAMILY, reason: 'undeclared' };
+        return HOST_SUBSCRIPTION_FAMILIES.map((family) => ({ family, reason: 'undeclared' }));
       }
       if (viewer.orgId !== declared) {
-        return { family: HOST_SUBSCRIPTION_FAMILY, reason: 'other-organisation' };
+        return HOST_SUBSCRIPTION_FAMILIES.map((family) => ({
+          family,
+          reason: 'other-organisation',
+        }));
       }
-      return { family: HOST_SUBSCRIPTION_FAMILY };
+      return HOST_SUBSCRIPTION_FAMILIES.map((family) => ({ family }));
     };
+
+    const subscriptionPayload = (): Record<string, unknown> => {
+      const offers = hostSubscriptionOffers();
+      return {
+        personalSubscriptions: {
+          codex:
+            roleAtLeast(viewer.role, 'org:member') &&
+            Boolean(ACCOUNT_SUBSCRIPTIONS?.codexProfileForRun(viewer.principalId)),
+          // Anthropic requires prior approval before a third-party product may
+          // offer claude.ai subscription login. Keep the capability explicit
+          // and server-owned; the client cannot turn it on.
+          claude: false,
+        },
+        ...(offers ? { hostSubscriptions: offers } : {}),
+        // Compatibility for a cached pre-upgrade client: it can still show
+        // and clear the Claude family while the new bundle loads.
+        ...(offers
+          ? {
+              hostSubscription: offers.find(
+                (offer) =>
+                  (offer.family as { id?: string }).id === HOST_SUBSCRIPTION_FAMILY.id
+              ),
+            }
+          : {}),
+      };
+    };
+
+    // PERSONAL SUBSCRIPTIONS — every route is self-scoped by the resolved
+    // session. Device material is short-lived and memory-only; provider
+    // credential bytes never cross this HTTP surface.
+    if (pathname === '/api/account/subscriptions') {
+      if (!methodAllowed(req, res, 'GET')) return;
+      if (!roleAtLeast(viewer.role, 'org:member')) {
+        // A viewer downgraded during an in-flight login must not keep reading
+        // its short-lived device code.
+        sendJson(res, 403, { error: 'org:member role or above is required' });
+        return;
+      }
+      if (!ACCOUNT_SUBSCRIPTIONS) {
+        sendJson(res, 503, { error: 'personal subscriptions are unavailable' });
+        return;
+      }
+      sendJson(
+        res,
+        200,
+        await ACCOUNT_SUBSCRIPTIONS.status(viewer.principalId, {
+          // A run child owns this exact auth.json generation. Return the
+          // persisted receipt while it is live instead of starting a second
+          // provider process that could rotate the same credentials.
+          verify: !PROJECTS_RUNTIME?.coordinator.hasActiveRunForPrincipal(
+            viewer.principalId
+          ),
+        })
+      );
+      return;
+    }
+
+    if (pathname === '/api/account/subscriptions/codex/login') {
+      if (!roleAtLeast(viewer.role, 'org:member')) {
+        sendJson(res, 403, { error: 'org:member role or above is required' });
+        return;
+      }
+      if (!ACCOUNT_SUBSCRIPTIONS) {
+        sendJson(res, 503, { error: 'personal subscriptions are unavailable' });
+        return;
+      }
+      if (req.method === 'POST') {
+        if (!sameOrigin(req, res)) return;
+        const rate = acceptLoginAttempt(req, AUTH_RUNTIME!.trustedProxies);
+        if (!rate.accepted) {
+          res.setHeader('retry-after', String(rate.retryAfterSeconds));
+          sendJson(res, 429, { error: 'too many login attempts' });
+          return;
+        }
+        try {
+          sendJson(
+            res,
+            200,
+            await ACCOUNT_SUBSCRIPTIONS.startCodexLogin(
+              viewer.principalId,
+              viewer.orgId
+            )
+          );
+        } catch (error) {
+          if (error instanceof CodexSubscriptionConflictError) {
+            sendJson(res, 409, { error: error.message });
+          } else if (error instanceof CodexSubscriptionCapacityError) {
+            sendJson(res, 429, { error: 'too many pending Codex logins' });
+          } else if (error instanceof CodexSubscriptionUnavailableError) {
+            sendJson(res, 503, { error: 'Codex CLI is unavailable on this deployment' });
+          } else {
+            console.error('[viz subscriptions] Codex login start failed', error);
+            sendJson(res, 502, { error: 'Codex login could not start' });
+          }
+        }
+        return;
+      }
+      if (!methodAllowed(req, res, 'DELETE')) return;
+      if (!sameOrigin(req, res)) return;
+      sendJson(res, 200, {
+        cancelled: await ACCOUNT_SUBSCRIPTIONS.cancelCodexLogin(viewer.principalId),
+      });
+      return;
+    }
+
+    if (pathname === '/api/account/subscriptions/codex') {
+      if (!roleAtLeast(viewer.role, 'org:member')) {
+        sendJson(res, 403, { error: 'org:member role or above is required' });
+        return;
+      }
+      if (!methodAllowed(req, res, 'DELETE')) return;
+      if (!sameOrigin(req, res)) return;
+      if (!ACCOUNT_SUBSCRIPTIONS) {
+        sendJson(res, 503, { error: 'personal subscriptions are unavailable' });
+        return;
+      }
+      if (PROJECTS_RUNTIME?.coordinator.hasActiveRunForPrincipal(viewer.principalId)) {
+        sendJson(res, 409, {
+          error: 'cancel the active run before disconnecting its Codex subscription',
+        });
+        return;
+      }
+      sendJson(res, 200, {
+        disconnected: await ACCOUNT_SUBSCRIPTIONS.disconnectCodex(
+          viewer.principalId,
+          viewer.orgId
+        ),
+      });
+      return;
+    }
 
     // ACCOUNT SELF-CARE — the viewer's own name and per-tier model pins.
     // Self-scoped by construction: the principal id comes from the resolved
@@ -2136,7 +2620,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           // pin without one falls through at run time, so the picker greys
           // the family instead of offering a dormant choice.
           ollamaAvailable: Boolean(process.env['OLLAMA_BASE_URL']?.trim()),
-          ...(hostSubscriptionOffer() ? { hostSubscription: hostSubscriptionOffer() } : {}),
+          ...subscriptionPayload(),
         });
         return;
       }
@@ -2179,9 +2663,35 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         // its account-level space admits the sentinel; whether THIS principal
         // may name it is decided here, from the resolved session, and again at
         // every run by the coordinator. A stored pin is data, never permission.
-        if (namesHostSubscription(requested) && !hostSubscriptionOffer()) {
+        if (namesHostSubscription(requested) && !hostSubscriptionOffers()) {
           sendJson(res, 403, {
             error: 'the host subscription is not offered to this account on this deployment',
+          });
+          return;
+        }
+        if (namesPrincipalSubscription(requested)) {
+          if (!roleAtLeast(viewer.role, 'org:member')) {
+            sendJson(res, 403, {
+              error: 'org:member role or above is required to use a personal subscription',
+            });
+            return;
+          }
+          if (!ACCOUNT_SUBSCRIPTIONS?.codexProfileForRun(viewer.principalId)) {
+            sendJson(res, 409, {
+              error: 'connect your Codex subscription before selecting it for a tier',
+            });
+            return;
+          }
+        }
+        if (
+          requested &&
+          typeof requested === 'object' &&
+          selectionsMixCodexOwners(Object.values(requested as Record<string, unknown>).map(
+            (value) => typeof value === 'string' ? value : null
+          ))
+        ) {
+          sendJson(res, 409, {
+            error: 'one account pin set cannot mix host and personal ChatGPT subscriptions',
           });
           return;
         }
@@ -2190,9 +2700,10 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         // Journaled at the moment of the CHOICE. The run rows that follow are
         // written by whoever launches, which may be someone else entirely, so
         // they cannot answer "who decided the operator's login was spendable".
-        const armedBefore = subscriptionTiersOf(before);
         const armedAfter = subscriptionTiersOf(pins);
-        if (armedBefore.join(',') !== armedAfter.join(',')) {
+        const selectionsBefore = subscriptionSelectionsOf(before);
+        const selectionsAfter = subscriptionSelectionsOf(pins);
+        if (JSON.stringify(selectionsBefore) !== JSON.stringify(selectionsAfter)) {
           emit({
             kind: 'principal.subscription_pin',
             actorType: 'principal',
@@ -2200,9 +2711,9 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
             orgId: viewer.orgId,
             summary:
               armedAfter.length > 0
-                ? `Host subscription armed on ${armedAfter.join(', ')}`
-                : 'Host subscription cleared from every tier',
-            detail: { tiers: armedAfter },
+                ? `Account subscription armed on ${armedAfter.join(', ')}`
+                : 'Account subscription cleared from every tier',
+            detail: { tiers: armedAfter, selections: selectionsAfter },
           });
         }
         sendJson(res, 200, {
@@ -2210,7 +2721,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           defaults: operatorTierDefaults(process.env),
           catalog: LLM_PROVIDER_CATALOG,
           ollamaAvailable: Boolean(process.env['OLLAMA_BASE_URL']?.trim()),
-          ...(hostSubscriptionOffer() ? { hostSubscription: hostSubscriptionOffer() } : {}),
+          ...subscriptionPayload(),
         });
       } catch {
         sendJson(res, 400, { error: 'each tier must be null or one of the offered models' });
@@ -2261,11 +2772,14 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         // payer-bearing value there would need a fail-closed re-ask on every
         // tenant run. `setOrgTierModels` refuses it through the narrower
         // schema; this says WHICH rule refused, instead of "not a model".
-        if (namesHostSubscription((body as { models?: unknown }).models)) {
+        if (
+          namesHostSubscription((body as { models?: unknown }).models) ||
+          namesPrincipalSubscription((body as { models?: unknown }).models)
+        ) {
           sendJson(res, 400, {
             error:
-              'the host subscription cannot be an organisation default; it is an account pin, ' +
-              'held by a platform admin',
+              'a subscription cannot be an organisation default; it is an account pin chosen ' +
+              'by the account that will spend it',
           });
           return;
         }
@@ -2913,7 +3427,10 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       send(res, 500, 'viz client missing at ' + UI_HTML_PATH, 'text/plain; charset=utf-8');
       return;
     }
-    const html = readFileSync(UI_HTML_PATH);
+    const html = injectAppShellSeo(
+      readFileSync(UI_HTML_PATH, 'utf8'),
+      AUTH_RUNTIME?.publicOrigin ?? null
+    );
     // `no-cache` permits the service worker's offline copy while requiring
     // normal HTTP caches to revalidate. With the gate on, the login-capable
     // shell also pins that it cannot be framed.
@@ -2928,6 +3445,34 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       return;
     }
     send(res, 200, html, 'text/html; charset=utf-8', 'no-cache');
+    return;
+  }
+
+  if (pathname === '/robots.txt') {
+    if (!methodAllowed(req, res, 'GET')) return;
+    send(
+      res,
+      200,
+      robotsTxt(AUTH_RUNTIME?.publicOrigin ?? null),
+      'text/plain; charset=utf-8',
+      'public, max-age=3600'
+    );
+    return;
+  }
+
+  if (pathname === '/sitemap.xml') {
+    if (!methodAllowed(req, res, 'GET')) return;
+    if (!AUTH_RUNTIME) {
+      send(res, 404, 'not found', 'text/plain; charset=utf-8');
+      return;
+    }
+    send(
+      res,
+      200,
+      sitemapXml(AUTH_RUNTIME.publicOrigin),
+      'application/xml; charset=utf-8',
+      'public, max-age=3600'
+    );
     return;
   }
 
@@ -3031,6 +3576,140 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           200,
           await PROJECTS_RUNTIME.projects.cancelProjectRun(viewer, projectId, projectRunId)
         );
+      } catch (error) {
+        if (error instanceof ProjectHttpError) {
+          sendJson(res, error.status, { error: error.message });
+          return;
+        }
+        throw error;
+      }
+      return;
+    }
+
+    // PREVIEW. Five thin blocks: authenticate, check same-origin on a
+    // mutation, and call the service. Every decision — roles, org binding,
+    // which status a failure maps to — lives in `src/preview/httpService.ts`,
+    // because a decision made here would be a decision the CLI cannot reach.
+    const previewRoute = pathname.match(
+      /^\/api\/projects\/([^/]+)\/runs\/([^/]+)\/preview(?:\/(open|heartbeat|stop|restart))?$/
+    );
+    if (previewRoute) {
+      if (!viewer) {
+        sendJson(res, 401, { error: 'authentication required' });
+        return;
+      }
+      const preview = PREVIEW_RUNTIME;
+      if (!preview) {
+        // A deployment that has not configured previews, or could not start
+        // the gateway. An operator's problem, and never the member's fault.
+        sendJson(res, 503, { error: 'previews are not available on this deployment' });
+        return;
+      }
+      const projectId = decodePathComponent(previewRoute[1]!);
+      const projectRunId = decodePathComponent(previewRoute[2]!);
+      const action = previewRoute[3];
+      if (!projectId || !projectRunId) {
+        sendJson(res, 400, { error: 'bad project run id' });
+        return;
+      }
+      try {
+        if (!action) {
+          if (!methodAllowed(req, res, 'GET')) return;
+          sendJson(res, 200, preview.service.status(viewer, projectId, projectRunId));
+          return;
+        }
+        if (!methodAllowed(req, res, 'POST')) return;
+        if (!sameOrigin(req, res)) return;
+        let body: unknown;
+        try {
+          body = JSON.parse((await readBodyBounded(req, 4_096)).toString('utf8') || '{}');
+        } catch {
+          sendJson(res, 400, { error: 'request body is not valid JSON' });
+          return;
+        }
+        const inFlight = (body as { inFlight?: unknown }).inFlight === true;
+        if (action === 'open' || action === 'restart') {
+          const answered =
+            action === 'open'
+              ? await preview.service.open(viewer, projectId, projectRunId, { inFlight })
+              : await preview.service.restart(viewer, projectId, projectRunId, { inFlight });
+          if (answered.body.retryAfterSeconds !== undefined) {
+            res.setHeader('retry-after', String(answered.body.retryAfterSeconds));
+          }
+          sendJson(res, answered.status, answered.body);
+          return;
+        }
+        if (action === 'heartbeat') {
+          const generation = Number((body as { generation?: unknown }).generation);
+          if (!Number.isInteger(generation) || generation <= 0) {
+            sendJson(res, 400, { error: 'a heartbeat names the generation it is for' });
+            return;
+          }
+          sendJson(
+            res,
+            200,
+            preview.service.heartbeat(viewer, projectId, projectRunId, generation)
+          );
+          return;
+        }
+        sendJson(res, 200, await preview.service.stop(viewer, projectId, projectRunId));
+      } catch (error) {
+        if (error instanceof ProjectHttpError) {
+          // A capacity refusal carries the delay: a caller that retried
+          // immediately would spend the quota it is waiting for.
+          if (error.status === 429) res.setHeader('retry-after', '30');
+          sendJson(res, error.status, { error: error.message });
+          return;
+        }
+        throw error;
+      }
+      return;
+    }
+
+    const previewEgress = pathname.match(/^\/api\/projects\/([^/]+)\/preview-egress$/);
+    if (previewEgress) {
+      if (!viewer) {
+        sendJson(res, 401, { error: 'authentication required' });
+        return;
+      }
+      const preview = PREVIEW_RUNTIME;
+      if (!preview) {
+        sendJson(res, 503, { error: 'previews are not available on this deployment' });
+        return;
+      }
+      const projectId = decodePathComponent(previewEgress[1]!);
+      if (!projectId) {
+        sendJson(res, 400, { error: 'bad project id' });
+        return;
+      }
+      try {
+        if (req.method === 'GET') {
+          sendJson(res, 200, preview.service.listEgress(viewer, projectId));
+          return;
+        }
+        if (req.method === 'PUT') {
+          if (!sameOrigin(req, res)) return;
+          let body: unknown;
+          try {
+            body = JSON.parse((await readBodyBounded(req, 4_096)).toString('utf8') || '{}');
+          } catch {
+            sendJson(res, 400, { error: 'request body is not valid JSON' });
+            return;
+          }
+          const hosts = (body as { hosts?: unknown }).hosts;
+          if (!Array.isArray(hosts)) {
+            sendJson(res, 400, { error: 'expected a hosts array' });
+            return;
+          }
+          sendJson(res, 200, await preview.service.replaceEgress(viewer, projectId, hosts));
+          return;
+        }
+        res.writeHead(405, {
+          allow: 'GET, PUT',
+          'content-length': '0',
+          'cache-control': 'no-store',
+        });
+        res.end();
       } catch (error) {
         if (error instanceof ProjectHttpError) {
           sendJson(res, error.status, { error: error.message });
@@ -3302,8 +3981,13 @@ server.listen(cli.port, cli.host, () => {
         `(${sentinelRuleTable().length} rules, zero tokens, flagging only)`
     );
     // The same obligation the CLI banner carries: a laptop that sleeps stops
-    // watching exactly while the run it was watching keeps spending.
-    console.log('  keep this machine awake alongside long runs: caffeinate -i -m');
+    // watching exactly while the run it was watching keeps spending. The
+    // command is the HOST's own, and on a platform that cannot start a run
+    // there is nothing to say — see `sleepInhibitorHint`.
+    const inhibitor = sleepInhibitorHint();
+    if (inhibitor) {
+      console.log(`  keep this machine awake alongside long runs: ${inhibitor}`);
+    }
   } else if (health.reason === 'ungated') {
     console.log('sentinel: off (no platform journal on this path — npm run sentinel writes its own)');
   } else if (health.reason === 'lease-held' && health.incumbent) {

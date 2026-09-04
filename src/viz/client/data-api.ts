@@ -2,6 +2,7 @@ import type {
   BurninRow,
   LaunchProfile,
   VizAccountModels,
+  VizAccountSubscriptions,
   VizOrgModels,
   VizOrgProviderKeyStatus,
   VizOrganisation,
@@ -19,6 +20,8 @@ import type {
   VizSentinelSnapshot,
   VizGitHubInstallation,
   VizProject,
+  VizPreviewOpen,
+  VizPreviewSummary,
   VizProjectRun,
   VizRun,
 } from './types.js';
@@ -57,6 +60,34 @@ export const api = {
     fetchJson<VizProjectRun[]>(`/api/projects/${encodeURIComponent(projectId)}/runs`),
   githubInstallations: () =>
     fetchJson<VizGitHubInstallation[]>('/api/github/installations'),
+  // PREVIEW. A GET allocates nothing on the server, which is why status may be
+  // polled while a generation starts; every other verb is a mutation.
+  previewStatus: (projectId: string, runId: string) =>
+    fetchJson<VizPreviewSummary>(
+      `/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/preview`
+    ),
+  openPreview: (projectId: string, runId: string, body: { inFlight?: boolean } = {}) =>
+    mutateJson<VizPreviewOpen>(
+      `/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/preview/open`,
+      body
+    ),
+  restartPreview: (projectId: string, runId: string, body: { inFlight?: boolean } = {}) =>
+    mutateJson<VizPreviewOpen>(
+      `/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/preview/restart`,
+      body
+    ),
+  stopPreview: (projectId: string, runId: string) =>
+    mutateJson<VizPreviewSummary>(
+      `/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/preview/stop`,
+      {}
+    ),
+  // The TRUSTED heartbeat: it names the generation it is for, so a browser one
+  // beat behind extends nothing rather than the wrong thing.
+  previewHeartbeat: (projectId: string, runId: string, generation: number) =>
+    mutateJson<VizPreviewSummary>(
+      `/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/preview/heartbeat`,
+      { generation }
+    ),
   createProject: (body: {
     name: string;
     slug: string;
@@ -130,6 +161,14 @@ export const api = {
     mutateJson<{ segment: string; orgCount: number | null }>('/api/admin/announce', body),
   organisation: () => fetchJson<VizOrganisation>('/api/org'),
   accountModels: () => fetchJson<VizAccountModels>('/api/account/models'),
+  accountSubscriptions: () =>
+    fetchJson<VizAccountSubscriptions>('/api/account/subscriptions'),
+  startCodexSubscriptionLogin: () =>
+    mutateWithoutResult('/api/account/subscriptions/codex/login', 'POST'),
+  cancelCodexSubscriptionLogin: () =>
+    mutateWithoutResult('/api/account/subscriptions/codex/login', 'DELETE'),
+  disconnectCodexSubscription: () =>
+    mutateWithoutResult('/api/account/subscriptions/codex', 'DELETE'),
   orgModels: () => fetchJson<VizOrgModels>('/api/org/models'),
   // PUT/PATCH rather than POST: these replace one account/org-scoped resource.
   saveAccountModels: (pins: VizAccountModels['pins']) =>
@@ -176,6 +215,26 @@ async function mutateJson<T>(
     },
     body: JSON.stringify(body),
   });
+  await assertMutationSucceeded(response, path);
+  return (await response.json()) as T;
+}
+
+/** Subscription mutations expose their fresh state through the following GET. */
+async function mutateWithoutResult(path: string, method: 'POST' | 'DELETE'): Promise<void> {
+  const response = await fetch(path, {
+    method,
+    credentials: 'same-origin',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({}),
+  });
+  await assertMutationSucceeded(response, path);
+  await response.arrayBuffer();
+}
+
+async function assertMutationSucceeded(response: Response, path: string): Promise<void> {
   redirectIfAuthenticationRequired(response.status);
   if (!response.ok) {
     let detail = `HTTP ${response.status} for ${path}`;
@@ -187,5 +246,4 @@ async function mutateJson<T>(
     }
     throw new Error(detail);
   }
-  return (await response.json()) as T;
 }

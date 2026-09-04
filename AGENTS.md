@@ -37,6 +37,8 @@ Use it when a rule's rationale matters, not as default session context.
 | `src/viz/` | [src/viz/AGENTS.md](src/viz/AGENTS.md) | trace projection, GPU client, frozen MUI fallback, gated surfaces, push |
 | `src/auth/` | [src/auth/AGENTS.md](src/auth/AGENTS.md) | OAuth gate, organisations, invitations, the platform-admin flag |
 | `src/projects/` | [src/projects/AGENTS.md](src/projects/AGENTS.md) | org-scoped projects, their run corpus, artifact manifests, publication |
+| `src/launcher/` | [src/launcher/AGENTS.md](src/launcher/AGENTS.md) | the one holder of container-engine access: profiles, networks, orphan reconciliation |
+| `src/preview/` | [src/preview/AGENTS.md](src/preview/AGENTS.md) | result preview: deliverable classification, byte policy, instance state |
 | `src/github/` | [src/github/AGENTS.md](src/github/AGENTS.md) | GitHub App install, webhooks, repository creation |
 | `src/platform/` | [src/platform/AGENTS.md](src/platform/AGENTS.md) | the control-plane audit journal and the one source of notifications |
 | `src/cli/` | [src/cli/AGENTS.md](src/cli/AGENTS.md) | operator commands, doctor, burn-in and friction reporting |
@@ -106,11 +108,15 @@ npm run typecheck
 npm run lint
 npm test
 npm run check
+npm run docs:facts -- --apply         # rewrite the README's derived-facts block
+npm run docs:architecture -- --apply  # rewrite the architecture diagram IR
 npm run build
 npm run release:check
 npm run doctor
 npm run doctor -- --container
+npm run doctor -- --preview
 npm run doctor:dev
+npm run deploy:preflight            # read-only; exits 75 while a run/preview is live
 npm run auth -- list
 npm run auth -- invite --role org:owner --ttl-hours 24
 npm run auth -- grant-admin --principal <id-or-email>
@@ -200,6 +206,13 @@ separately billed `OPENAI_API_KEY`. The full contract is in
   faster, or the arms to stop measuring frame time — not a longer timeout.
 - `npm run build:worker` consumes an existing `dist/`; the source path is
   `npm run build:worker:dev`.
+- `npm run preview:demo` is DEVELOPMENT TOOLING, never a release path: a
+  loopback OAuth provider plus a seeded project and delivered static run, so
+  the preview surface is clickable on a machine that cannot execute a run.
+- `npm run build:preview` builds the preview runtime image. It consumes no
+  `dist/` because it contains none: the process it starts is a run's own
+  deliverable, not ours. Production pins it by DIGEST, which means pushing it —
+  a mutable tag is not an identity, and the configuration refuses one.
 - Release archives contain no stores, skills, traces, workspaces, or secrets.
 - Checksums must be generated inside the release directory so they name the
   downloadable basename, and must be verified before extraction.
@@ -377,6 +390,20 @@ Read the archived sections before changing something that merely looks odd.
   product is multi-tenant. Trust counters remain runtime-local.
 - Keep outward-facing docs aligned with actual supported commands and packaged
   artifacts. Do not advertise development-only paths as release contracts.
+- `docs:check` now GENERATES what is tabular and ASSERTS what is prose. The
+  README block between `<!-- atoma:facts:begin -->` and its end marker belongs
+  to `scripts/readme-facts.mjs` — edit the derivation, never the block. The
+  sentences carrying the same numbers stay hand-written and are only CHECKED,
+  because a generator that rewrote prose would silently "correct" a claim whose
+  surrounding argument no longer holds. `scripts/repo-facts.mjs` is the single
+  derivation and names, in `KNOWN_NARRATIVE`, the README numbers it refuses to
+  invent. The architecture diagram follows the same split:
+  `docs/ir/atoma.architecture.json` takes its component list from the subsystem
+  map above, while placement and edges stay authored in
+  `scripts/architecture-ir.mjs`. Rendering it needs a third-party Archify
+  checkout and is development tooling — `docs:check` never renders, and CI
+  never clones it. Full rationale:
+  [`docs/documentation-freshness-2026-09-04.md`](docs/documentation-freshness-2026-09-04.md).
 
 ## Historical evidence
 
@@ -393,6 +420,8 @@ The frozen record contains the full dated reasoning behind these rules:
 - [decided, not built — session snapshot 2026-08-23](docs/decided-not-built-2026-08-23.md)
 - [lessons from Lovable — internal architecture review 2026-08-26](docs/lovable-lessons-atoma-2026-08-26.md)
 - [per-tier host subscription — design and implementation record 2026-08-28](docs/subscription-per-tier-design-2026-08-28.md)
+- [presenting the app under development — Lovable UI study and adopted direction 2026-08-31](docs/live-preview-direction-2026-08-31.md)
+- [previewing a run in flight — decision and contract 2026-09-02](docs/in-flight-preview-2026-09-02.md)
 - [release soak v0.1.0](docs/release-soak-v0.1.0.md)
 - [release acceptance v0.1.1](docs/release-acceptance-v0.1.1.md)
 - [release acceptance v0.1.3](docs/release-acceptance-v0.1.3.md)

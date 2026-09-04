@@ -168,6 +168,7 @@ describe('navigation icon identity', () => {
 import {
   nextRunFilters,
   projectSelectionAfterActivate,
+  previewTargetForRun,
   projectSelectionAfterProjects,
   useGpuStore,
 } from '../src/viz/client-gl/store.js';
@@ -344,6 +345,48 @@ describe('full-GL Zustand scene state', () => {
     expect(projectSelectionAfterProjects('project-gone', ['project-a', 'project-b']))
       .toBe('project-a');
     expect(projectSelectionAfterProjects('project-a', [])).toBe('project-a');
+  });
+
+  it('joins a selected TRACE back to the project run a preview is keyed by', () => {
+    const runs = [
+      { projectId: 'p1', projectRunId: 'run-1', traceId: 'trace-1' },
+      // A run whose trace does not exist yet: the Projects view emits its
+      // project-run id instead, so both must resolve.
+      { projectId: 'p1', projectRunId: 'run-2', traceId: null },
+    ];
+
+    expect(previewTargetForRun(runs, 'trace-1')).toEqual({ projectId: 'p1', projectRunId: 'run-1' });
+    expect(previewTargetForRun(runs, 'run-2')).toEqual({ projectId: 'p1', projectRunId: 'run-2' });
+    // A run reached from the runs index, a burn-in row or a deep link has no
+    // project run. Guessing one would offer a control that 404s.
+    expect(previewTargetForRun(runs, 'trace-elsewhere')).toBeNull();
+    expect(previewTargetForRun(runs, null)).toBeNull();
+    expect(previewTargetForRun([], 'trace-1')).toBeNull();
+  });
+
+  it('resolves the target from the runs INDEX first, with no project selected at all', () => {
+    // MEASURED ON A LIVE RUN: summary card drawn, run `running`, and no
+    // Preview control — because the join above needs the selected project's
+    // run list, and after a reload or an arrival through the Runs tab there is
+    // no selected project and therefore no list. The index entry names its own
+    // project, so it is the source that is always there.
+    const index = [
+      { id: 'trace-9', projectId: 'p9', projectRunId: 'run-9' },
+      // A legacy entry with no projectRunId: the trace id IS the run id by
+      // the runner's convention, and the fallback says so.
+      { id: 'trace-8', projectId: 'p8' },
+      // An operator-corpus run: no project, so nothing to preview.
+      { id: 'trace-7' },
+    ];
+
+    expect(previewTargetForRun([], 'trace-9', index)).toEqual({ projectId: 'p9', projectRunId: 'run-9' });
+    expect(previewTargetForRun([], 'trace-8', index)).toEqual({ projectId: 'p8', projectRunId: 'trace-8' });
+    expect(previewTargetForRun([], 'trace-7', index)).toBeNull();
+    // The index wins over the list when both know the run.
+    const runs = [{ projectId: 'p-list', projectRunId: 'run-list', traceId: 'trace-9' }];
+    expect(previewTargetForRun(runs, 'trace-9', index)).toEqual({ projectId: 'p9', projectRunId: 'run-9' });
+    // And the list still answers when the index has nothing.
+    expect(previewTargetForRun(runs, 'trace-9', [])).toEqual({ projectId: 'p-list', projectRunId: 'run-list' });
   });
 });
 

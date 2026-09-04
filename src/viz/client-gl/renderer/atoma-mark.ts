@@ -274,11 +274,20 @@ function buildTransmittedPool(): Graphics {
   return pool;
 }
 
-function markStageToClient(
-  renderer: Renderer,
-  stageX: number,
-  stageY: number
-): { clientX: number; clientY: number; pixelScale: number } {
+interface MarkProjection {
+  clientToStage(clientX: number, clientY: number): { x: number; y: number };
+  stageToClient(
+    stageX: number,
+    stageY: number
+  ): { clientX: number; clientY: number; pixelScale: number };
+}
+
+/**
+ * Capture DOM/camera geometry once for a mark frame. A hero publishes four
+ * spills plus up to fifteen caustic corners; asking the canvas for its bounds
+ * in every projection turned one visual sample into dozens of layout reads.
+ */
+function markProjection(renderer: Renderer): MarkProjection {
   const canvas = renderer.canvas;
   const screen = renderer.screen;
   if (
@@ -289,72 +298,62 @@ function markStageToClient(
   ) {
     const viewport = sceneCameraViewport(canvas);
     if (viewport) {
-      const client = rendererToClientPoint(
-        { x: stageX, y: stageY },
-        screen.width,
-        screen.height,
-        viewport
-      );
       return {
-        clientX: client.x,
-        clientY: client.y,
-        // Radius and spectral widths return to renderer space before they are
-        // drawn, so this is the layout-to-renderer scale, not the camera's
-        // position-dependent magnification.
-        pixelScale: viewport.width / screen.width,
+        clientToStage: (clientX, clientY) => clientToRendererPoint(
+          { x: clientX, y: clientY },
+          screen.width,
+          screen.height,
+          viewport
+        ),
+        stageToClient: (stageX, stageY) => {
+          const client = rendererToClientPoint(
+            { x: stageX, y: stageY },
+            screen.width,
+            screen.height,
+            viewport
+          );
+          return {
+            clientX: client.x,
+            clientY: client.y,
+            // Radius and spectral widths return to renderer space before they
+            // are drawn, so this is the layout-to-renderer scale, not the
+            // camera's position-dependent magnification.
+            pixelScale: viewport.width / screen.width,
+          };
+        },
       };
     }
     const bounds = canvas.getBoundingClientRect();
     return {
-      clientX: bounds.left + stageX * bounds.width / screen.width,
-      clientY: bounds.top + stageY * bounds.height / screen.height,
-      pixelScale: bounds.width / screen.width,
+      clientToStage: (clientX, clientY) => ({
+        x: (clientX - bounds.left) * screen.width / Math.max(1, bounds.width),
+        y: (clientY - bounds.top) * screen.height / Math.max(1, bounds.height),
+      }),
+      stageToClient: (stageX, stageY) => ({
+        clientX: bounds.left + stageX * bounds.width / screen.width,
+        clientY: bounds.top + stageY * bounds.height / screen.height,
+        pixelScale: bounds.width / screen.width,
+      }),
     };
   }
-  return { clientX: stageX, clientY: stageY, pixelScale: 1 };
-}
-
-function markClientToStage(
-  renderer: Renderer,
-  clientX: number,
-  clientY: number
-): { x: number; y: number } {
-  const canvas = renderer.canvas;
-  const screen = renderer.screen;
-  if (
-    typeof HTMLCanvasElement !== 'undefined' &&
-    canvas instanceof HTMLCanvasElement &&
-    screen.width > 0 &&
-    screen.height > 0
-  ) {
-    const viewport = sceneCameraViewport(canvas);
-    if (viewport) {
-      return clientToRendererPoint(
-        { x: clientX, y: clientY },
-        screen.width,
-        screen.height,
-        viewport
-      );
-    }
-    const bounds = canvas.getBoundingClientRect();
-    if (bounds.width > 0 && bounds.height > 0) {
-      return {
-        x: (clientX - bounds.left) * screen.width / bounds.width,
-        y: (clientY - bounds.top) * screen.height / bounds.height,
-      };
-    }
-  }
-  return { x: clientX, y: clientY };
+  return {
+    clientToStage: (clientX, clientY) => ({ x: clientX, y: clientY }),
+    stageToClient: (stageX, stageY) => ({
+      clientX: stageX,
+      clientY: stageY,
+      pixelScale: 1,
+    }),
+  };
 }
 
 function markClientToLocal(
-  renderer: Renderer,
+  projection: MarkProjection,
   container: { x: number; y: number },
   scale: number,
   clientX: number,
   clientY: number
 ): { x: number; y: number } {
-  const stage = markClientToStage(renderer, clientX, clientY);
+  const stage = projection.clientToStage(clientX, clientY);
   const safeScale = scale === 0 ? 1 : scale;
   return {
     x: (stage.x - container.x - ATOMA_MARK_LOCAL_CENTER) / safeScale + ATOMA_MARK_LOCAL_CENTER,
@@ -392,7 +391,7 @@ function fieldSpillsToSample(
   container: { x: number; y: number },
   scale: number,
   radiusPx: number,
-  renderer: Renderer
+  projection: MarkProjection
 ) {
   return spills.map((spill) => {
     const rgb = markColorToRgb(spill.color);
@@ -400,7 +399,7 @@ function fieldSpillsToSample(
       (spill.x - ATOMA_MARK_LOCAL_CENTER) * scale;
     const stageY = container.y + ATOMA_MARK_LOCAL_CENTER +
       (spill.y - ATOMA_MARK_LOCAL_CENTER) * scale;
-    const client = markStageToClient(renderer, stageX, stageY);
+    const client = projection.stageToClient(stageX, stageY);
     return {
       clientX: client.clientX,
       clientY: client.clientY,
@@ -628,7 +627,7 @@ export function attachAtomaMark(
    * capture cannot feed on its own output. The scheduler below samples this
    * broad pass at 12 Hz and invalidates it immediately on resize or rebuild.
    */
-  const envPass = ((): ((pointer: PointerLightSnapshot) => void) | null => {
+  const envPass = ((): ((pointer: PointerLightSnapshot, projection: MarkProjection) => void) | null => {
     if (!renderer || !shell) return null;
     if (visualScale < ATOMA_MARK_ENV_MIN_SCALE) return null;
     const stage = parent.parent;
@@ -661,7 +660,7 @@ export function attachAtomaMark(
       for (const texture of textures) ownedTextures.add(texture);
       writeIndex = 0;
     };
-    return (pointer) => {
+    return (pointer, projection) => {
       const screenW = Math.max(1, renderer.screen.width);
       const screenH = Math.max(1, renderer.screen.height);
       const fit = Math.min(1, ATOMA_MARK_ENV_MAX_PX / Math.max(screenW, screenH));
@@ -671,11 +670,7 @@ export function attachAtomaMark(
       );
       transform.set(envW / screenW, 0, 0, envH / screenH, 0, 0);
       if (pointer.active) {
-        const stagePos = markClientToStage(
-          renderer,
-          pointer.clientX,
-          pointer.clientY
-        );
+        const stagePos = projection.clientToStage(pointer.clientX, pointer.clientY);
         echo.position.set(
           stagePos.x - ATOMA_CURSOR_HOTSPOT.x,
           stagePos.y - ATOMA_CURSOR_HOTSPOT.y
@@ -764,6 +759,11 @@ export function attachAtomaMark(
     const beadVisible = markBeadVisible();
     const scale = visualScale * frame.scale;
     const pointer = renderer ? readPointerLight() : null;
+    // Compact chrome has no far-field receiver. Until the pointer actually
+    // interacts with that crystal it needs no DOM projection at all.
+    const projection = renderer && (pointer?.active || visualScale >= ATOMA_MARK_ENV_MIN_SCALE)
+      ? markProjection(renderer)
+      : null;
     let pointerSpills: AtomaMarkRearSpill[] = [];
     let lamp: {
       position: readonly [number, number, number];
@@ -778,10 +778,10 @@ export function attachAtomaMark(
     } = { uv: [0, 0], on: 0 };
     /** The pointer's local position when it couples into the glass, else null. */
     let coupledLocal: { x: number; y: number } | null = null;
-    if (renderer && pointer) {
+    if (renderer && pointer && projection) {
       if (pointer.active) {
         const local = markClientToLocal(
-          renderer,
+          projection,
           container,
           scale,
           pointer.clientX,
@@ -790,11 +790,7 @@ export function attachAtomaMark(
         pointerSpills = collectPointerFieldSpills(frame, local.x, local.y);
         lamp = pointerLampForLocal(local.x, local.y);
         coupledLocal = local;
-        const stagePos = markClientToStage(
-          renderer,
-          pointer.clientX,
-          pointer.clientY
-        );
+        const stagePos = projection.clientToStage(pointer.clientX, pointer.clientY);
         const screenW = Math.max(1, renderer.screen.width);
         const screenH = Math.max(1, renderer.screen.height);
         pointerClip = {
@@ -860,7 +856,7 @@ export function attachAtomaMark(
     // Lantern light belongs on the far-field mesh. The bead throws from
     // inside; the pointer lamp sits in front and has to go THROUGH the glass
     // to reach the same wall — same rear windows, stained by the faces.
-    if (!renderer) {
+    if (!renderer || !projection || visualScale < ATOMA_MARK_ENV_MIN_SCALE) {
       clearMarkFieldLight();
     } else {
       const localRadius = Math.max(
@@ -877,7 +873,7 @@ export function attachAtomaMark(
         writeMarkFieldLight([]);
       } else {
         writeMarkFieldLight(
-          fieldSpillsToSample(merged, container, scale, localRadius, renderer)
+          fieldSpillsToSample(merged, container, scale, localRadius, projection)
         );
       }
       // The CAST is CPU ray traced. Its published sample stays live between
@@ -909,12 +905,11 @@ export function attachAtomaMark(
                 (corner.x - ATOMA_MARK_LOCAL_CENTER) * scale;
               const stageY = container.y + ATOMA_MARK_LOCAL_CENTER +
                 (corner.y - ATOMA_MARK_LOCAL_CENTER) * scale;
-              const client = markStageToClient(renderer, stageX, stageY);
+              const client = projection.stageToClient(stageX, stageY);
               points.push({ x: client.clientX, y: client.clientY });
               const delta = band?.[index];
               if (spectral && delta) {
-                const endpoint = markStageToClient(
-                  renderer,
+                const endpoint = projection.stageToClient(
                   stageX + delta.x * scale,
                   stageY + delta.y * scale
                 );
@@ -988,8 +983,8 @@ export function attachAtomaMark(
       reducedMotion ||
       nowMs - envLastCaptureMs >= ATOMA_MARK_ENV_UPDATE_INTERVAL_MS
     );
-    if (captureEnv && pointer) {
-      envPass(pointer);
+    if (captureEnv && pointer && projection) {
+      envPass(pointer, projection);
       envDirty = false;
       envLastCaptureMs = nowMs;
     }

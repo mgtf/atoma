@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { spawn, spawnSync } from 'node:child_process';
 import { connect } from 'node:net';
+import { forceKillTestProcessTree } from './helpers.js';
 
 /**
  * `npm run viz:dev` must not leave a dev server behind on Ctrl-C.
@@ -28,6 +29,7 @@ import { connect } from 'node:net';
  */
 const API_PORT = 44_111;
 const DEV_PORT = 45_173;
+const posixIt = it.skipIf(process.platform === 'win32');
 
 function isListening(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -54,7 +56,7 @@ async function waitFor(want: boolean, ports: number[], ms: number): Promise<bool
 }
 
 describe('viz:dev — Ctrl-C frees both ports', () => {
-  it('leaves no server behind when the launcher is killed the way npm kills it', async () => {
+  posixIt('leaves no server behind when the launcher is killed the way npm kills it', async () => {
     expect(
       await waitFor(false, [API_PORT, DEV_PORT], 0),
       `ports ${API_PORT}/${DEV_PORT} busy before the test`
@@ -87,11 +89,7 @@ describe('viz:dev — Ctrl-C frees both ports', () => {
         'a child outlived the launcher and kept its port'
       ).toBe(true);
     } finally {
-      try {
-        process.kill(-group, 'SIGKILL');
-      } catch {
-        // The group is already gone on the passing path.
-      }
+      forceKillTestProcessTree(group);
       // A failing run leaks the very orphans under test; reclaim them so the
       // next run's precondition check is not poisoned by this one.
       for (const port of [API_PORT, DEV_PORT]) if (await isListening(port)) reclaim(port);

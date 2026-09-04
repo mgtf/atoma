@@ -28,6 +28,23 @@ export { appendHttpProbe, mergeProbeManifestWrite, mergeShellProbe, probeManifes
 import { elementForTool } from '../contracts/toolTaxonomy.js';
 import puppeteer, { type Browser } from 'puppeteer';
 
+/**
+ * Which entry file `start_node_server` actually spawned, by bound port.
+ *
+ * THE ONE CHANNEL BETWEEN TWO TOOLS, and it exists because the two halves of
+ * the same fact are observed in different places: `start_node_server` knows
+ * the entry file (it is the argument it hands to `spawn`) and never writes the
+ * manifest; `fetch_url record:true` writes the http entry and only ever sees a
+ * URL. Without this the recorded evidence says a server answered and cannot
+ * say which file was the server — which is precisely what a later reader needs
+ * in order to start it again.
+ *
+ * MACHINE-OBSERVED, not declared: the value is the spawned argument, already
+ * jailed by `sandbox.resolve`, never a model's prose about its own layout.
+ * Per tool set, so it dies with the run and two runs cannot see each other's.
+ */
+export type NodeServerEntries = Map<number, string>;
+
 export interface BuiltinToolOptions {
   sandbox: ToolSandbox;
   logger?: Logger;
@@ -35,6 +52,8 @@ export interface BuiltinToolOptions {
   shellAllowlist?: string[];
   /** Hard timeout for shell commands in ms. Defaults to 30s. */
   shellTimeoutMs?: number;
+  /** Shared by `start_node_server` and `fetch_url`; `defaultBuiltinTools` supplies one. */
+  nodeServers?: NodeServerEntries;
 }
 
 /** Simple declaration + implementation bundle for an atom tool. */
@@ -1046,6 +1065,7 @@ export function fetchUrlTool(opts: BuiltinToolOptions): BuiltinTool {
             status: number;
             body?: string;
             note?: string;
+            entry?: string;
           } = {
             probe: 'http',
             method,
@@ -1055,6 +1075,20 @@ export function fetchUrlTool(opts: BuiltinToolOptions): BuiltinTool {
           };
           if (typeof args['note'] === 'string' && args['note'].trim()) {
             entry.note = args['note'].trim();
+          }
+          // WHICH FILE ANSWERED. Only for a loopback request whose port this
+          // tool set actually started: an external API on 443 is not one of
+          // our servers, and stamping it with an unrelated entry file would
+          // manufacture evidence rather than record it. The bound port is
+          // OS-assigned and ephemeral, so the lookup is exact.
+          const loopback =
+            parsedUrl.hostname === 'localhost' ||
+            parsedUrl.hostname === '127.0.0.1' ||
+            parsedUrl.hostname === '[::1]' ||
+            parsedUrl.hostname === '::1';
+          if (loopback && parsedUrl.port) {
+            const servedByEntry = opts.nodeServers?.get(Number(parsedUrl.port));
+            if (servedByEntry) entry.entry = servedByEntry;
           }
           const manifestPath = opts.sandbox.resolve(PROBE_MANIFEST_FILENAME);
           const existing = existsSync(manifestPath)
@@ -1216,10 +1250,20 @@ export function startNodeServerTool(opts: BuiltinToolOptions): BuiltinTool {
         `[tool:start_node_server] node ${entry} :${port} in ${opts.sandbox.root}`
       );
 
+      // WHICH FILE IS THE SERVER. Recorded against the bound port so
+      // `fetch_url record:true` can stamp it onto the http evidence it writes.
+      // The value is the argument that was spawned — `sandbox.resolve` above
+      // already refused anything outside the workspace — so it is an
+      // observation, never a claim. Canonicalising is the READER's job:
+      // `src/tools` deliberately imports nothing outside node builtins and its
+      // own siblings, which is what keeps the worker image's closure small.
+      opts.nodeServers?.set(port, entry);
+
       return {
         ok: true,
         url: `http://localhost:${port}/`,
         port,
+        entry,
         pid: child.pid,
         servedFrom: opts.sandbox.root,
       };
@@ -2910,7 +2954,13 @@ export function recordProbeTool(opts: BuiltinToolOptions): BuiltinTool {
   };
 }
 
-export function defaultBuiltinTools(opts: BuiltinToolOptions): BuiltinTool[] {
+export function defaultBuiltinTools(options: BuiltinToolOptions): BuiltinTool[] {
+  // ONE map for this tool set, so `start_node_server` and `fetch_url` share
+  // the channel by construction rather than by both remembering to.
+  const opts: BuiltinToolOptions = {
+    ...options,
+    nodeServers: options.nodeServers ?? new Map(),
+  };
   return [
     writeFileTool(opts),
     editFileTool(opts),

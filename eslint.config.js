@@ -32,6 +32,11 @@ export default tseslint.config(
       // tree that belongs to no tsconfig here: 860 type-aware errors from code
       // that is not this working tree's. Not project source, never linted.
       '.claude/worktrees/**',
+      // Same reason, the other conventional location: a `git worktree` placed
+      // inside the checkout is a second full source tree belonging to no
+      // tsconfig here, so `eslint .` reports hundreds of parser errors from
+      // code this working tree does not own.
+      '.worktrees/**',
     ],
   },
   js.configs.recommended,
@@ -51,6 +56,14 @@ export default tseslint.config(
       reportUnusedDisableDirectives: 'error',
     },
     rules: {
+      // ESLint 10 added these three rules to `eslint:recommended`. Keep this
+      // dependency migration behaviour-neutral: adopting a new mechanical
+      // gate requires its own measured review, rather than silently changing
+      // the calibrated lint contract during a major-version bump.
+      'no-unassigned-vars': 'off',
+      'no-useless-assignment': 'off',
+      'preserve-caught-error': 'off',
+
       // ── the rules that pay for the whole setup ──────────────────────────
       // Async correctness. Not stylistic: an unawaited promise in the
       // supervise loop is work the run does not wait for.

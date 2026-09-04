@@ -11,7 +11,7 @@ import { z } from 'zod';
  * but an English summary.
  *
  * A per-tier subscription choice ends that. A run may now spend the operator's
- * own Claude login on L2 and L3 while L1 bills the organisation's Z.ai key, and
+ * own Claude or ChatGPT login on L2 and L3 while L1 bills the organisation's Z.ai key, and
  * a row that names the run cannot describe it. This module is the shape that
  * can: four rows, one per tier plus the BASE transport, each naming what was
  * selected, which provider served it and who paid.
@@ -33,6 +33,12 @@ import { z } from 'zod';
 /** The prefix a per-tier subscription selection is stored under. */
 export const HOST_SUBSCRIPTION_PREFIX = 'host-subscription';
 
+/** The distinct sentinel for the operator's ChatGPT-backed Codex login. */
+export const CHATGPT_SUBSCRIPTION_PREFIX = 'chatgpt-subscription';
+
+/** A requester's own ChatGPT login, distinct from the operator's host login. */
+export const PRINCIPAL_CHATGPT_SUBSCRIPTION_PREFIX = 'principal-chatgpt-subscription';
+
 /**
  * What the transport can actually serve. `resolveCliModel` maps every pin onto
  * one of these three aliases and reports the ALIAS back as `servedModel`,
@@ -44,6 +50,24 @@ export const HOST_SUBSCRIPTION_PREFIX = 'host-subscription';
 export const HOST_SUBSCRIPTION_ALIASES = ['opus', 'sonnet', 'haiku'] as const;
 
 export type HostSubscriptionAlias = (typeof HOST_SUBSCRIPTION_ALIASES)[number];
+
+/**
+ * Exact Codex slugs offered by the account picker. Codex remains a supervisor
+ * transport: these selections are valid on L2/L3 only because L1 owns the
+ * tool loop and Codex cannot expose that loop through ToolSandbox.
+ */
+export const CHATGPT_SUBSCRIPTION_MODELS = [
+  'gpt-5.6-sol',
+  'gpt-5.6-terra',
+  'gpt-5.4-mini',
+] as const;
+
+export type ChatGptSubscriptionModel = (typeof CHATGPT_SUBSCRIPTION_MODELS)[number];
+
+export interface HostSubscriptionRoute {
+  readonly provider: 'claude-cli' | 'codex';
+  readonly model: HostSubscriptionAlias | ChatGptSubscriptionModel;
+}
 
 /**
  * A NON-ROUTABLE SENTINEL, deliberately not `claude-cli:opus`.
@@ -61,7 +85,7 @@ export type HostSubscriptionAlias = (typeof HOST_SUBSCRIPTION_ALIASES)[number];
  * check.
  */
 export function isHostSubscriptionSelection(value: string): boolean {
-  return hostSubscriptionAlias(value) !== null;
+  return hostSubscriptionRoute(value) !== null;
 }
 
 /** The alias a sentinel names, or null when the value is not one. */
@@ -80,6 +104,72 @@ export function hostSubscriptionSelection(alias: HostSubscriptionAlias): string 
   return `${HOST_SUBSCRIPTION_PREFIX}:${alias}`;
 }
 
+/** The Codex model named by a ChatGPT sentinel, or null. */
+export function chatGptSubscriptionModel(value: string): ChatGptSubscriptionModel | null {
+  const separator = value.indexOf(':');
+  if (separator <= 0) return null;
+  if (value.slice(0, separator) !== CHATGPT_SUBSCRIPTION_PREFIX) return null;
+  const model = value.slice(separator + 1);
+  return (CHATGPT_SUBSCRIPTION_MODELS as readonly string[]).includes(model)
+    ? (model as ChatGptSubscriptionModel)
+    : null;
+}
+
+/** The stored spelling for one ChatGPT subscription model. */
+export function chatGptSubscriptionSelection(model: ChatGptSubscriptionModel): string {
+  return `${CHATGPT_SUBSCRIPTION_PREFIX}:${model}`;
+}
+
+/** The model named by a requester's personal ChatGPT sentinel, or null. */
+export function principalChatGptSubscriptionModel(
+  value: string
+): ChatGptSubscriptionModel | null {
+  const separator = value.indexOf(':');
+  if (separator <= 0) return null;
+  if (value.slice(0, separator) !== PRINCIPAL_CHATGPT_SUBSCRIPTION_PREFIX) return null;
+  const model = value.slice(separator + 1);
+  return (CHATGPT_SUBSCRIPTION_MODELS as readonly string[]).includes(model)
+    ? (model as ChatGptSubscriptionModel)
+    : null;
+}
+
+export function principalChatGptSubscriptionSelection(model: ChatGptSubscriptionModel): string {
+  return `${PRINCIPAL_CHATGPT_SUBSCRIPTION_PREFIX}:${model}`;
+}
+
+export function isPrincipalSubscriptionSelection(value: string): boolean {
+  return principalChatGptSubscriptionModel(value) !== null;
+}
+
+/** One Codex process has one credential home, so a pin set cannot name both owners. */
+export function selectionsMixCodexOwners(
+  selections: Iterable<string | null | undefined>
+): boolean {
+  let host = false;
+  let principal = false;
+  for (const selection of selections) {
+    if (!selection) continue;
+    host ||= chatGptSubscriptionModel(selection) !== null;
+    principal ||= principalChatGptSubscriptionModel(selection) !== null;
+    if (host && principal) return true;
+  }
+  return false;
+}
+
+/** Translate a non-routable subscription sentinel into its guarded transport. */
+export function hostSubscriptionRoute(value: string): HostSubscriptionRoute | null {
+  const alias = hostSubscriptionAlias(value);
+  if (alias) return { provider: 'claude-cli', model: alias };
+  const model = chatGptSubscriptionModel(value);
+  return model ? { provider: 'codex', model } : null;
+}
+
+/** Translate a guarded personal sentinel after its principal/profile check. */
+export function principalSubscriptionRoute(value: string): HostSubscriptionRoute | null {
+  const model = principalChatGptSubscriptionModel(value);
+  return model ? { provider: 'codex', model } : null;
+}
+
 /**
  * WHO paid. `host-selfhosted` is Ollama: the operator's hardware, priced at
  * zero and billed to nobody, which is a different fact from "the operator's
@@ -87,6 +177,7 @@ export function hostSubscriptionSelection(alias: HostSubscriptionAlias): string 
  */
 export const payerKindSchema = z.enum([
   'host-subscription',
+  'principal-subscription',
   'org-key',
   'host-key',
   'host-selfhosted',
@@ -147,10 +238,28 @@ export function ledgerTouchesSubscription(ledger: RunPayerLedger): boolean {
   return ledgerRows(ledger).some(([, row]) => row.payer === 'host-subscription');
 }
 
+/** Does any row spend the requesting principal's own subscription? */
+export function ledgerTouchesPrincipalSubscription(ledger: RunPayerLedger): boolean {
+  return ledgerRows(ledger).some(([, row]) => row.payer === 'principal-subscription');
+}
+
+/** Any CLI subscription, regardless of whether host or requester owns it. */
+export function ledgerTouchesAnySubscription(ledger: RunPayerLedger): boolean {
+  return ledgerRows(ledger).some(
+    ([, row]) => row.payer === 'host-subscription' || row.payer === 'principal-subscription'
+  );
+}
+
 /** The tiers on the subscription, in tier order, base included when it is. */
 export function subscriptionTiers(ledger: RunPayerLedger): readonly string[] {
   return ledgerRows(ledger)
     .filter(([, row]) => row.payer === 'host-subscription')
+    .map(([tier]) => tier);
+}
+
+export function principalSubscriptionTiers(ledger: RunPayerLedger): readonly string[] {
+  return ledgerRows(ledger)
+    .filter(([, row]) => row.payer === 'principal-subscription')
     .map(([tier]) => tier);
 }
 
@@ -169,6 +278,7 @@ export function runPayerDetail(ledger: RunPayerLedger): Record<string, unknown> 
       ])
     ),
     subscriptionTiers: subscriptionTiers(ledger),
+    principalSubscriptionTiers: principalSubscriptionTiers(ledger),
   };
 }
 
@@ -183,4 +293,11 @@ export function hostSubscriptionSummary(ledger: RunPayerLedger): string {
   const billed = ledgerRows(ledger).filter(([, row]) => row.payer === 'org-key').length;
   const mixed = billed > 0 ? `, ${billed} on the organisation's own key` : '';
   return `Run spent the host subscription on ${tiers.join(', ')}${mixed}`;
+}
+
+/** Audit summary for a run spending only the requester's own subscription rows. */
+export function principalSubscriptionSummary(ledger: RunPayerLedger): string {
+  const tiers = principalSubscriptionTiers(ledger);
+  if (tiers.length === 0) return 'Run spent no requester subscription';
+  return `Run spent the requester subscription on ${tiers.join(', ')}`;
 }

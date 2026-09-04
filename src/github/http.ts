@@ -10,7 +10,7 @@ import {
 } from '../auth/oidc.js';
 import type { Viewer } from '../auth/store.js';
 import { roleAtLeast } from '../projects/service.js';
-import type { GitHubAppClient } from './client.js';
+import type { GitHubAppClient, GitHubInstallationView } from './client.js';
 import type { GitHubAppConfig } from './config.js';
 import { canonicalGitHubId } from './config.js';
 import {
@@ -40,7 +40,64 @@ export const GITHUB_COPY = Object.freeze({
   linkFailed: 'GitHub installation could not be linked to this organisation.',
   alreadyLinked: 'That GitHub installation is already linked to another organisation.',
   providerFailure: 'GitHub could not be reached. Start the connect flow again.',
+  notYours: 'That GitHub installation is not one your GitHub account can administer.',
+  suspended: 'That GitHub installation is suspended at GitHub. Re-enable it, then connect again.',
 });
+
+/** Which door an installation came through, for the audit row. */
+export type InstallationBindOrigin = 'setup' | 'authorize';
+
+/**
+ * THE ONE PLACE AN INSTALLATION BECOMES THIS ORGANISATION'S.
+ *
+ * Both doors route through it, and that is the point: the setup callback and
+ * the authorize callback each used to link on their own terms, and they did
+ * not agree. Setup checked the role and skipped the journal; authorize
+ * journaled nothing and checked NO role at all. Neither refused a suspended
+ * installation, though `suspended` has been parsed off the API since the
+ * client was written and read by nothing.
+ *
+ * The caller supplies a view it has already VERIFIED against the connecting
+ * user (`verifyInstallation`), never one read from the App JWT alone — see
+ * `completeGitHubSetup` for why that distinction is the security property.
+ *
+ * Returns null when the binding happened, or the refusal to send back.
+ */
+function bindInstallation(input: {
+  readonly viewer: Viewer;
+  readonly github: GitHubStore;
+  readonly view: GitHubInstallationView;
+  readonly via: InstallationBindOrigin;
+  readonly events?: PlatformEventSink;
+}): GitHubHttpResult | null {
+  const forbidden = requireAdmin(input.viewer);
+  if (forbidden) return forbidden;
+  if (input.view.suspended) return htmlError(409, GITHUB_COPY.suspended);
+  input.github.linkInstallation({
+    installationId: input.view.installationId,
+    orgId: input.viewer.orgId,
+    accountId: input.view.accountId,
+    accountLogin: input.view.accountLogin,
+    targetType: input.view.targetType,
+    repositorySelection: input.view.repositorySelection,
+    permissions: input.view.permissions,
+    connectedByPrincipalId: input.viewer.principalId,
+  });
+  input.events?.({
+    kind: 'github.installation_linked',
+    actorType: 'principal',
+    actorId: input.viewer.principalId,
+    orgId: input.viewer.orgId,
+    summary: `GitHub installation linked for ${eventLabel(input.view.accountLogin)} (${input.view.targetType})`,
+    detail: {
+      installationId: input.view.installationId,
+      targetType: input.view.targetType,
+      repositorySelection: input.view.repositorySelection,
+      via: input.via,
+    },
+  });
+  return null;
+}
 
 export type GitHubHttpResult =
   | { readonly kind: 'redirect'; readonly location: string; readonly cookies?: readonly string[] }
@@ -122,9 +179,24 @@ export function startGitHubConnect(input: {
   readonly viewer: Viewer;
   readonly github: GitHubStore;
   readonly config: GitHubAppConfig;
+  /** Where to send a viewer whose GitHub account this deployment cannot yet read. */
+  readonly authorizePath?: string;
 }): GitHubHttpResult {
   const forbidden = requireAdmin(input.viewer);
   if (forbidden) return forbidden;
+  // THE USER TOKEN IS A PRECONDITION OF CONNECTING, not a consequence of it.
+  // The setup callback must prove the installation GitHub names is one THIS
+  // viewer can administer, and the only way to ask that is with the viewer's
+  // own token. Acquiring it here — before GitHub is involved — is what lets
+  // the callback verify instead of trust; acquiring it after the link, as this
+  // flow used to, is what left the link unverified.
+  //
+  // Almost nobody sees this hop: an ordinary GitHub login already stores the
+  // authorization. It exists for the admin who signed in with another
+  // provider, who authorizes once and then connects normally.
+  if (input.authorizePath && !input.github.getUserAuthorization(input.viewer.principalId)) {
+    return { kind: 'redirect', location: input.authorizePath };
+  }
   const state = newGitHubConnectState();
   try {
     input.github.createConnectState({
@@ -156,8 +228,14 @@ export async function completeGitHubSetup(input: {
   readonly state: string | null;
   readonly installationId: string | null;
   readonly setupAction: string | null;
-  readonly authorizePath: string;
   readonly homePath: string;
+  /**
+   * The connecting viewer's own GitHub token, so the untrusted
+   * `installation_id` can be corroborated against what THEY can administer.
+   * Throwing is a refusal: `startGitHubConnect` will not start a flow whose
+   * callback could not verify.
+   */
+  readonly resolveUserAccessToken: (principalId: string) => Promise<string>;
   readonly events?: PlatformEventSink;
 }): Promise<GitHubHttpResult> {
   const forbidden = requireAdmin(input.viewer);
@@ -175,35 +253,33 @@ export async function completeGitHubSetup(input: {
   if (!input.installationId) return htmlError(400, GITHUB_COPY.invalidInstallation);
   try {
     const installationId = canonicalGitHubId(input.installationId, 'GitHub installation id');
-    const installation = await input.client.getAppInstallation(installationId);
-    input.github.linkInstallation({
-      installationId: installation.installationId,
-      orgId: input.viewer.orgId,
-      accountId: installation.accountId,
-      accountLogin: installation.accountLogin,
-      targetType: installation.targetType,
-      repositorySelection: installation.repositorySelection,
-      permissions: installation.permissions,
-      connectedByPrincipalId: input.viewer.principalId,
+    // `installation_id` ARRIVES FROM A URL THE VIEWER CAN TYPE, and the connect
+    // state does not bind one — the row holds a principal and an org, nothing
+    // more. So the App-JWT view that used to stand here proved only "this is
+    // some installation of this App", and an authenticated admin could paste a
+    // stranger's installation id onto their own state and capture it: the
+    // cross-org guard fires only once a row exists, so the FIRST binder wins,
+    // permanently. Open signup makes org:admin free, and installation ids are
+    // not secret — they sit in a settings URL and in every webhook payload.
+    //
+    // `verifyInstallation` is the same call the authorize door already made:
+    // it corroborates the App view against the CONNECTING USER's own
+    // /user/installations, so an id the viewer cannot administer is refused
+    // before anything is written. `startGitHubConnect` guarantees the token
+    // exists by this point.
+    const userAccessToken = await input.resolveUserAccessToken(input.viewer.principalId);
+    const installation = await input.client.verifyInstallation({
+      userAccessToken,
+      installationId,
     });
-    input.events?.({
-      kind: 'github.installation_linked',
-      actorType: 'principal',
-      actorId: input.viewer.principalId,
-      orgId: input.viewer.orgId,
-      summary: `GitHub installation linked for ${eventLabel(installation.accountLogin)} (${installation.targetType})`,
-      detail: {
-        installationId: installation.installationId,
-        targetType: installation.targetType,
-        repositorySelection: installation.repositorySelection,
-      },
+    const refused = bindInstallation({
+      viewer: input.viewer,
+      github: input.github,
+      view: installation,
+      via: 'setup',
+      ...(input.events ? { events: input.events } : {}),
     });
-    if (
-      installation.targetType === 'User' &&
-      !input.github.getUserAuthorization(input.viewer.principalId)
-    ) {
-      return { kind: 'redirect', location: input.authorizePath };
-    }
+    if (refused) return refused;
     return { kind: 'redirect', location: input.homePath };
   } catch (error) {
     if (error instanceof GitHubInstallationCrossOrgError) {
@@ -269,6 +345,7 @@ export async function completeGitHubUserCallback(input: {
   readonly installationId: string | null;
   readonly client: GitHubAppClient;
   readonly homePath: string;
+  readonly events?: PlatformEventSink;
   readonly fetchImpl?: typeof fetch;
 }): Promise<GitHubHttpResult> {
   const consumed = input.github.consumeConnectState({
@@ -305,16 +382,18 @@ export async function completeGitHubUserCallback(input: {
         userAccessToken: tokens.accessToken,
         installationId: input.installationId,
       });
-      input.github.linkInstallation({
-        installationId: installation.installationId,
-        orgId: input.viewer.orgId,
-        accountId: installation.accountId,
-        accountLogin: installation.accountLogin,
-        targetType: installation.targetType,
-        repositorySelection: installation.repositorySelection,
-        permissions: installation.permissions,
-        connectedByPrincipalId: input.viewer.principalId,
+      // Through the shared binder, which is where this path picks up the role
+      // check it never had and the audit row it never wrote. The token write
+      // above stands either way: it is this principal's own authorization, and
+      // a refused LINK is not a reason to forget that they authorized.
+      const refused = bindInstallation({
+        viewer: input.viewer,
+        github: input.github,
+        view: installation,
+        via: 'authorize',
+        ...(input.events ? { events: input.events } : {}),
       });
+      if (refused) return refused;
     }
     return { kind: 'redirect', location: input.homePath };
   } catch (error) {

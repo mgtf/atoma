@@ -1,11 +1,24 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
-import { existsSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
 import {
   CodexCliLlmClient,
+  CodexTransportError,
   buildCodexArgs,
+  CODEX_TEXT_ONLY_DISABLED_FEATURES,
   cleanupCodexJails,
+  codexChildEnvironment,
   codexCallTimeoutMs,
   codexEffortFor,
   foldCodexEvents,
@@ -21,6 +34,7 @@ import {
 import { InMemoryMetrics, MetricsLlmClient, pricesFor } from '../src/core/metrics.js';
 import { RoutingLlmClient } from '../src/core/llmRouting.js';
 import type { LlmCompletionRequest, ToolExecutor } from '../src/core/types.js';
+import { PERSONAL_CODEX_PROFILE_ROOT_ENV } from '../src/core/codexHomeLease.js';
 import { makeTools } from './helpers/factories.js';
 
 afterEach(() => cleanupCodexJails());
@@ -47,6 +61,8 @@ function fakeChild(script: {
   gapMs?: number;
   stderr?: string;
   neverEnd?: boolean;
+  pid?: number;
+  closeOnKill?: boolean;
 }): ChildProcess {
   const child = new EventEmitter() as unknown as ChildProcess & {
     stdout: EventEmitter;
@@ -60,12 +76,12 @@ function fakeChild(script: {
     stdout,
     stderr,
     stdin: { end: () => undefined },
-    pid: undefined,
+    pid: script.pid,
     killed: false,
     kill: () => {
       (child as { killed: boolean }).killed = true;
       // A killed subprocess closes; the client must not hang waiting.
-      setImmediate(() => child.emit('close', null));
+      if (script.closeOnKill !== false) setImmediate(() => child.emit('close', null));
       return true;
     },
   });
@@ -92,6 +108,21 @@ const OK_LINES = [
   '{"type":"item.completed","item":{"id":"i0","type":"agent_message","text":"{\\"ok\\":1}"}}',
   '{"type":"turn.completed","usage":{"input_tokens":9768,"cached_input_tokens":6912,"cache_write_input_tokens":0,"output_tokens":9,"reasoning_output_tokens":4}}',
 ];
+
+function installFakeCodex(binRoot: string): void {
+  const executable = path.join(binRoot, 'codex');
+  writeFileSync(
+    executable,
+    [
+      '#!/usr/bin/env node',
+      `const lines = ${JSON.stringify(OK_LINES)}`,
+      'process.stdin.resume()',
+      "process.stdin.on('end', () => { for (const line of lines) console.log(line) })",
+    ].join('\n'),
+    'utf8'
+  );
+  chmodSync(executable, 0o755);
+}
 
 describe('resolveCodexModel — a subscription serves slugs, not families', () => {
   afterEach(() => {
@@ -172,16 +203,43 @@ describe('buildCodexArgs — the isolation guarantees live here', () => {
   });
 
   it('confines the model to an empty cwd that is not a git repo', () => {
-    // THE LOAD-BEARING FLAG. Codex keeps its own shell/read tools
-    // (openai/codex#6049), so the cwd bounds what it can reach — an empty
-    // dir outside the repo keeps atoma.db and skills/ off the map.
+    // A second boundary around residual built-ins: the permission profile
+    // makes this empty directory the only readable workspace.
     expect(args).toContain('-C');
     expect(args[args.indexOf('-C') + 1]).toBe('/tmp/jail/cwd');
     expect(args).toContain('--skip-git-repo-check');
   });
 
-  it('forbids writes: L2/L3 produce text, never disk changes', () => {
-    expect(args[args.indexOf('-s') + 1]).toBe('read-only');
+  it('uses one strict permission profile, never the incompatible legacy sandbox', () => {
+    expect(args).not.toContain('-s');
+    expect(args).not.toContain('--sandbox');
+    expect(args).toContain('--strict-config');
+    expect(args).toContain('default_permissions="atoma-text-only"');
+    expect(args).toContain(
+      'permissions.atoma-text-only.filesystem={":root"="deny",":minimal"="read",":workspace_roots"={"."="read"}}'
+    );
+    expect(args).toContain('permissions.atoma-text-only.network.enabled=false');
+    expect(args).toContain('approval_policy="never"');
+    expect(args).toContain('cli_auth_credentials_store="file"');
+  });
+
+  it('removes every avoidable Codex tool from a text-only completion', () => {
+    const disabled = args.flatMap((arg, index) =>
+      arg === '--disable' ? [args[index + 1]] : []
+    );
+    expect(disabled).toEqual(CODEX_TEXT_ONLY_DISABLED_FEATURES);
+    expect(args).toContain('web_search="disabled"');
+    expect(args).toContain('agents.enabled=false');
+    expect(args).toContain('orchestrator.mcp.enabled=false');
+    expect(args).toContain('orchestrator.skills.enabled=false');
+    // Codex has no supported apply_patch-off switch. Its remaining patch
+    // tool is made inert by root=deny + workspace=read above.
+  });
+
+  it('gives any residual command path an empty environment', () => {
+    expect(args).toContain('shell_environment_policy.inherit="none"');
+    expect(args).toContain('shell_environment_policy.ignore_default_excludes=false');
+    expect(args).toContain('allow_login_shell=false');
   });
 
   it('isolates from operator config, the settingSources:[] equivalent', () => {
@@ -224,6 +282,37 @@ describe('buildCodexArgs — the isolation guarantees live here', () => {
   });
 });
 
+describe('codexChildEnvironment — explicit allowlist, never provider secrets', () => {
+  it('keeps only process/runtime paths, proxies, certificates and the selected Codex profile', () => {
+    expect(
+      codexChildEnvironment({
+        PATH: '/safe/bin',
+        HOME: '/home/atoma/state',
+        LANG: 'en_US.UTF-8',
+        HTTPS_PROXY: 'http://proxy.internal',
+        SSL_CERT_FILE: '/etc/ssl/custom.pem',
+        CODEX_HOME: '/profiles/principal-a/codex',
+        CODEX_SQLITE_HOME: '/profiles/principal-a/codex',
+        OPENAI_API_KEY: 'must-not-leak',
+        CODEX_API_KEY: 'must-not-leak',
+        CODEX_ACCESS_TOKEN: 'must-not-leak',
+        ANTHROPIC_API_KEY: 'must-not-leak',
+        ZAI_API_KEY: 'must-not-leak',
+        ATOMA_WEBHOOK_SECRET: 'must-not-leak',
+      })
+    ).toEqual({
+      PATH: '/safe/bin',
+      LANG: 'en_US.UTF-8',
+      HTTPS_PROXY: 'http://proxy.internal',
+      SSL_CERT_FILE: '/etc/ssl/custom.pem',
+      CODEX_HOME: '/profiles/principal-a/codex',
+      CODEX_SQLITE_HOME: '/profiles/principal-a/codex',
+      HOME: '/profiles/principal-a/codex',
+      USERPROFILE: '/profiles/principal-a/codex',
+    });
+  });
+});
+
 describe('foldCodexEvents — tolerant fold of the JSONL stream', () => {
   it('extracts the agent message and the usage', () => {
     const o = foldCodexEvents(OK_LINES);
@@ -245,13 +334,30 @@ describe('foldCodexEvents — tolerant fold of the JSONL stream', () => {
     expect(o.text).toBe('{"ok":1}');
   });
 
-  it('reports a turn.failed / error event as the outcome error', () => {
+  it('reduces turn.failed / error diagnostics to a stable non-sensitive code', () => {
+    const secret = 'account=private@example.test token=secret-token profile=/private/codex';
     const failed = foldCodexEvents([
-      '{"type":"error","message":"{\\"status\\":400,\\"error\\":{\\"message\\":\\"nope\\"}}"}',
-      '{"type":"turn.failed","error":{"message":"{\\"status\\":400}"}}',
+      JSON.stringify({
+        type: 'error',
+        message: JSON.stringify({ status: 400, error: { message: secret } }),
+      }),
+      JSON.stringify({ type: 'turn.failed', error: { message: `status: 400 ${secret}` } }),
     ]);
-    expect(failed.error).toBeDefined();
+    expect(failed.error).toBe('request-rejected');
+    expect(JSON.stringify(failed)).not.toContain(secret);
     expect(failed.text).toBe('');
+  });
+
+  it('classifies authentication diagnostics without retaining account or token text', () => {
+    const secret = 'refresh token super-secret for private@example.test';
+    const failed = foldCodexEvents([
+      JSON.stringify({
+        type: 'turn.failed',
+        error: { message: `HTTP 401 unauthorized: invalid ${secret}` },
+      }),
+    ]);
+    expect(failed.error).toBe('authentication-required');
+    expect(JSON.stringify(failed)).not.toContain(secret);
   });
 
   it('skips unparseable lines rather than dying — the CLI may add event types', () => {
@@ -271,8 +377,10 @@ describe('foldCodexEvents — tolerant fold of the JSONL stream', () => {
 describe('isCodexTransientError', () => {
   it('retries 5xx and the 429 subscription throttle', () => {
     expect(isCodexTransientError('{"status":503,"error":{}}')).toBe(true);
+    expect(isCodexTransientError('HTTP/1.1 502 Bad Gateway')).toBe(true);
     // A burn-in batch throttling on a subscription is transient by definition.
     expect(isCodexTransientError('{"status":429,"error":{}}')).toBe(true);
+    expect(isCodexTransientError('HTTP 429 Too Many Requests')).toBe(true);
   });
 
   it('does NOT retry a real request error the caller must see', () => {
@@ -306,7 +414,7 @@ describe('CodexCliLlmClient — L1 is refused STRUCTURALLY', () => {
     }
   });
 
-  it('throws when handed tools: Codex cannot disable its own built-ins (#6049)', async () => {
+  it('throws when handed tools: Codex cannot expose only Atoma tools', async () => {
     // The refusal is the whole safety story of this provider. Silently
     // serving a tool-bearing request would let the model act on the
     // filesystem OUTSIDE ToolSandbox: no jail, no #8a scope gate, no
@@ -321,7 +429,7 @@ describe('CodexCliLlmClient — L1 is refused STRUCTURALLY', () => {
   it('throws when handed an executor even with no declared tools', async () => {
     const executor: ToolExecutor = { execute: async () => undefined, has: () => true };
     const client = new CodexCliLlmClient({ spawnFn: () => fakeChild({ lines: OK_LINES }) });
-    await expect(client.complete(req({ executor }))).rejects.toThrow(/openai\/codex#6049/);
+    await expect(client.complete(req({ executor }))).rejects.toThrow(/openai\/codex#8161/);
   });
 
   it('names a working alternative in the error, not just the problem', async () => {
@@ -333,6 +441,88 @@ describe('CodexCliLlmClient — L1 is refused STRUCTURALLY', () => {
 });
 
 describe('CodexCliLlmClient — transport', () => {
+  it.skipIf(process.platform === 'win32')(
+    'keeps the host subscription direct and wraps only a personal profile',
+    async () => {
+      const root = mkdtempSync(path.join(tmpdir(), 'atoma-codex-default-spawn-'));
+      try {
+        const binRoot = path.join(root, 'bin');
+        mkdirSync(binRoot);
+        installFakeCodex(binRoot);
+        const childPath = `${binRoot}${path.delimiter}${process.env['PATH'] ?? ''}`;
+
+        const host = new CodexCliLlmClient({
+          env: { PATH: childPath, HOME: root },
+          callTimeoutMs: 5_000,
+        });
+        await expect(host.complete(req())).resolves.toMatchObject({ text: '{"ok":1}' });
+        expect(readdirSync(root).some((name) => name.includes('process-slot'))).toBe(false);
+
+        const profilesRoot = path.join(root, 'profiles');
+        const profileHome = path.join(profilesRoot, 'principal', 'codex', 'generation');
+        mkdirSync(profileHome, { recursive: true, mode: 0o700 });
+        chmodSync(profilesRoot, 0o700);
+        chmodSync(path.join(profilesRoot, 'principal'), 0o700);
+        chmodSync(path.join(profilesRoot, 'principal', 'codex'), 0o700);
+        const personal = new CodexCliLlmClient({
+          env: {
+            PATH: childPath,
+            CODEX_HOME: profileHome,
+            CODEX_SQLITE_HOME: profileHome,
+            [PERSONAL_CODEX_PROFILE_ROOT_ENV]: profilesRoot,
+          },
+          callTimeoutMs: 5_000,
+        });
+        await expect(personal.complete(req())).resolves.toMatchObject({ text: '{"ok":1}' });
+        expect(readdirSync(profilesRoot).some((name) => name.includes('process-slot'))).toBe(true);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it('spawns from an immutable supplied snapshot, in the empty jail, with no API key', async () => {
+    const supplied: NodeJS.ProcessEnv = {
+      PATH: '/snapshot/bin',
+      CODEX_HOME: '/profiles/principal-a/codex',
+      CODEX_SQLITE_HOME: '/profiles/principal-a/codex',
+      HOME: '/home/atoma/state',
+      USERPROFILE: 'C:\\Users\\atoma',
+      ATOMA_CODEX_MODEL: 'gpt-5.4-mini',
+      OPENAI_API_KEY: 'api-secret',
+      ANTHROPIC_API_KEY: 'anthropic-secret',
+    };
+    let seenEnv: Readonly<NodeJS.ProcessEnv> | undefined;
+    let seenCwd = '';
+    let seenArgs: readonly string[] = [];
+    const client = new CodexCliLlmClient({
+      env: supplied,
+      spawnFn: (args, _stdin, env, cwd) => {
+        seenArgs = args;
+        seenEnv = env;
+        seenCwd = cwd;
+        return fakeChild({ lines: OK_LINES });
+      },
+    });
+
+    // Mutating either source after construction cannot switch the payer/profile.
+    supplied['CODEX_HOME'] = '/profiles/principal-b/codex';
+    supplied['ATOMA_CODEX_MODEL'] = 'gpt-5.6-luna';
+    const result = await client.complete(req());
+
+    expect(result.servedModel).toBe('gpt-5.4-mini');
+    expect(seenArgs[seenArgs.indexOf('-m') + 1]).toBe('gpt-5.4-mini');
+    expect(seenCwd).toBe(seenArgs[seenArgs.indexOf('-C') + 1]);
+    expect(seenEnv).toEqual({
+      PATH: '/snapshot/bin',
+      CODEX_HOME: '/profiles/principal-a/codex',
+      CODEX_SQLITE_HOME: '/profiles/principal-a/codex',
+      HOME: '/profiles/principal-a/codex',
+      USERPROFILE: '/profiles/principal-a/codex',
+    });
+    expect(Object.isFrozen(seenEnv)).toBe(true);
+  });
+
   it('removes its ephemeral cwd and instruction files on cleanup', async () => {
     let cwd = '';
     const client = new CodexCliLlmClient({
@@ -379,8 +569,93 @@ describe('CodexCliLlmClient — transport', () => {
     expect(spawns).toBe(1);
   });
 
-  it('retries ONCE on a transient error, then surfaces it', async () => {
-    const bad = ['{"type":"turn.failed","error":{"message":"{\\"status\\":503}"}}'];
+  it('serializes concurrent calls that share one personal CODEX_HOME', async () => {
+    const controller = new AbortController();
+    let spawns = 0;
+    const profileEnv = { CODEX_HOME: '/profiles/principal-a/codex' };
+    const first = new CodexCliLlmClient({
+      env: profileEnv,
+      callTimeoutMs: 5_000,
+      spawnFn: () => {
+        spawns++;
+        return fakeChild({ neverEnd: true });
+      },
+    });
+    const second = new CodexCliLlmClient({
+      env: profileEnv,
+      spawnFn: () => {
+        spawns++;
+        return fakeChild({ lines: OK_LINES });
+      },
+    });
+
+    const firstCall = first.complete(req({ signal: controller.signal }));
+    await vi.waitFor(() => expect(spawns).toBe(1));
+    const secondCall = second.complete(req());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(spawns).toBe(1);
+
+    controller.abort(new Error('cancel first lane'));
+    await expect(firstCall).rejects.toThrow('cancel first lane');
+    await expect(secondCall).resolves.toMatchObject({ text: '{"ok":1}' });
+    expect(spawns).toBe(2);
+  });
+
+  it('keeps the personal CODEX_HOME lease until a timed-out child is actually reaped', async () => {
+    let spawns = 0;
+    let firstChild: ChildProcess | null = null;
+    const profileEnv = { CODEX_HOME: '/profiles/principal-reap/codex' };
+    const first = new CodexCliLlmClient({
+      env: profileEnv,
+      callTimeoutMs: 20,
+      spawnFn: () => {
+        spawns++;
+        firstChild = fakeChild({
+          neverEnd: true,
+          pid: 2_147_000_000,
+          closeOnKill: false,
+        });
+        return firstChild;
+      },
+    });
+    const second = new CodexCliLlmClient({
+      env: profileEnv,
+      spawnFn: () => {
+        spawns++;
+        return fakeChild({ lines: OK_LINES });
+      },
+    });
+
+    let firstSettled = false;
+    const firstCall = first.complete(req());
+    void firstCall.then(
+      () => {
+        firstSettled = true;
+      },
+      () => {
+        firstSettled = true;
+      }
+    );
+    await vi.waitFor(() => expect(spawns).toBe(1));
+    const secondCall = second.complete(req());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(firstSettled).toBe(false);
+    expect(spawns).toBe(1);
+
+    (firstChild as ChildProcess | null)?.emit('close', null);
+    await expect(firstCall).rejects.toMatchObject({ code: 'timeout' });
+    await expect(secondCall).resolves.toMatchObject({ text: '{"ok":1}' });
+    expect(spawns).toBe(2);
+  });
+
+  it('retries ONCE on a transient error, then surfaces only its stable code', async () => {
+    const secret = 'account=private@example.test token=secret-token';
+    const bad = [
+      JSON.stringify({
+        type: 'turn.failed',
+        error: { message: JSON.stringify({ status: 503, detail: secret }) },
+      }),
+    ];
     let spawns = 0;
     const client = new CodexCliLlmClient({
       spawnFn: () => {
@@ -388,30 +663,90 @@ describe('CodexCliLlmClient — transport', () => {
         return fakeChild({ lines: bad });
       },
     });
-    await expect(client.complete(req())).rejects.toThrow(/after 1 retry/);
+    let caught: unknown;
+    try {
+      await client.complete(req());
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(CodexTransportError);
+    expect(caught).toMatchObject({
+      code: 'service-unavailable',
+      retried: true,
+      message: 'codex call failed [service-unavailable] after 1 retry',
+    });
+    expect(String(caught)).not.toContain(secret);
     expect(spawns).toBe(2);
   }, 20000);
 
-  it('does not retry a non-transient error', async () => {
+  it('does not retry or disclose a non-transient provider diagnostic', async () => {
+    const secret = 'private@example.test /profiles/principal-a/codex secret-token';
     let spawns = 0;
     const client = new CodexCliLlmClient({
       spawnFn: () => {
         spawns++;
         return fakeChild({
-          lines: ['{"type":"turn.failed","error":{"message":"{\\"status\\":400}"}}'],
+          lines: [
+            JSON.stringify({
+              type: 'turn.failed',
+              error: { message: `status: 400 rejected for ${secret}` },
+            }),
+          ],
         });
       },
     });
-    await expect(client.complete(req())).rejects.toThrow(/codex call failed/);
+    let caught: unknown;
+    try {
+      await client.complete(req());
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toMatchObject({
+      code: 'request-rejected',
+      retried: false,
+      message: 'codex call failed [request-rejected]',
+    });
+    expect(String(caught)).not.toContain(secret);
     expect(spawns).toBe(1);
   });
 
-  it('treats a silent dead subprocess as an error, never as an empty answer', async () => {
+  it('classifies silent-process stderr without disclosing it', async () => {
     // Missing CLI / auth failure / crash: stderr is the only evidence.
+    const secret = 'command not found at /private/codex for private@example.test';
     const client = new CodexCliLlmClient({
-      spawnFn: () => fakeChild({ lines: [], stderr: 'command not found: codex' }),
+      spawnFn: () => fakeChild({ lines: [], stderr: secret }),
     });
-    await expect(client.complete(req())).rejects.toThrow(/command not found/);
+    let caught: unknown;
+    try {
+      await client.complete(req());
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toMatchObject({
+      code: 'transport-unavailable',
+      message: 'codex call failed [transport-unavailable]',
+    });
+    expect(String(caught)).not.toContain(secret);
+  });
+
+  it('classifies a synchronous spawn failure without disclosing it', async () => {
+    const secret = 'ENOENT /private/bin/codex profile=private@example.test';
+    const client = new CodexCliLlmClient({
+      spawnFn: () => {
+        throw new Error(secret);
+      },
+    });
+    let caught: unknown;
+    try {
+      await client.complete(req());
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toMatchObject({
+      code: 'transport-unavailable',
+      message: 'codex call failed [transport-unavailable]',
+    });
+    expect(String(caught)).not.toContain(secret);
   });
 
   it('kills a wedged call on the INACTIVITY deadline', async () => {
@@ -420,7 +755,10 @@ describe('CodexCliLlmClient — transport', () => {
       callTimeoutMs: 60,
       spawnFn: () => fakeChild({ neverEnd: true }),
     });
-    await expect(client.complete(req())).rejects.toThrow(/idle/);
+    await expect(client.complete(req())).rejects.toMatchObject({
+      code: 'timeout',
+      message: 'codex call failed [timeout]',
+    });
   });
 
   it('does NOT kill a LONG BUT ACTIVE call — the clock measures silence', async () => {

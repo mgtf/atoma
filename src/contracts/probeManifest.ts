@@ -879,6 +879,19 @@ export function appendHttpProbe(
     status: number;
     body?: string;
     note?: string;
+    /**
+     * The entry file `start_node_server` spawned for the port this request
+     * reached, when the recorder knew it.
+     *
+     * MACHINE-STAMPED AND DELIBERATELY UNTAUGHT. It is absent from
+     * `EXAMPLE_HTTP_ENTRY` and from `manifestWriterLines`, because a field the
+     * prompt teaches is a field a model authors — and the whole reason this
+     * one exists is to be an observation. Its OMISSION means "unknown", not
+     * "varies between runs", which is the opposite of what an omitted
+     * `stdout` means on a shell entry; a replayer preserving entry shape must
+     * not read the two the same way.
+     */
+    entry?: string;
   }
 ): string {
   let doc: { version: number; entries: Record<string, unknown>[] } = {

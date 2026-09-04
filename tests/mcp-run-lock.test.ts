@@ -6,10 +6,14 @@ import { tmpdir } from 'node:os';
 import Database from 'better-sqlite3';
 import {
   acquireRunLease,
+  acquireRunLeaseWithoutRecovery,
   peekRunLease,
   processFingerprint,
   RunLockBusyError,
 } from '../src/mcp/runLock.js';
+import { forceKillTestProcessTree } from './helpers.js';
+
+const posixIt = it.skipIf(process.platform === 'win32');
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS mcp_run_lease (
@@ -80,18 +84,25 @@ describe('MCP cross-process run lease', () => {
   });
 
   it('excludes a genuinely separate MCP process', async () => {
+    // The child holds the lease until its stdin closes. A fixed hold window
+    // (1200ms originally) was a pure race under a fully parallel suite: by
+    // the time the parent asserted, the child had already released, and the
+    // exclusion this test exists to prove looked broken. The 30s LOCKED
+    // budget is a watchdog for the same contention (a cold `npx tsx` boot
+    // alone outran the old 5s there), not an expected duration.
     const script = [
       "import { acquireRunLease } from './src/mcp/runLock.ts';",
       '(async () => {',
       "const lease = await acquireRunLease('child-run', process.env['LOCK_PATH']);",
       "process.stdout.write('LOCKED\\n');",
-      'setTimeout(() => { lease.release(); process.exit(0); }, 1200);',
+      'process.stdin.resume();',
+      "process.stdin.on('end', () => { lease.release(); process.exit(0); });",
       '})().catch((e) => { console.error(e); process.exit(1); });',
     ].join(' ');
-    const child = spawn('npx', ['tsx', '-e', script], {
+    const child = spawn(process.execPath, ['--import', 'tsx', '-e', script], {
       cwd: process.cwd(),
       env: { ...process.env, LOCK_PATH: lockPath },
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stderr = '';
     child.stderr.on('data', (chunk: Buffer) => {
@@ -101,7 +112,7 @@ describe('MCP cross-process run lease', () => {
 
     try {
       await new Promise<void>((resolveLocked, rejectLocked) => {
-        const timer = setTimeout(() => rejectLocked(new Error(`child did not lock: ${stderr}`)), 5000);
+        const timer = setTimeout(() => rejectLocked(new Error(`child did not lock: ${stderr}`)), 30_000);
         child.stdout.on('data', (chunk: Buffer) => {
           if (!chunk.toString().includes('LOCKED')) return;
           clearTimeout(timer);
@@ -111,13 +122,14 @@ describe('MCP cross-process run lease', () => {
       });
 
       await expect(acquireRunLease('parent-run', lockPath)).rejects.toThrow(/child-run/);
+      child.stdin.end();
       expect(await exited).toBe(0);
       const after = await acquireRunLease('parent-run', lockPath);
       after.release();
     } finally {
       if (child.exitCode === null) child.kill('SIGKILL');
     }
-  });
+  }, 60_000);
 
   it('recovers a lease whose owner process is dead', async () => {
     seedStale();
@@ -127,6 +139,25 @@ describe('MCP cross-process run lease', () => {
     expect(owner.run_id).toBe('new-run');
     db.close();
     recovered.release();
+  });
+
+  it('lets a deployment claim only an empty slot and never recover a stale owner', async () => {
+    seedStale('unfinished-run');
+
+    expect(() => acquireRunLeaseWithoutRecovery('deployment:revision', lockPath)).toThrow(
+      /will not recover or interrupt/
+    );
+    expect(peekRunLease(lockPath)?.runId).toBe('unfinished-run');
+
+    const db = inspect();
+    db.prepare('DELETE FROM mcp_run_lease').run();
+    db.close();
+    const deployment = acquireRunLeaseWithoutRecovery('deployment:revision', lockPath);
+    try {
+      await expect(acquireRunLease('new-run', lockPath)).rejects.toThrow(/deployment:revision/);
+    } finally {
+      deployment.release();
+    }
   });
 
   it('migrates an existing lease store before recording process fingerprints', async () => {
@@ -141,11 +172,13 @@ describe('MCP cross-process run lease', () => {
     );
     expect(columns).toContain('owner_fingerprint');
     expect(columns).toContain('child_fingerprint');
-    expect(
-      (db.prepare('SELECT owner_fingerprint FROM mcp_run_lease').get() as {
+    const ownerFingerprint = (
+      db.prepare('SELECT owner_fingerprint FROM mcp_run_lease').get() as {
         owner_fingerprint: string | null;
-      }).owner_fingerprint
-    ).toEqual(expect.any(String));
+      }
+    ).owner_fingerprint;
+    if (process.platform === 'win32') expect(ownerFingerprint).toBeNull();
+    else expect(ownerFingerprint).toEqual(expect.any(String));
     db.close();
     lease.release();
   });
@@ -159,6 +192,10 @@ describe('MCP cross-process run lease', () => {
     ).run(process.pid, new Date().toISOString());
     db.close();
 
+    if (process.platform === 'win32') {
+      await expect(acquireRunLease('new-run', lockPath)).rejects.toThrow(/birth unverifiable/);
+      return;
+    }
     const recovered = await acquireRunLease('new-run', lockPath);
     const after = inspect();
     expect(
@@ -208,11 +245,7 @@ describe('MCP cross-process run lease', () => {
       expect(() => process.kill(child.pid!, 0)).not.toThrow();
       recovered.release();
     } finally {
-      try {
-        process.kill(-child.pid, 'SIGKILL');
-      } catch {
-        // Already gone is fine.
-      }
+      forceKillTestProcessTree(child.pid);
     }
   });
 
@@ -244,7 +277,7 @@ describe('MCP cross-process run lease', () => {
    * just destroyed a run could not explain the missing deliverable
    * (2026-08-14 review, MCP §). The lease must name what it killed.
    */
-  it('recovering a dead owner with a LIVE group reaps it AND reports what was reaped', async () => {
+  posixIt('recovering a dead owner with a LIVE group reaps it AND reports what was reaped', async () => {
     const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
       detached: true,
       stdio: ['ignore', 'ignore', 'ignore'],
@@ -274,11 +307,7 @@ describe('MCP cross-process run lease', () => {
       expect(() => process.kill(-child.pid!, 0)).toThrow();
       lease.release();
     } finally {
-      try {
-        process.kill(-child.pid, 'SIGKILL');
-      } catch {
-        // Already reaped is the expected case.
-      }
+      forceKillTestProcessTree(child.pid);
     }
   }, 15_000);
 
@@ -338,11 +367,7 @@ describe('MCP cross-process run lease', () => {
         child_pgid: child.pid,
       });
     } finally {
-      try {
-        process.kill(-child.pid, 'SIGKILL');
-      } catch {
-        // Already gone is fine.
-      }
+      forceKillTestProcessTree(child.pid);
     }
   });
 
@@ -359,12 +384,19 @@ describe('MCP cross-process run lease', () => {
   });
 
   it('lets exactly one of two processes recover the same stale token', async () => {
+    // The WINNER holds the lease until its stdin closes. The original 500ms
+    // hold was a race under a fully parallel suite: a loser whose event loop
+    // lagged past the winner's release acquired a lease of its own and the
+    // exclusivity this test exists to prove looked broken. The 30s ready
+    // deadline is a watchdog for the same contention — two cold `npx tsx`
+    // boots outran the old 5s there — not an expected duration.
     seedStale('dead-run');
     const go = join(dir, 'go');
     const launch = (id: string): {
       child: ChildProcessWithoutNullStreams;
       ready: string;
-      output: Promise<string>;
+      verdict: Promise<string>;
+      closed: Promise<void>;
     } => {
       const ready = join(dir, `ready-${id}`);
       const script = [
@@ -375,43 +407,66 @@ describe('MCP cross-process run lease', () => {
         "while (!existsSync(process.env['GO'])) await new Promise(r => setTimeout(r, 10));",
         'try {',
         "const lease = await acquireRunLease(process.env['ID'], process.env['LOCK_PATH']);",
-        "process.stdout.write('ACQUIRED:' + process.env['ID']);",
-        'setTimeout(() => { lease.release(); process.exit(0); }, 500);',
+        "process.stdout.write('ACQUIRED:' + process.env['ID'] + '\\n');",
+        'process.stdin.resume();',
+        "process.stdin.on('end', () => { lease.release(); process.exit(0); });",
         '} catch {',
-        "process.stdout.write('BUSY:' + process.env['ID']); process.exit(0);",
+        "process.stdout.write('BUSY:' + process.env['ID'] + '\\n'); process.exit(0);",
         '}',
         '})().catch(() => process.exit(1));',
       ].join(' ');
-      const child = spawn('npx', ['tsx', '-e', script], {
+      const child = spawn(process.execPath, ['--import', 'tsx', '-e', script], {
         cwd: process.cwd(),
         env: { ...process.env, ID: id, READY: ready, GO: go, LOCK_PATH: lockPath },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
-      const output = new Promise<string>((resolveOutput) => {
+      const closed = new Promise<void>((resolveClosed) => {
+        child.once('close', () => resolveClosed());
+      });
+      const verdict = new Promise<string>((resolveVerdict) => {
         let stdout = '';
+        let childStderr = '';
         child.stdout.on('data', (chunk: Buffer) => {
           stdout += chunk.toString();
+          if (stdout.includes('\n')) resolveVerdict(stdout.split('\n')[0] ?? '');
         });
-        child.once('exit', () => resolveOutput(stdout));
+        child.stderr.on('data', (chunk: Buffer) => {
+          childStderr += chunk.toString();
+        });
+        // A child that dies before printing its verdict (an external kill, a
+        // native crash — nothing the in-script catch can see) must still
+        // settle the race, immediately and carrying its own diagnostics,
+        // instead of hanging Promise.all until the test budget kills the run
+        // anonymously. `close` fires after the streams flush, so a buffered
+        // BUSY line always wins over this fallback.
+        child.once('close', () => resolveVerdict(`DIED:${id}: ${childStderr.slice(0, 2000)}`));
       });
-      return { child, ready, output };
+      return { child, ready, verdict, closed };
     };
 
     const a = launch('A');
     const b = launch('B');
     try {
-      const deadline = Date.now() + 5000;
+      const deadline = Date.now() + 30_000;
       while ((!existsSync(a.ready) || !existsSync(b.ready)) && Date.now() < deadline) {
         await new Promise((resolveWait) => setTimeout(resolveWait, 20));
       }
       expect(existsSync(a.ready) && existsSync(b.ready)).toBe(true);
       writeFileSync(go, 'go');
-      const outputs = await Promise.all([a.output, b.output]);
-      expect(outputs.filter((value) => value.startsWith('ACQUIRED:'))).toHaveLength(1);
-      expect(outputs.filter((value) => value.startsWith('BUSY:'))).toHaveLength(1);
+      const verdicts = await Promise.all([a.verdict, b.verdict]);
+      expect(verdicts.filter((value) => value.startsWith('ACQUIRED:'))).toHaveLength(1);
+      expect(verdicts.filter((value) => value.startsWith('BUSY:'))).toHaveLength(1);
+      a.child.stdin.end();
+      b.child.stdin.end();
+      await Promise.all([a.closed, b.closed]);
     } finally {
-      if (a.child.exitCode === null) a.child.kill('SIGKILL');
-      if (b.child.exitCode === null) b.child.kill('SIGKILL');
+      for (const contender of [a, b]) {
+        contender.child.stdin.end();
+        if (contender.child.exitCode === null && contender.child.signalCode === null) {
+          contender.child.kill('SIGKILL');
+        }
+      }
+      await Promise.all([a.closed, b.closed]);
     }
-  }, 15_000);
+  }, 60_000);
 });

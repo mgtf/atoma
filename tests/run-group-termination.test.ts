@@ -6,8 +6,10 @@ import {
   terminateRunProcessGroup,
 } from '../src/cli/burnin.js';
 
+const posixIt = it.skipIf(process.platform === 'win32');
+
 describe('detached run process-group termination', () => {
-  it('waits for descendants after the group leader has already exited', async () => {
+  posixIt('waits for descendants after the group leader has already exited', async () => {
     const leader = spawn(
       process.execPath,
       [
@@ -29,7 +31,7 @@ describe('detached run process-group termination', () => {
     }
   });
 
-  it('escalates when the group ignores SIGTERM and confirms ESRCH', async () => {
+  posixIt('escalates when the group ignores SIGTERM and confirms ESRCH', async () => {
     const child = spawn(
       process.execPath,
       ['-e', `process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);`],

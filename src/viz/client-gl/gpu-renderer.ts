@@ -32,6 +32,7 @@ import type {
   VizOrganisation,
   VizNotification,
   VizPlatformEvent,
+  VizPreviewSummary,
   VizSentinelSnapshot,
   VizGitHubInstallation,
   VizProject,
@@ -47,7 +48,12 @@ import {
   type AtomaMarkHandle,
   type AtomaMarkPlacement,
 } from './renderer/atoma-mark.js';
-import { createFarField, FAR_FIELD_LABEL, type FarField } from './renderer/far-field.js';
+import {
+  createFarField,
+  FAR_FIELD_LABEL,
+  shouldShowFarField,
+  type FarField,
+} from './renderer/far-field.js';
 import {
   markElapsedMs,
   markTurnDegrees,
@@ -173,6 +179,12 @@ export interface GpuDataSnapshot {
   accountModels: VizAccountModels | null;
   /** Last failed account write, already bounded by the server. */
   accountError: string | null;
+  /**
+   * Preview state for the SELECTED run, or null when this deployment serves no
+   * preview for it. Server data, not UI state: it is the manager's state
+   * machine read back, and the client never invents a transition of its own.
+   */
+  preview: VizPreviewSummary | null;
   /**
    * Non-null when the gate is on and this browser holds no session: the
    * arrival gate offers these providers instead of Continue, and `notice`
@@ -531,6 +543,7 @@ export class GpuRenderer {
   private lightRendererY = 0;
   private pointerLightBufferPinned = false;
   private farField: FarField | null = null;
+  private farFieldTickerActive = false;
   previousFilterBounds = new Map<string, FilterVisualTarget>();
   private currentFilterBounds = new Map<string, FilterVisualTarget>();
   private handledExitIds = new Set<string>();
@@ -609,6 +622,12 @@ export class GpuRenderer {
   private turnSliderLastTapAt = 0;
 
   private castShadows: CastShadowEntry[] = [];
+  private lastCastShadowFrame = {
+    strength: Number.NaN,
+    lightX: Number.NaN,
+    lightY: Number.NaN,
+    tuningRevision: -1,
+  };
   /**
    * Outer view panels are authored once at the largest transition height.
    * Camera frames then resize only these retained Graphics and their mask;
@@ -851,6 +870,9 @@ export class GpuRenderer {
       ? 1
       : 1 - Math.exp(-Math.max(0, ticker.deltaMS) * 0.018);
     this.pointerLightStrength += (target - this.pointerLightStrength) * response;
+    if (pointer.active && this.pointerLightStrength > 0.998) {
+      this.pointerLightStrength = 1;
+    }
     if (!pointer.active && this.pointerLightStrength < 0.002) {
       this.pointerLightStrength = 0;
       uniforms.uStrength = 0;
@@ -924,15 +946,10 @@ export class GpuRenderer {
     this.app.ticker.add(this.updateCastShadows);
   }
 
-  /**
-   * Aurora lives on ambientRoot for the session. Scene rebuilds wipe that
-   * container; skip the field mesh or the shader is compiled again every
-   * render — and the welcome gem's env capture would miss the field for a
-   * frame after every rebuild.
-   */
+  /** Keep the compiled hero field across welcome rebuilds without drawing it in the app. */
   private retainFarField() {
     const keep = this.farField?.mesh;
-    if (!keep || keep.destroyed) return;
+    if (!this.farFieldTickerActive || !keep || keep.destroyed) return;
     if (keep.parent !== this.ambientRoot) {
       this.ambientRoot.addChildAt(keep, 0);
       return;
@@ -942,15 +959,49 @@ export class GpuRenderer {
     }
   }
 
+  /**
+   * A hidden fullscreen mesh is still needless ticker and scene work. Detach
+   * both together; reactivation reuses the compiled shader and geometry.
+   */
+  private setFarFieldActive(active: boolean) {
+    const field = this.farField;
+    if (!field || active === this.farFieldTickerActive) return;
+    this.farFieldTickerActive = active;
+    field.mesh.visible = active;
+    if (active) {
+      this.retainFarField();
+      this.app.ticker.add(this.tickFarField);
+    } else {
+      this.app.ticker.remove(this.tickFarField);
+      field.mesh.removeFromParent();
+    }
+  }
+
   private readonly tickFarField = (ticker: Ticker) => {
     if (!this.farField) return;
     const canvas = this.app.canvas;
+    const bounds = canvas.getBoundingClientRect();
+    const viewport = sceneCameraViewport(canvas);
+    const mapClientToRenderer = viewport
+      ? (x: number, y: number) => clientToRendererPoint(
+          { x, y },
+          this.app.screen.width,
+          this.app.screen.height,
+          viewport
+        )
+      : (x: number, y: number) => pointerClientToRenderer(
+          x,
+          y,
+          bounds,
+          this.app.screen.width,
+          this.app.screen.height
+        );
     this.farField.tick(
       ticker.deltaMS / 1000,
       this.app.screen.width,
       this.app.screen.height,
-      canvas.getBoundingClientRect(),
-      (x, y) => this.clientToRendererPosition(x, y)
+      bounds,
+      mapClientToRenderer
     );
   };
 
@@ -1072,6 +1123,7 @@ export class GpuRenderer {
     this.farField = createFarField();
     if (this.farField) {
       this.ambientRoot.addChild(this.farField.mesh);
+      this.farFieldTickerActive = true;
       this.app.ticker.add(this.tickFarField);
     }
     this.installPointerLightFilter();
@@ -1180,6 +1232,7 @@ export class GpuRenderer {
     this.app.ticker.remove(this.updatePointerLight);
     this.app.ticker.remove(this.updateCastShadows);
     this.app.ticker.remove(this.tickFarField);
+    this.farFieldTickerActive = false;
     this.farField = null;
     this.castShadows = [];
     this.stage.filters = null;
@@ -1245,6 +1298,10 @@ export class GpuRenderer {
 
   private renderScene(snapshot: GpuRenderSnapshot) {
     this.snapshot = snapshot;
+    this.setFarFieldActive(shouldShowFarField(
+      snapshot.state.entered,
+      this.atomaMark?.placement.visualScale
+    ));
     // Drop camera handles BEFORE their scene-owned Graphics are destroyed.
     // A camera rAF can publish again only after this synchronous pass returns.
     this.cameraFramePanels = [];
@@ -1377,12 +1434,6 @@ export class GpuRenderer {
       this.utilityDockTransition = null;
       utilityTransition = null;
     }
-    this.drawAmbientGrid(
-      this.ambientRoot,
-      width,
-      height,
-      focused ? 0 : GPU_LAYOUT.headerHeight
-    );
     this.drawHeader(snapshot, width);
     // Views draw in their OWN viewport space, from x = 0, exactly as they did
     // when they owned the full width. The rail narrows before it can shove the
@@ -1735,24 +1786,6 @@ export class GpuRenderer {
       count += child instanceof Container ? this.countObjects(child) : 1;
     }
     return count;
-  }
-
-  private drawAmbientGrid(
-    parent: Container,
-    width: number,
-    height: number,
-    top: number
-  ) {
-    const graphics = new Graphics();
-    graphics.alpha = 0.12;
-    for (let x = 0; x < width; x += 40) {
-      graphics.moveTo(x, top).lineTo(x, height);
-    }
-    for (let y = top; y < height; y += 40) {
-      graphics.moveTo(0, y).lineTo(width, y);
-    }
-    graphics.stroke({ color: 0x26334a, width: 1, alpha: 0.18 });
-    parent.addChild(graphics);
   }
 
   panel(
@@ -2658,6 +2691,7 @@ export class GpuRenderer {
    * renders — scrolling rebuilds it — so these stay valid until the next one.
    */
   private anchorCastShadows() {
+    this.lastCastShadowFrame.strength = Number.NaN;
     for (const entry of this.castShadows) {
       if (entry.shadow.destroyed || !entry.parent.parent) continue;
       // Top-left only: the scene translates but never scales beyond the ±3.5%
@@ -2685,6 +2719,20 @@ export class GpuRenderer {
     const lightX = this.lightRendererX;
     const lightY = this.lightRendererY;
     const tuning = readTuning();
+    if (
+      strength === this.lastCastShadowFrame.strength &&
+      lightX === this.lastCastShadowFrame.lightX &&
+      lightY === this.lastCastShadowFrame.lightY &&
+      tuning.revision === this.lastCastShadowFrame.tuningRevision
+    ) {
+      return;
+    }
+    this.lastCastShadowFrame = {
+      strength,
+      lightX,
+      lightY,
+      tuningRevision: tuning.revision,
+    };
     for (const entry of this.castShadows) {
       if (entry.shadow.destroyed) continue;
       const offset = castShadowOffset({
@@ -3510,7 +3558,7 @@ export class GpuRenderer {
 
     const back = new Graphics();
     back.poly(facePoints.map((value, index) => value + (index % 2 === 0 ? extrusionX : extrusionY)));
-    back.fill({ color: mixColor(0x091426, accent, 0.18), alpha: 0.98 });
+    back.fill({ color: mixColor(0x10243b, accent, 0.18), alpha: 0.98 });
     underlayContainer.addChild(back);
 
     // Solid right and lower walls connect the rear slab to the face. Their
@@ -3522,7 +3570,7 @@ export class GpuRenderer {
       width + extrusionX, height - chamfer + extrusionY,
       width, height - chamfer,
     ]);
-    rightWall.fill({ color: mixColor(0x071326, accent, 0.14), alpha: 0.98 });
+    rightWall.fill({ color: mixColor(0x0d2035, accent, 0.14), alpha: 0.98 });
     underlayContainer.addChild(rightWall);
 
     const lowerWall = new Graphics();
@@ -3532,7 +3580,7 @@ export class GpuRenderer {
       width - chamfer + extrusionX, height + extrusionY,
       chamfer + extrusionX, height + extrusionY,
     ]);
-    lowerWall.fill({ color: mixColor(0x050f20, accent, 0.1), alpha: 0.98 });
+    lowerWall.fill({ color: mixColor(0x0a1a2c, accent, 0.1), alpha: 0.98 });
     underlayContainer.addChild(lowerWall);
 
     const aura = new Graphics();
@@ -3551,7 +3599,7 @@ export class GpuRenderer {
     underlayContainer.addChild(aura);
 
     const faceColor = mixColor(
-      selected ? 0x172a49 : 0x111a2b,
+      selected ? 0x203b61 : 0x192a43,
       accent,
       selected ? 0.23 : 0.13
     );
@@ -3598,7 +3646,7 @@ export class GpuRenderer {
       width - chamfer - 3, height - 2.5,
       chamfer + 3, height - 2.5,
     ]);
-    lowerBevel.fill({ color: 0x02050b, alpha: 0.42 });
+    lowerBevel.fill({ color: 0x07111d, alpha: 0.42 });
     container.addChild(lowerBevel);
 
     const rail = new Graphics();
@@ -4081,6 +4129,10 @@ export class GpuRenderer {
     options?: { bobPx?: number; bobPeriodMs?: number }
   ) {
     const resolvedScale = visualScale ?? ATOMA_MARK_HEADER_SCALE;
+    this.setFarFieldActive(shouldShowFarField(
+      this.snapshot?.state.entered ?? false,
+      resolvedScale
+    ));
     const placement: AtomaMarkPlacement = {
       x,
       y,

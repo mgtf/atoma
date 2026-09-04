@@ -27,6 +27,7 @@ import { useAuthController } from './session-controller.js';
 import { GpuDomBridge } from './DomBridge.js';
 import { OrgModelsForm } from './OrgModelsForm.js';
 import { EntryVeilLayer } from './EntryVeilLayer.js';
+import { PreviewPlane, type PreviewPlaneStatus } from './PreviewPlane.js';
 import { useEntryFade } from './entry-fade.js';
 import { GpuSurface } from './GpuSurface.js';
 import { SceneCameraPlane } from './SceneCameraPlane.js';
@@ -43,6 +44,7 @@ import {
   useBurnin,
   useOrganisation,
   useGithubInstallations,
+  usePreviewStatus,
   useProfiles,
   useProjectRuns,
   useProjects,
@@ -57,6 +59,7 @@ import {
 import {
   isRoutableView,
   nextRunFilters,
+  previewTargetForRun,
   projectSelectionAfterActivate,
   projectSelectionAfterProjects,
   useGpuStore,
@@ -78,6 +81,30 @@ declare global {
       dispatch: (id: string) => void;
     };
   }
+}
+
+/**
+ * How often the plane tells the host it is still being watched.
+ *
+ * It must be comfortably shorter than the SHORTER of the two clocks it feeds:
+ * the instance's idle TTL (15 minutes by default) and the browser's grant on
+ * the preview origin (5 minutes, fixed). One minute leaves room for a beat to
+ * be lost without the member losing the preview.
+ */
+const PREVIEW_HEARTBEAT_MS = 60_000;
+
+/**
+ * One bounded sentence for a refused preview.
+ *
+ * The server's own message is preferred when it has one — it names the actual
+ * reason, and every one of them is already bounded by `PreviewHttpService`.
+ * The three fallbacks exist for a transport failure that produced no message
+ * at all.
+ */
+function previewErrorMessage(error: unknown, t: (key: string) => string): string {
+  const message = error instanceof Error ? error.message : '';
+  if (message) return message;
+  return t('preview.error.generic');
 }
 
 function errorMessage(errors: unknown[], t: (key: string) => string) {
@@ -191,14 +218,27 @@ function GpuAppContent({
   // the runs view then rendered an error banner instead of its list — the
   // wheel handler fails closed on scrollMax, so scrolling died with it.
   const authed = authSnapshot !== null;
-  const projectsQuery = useProjects(state.view === 'projects' && authed);
+  // Enabled on Runs too, and not for the Runs list: it is the ONLY way to
+  // resolve the project a selected run belongs to, and the preview is keyed by
+  // (project, project run) while this view is keyed by trace id. Gated on the
+  // Projects view alone, a member who RELOADED the page while watching their
+  // run had no project list in cache and therefore no preview control — the
+  // one moment the control matters most.
+  const projectsQuery = useProjects(
+    (state.view === 'projects' || state.view === 'runs') && authed
+  );
   const githubInstallationsQuery = useGithubInstallations(state.view === 'projects' && authed);
-  const selectedProject = state.view === 'projects'
-    ? projectsQuery.data?.find((project) => project.projectId === state.selectedProjectId) ?? null
-    : null;
+  // Resolved on EVERY view, not only Projects. A member reaches a run's detail
+  // by clicking it in its project, and the preview below is keyed by (project,
+  // project run) while the Runs view is keyed by trace id — so the project run
+  // list has to survive that navigation. Gating this on the view emptied the
+  // query key the moment the viewer left, taking the only link between the two
+  // identities with it.
+  const selectedProject =
+    projectsQuery.data?.find((project) => project.projectId === state.selectedProjectId) ?? null;
   const projectRunsQuery = useProjectRuns(
     selectedProject?.projectId ?? null,
-    state.view === 'projects' && !!selectedProject
+    (state.view === 'projects' || state.view === 'runs') && !!selectedProject
   );
   const projectRuns = useMemo<Record<string, import('../client/types.js').VizProjectRun[]>>(
     () =>
@@ -207,6 +247,42 @@ function GpuAppContent({
         : {},
     [projectRunsQuery.data, selectedProject]
   );
+
+  // The project run behind the selected trace. A run reached from anywhere
+  // else — the runs index, a burn-in row, a deep link — has no project run to
+  // preview, and the control below stays absent rather than guessing one.
+  const previewTarget = useMemo(
+    () => previewTargetForRun(projectRunsQuery.data ?? [], state.selectedRunId, runsQuery.data ?? []),
+    [projectRunsQuery.data, runsQuery.data, state.selectedRunId]
+  );
+  // READS ONLY. A GET allocates nothing server-side, which is what makes it
+  // safe to poll from a tab a viewer left open on a run.
+  const previewQuery = usePreviewStatus(
+    previewTarget?.projectId ?? null,
+    previewTarget?.projectRunId ?? null,
+    state.view === 'runs' && authed && !!previewTarget
+  );
+  // THE RUN'S STATUS IS WHAT MAKES A PREVIEW POSSIBLE, so a change to it must
+  // re-ask. Nothing else will: `usePreviewStatus` stops polling once the state
+  // is `stopped`, which is exactly what a run nobody has previewed reads as,
+  // and `refetchOnWindowFocus` is off. So a run watched from `queued` never
+  // learned it had gone `running`, and the control the member is waiting for
+  // never appeared — the in-flight case, silently unreachable.
+  //
+  // It matters at the other end too. The run row flips to `delivered` BEFORE
+  // the coordinator writes the descriptor, so a summary read in that window
+  // says `available` from the in-flight branch and then sticks: the surface
+  // would keep offering a snapshot of a run that has finished.
+  const previewRunStatus =
+    (projectRunsQuery.data ?? []).find(
+      (run) => run.projectRunId === previewTarget?.projectRunId
+    )?.status ?? null;
+  useEffect(() => {
+    if (!previewTarget || !previewRunStatus) return;
+    void queryClient.invalidateQueries({
+      queryKey: ['viz', 'preview', previewTarget.projectId, previewTarget.projectRunId],
+    });
+  }, [previewRunStatus, previewTarget, queryClient]);
 
   const login = useMemo(
     () =>
@@ -480,6 +556,160 @@ function GpuAppContent({
     }
   }, [githubInstallationsQuery.data, projectBusy, queryClient, t]);
 
+  // THE PREVIEW SESSION, and it lives HERE rather than in the store on
+  // purpose: `previewUrl` carries a one-time claim in its fragment, so it is a
+  // credential — never the store (which a devtools reader can dump), never a
+  // query cache, never a log line. Nothing on the canvas reads any of it, so
+  // there is no shared transition for the store to own either.
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewStatus, setPreviewStatus] = useState<PreviewPlaneStatus>('idle');
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  // Bumped by Reload. It is what makes the frame remount, and it also tells
+  // the plane the claim in `previewUrl` has been spent — see `frameSrc`.
+  const [previewReloadNonce, setPreviewReloadNonce] = useState(0);
+  // Where focus was when the plane took the screen. A keyboard member arrived
+  // from the mirrored Preview button in the semantic bridge and must land back
+  // on it; one who clicked the canvas had focus on the body, and restoring
+  // that is a no-op rather than a jump.
+  const previewOpener = useRef<HTMLElement | null>(null);
+  const previewSummary = previewQuery.data ?? null;
+  const previewProject = previewTarget
+    ? projectsQuery.data?.find((project) => project.projectId === previewTarget.projectId) ?? null
+    : null;
+  const previewGoal =
+    (projectRunsQuery.data ?? []).find(
+      (run) => run.projectRunId === previewTarget?.projectRunId
+    )?.goal ?? '';
+
+  const requestPreview = useCallback(
+    async (mode: 'open' | 'restart'): Promise<void> => {
+      if (!previewTarget) return;
+      const { projectId, projectRunId } = previewTarget;
+      setPreviewStatus('opening');
+      setPreviewError(null);
+      previewOpener.current =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      // The plane opens BEFORE the answer, showing "starting" — a member who
+      // clicked deserves the surface they asked for immediately, and the
+      // container start is measured in seconds.
+      setPreviewOpen(true);
+      // Back to zero: the answer below carries a FRESH claim, and the frame
+      // must use it rather than the origin root a previous reload left behind.
+      setPreviewReloadNonce(0);
+      try {
+        // `inFlight` is a REQUEST, never an assertion: a run that has
+        // delivered gets its delivered preview back and the flag is ignored.
+        // The client is not the one that decides which of the two this is.
+        const answered =
+          mode === 'open'
+            ? await api.openPreview(projectId, projectRunId, { inFlight: true })
+            : await api.restartPreview(projectId, projectRunId, { inFlight: true });
+        setPreviewUrl(answered.url ?? null);
+        setPreviewStatus('idle');
+        // A 202 means another caller is building this generation. Nothing to
+        // do but let `usePreviewStatus` poll, which it already does while the
+        // state is `starting`.
+      } catch (error) {
+        setPreviewStatus('error');
+        setPreviewError(previewErrorMessage(error, t));
+      } finally {
+        await queryClient.invalidateQueries({
+          queryKey: ['viz', 'preview', projectId, projectRunId],
+        });
+      }
+    },
+    [previewTarget, queryClient, t]
+  );
+
+  const reloadPreview = useCallback(() => {
+    setPreviewReloadNonce((nonce) => nonce + 1);
+  }, []);
+
+  const closePreview = useCallback(() => {
+    setPreviewOpen(false);
+    // The URL is dropped with the plane. Its claim is spent anyway, and a
+    // credential kept past the surface that used it is a credential waiting
+    // to be found.
+    setPreviewUrl(null);
+    setPreviewStatus('idle');
+    setPreviewError(null);
+    const opener = previewOpener.current;
+    previewOpener.current = null;
+    // After the plane unmounts, or the focus call lands on an element React is
+    // about to remove.
+    if (opener?.isConnected) requestAnimationFrame(() => opener.focus());
+  }, []);
+
+  const stopPreview = useCallback(async (): Promise<void> => {
+    if (!previewTarget) return;
+    const { projectId, projectRunId } = previewTarget;
+    // The plane goes with it. Stopping IS "I am done looking", and leaving it
+    // up would also race the claim effect below: the status poll lags the
+    // stop, so a plane still open against a summary that still says `ready`
+    // would immediately ask for a new claim on the preview just stopped.
+    closePreview();
+    try {
+      await api.stopPreview(projectId, projectRunId);
+    } catch (error) {
+      setPreviewStatus('error');
+      setPreviewError(previewErrorMessage(error, t));
+    } finally {
+      await queryClient.invalidateQueries({
+        queryKey: ['viz', 'preview', projectId, projectRunId],
+      });
+    }
+  }, [previewTarget, queryClient, t]);
+
+  // THE HEARTBEAT — the only thing that keeps a preview alive, and it beats
+  // only while the plane is actually up. That is the D6 contract made
+  // mechanical: the generated app's own traffic never reaches this, so an
+  // abandoned tab full of polling code cannot keep its own container running.
+  // The interval sits well inside BOTH clocks it feeds: the container's idle
+  // TTL and the browser's grant, the shorter of which is five minutes.
+  useEffect(() => {
+    if (!previewOpen || !previewTarget) return;
+    const generation = previewSummary?.generation ?? 0;
+    if (previewSummary?.state !== 'ready' || generation <= 0) return;
+    const { projectId, projectRunId } = previewTarget;
+    let cancelled = false;
+    const beat = () => {
+      void api.previewHeartbeat(projectId, projectRunId, generation).catch(() => {
+        // A failed beat is not worth a banner: the next status poll says what
+        // happened, and the container stops on its own if none arrive.
+      });
+    };
+    const timer = window.setInterval(() => {
+      if (!cancelled) beat();
+    }, PREVIEW_HEARTBEAT_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [previewOpen, previewSummary?.generation, previewSummary?.state, previewTarget]);
+
+  // A generation someone ELSE was building has become ready, and this browser
+  // holds no claim for it: `open` answered 202 because another caller was
+  // already starting it, so there was no URL to hand over. Without this the
+  // plane sits on its placeholder for a preview that is running and reachable.
+  // ONE ask, and it cannot loop: a success sets the URL and a failure sets the
+  // error status, and both falsify the guard.
+  useEffect(() => {
+    if (!previewOpen || previewUrl || previewStatus !== 'idle') return;
+    if (previewSummary?.state !== 'ready') return;
+    void requestPreview('open');
+  }, [previewOpen, previewStatus, previewSummary?.state, previewUrl, requestPreview]);
+
+  // A preview that stopped underneath the plane — idle expiry, a restart
+  // elsewhere, an operator stop — takes its frame down with it rather than
+  // leaving a dead iframe that still looks like the app.
+  useEffect(() => {
+    if (!previewOpen) return;
+    if (previewSummary && previewSummary.state !== 'ready' && previewSummary.state !== 'starting') {
+      setPreviewUrl(null);
+    }
+  }, [previewOpen, previewSummary]);
+
   const startProjectRun = useCallback(async (): Promise<void> => {
     if (projectBusy) return;
     const projectId = useGpuStore.getState().selectedProjectId;
@@ -634,6 +864,19 @@ function GpuAppContent({
       store.toggleRunSummary();
       return;
     }
+    // The preview controls, drawn as siblings of the summary card so the
+    // full-card toggle above cannot swallow them.
+    if (id === 'run.preview.open') {
+      // `failed` reopens as a RESTART, not an open: a generation that could
+      // not start is not one to retry into, and the state machine already
+      // says a new attempt is a new generation.
+      void requestPreview(previewQuery.data?.state === 'failed' ? 'restart' : 'open');
+      return;
+    }
+    if (id === 'run.preview.stop') {
+      void stopPreview();
+      return;
+    }
     // The id carries what the viewer SAW, because with no stored preference
     // the view resolved the open state from the selected project's run count
     // and only it knows what it drew.
@@ -753,8 +996,11 @@ function GpuAppContent({
     loadOlderNotifications,
     mintInvitation,
     pendingLoginProvider,
+    previewQuery.data?.state,
     profilesQuery.data,
     projectsQuery.data,
+    requestPreview,
+    stopPreview,
   ]);
 
   const loading =
@@ -824,12 +1070,14 @@ function GpuAppContent({
     organisation: organisationQuery.data ?? null,
     accountModels: accountModelsQuery.data ?? null,
     accountError,
+    preview: previewQuery.data ?? null,
     login,
     loading,
     error,
   }), [
     accountError,
     accountModelsQuery.data,
+    previewQuery.data,
     adminError,
     adminInvitation,
     adminOrganisationsQuery.data,
@@ -884,7 +1132,14 @@ function GpuAppContent({
   }, [activate, state.sceneCameraMode, state.selectedRunId, state.view]);
 
   return (
-    <main className="gpu-app">
+    <main className="gpu-app" data-entered={state.entered ? 'true' : 'false'}>
+      {/* The product tree goes INERT behind an open preview, not merely
+          hidden: `inert` takes the whole subtree out of focus order, hit
+          testing and the accessibility tree in one attribute, so a tab press
+          cannot land on a GL control the member cannot see, and a screen
+          reader is not read two surfaces at once. `aria-hidden` alone would
+          have done only the last of the three. */}
+      <div className="gpu-scene-host" inert={previewOpen}>
       <SceneCameraPlane mode={state.sceneCameraMode} onSettled={cameraSettled}>
         <GpuSurface
           data={data}
@@ -924,6 +1179,8 @@ function GpuAppContent({
           onDismissPush={dismissPush}
           onRenameAccount={(displayName) => { void renameAccount(displayName); }}
           accountError={accountError}
+          preview={previewSummary}
+          onActivate={activate}
           orgModelsForm={
             state.view === 'settings' &&
             authSnapshot !== null &&
@@ -949,6 +1206,23 @@ function GpuAppContent({
         />
         <SceneTuningPanel />
       </SceneCameraPlane>
+      </div>
+      <PreviewPlane
+        open={previewOpen}
+        summary={previewSummary}
+        url={previewUrl}
+        projectName={previewProject?.name ?? ''}
+        goal={previewGoal}
+        reloadNonce={previewReloadNonce}
+        status={previewStatus}
+        errorMessage={previewError}
+        t={t}
+        locale={state.locale}
+        onClose={closePreview}
+        onReload={reloadPreview}
+        onRestart={() => { void requestPreview('restart'); }}
+        onStop={() => { void stopPreview(); }}
+      />
       <AtomaCursor />
       <EntryVeilLayer phase={entryPhase} />
     </main>

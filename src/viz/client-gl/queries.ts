@@ -142,6 +142,43 @@ export function useProjects(active: boolean) {
   });
 }
 
+/**
+ * One run's preview state.
+ *
+ * TWO CADENCES, for two questions. While a generation is BUILDING the member
+ * is watching a spinner, so 1.5s is what makes it feel answered. While one is
+ * READY the question is the opposite — has it stopped underneath me? — and a
+ * slow poll is what takes a dead iframe down instead of leaving it looking
+ * like the app. Neither can spend an organisation's quota: the server refuses
+ * to allocate on a GET, by contract.
+ */
+export function usePreviewStatus(
+  projectId: string | null,
+  runId: string | null,
+  active: boolean
+) {
+  return useQuery({
+    queryKey: ['viz', 'preview', projectId, runId],
+    enabled: active && !!projectId && !!runId,
+    queryFn: () => {
+      if (!projectId || !runId) throw new Error('project and run ids are required');
+      return api.previewStatus(projectId, runId);
+    },
+    // TWO cadences, for two questions. While a generation is BUILDING the
+    // member is watching a spinner and 1.5s is what makes it feel answered.
+    // While one is READY the question is the opposite — has it stopped
+    // underneath me? — and a slow poll is what takes a dead iframe down
+    // instead of leaving it looking like the app. A GET allocates nothing, so
+    // neither cadence can spend an organisation's quota.
+    refetchInterval: (query) => {
+      const state = query.state.data?.state;
+      if (state === 'starting' || state === 'stopping') return 1_500;
+      return state === 'ready' ? 15_000 : false;
+    },
+    staleTime: 1_000,
+  });
+}
+
 export function useProjectRuns(projectId: string | null, active: boolean) {
   return useQuery({
     queryKey: ['viz', 'project', projectId, 'runs'],
@@ -276,6 +313,30 @@ export function useAccountModels(active: boolean) {
     queryFn: api.accountModels,
     enabled: active,
     staleTime: 30_000,
+  });
+}
+
+/**
+ * Personal provider state is account self-care, separate from model pins.
+ * Only an active Codex device flow needs polling; a settled connection is
+ * refreshed explicitly after each mutation.
+ */
+export function useAccountSubscriptions(active: boolean) {
+  return useQuery({
+    queryKey: ['viz', 'account', 'subscriptions'],
+    queryFn: api.accountSubscriptions,
+    enabled: active,
+    staleTime: 1_000,
+    // A device code is transient login material. Once Settings unmounts it
+    // leaves the browser query cache immediately rather than waiting for the
+    // ordinary five-minute garbage-collection window.
+    gcTime: 0,
+    refetchInterval: (query) =>
+      active &&
+      (query.state.data?.codex.state === 'connecting' ||
+        query.state.data?.codexAttempt?.state === 'connecting')
+        ? 1_000
+        : false,
   });
 }
 

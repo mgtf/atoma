@@ -1,0 +1,105 @@
+name: Deploy production
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # ATOMA_DEPLOY_ENABLED is deliberately a REPOSITORY variable: environment
+    # variables are loaded only after this job enters the environment. Missing
+    # configuration therefore skips instead of creating a failing production
+    # deployment after every push.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      vars.ATOMA_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: ${{ vars.ATOMA_DEPLOY_URL }}
+    env:
+      DEPLOY_HOST: ${{ vars.ATOMA_DEPLOY_HOST }}
+      DEPLOY_PORT: ${{ vars.ATOMA_DEPLOY_PORT || '22' }}
+      DEPLOY_USER: ${{ vars.ATOMA_DEPLOY_USER }}
+      DEPLOY_URL: ${{ vars.ATOMA_DEPLOY_URL }}
+      SSH_PRIVATE_KEY: ${{ secrets.ATOMA_DEPLOY_SSH_PRIVATE_KEY }}
+      SSH_KNOWN_HOSTS: ${{ secrets.ATOMA_DEPLOY_KNOWN_HOSTS }}
+      REVISION: ${{ github.event.workflow_run.head_sha }}
+      CI_RUN_ID: ${{ github.event.workflow_run.id }}
+    steps:
+      - name: Download the artifact produced by the successful CI run
+        uses: actions/download-artifact@v5
+        with:
+          name: atoma-deploy-${{ github.event.workflow_run.head_sha }}
+          path: deployment
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Verify deployment inputs and artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          deploy_url_pattern='^https://[A-Za-z0-9._:/?&=%-]+$'
+          [[ "${REVISION}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${DEPLOY_HOST}" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ "${DEPLOY_USER}" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]]
+          [[ "${DEPLOY_PORT}" =~ ^[0-9]+$ ]] && (( DEPLOY_PORT >= 1 && DEPLOY_PORT <= 65535 ))
+          [[ "${DEPLOY_URL}" =~ ${deploy_url_pattern} ]]
+          [[ -n "${SSH_PRIVATE_KEY}" && -n "${SSH_KNOWN_HOSTS}" ]]
+          cd deployment
+          sha256sum -c "atoma-${REVISION}.tar.gz.sha256"
+          test -f "atoma-${REVISION}.tar.gz"
+
+      - name: Install pinned SSH identity and host key
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 0700 "${RUNNER_TEMP}/ssh"
+          printf '%s\n' "${SSH_PRIVATE_KEY}" > "${RUNNER_TEMP}/ssh/id"
+          printf '%s\n' "${SSH_KNOWN_HOSTS}" > "${RUNNER_TEMP}/ssh/known_hosts"
+          chmod 0600 "${RUNNER_TEMP}/ssh/id" "${RUNNER_TEMP}/ssh/known_hosts"
+
+      - name: Stream the exact CI artifact to the host activator
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="deployment/atoma-${REVISION}.tar.gz"
+          digest="$(sha256sum "${archive}" | awk '{print $1}')"
+          ssh \
+            -i "${RUNNER_TEMP}/ssh/id" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o "UserKnownHostsFile=${RUNNER_TEMP}/ssh/known_hosts" \
+            -o ConnectTimeout=15 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=20 \
+            -o TCPKeepAlive=yes \
+            -p "${DEPLOY_PORT}" \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "deploy ${REVISION} ${digest}" \
+            < "${archive}"
+
+      - name: Verify the public TLS path
+        shell: bash
+        run: |
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --retry 12 \
+            --retry-all-errors \
+            --retry-delay 5 \
+            --max-time 10 \
+            "${DEPLOY_URL}" >/dev/null

@@ -20,12 +20,19 @@ function dependencies(
 ): Partial<DoctorDependencies> {
   return {
     nodeVersion: 'v22.13.0',
+    // PINNED, so this suite diagnoses one platform whatever host it runs on.
+    // Without it every doctor assertion below would flip on a Windows
+    // developer's machine, where the run-host check fails by contract.
+    platform: 'linux',
     runCommand: async (command, args) => {
       if (command === 'docker' && args[0] === 'version') {
         return { stdout: '28.0.0\n', stderr: '' };
       }
       if (command === 'docker' && args[0] === 'image') {
         return { stdout: 'sha256:test\n', stderr: '' };
+      }
+      if (command === 'python3') {
+        return { stdout: 'Python 3.13.5\n', stderr: '' };
       }
       if (command === 'claude') {
         return {
@@ -333,6 +340,77 @@ describe('atoma doctor', () => {
     });
 
     expect(report.checks.find((c) => c.id === 'isolation')).toBeUndefined();
+  });
+
+  it.each([
+    ['linux', 'pass', true],
+    ['darwin', 'pass', true],
+    ['win32', 'fail', false],
+  ] as const)('reports %s as a run host (%s)', async (platform, status, ready) => {
+    // The audit's worst state was SILENCE: on win32 every check passed and no
+    // run could start. Doctor must say so before a run dies several
+    // processes deep, and must say it for a platform this suite is not on.
+    const report = await diagnoseDoctor({
+      mode: { container: false, egress: false },
+      env: { ATOMA_LLM: 'anthropic', ANTHROPIC_API_KEY: 'configured' },
+      dependencies: dependencies({ platform }),
+    });
+
+    const host = report.checks.find((check) => check.id === 'run-host');
+    expect(host?.status).toBe(status);
+    expect(report.ready).toBe(ready);
+    if (status === 'fail') {
+      // Detail is the mechanical fact, remedy is the way out — the renderer
+      // prints both, so a detail that also carried the remedy said it twice.
+      expect(host?.detail).toContain('win32');
+      expect(host?.detail).not.toContain('WSL2');
+      expect(host?.remedy).toMatch(/WSL2/);
+      expect(host?.remedy).toMatch(/development-setup\.md/);
+    }
+  });
+
+  it('warns when python3 is absent, since start_static_server spawns it', async () => {
+    const runCommand = async (
+      command: string
+    ): Promise<{ stdout: string; stderr: string }> => {
+      if (command === 'python3') throw new Error('spawn python3 ENOENT');
+      return { stdout: '', stderr: '' };
+    };
+    const missing = await diagnoseDoctor({
+      mode: { container: false, egress: false },
+      env: { ATOMA_LLM: 'anthropic', ANTHROPIC_API_KEY: 'configured' },
+      dependencies: dependencies({ runCommand }),
+    });
+    const check = missing.checks.find((c) => c.id === 'python');
+    expect(check?.status).toBe('warn');
+    expect(check?.remedy).toContain('python3');
+    // A warning, not a failure: tasks that never serve a page are unaffected.
+    expect(missing.ready).toBe(true);
+
+    // Present is a pass…
+    const present = await diagnoseDoctor({
+      mode: { container: false, egress: false },
+      env: { ATOMA_LLM: 'anthropic', ANTHROPIC_API_KEY: 'configured' },
+      dependencies: dependencies(),
+    });
+    expect(present.checks.find((c) => c.id === 'python')?.status).toBe('pass');
+
+    // …and a reply that is not a python version is not a python (a `python3`
+    // shim answering nothing at all is the Windows Store stub's behaviour).
+    const stub = await diagnoseDoctor({
+      mode: { container: false, egress: false },
+      env: { ATOMA_LLM: 'anthropic', ANTHROPIC_API_KEY: 'configured' },
+      dependencies: dependencies({ runCommand: async () => ({ stdout: '', stderr: '' }) }),
+    });
+    expect(stub.checks.find((c) => c.id === 'python')?.status).toBe('warn');
+
+    // The host's python is irrelevant in container mode: the worker ships one.
+    const containerised = await diagnoseDoctor({
+      mode: { container: true, egress: false },
+      env: { ATOMA_LLM: 'anthropic', ANTHROPIC_API_KEY: 'configured' },
+      dependencies: dependencies({ runCommand }),
+    });
+    expect(containerised.checks.find((c) => c.id === 'python')).toBeUndefined();
   });
 
   it('requires Docker and a bootable worker in container mode', async () => {

@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn, spawnSync, execSync } from 'node:child_process';
 
+const posixIt = it.skipIf(process.platform === 'win32');
+
 /**
  * Headless Chrome must die with its run, on the HARD exit path too.
  *
@@ -26,7 +28,7 @@ import { spawn, spawnSync, execSync } from 'node:child_process';
  * WITHOUT calling cleanup — exactly the shape that leaked.
  */
 describe('validate_html — the browser is reaped on a hard exit', () => {
-  it('kills headless Chrome when the run exits without cleanup', () => {
+  posixIt('kills headless Chrome when the run exits without cleanup', () => {
     const dir = mkdtempSync(join(tmpdir(), 'atoma-orphan-'));
     const script = join(dir, 'leak.mjs');
     const repo = process.cwd();
@@ -74,7 +76,7 @@ process.exit(0);   // hard exit — the leak's shape
     rmSync(dir, { recursive: true, force: true });
   }, 120_000);
 
-  it('the harness kill shape leaks NOTHING: detached child + group SIGTERM', async () => {
+  posixIt('the harness kill shape leaks NOTHING: detached child + group SIGTERM', async () => {
     // The faithful reproduction, and the measured reason the harness now
     // escalates instead of going straight to SIGKILL. Same shape as
     // burnin.ts (spawn detached, signal the whole group), A/B'd by hand:
@@ -84,10 +86,6 @@ process.exit(0);   // hard exit — the leak's shape
     const dir = mkdtempSync(join(tmpdir(), 'atoma-sigterm-'));
     const script = join(dir, 'live.mjs');
     const repo = process.cwd();
-    const count = (): number =>
-      Number(
-        execSync("pgrep -f '\\.cache/puppeteer' | wc -l", { encoding: 'utf8' }).trim()
-      );
     writeFileSync(
       script,
       `
@@ -101,31 +99,74 @@ setInterval(() => {}, 1000);   // idle like a delivered run that started a serve
       'utf8'
     );
 
-    const before = count();
     const child = spawn('npx', ['tsx', script], {
       cwd: repo,
       detached: true, // exactly how burnin.ts spawns a run
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    // The puppeteer processes THIS child owns, found by walking the live
+    // process tree from its pid. Not a machine-wide pgrep: under a fully
+    // parallel suite the other browser-driving test files inflate and
+    // deflate a global count between any two samples (measured 2026-08-31:
+    // "leaked" came out at -6 because six unrelated Chromes had exited
+    // since the baseline). Not the child's process GROUP either: puppeteer
+    // launches Chrome detached into a group of its own, so the reap this
+    // test proves travels through the child's exit handler, not through
+    // group membership.
+    const puppeteerDescendants = (): number[] => {
+      const rows = execSync('ps -eo pid=,ppid=,args=', { encoding: 'utf8' })
+        .trim()
+        .split('\n')
+        .map((row) => /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(row))
+        .filter((m): m is RegExpExecArray => m !== null)
+        .map((m) => ({ pid: Number(m[1]), ppid: Number(m[2]), args: m[3] ?? '' }));
+      const owned = new Set([child.pid!]);
+      let grew = true;
+      while (grew) {
+        grew = false;
+        for (const row of rows) {
+          if (owned.has(row.ppid) && !owned.has(row.pid)) {
+            owned.add(row.pid);
+            grew = true;
+          }
+        }
+      }
+      return rows
+        .filter((row) => owned.has(row.pid) && row.args.includes('.cache/puppeteer'))
+        .map((row) => row.pid);
+    };
     const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
     let out = '';
     child.stdout.on('data', (c: Buffer) => (out += c.toString()));
     const upBy = Date.now() + 90_000;
     while (!/READY/.test(out) && Date.now() < upBy) await sleep(200);
     expect(/READY/.test(out), `child never booted a browser. out=${out}`).toBe(true);
-    expect(count()).toBeGreaterThan(before); // the browser really is up
+    const browserPids = puppeteerDescendants();
+    expect(browserPids.length).toBeGreaterThan(0); // the browser really is up
 
     process.kill(-child.pid!, 'SIGTERM'); // the harness's first signal
 
-    const deadline = Date.now() + 15_000;
-    while (count() > before && Date.now() < deadline) await sleep(300);
-    const leaked = count() - before;
+    const gone = (pid: number): boolean => {
+      try {
+        process.kill(pid, 0);
+        return false;
+      } catch {
+        return true;
+      }
+    };
+    const deadline = Date.now() + 30_000;
+    let leaked: number[] = [];
+    do {
+      leaked = browserPids.filter((pid) => !gone(pid));
+      if (leaked.length === 0) break;
+      await sleep(300);
+    } while (Date.now() < deadline);
     try {
       process.kill(-child.pid!, 'SIGKILL');
     } catch {
       /* already gone */
     }
-    expect(leaked, `${leaked} puppeteer process(es) survived the graceful kill`).toBe(0);
+    expect(leaked, `puppeteer pid(s) survived the graceful kill: ${leaked.join(', ')}`).toEqual([]);
     rmSync(dir, { recursive: true, force: true });
   }, 150_000);
 });

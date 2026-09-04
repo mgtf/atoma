@@ -178,9 +178,12 @@ const PUSH_ROUTE_SOURCES: Record<PlatformEventKind, PushRouteSource | null> = {
   // Journaled for audit, never pushed: on a single-operator instance every
   // admin run would fire one.
   'run.host_subscription': null,
+  'run.principal_subscription': null,
   // The operator's own choice about their own account. Journaled, never a
   // notification.
   'principal.subscription_pin': null,
+  'principal.subscription_connected': null,
+  'principal.subscription_disconnected': null,
   // Preference changes are audit rows, never notifications: on a healthy
   // multi-org instance these would be the loudest channel there is.
   'org.models_updated': null,
@@ -376,6 +379,11 @@ const PUSH_ROUTE_SOURCES: Record<PlatformEventKind, PushRouteSource | null> = {
   },
   'push.subscribed': null,
   'push.unsubscribed': null,
+  // A preview is something a member is watching while they watch it. A push
+  // would arrive on the device already showing the thing it is about.
+  'preview.started': null,
+  'preview.stopped': null,
+  'preview.failed': null,
 };
 
 /** Every consumer sees a total per-locale table; source omissions mean EN fallback. */

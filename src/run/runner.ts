@@ -417,16 +417,14 @@ export async function startTask(
     );
   }
 
-  // Provider selection. Default is Anthropic; set ATOMA_LLM=ollama to
-  // run against a local Ollama install (or Ollama Cloud via a :cloud
-  // tag). The Ollama path ignores ANTHROPIC_API_KEY and doesn't need a
-  // network-reachable Anthropic endpoint. The L3 Opus-discovery step
-  // (`resolveLatestOpus`) is also skipped — L3 falls back to its
-  // FALLBACK_OPUS model id string, which the OllamaLlmClient then
-  // silently substitutes with its configured default model.
+  // Provider selection. Default is Anthropic; Z.ai is the compatible remote
+  // alternative and Ollama serves local/cloud tags. Non-Anthropic base paths
+  // skip the L3 Opus-discovery call — L3 falls back to its model id string,
+  // which each transport maps or serves according to its own contract.
   const provider = resolveBaseProviderKind(providerEnv['ATOMA_LLM']);
   if (suppliedProviderEnv) assertTransportHonoursCredentials(provider, suppliedProviderEnv);
   const useOllama = provider === 'ollama';
+  const useZai = provider === 'zai';
   // ATOMA_LLM=claude-cli routes every LLM call through the local Claude
   // Code installation (Claude Agent SDK) — subscription auth, no API key.
   const useClaudeCli = provider === 'claude-cli';
@@ -579,7 +577,7 @@ export async function startTask(
   // A missing credential is NOT detectable here — the SDK resolves on the
   // first request — so this never fails the launch; `atoma doctor` is
   // where credential presence is reported.
-  const anthropic = useOllama || useClaudeCli ? undefined : makeAnthropicClient(providerEnv);
+  const anthropic = useOllama || useZai || useClaudeCli ? undefined : makeAnthropicClient(providerEnv);
   const metrics = new InMemoryMetrics();
   const runSignals: RunSignalCounts = {
     deterministic: 0,
@@ -617,6 +615,8 @@ export async function startTask(
   console.log(
     useOllama
       ? `llm provider: ollama — ${process.env['OLLAMA_MODEL'] ?? 'glm-5.1:cloud'} @ ${process.env['OLLAMA_BASE_URL'] ?? 'http://localhost:11434'}`
+      : useZai
+        ? `llm provider: zai — Anthropic-compatible endpoint @ ${providerEnv['ZAI_BASE_URL'] ?? 'https://api.z.ai/api/anthropic'}`
       : useClaudeCli
         ? `llm provider: claude-cli — local Claude Code auth; tiers map to haiku/sonnet/opus aliases${
             process.env['ATOMA_CLAUDE_MODEL']

@@ -15,7 +15,8 @@ import { tmpdir } from 'node:os';
  */
 const CHILD_ENV_ALLOWLIST: readonly string[] = [
   'PATH',
-  'HOME',
+  // HOME is deliberately absent: children always receive a synthesized
+  // scratch HOME (see sandboxChildEnv), never the parent's.
   'TMPDIR',
   'TEMP',
   'TMP',
@@ -61,14 +62,15 @@ const CHILD_ENV_ALLOWLIST: readonly string[] = [
  * (e.g. `PORT` for server tools). Extras win on conflict.
  */
 export function sandboxChildEnv(
-  extra: Record<string, string> = {}
+  extra: Record<string, string> = {},
+  platform: NodeJS.Platform = process.platform
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const key of CHILD_ENV_ALLOWLIST) {
     const val = process.env[key];
     if (val !== undefined) env[key] = val;
   }
-  // HOME is allowlisted for tool CACHES (npm, pip, node-gyp) — but the
+  // Children need a HOME for tool CACHES (npm, pip, node-gyp) — but the
   // REAL home is a credential store: run_shell executes model-authored
   // code with network egress (fetch_url, npm), and ~/.aws/credentials,
   // ~/.netrc or ~/.ssh were one `cat` away (same exfiltration class the
@@ -76,8 +78,23 @@ export function sandboxChildEnv(
   // the FILE side). Children get a scratch HOME under the OS tmpdir:
   // caches still work (they're just cold), dotfiles are out of reach.
   // Callers may still override via `extra` (task-owned config).
-  if (env['HOME'] !== undefined && extra['HOME'] === undefined) {
-    env['HOME'] = scratchHome();
+  //
+  // The substitution must not depend on the parent HAVING a HOME: a win32
+  // parent usually defines none, and a child with no HOME at all still
+  // reaches the real profile through os.homedir()'s USERPROFILE/syscall
+  // fallback (~/.claude/.credentials.json was one readFile away, measured
+  // 2026-08-30). USERPROFILE is what os.homedir() and most Windows tooling
+  // actually read, so on win32 it — and the HOMEDRIVE/HOMEPATH pair older
+  // tools split it into — is pinned to the same scratch dir.
+  const home = extra['HOME'] ?? scratchHome();
+  if (extra['HOME'] === undefined) env['HOME'] = home;
+  if (platform === 'win32' && extra['USERPROFILE'] === undefined) {
+    env['USERPROFILE'] = home;
+    const drive = /^[A-Za-z]:/.exec(home)?.[0];
+    if (drive !== undefined) {
+      env['HOMEDRIVE'] = drive;
+      env['HOMEPATH'] = home.slice(drive.length);
+    }
   }
   return { ...env, ...extra };
 }

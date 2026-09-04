@@ -37,3 +37,28 @@ Neighbours:
   not even a verified-email assertion.
   What the flag unlocks is a routing question, answered in
   [`src/viz`](../viz/AGENTS.md).
+
+## Personal provider subscriptions
+
+- A provider subscription belongs to one principal, never an organisation.
+  SQLite stores only an opaque profile-generation receipt and timestamps;
+  provider credentials remain below the private `ATOMA_ACCOUNT_PROFILES_ROOT`
+  (`0700`, credential files `0600`). Never put tokens, device codes, account
+  email, plan or profile paths in the store, API or audit journal.
+- Personal profiles fail closed on hosts where private ownership cannot be
+  proven. POSIX mode checks are implemented; Windows requires an explicit ACL
+  implementation before this capability may be enabled there.
+- Codex login uses the official app-server device-code account methods. Pending
+  attempts are bounded, memory-only and self-scoped from the resolved session.
+  A run resolves the exact current generation from its requesting principal;
+  disconnection deletes the receipt first and never falls back to the host.
+  App-server access shares the same per-`CODEX_HOME` lease as run calls. The
+  lease combines an in-process FIFO with a sibling SQLite transaction, so it
+  also excludes a surviving run child or overlapping server process and is
+  released by the OS after a crash. Never release it before the provider child
+  is reaped. Status verification shares the bounded app-server process budget.
+  Startup removes only safe UUID generations absent from the receipt set, so a
+  crash cannot leave an unbounded credential-bearing staging corpus.
+- Personal Claude/claude.ai login is unavailable until Anthropic grants the
+  third-party approval its SDK terms require. Keep that a server-owned disabled
+  capability, not a client flag or an emulated OAuth flow.

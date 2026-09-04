@@ -1,5 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,6 +30,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dirs: string[] = [];
 
+// Each test drives the real hook, which shells out to node and npx eslint.
+// That chain ran ~16s against the default 15s budget when the whole suite
+// competed for the machine (measured 2026-08-31), while passing alone in a
+// fraction of it — the timeout is a watchdog, so headroom costs nothing.
+const HOOK_TEST_TIMEOUT_MS = 60_000;
+const posixIt = it.skipIf(process.platform === 'win32');
+
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
@@ -38,11 +53,18 @@ function repoWithHook(): string {
   cpSync(join(REPO_ROOT, '.husky', 'pre-commit'), join(dir, 'hooks', 'pre-commit'));
   execFileSync('chmod', ['+x', join(dir, 'hooks', 'pre-commit')]);
   // The hook shells out to `node scripts/i18n.mjs` and `npx eslint`, both of
-  // which must resolve from the fixture: scripts/ is copied, and eslint is
-  // reached through this repository's own node_modules via NODE_PATH-free
-  // `npx` falling back to the parent — so the fixture keeps a config that
-  // makes eslint a no-op instead of pulling the real ruleset.
+  // which must resolve from the fixture: scripts/ is copied, while a local
+  // node_modules link exposes the exact eslint installed by the outer `npm
+  // ci`. The fixture lives under /tmp on CI, so relying on ancestor lookup
+  // makes `npx` download eslint and turns this behavioural test into a network
+  // timeout. The empty config keeps eslint focused on the hook's index logic.
   cpSync(join(REPO_ROOT, 'scripts'), join(dir, 'scripts'), { recursive: true });
+  mkdirSync(join(dir, 'node_modules', '.bin'), { recursive: true });
+  symlinkSync(join(REPO_ROOT, 'node_modules', 'eslint'), join(dir, 'node_modules', 'eslint'), 'dir');
+  symlinkSync(
+    join('..', 'eslint', 'bin', 'eslint.js'),
+    join(dir, 'node_modules', '.bin', 'eslint'),
+  );
   mkdirSync(join(dir, 'src', 'viz', 'client', 'locales'), { recursive: true });
   writeFileSync(join(dir, 'eslint.config.js'), 'export default [];\n');
   writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'fixture', type: 'module' }) + '\n');
@@ -54,13 +76,13 @@ function repoWithHook(): string {
 }
 
 describe('the pre-commit hook preserves what was left unstaged', () => {
-  it('does not sweep the unstaged hunks of a partially staged file into the commit', () => {
+  posixIt('does not sweep the unstaged hunks of a partially staged file into the commit', () => {
     const dir = repoWithHook();
     const file = join(dir, 'sample.ts');
 
     writeFileSync(file, 'export const first = 1;\nexport const second = 2;\n');
     git(dir, ['add', '-A']);
-    git(dir, ['commit', '-qm', 'base']);
+    git(dir, ['commit', '--no-verify', '-qm', 'base']);
 
     // Two independent edits; only the first is staged. `git add -p` is what a
     // human does here — the same index state is produced by staging the file
@@ -80,15 +102,15 @@ describe('the pre-commit hook preserves what was left unstaged', () => {
     // Which is still there, untouched, for the next commit.
     expect(readFileSync(file, 'utf8')).toContain('second = 22');
     expect(git(dir, ['status', '--porcelain'])).toContain('sample.ts');
-  });
+  }, HOOK_TEST_TIMEOUT_MS);
 
-  it('still fixes and re-stages a file that is staged whole', () => {
+  posixIt('still fixes and re-stages a file that is staged whole', () => {
     // The narrowing must not cost the hook its job on the ordinary case.
     const dir = repoWithHook();
     const file = join(dir, 'whole.ts');
     writeFileSync(file, 'export const value = 1;\n');
     git(dir, ['add', '-A']);
-    git(dir, ['commit', '-qm', 'base']);
+    git(dir, ['commit', '--no-verify', '-qm', 'base']);
 
     writeFileSync(file, 'export const value = 2;\n');
     git(dir, ['add', 'whole.ts']);
@@ -97,9 +119,9 @@ describe('the pre-commit hook preserves what was left unstaged', () => {
     expect(git(dir, ['show', 'HEAD:whole.ts'])).toContain('value = 2');
     // Nothing left behind: index, worktree and HEAD agree.
     expect(git(dir, ['status', '--porcelain']).trim()).toBe('');
-  });
+  }, HOOK_TEST_TIMEOUT_MS);
 
-  it('does not stage a locale catalog that carries unstaged edits of its own', () => {
+  posixIt('does not stage a locale catalog that carries unstaged edits of its own', () => {
     // Same class, the i18n half: `invalidate-staged` writes target catalogs and
     // used to `git add` them whole, whatever else the author had in there.
     const dir = repoWithHook();
@@ -109,7 +131,7 @@ describe('the pre-commit hook preserves what was left unstaged', () => {
     writeFileSync(en, JSON.stringify({ greeting: 'hello', other: 'thing' }, null, 2) + '\n');
     writeFileSync(fr, JSON.stringify({ greeting: 'bonjour', other: 'chose' }, null, 2) + '\n');
     git(dir, ['add', '-A']);
-    git(dir, ['commit', '-qm', 'base']);
+    git(dir, ['commit', '--no-verify', '-qm', 'base']);
 
     // The EN rewording is staged; fr.json carries an unrelated unstaged edit.
     writeFileSync(en, JSON.stringify({ greeting: 'hi there', other: 'thing' }, null, 2) + '\n');
@@ -126,5 +148,5 @@ describe('the pre-commit hook preserves what was left unstaged', () => {
     const worktreeFr = JSON.parse(readFileSync(fr, 'utf8'));
     expect(worktreeFr.greeting).toBe('');
     expect(worktreeFr.other).toBe('MON BROUILLON');
-  });
+  }, HOOK_TEST_TIMEOUT_MS);
 });

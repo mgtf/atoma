@@ -1,4 +1,4 @@
-const CACHE_NAME = 'atoma-viz-shell-v3';
+const CACHE_NAME = 'atoma-viz-shell-v4';
 const SHELL_ASSETS = [
   '/',
   '/manifest.webmanifest',
@@ -61,7 +61,7 @@ async function activateSecurityWorker() {
         })
     );
   } catch {
-    // Cache enumeration is optional; the fetch boundary below names only v2.
+    // Cache enumeration is optional; the fetch boundary below opens only CACHE_NAME.
   }
   try {
     await globalThis.clients.claim();

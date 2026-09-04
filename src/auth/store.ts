@@ -7,6 +7,13 @@ import {
   type TierModelPins,
 } from '../contracts/tierModels.js';
 import {
+  accountSubscriptionProfileIdSchema,
+  accountSubscriptionProviderSchema,
+  type AccountSubscriptionProvider,
+} from '../contracts/accountSubscriptions.js';
+import { principalIdSchema } from '../contracts/projects.js';
+import { PRINCIPAL_CHATGPT_SUBSCRIPTION_PREFIX } from '../contracts/runPayers.js';
+import {
   isAccountTierSelection,
   isValidTierModelSelection,
 } from '../core/providerCatalog.js';
@@ -44,6 +51,17 @@ export interface OrgProviderKeyStatus {
   readonly configuredAt: string;
 }
 
+/** Non-secret receipt pointing at one provider-owned credential generation. */
+export interface PrincipalSubscriptionReceipt {
+  readonly principalId: string;
+  readonly provider: AccountSubscriptionProvider;
+  readonly profileId: string;
+  readonly state: 'connected' | 'reauth_required';
+  readonly connectedAt: string;
+  readonly lastVerifiedAt: string | null;
+  readonly updatedAt: string;
+}
+
 /**
  * A stored ORG default that is no longer selectable reads as `null` (inherit)
  * rather than throwing — a retired model id must never break the account page
@@ -67,9 +85,9 @@ function allowedStoredSelection(value: string | null): string | null {
  * D5). Reading it back as `null` here would BE that downgrade, silently
  * changing who pays: the defect class finding 2.2 closed on 2026-08-27.
  */
-function allowedPrincipalSelection(value: string | null): string | null {
+function allowedPrincipalSelection(value: string | null, tier: 1 | 2 | 3): string | null {
   if (value === null) return null;
-  return isAccountTierSelection(value) ? value : null;
+  return isAccountTierSelection(value, tier) ? value : null;
 }
 
 /**
@@ -176,6 +194,16 @@ CREATE TABLE IF NOT EXISTS auth_principal_model_pins (
   model_l2     TEXT,
   model_l3     TEXT,
   updated_at   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS auth_principal_subscriptions (
+  principal_id     TEXT NOT NULL REFERENCES auth_principals(principal_id),
+  provider         TEXT NOT NULL CHECK (provider IN ('claude','codex')),
+  profile_id       TEXT NOT NULL UNIQUE,
+  state            TEXT NOT NULL CHECK (state IN ('connected','reauth_required')),
+  connected_at     TEXT NOT NULL,
+  last_verified_at TEXT,
+  updated_at       TEXT NOT NULL,
+  PRIMARY KEY (principal_id, provider)
 );
 CREATE TABLE IF NOT EXISTS auth_org_tier_models (
   org_id     TEXT PRIMARY KEY REFERENCES auth_organisations(org_id),
@@ -372,6 +400,7 @@ const AUTH_TABLE_NAMES = [
   'auth_oauth_states',
   'auth_org_tier_models',
   'auth_org_provider_keys',
+  'auth_principal_subscriptions',
 ] as const;
 
 interface AuthStoreOptions {
@@ -1435,9 +1464,9 @@ export class AuthStore {
       | undefined;
     if (!row) return { ...EMPTY_TIER_MODEL_PINS };
     const parsed = accountTierModelPinsSchema.safeParse({
-      l1: allowedPrincipalSelection(row.model_l1),
-      l2: allowedPrincipalSelection(row.model_l2),
-      l3: allowedPrincipalSelection(row.model_l3),
+      l1: allowedPrincipalSelection(row.model_l1, 1),
+      l2: allowedPrincipalSelection(row.model_l2, 2),
+      l3: allowedPrincipalSelection(row.model_l3, 3),
     });
     return parsed.success ? parsed.data : { ...EMPTY_TIER_MODEL_PINS };
   }
@@ -1463,6 +1492,143 @@ export class AuthStore {
       )
       .run(principalId, parsed.l1, parsed.l2, parsed.l3, new Date().toISOString());
     return parsed;
+  }
+
+  /**
+   * PERSONAL SUBSCRIPTION RECEIPTS — pointers, never credentials.
+   *
+   * The provider CLI owns the credential bytes under a private host path.
+   * SQLite records only which opaque generation is current so replacing a
+   * profile is atomic and a run can bind to the exact generation selected at
+   * launch. No email, plan, device code, token or path is stored here.
+   */
+  principalSubscription(
+    principalIdInput: string,
+    providerInput: AccountSubscriptionProvider
+  ): PrincipalSubscriptionReceipt | null {
+    const principalId = principalIdSchema.parse(principalIdInput);
+    const provider = accountSubscriptionProviderSchema.parse(providerInput);
+    const row = this.db
+      .prepare(
+        `SELECT principal_id, provider, profile_id, state, connected_at,
+                last_verified_at, updated_at
+         FROM auth_principal_subscriptions
+         WHERE principal_id = ? AND provider = ?`
+      )
+      .get(principalId, provider) as
+      | {
+          principal_id: string;
+          provider: AccountSubscriptionProvider;
+          profile_id: string;
+          state: 'connected' | 'reauth_required';
+          connected_at: string;
+          last_verified_at: string | null;
+          updated_at: string;
+        }
+      | undefined;
+    if (!row) return null;
+    const profileId = accountSubscriptionProfileIdSchema.parse(row.profile_id);
+    if (
+      row.principal_id !== principalId ||
+      row.provider !== provider ||
+      storedInstantMs(row.connected_at) === null ||
+      storedInstantMs(row.updated_at) === null ||
+      (row.last_verified_at !== null && storedInstantMs(row.last_verified_at) === null)
+    ) {
+      throw new Error('stored principal subscription receipt is invalid');
+    }
+    return {
+      principalId,
+      provider,
+      profileId,
+      state: row.state,
+      connectedAt: row.connected_at,
+      lastVerifiedAt: row.last_verified_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  setPrincipalSubscription(input: {
+    readonly principalId: string;
+    readonly provider: AccountSubscriptionProvider;
+    readonly profileId: string;
+  }): PrincipalSubscriptionReceipt {
+    const principalId = principalIdSchema.parse(input.principalId);
+    const provider = accountSubscriptionProviderSchema.parse(input.provider);
+    const profileId = accountSubscriptionProfileIdSchema.parse(input.profileId);
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO auth_principal_subscriptions
+           (principal_id, provider, profile_id, state, connected_at, last_verified_at, updated_at)
+         VALUES (?, ?, ?, 'connected', ?, ?, ?)
+         ON CONFLICT(principal_id, provider) DO UPDATE SET
+           profile_id = excluded.profile_id,
+           state = 'connected',
+           connected_at = excluded.connected_at,
+           last_verified_at = excluded.last_verified_at,
+           updated_at = excluded.updated_at`
+      )
+      .run(principalId, provider, profileId, now, now, now);
+    const receipt = this.principalSubscription(principalId, provider);
+    if (!receipt) throw new Error('principal subscription receipt was not stored');
+    return receipt;
+  }
+
+  markPrincipalSubscriptionVerified(
+    principalIdInput: string,
+    providerInput: AccountSubscriptionProvider,
+    state: 'connected' | 'reauth_required',
+    expectedProfileIdInput: string
+  ): PrincipalSubscriptionReceipt | null {
+    const principalId = principalIdSchema.parse(principalIdInput);
+    const provider = accountSubscriptionProviderSchema.parse(providerInput);
+    const expectedProfileId = accountSubscriptionProfileIdSchema.parse(expectedProfileIdInput);
+    if (state !== 'connected' && state !== 'reauth_required') {
+      throw new Error('invalid principal subscription state');
+    }
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `UPDATE auth_principal_subscriptions
+         SET state = ?, last_verified_at = ?, updated_at = ?
+         WHERE principal_id = ? AND provider = ? AND profile_id = ?`
+      )
+      .run(state, now, now, principalId, provider, expectedProfileId);
+    return this.principalSubscription(principalId, provider);
+  }
+
+  deletePrincipalSubscription(
+    principalIdInput: string,
+    providerInput: AccountSubscriptionProvider
+  ): PrincipalSubscriptionReceipt | null {
+    const principalId = principalIdSchema.parse(principalIdInput);
+    const provider = accountSubscriptionProviderSchema.parse(providerInput);
+    const remove = this.db.transaction((): PrincipalSubscriptionReceipt | null => {
+      const receipt = this.principalSubscription(principalId, provider);
+      if (receipt) {
+        this.db
+          .prepare(
+            'DELETE FROM auth_principal_subscriptions WHERE principal_id = ? AND provider = ?'
+          )
+          .run(principalId, provider);
+      }
+      if (provider === 'codex') {
+        const prefix = `${PRINCIPAL_CHATGPT_SUBSCRIPTION_PREFIX}:%`;
+        this.db
+          .prepare(
+            `UPDATE auth_principal_model_pins
+             SET model_l1 = CASE WHEN model_l1 LIKE ? THEN NULL ELSE model_l1 END,
+                 model_l2 = CASE WHEN model_l2 LIKE ? THEN NULL ELSE model_l2 END,
+                 model_l3 = CASE WHEN model_l3 LIKE ? THEN NULL ELSE model_l3 END,
+                 updated_at = ?
+             WHERE principal_id = ?`
+          )
+          .run(prefix, prefix, prefix, new Date().toISOString(), principalId);
+      }
+      return receipt;
+    });
+    return remove.immediate();
   }
 
   /**

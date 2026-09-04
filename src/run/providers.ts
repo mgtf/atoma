@@ -17,7 +17,7 @@ import { makeAnthropicClient } from './auth.js';
  */
 export const ZAI_DEFAULT_BASE_URL = 'https://api.z.ai/api/anthropic';
 
-export type BaseProviderKind = 'anthropic' | 'ollama' | 'claude-cli';
+export type BaseProviderKind = 'anthropic' | 'zai' | 'ollama' | 'claude-cli';
 
 /**
  * One definition for the process-wide provider selector used by the runner
@@ -26,6 +26,7 @@ export type BaseProviderKind = 'anthropic' | 'ollama' | 'claude-cli';
 export function resolveBaseProviderKind(raw?: string): BaseProviderKind {
   const provider = (raw ?? 'anthropic').trim().toLowerCase();
   if (provider === 'anthropic') return 'anthropic';
+  if (provider === 'zai') return 'zai';
   if (provider === 'ollama') return 'ollama';
   if (provider === 'claude-cli' || provider === 'claude') return 'claude-cli';
   if (provider === 'codex') {
@@ -35,7 +36,7 @@ export function resolveBaseProviderKind(raw?: string): BaseProviderKind {
     );
   }
   throw new Error(
-    `unknown ATOMA_LLM provider "${raw}" (expected anthropic, ollama, claude-cli, or claude)`
+    `unknown ATOMA_LLM provider "${raw}" (expected anthropic, zai, ollama, claude-cli, or claude)`
   );
 }
 
@@ -67,6 +68,8 @@ export function makeBaseClient(
       });
     case 'claude-cli':
       return new ClaudeCliLlmClient();
+    case 'zai':
+      return makeZaiClient(env);
     case 'anthropic':
       if (!opts?.anthropic) {
         throw new Error(
@@ -78,6 +81,23 @@ export function makeBaseClient(
   }
 }
 
+/** Build the Anthropic-compatible Z.ai transport from one environment snapshot. */
+function makeZaiClient(env: NodeJS.ProcessEnv): LlmClient {
+  const apiKey = env['ZAI_API_KEY'];
+  if (!apiKey || apiKey.trim().length === 0) {
+    throw new Error(
+      'Z.ai requires ZAI_API_KEY — get a key at https://z.ai and export ZAI_API_KEY ' +
+        `(optional: ZAI_BASE_URL, default ${ZAI_DEFAULT_BASE_URL})`
+    );
+  }
+  return new AnthropicLlmClient(
+    new Anthropic({
+      apiKey: apiKey.trim(),
+      baseURL: env['ZAI_BASE_URL']?.trim() || ZAI_DEFAULT_BASE_URL,
+    })
+  );
+}
+
 /**
  * Providers that a `provider:model` tier pin can reference
  * (e.g. ATOMA_MODEL_L1=zai:glm-4.5-air). Each entry builds its client
@@ -86,22 +106,7 @@ export function makeBaseClient(
  * for Z.ai.
  */
 const PROVIDER_FACTORIES: Record<string, (env: NodeJS.ProcessEnv) => LlmClient> = {
-  zai: (env) => {
-    const apiKey = env['ZAI_API_KEY'];
-    if (!apiKey || apiKey.trim().length === 0) {
-      throw new Error(
-        'a tier model is pinned to "zai:…" but ZAI_API_KEY is not set — ' +
-          'get a key at https://z.ai and export ZAI_API_KEY (optional: ZAI_BASE_URL, ' +
-          `default ${ZAI_DEFAULT_BASE_URL})`
-      );
-    }
-    return new AnthropicLlmClient(
-      new Anthropic({
-        apiKey: apiKey.trim(),
-        baseURL: env['ZAI_BASE_URL']?.trim() || ZAI_DEFAULT_BASE_URL,
-      })
-    );
-  },
+  zai: (env) => makeBaseClient('zai', { env }),
   // The three base kinds route through the ONE construction switch above —
   // a tier-pinned `anthropic:`/`ollama:`/`claude-cli:` client must be built
   // exactly like the ATOMA_LLM base client, or the two paths drift.
@@ -112,12 +117,13 @@ const PROVIDER_FACTORIES: Record<string, (env: NodeJS.ProcessEnv) => LlmClient> 
   // caller supplied a credential snapshot.
   'claude-cli': () => makeBaseClient('claude-cli'),
   // Local Codex CLI on a ChatGPT subscription (`codex login`) — TIERS 2/3
-  // ONLY. It cannot host a tool loop (openai/codex#6049: Codex's own
-  // built-in tools cannot be disabled, so calls would bypass ToolSandbox
-  // and the #8a scope gate), and CodexCliLlmClient.complete throws when
-  // handed tools rather than degrading silently. Needs no key: an ABSENT
-  // OPENAI_API_KEY is what makes it reuse the subscription login.
-  codex: () => new CodexCliLlmClient(),
+  // ONLY. It cannot host a tool loop (Codex cannot expose only Atoma tools
+  // while disabling every built-in, so calls would bypass ToolSandbox and
+  // the #8a scope gate), and CodexCliLlmClient.complete throws when
+  // handed tools rather than degrading silently. The client captures THIS
+  // run's environment snapshot: CODEX_HOME selects the authorised principal
+  // profile, while its subprocess allowlist strips every API/provider key.
+  codex: (env) => new CodexCliLlmClient({ env }),
 };
 
 /** Provider names a tier pin may reference via the `provider:` prefix. */
@@ -215,13 +221,13 @@ export function assertTransportHonoursCredentials(
     (name) => name === 'claude-cli' || name === 'codex'
   );
   if (pinned.length === 0) return;
-  // Every machine-bound pin the parent authorised, by tier. A `claude-cli:`
-  // pin on a tier the parent did NOT name still throws below.
+  // Every machine-bound pin the parent authorised, by tier. A CLI pin on a
+  // tier the parent did NOT name still throws below.
   const unauthorised = ([1, 2, 3] as const).filter((tier) => {
     const value = env[`ATOMA_MODEL_L${tier}`]?.trim().toLowerCase();
     if (!value) return false;
     if (!value.startsWith('claude-cli:') && !value.startsWith('codex:')) return false;
-    return !(value.startsWith('claude-cli:') && authorised.has(`l${tier}`));
+    return !authorised.has(`l${tier}`);
   });
   if (unauthorised.length === 0) return;
   throw new RunnerConfigError(

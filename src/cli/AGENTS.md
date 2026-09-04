@@ -20,11 +20,56 @@ Neighbours:
 ## Doctor
 
 `atoma doctor` is quota-free. It proves configuration and local prerequisites,
-not that a provider will accept the next billable request. Local Docker failures
+not that a provider will accept the next billable request. The run-host check
+is a hard failure on an unsupported platform and quotes
+[`src/run/platform.ts`](../run/platform.ts), which owns that list. `python3` is
+a WARNING: `start_static_server` spawns it and `run_shell` admits it, so a host
+without it fails web-serving tasks mid-run — but a task that never serves a
+page is unaffected, and doctor does not fail a run that would succeed. Local Docker failures
 are warnings; container/egress modes make them hard failures. Egress implies
 container. A pre-T4 store (no `atom_id` column) is a hard failure — the schema
 is the schema and `CREATE TABLE IF NOT EXISTS` will not migrate it. Do not add
 remote completion calls to doctor.
+
+`--preview` is OPT-IN because it is the one check here that ALLOCATES rather
+than observes: it starts a real container. Two things make it different from
+every other check, and both are the reason it exists.
+
+- **It asks the HOST, not the container.** `docker inspect
+  .HostConfig.Runtime` on a unit doctor started is the only trustworthy answer
+  to "is this really gVisor?" — a process inside a sandbox can be told anything
+  about its own sandbox, so a check that asked it would be asking the thing
+  under test. For the same reason the runtime list comes from `docker info`,
+  never from `$PATH`: gVisor installed is not gVisor registered, and that is
+  exactly the gap a Docker Desktop machine falls into.
+- **The origin check is about a SECURE CONTEXT, not a scheme.** The grant
+  cookie is set on the PREVIEW origin, which is HTTPS by construction; what the
+  visualizer's own origin decides is whether the browser keeps a partitioned
+  third-party cookie for the frame it embeds. Loopback is trustworthy, so it
+  warns rather than fails — a check that failed there would tell an operator
+  their working development setup was broken.
+- **The passing result is a REFUSAL.** The root filesystem must reject a write
+  and a `--network none` container must fail to resolve a name. A probe that
+  only proved a container starts would pass on a container with no isolation at
+  all.
+
+A missing runtime or image reports the isolation as NOT PROBED rather than
+skipping the line: an unprobed boundary is not a verified one. The Docker seam
+is injected like the rest of doctor's, so the suite can diagnose the two
+machines this repository cannot have at once. The preconditions themselves
+belong to [`src/preview`](../preview/AGENTS.md). `npm run preview:demo` is the
+laptop counterpart — the harness that makes the surface clickable where doctor
+can only report that it cannot be.
+
+## Deployment preflight
+
+- `deploy:preflight` is quota-free and read-only unless `--hold` is explicit.
+  Hold mode takes the machine-global run lease without stale recovery, checks
+  queued/running project rows and live preview rows, then keeps the lease until
+  its supervising deploy process releases it. The hold process also removes
+  the admission marker when its parent disappears, so an untrappable host
+  activator death cannot leave every write on 503. Existing work always blocks
+  an activation; deployment never reaps it.
 
 ## Burn-in and friction
 

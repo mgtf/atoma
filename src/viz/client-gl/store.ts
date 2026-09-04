@@ -125,6 +125,41 @@ export function projectGuidanceOpen(preference: boolean | null): boolean {
 }
 
 /**
+ * The project run behind the run the Runs view has selected.
+ *
+ * TWO IDENTITIES, ONE ROW. The Runs view is keyed by TRACE id — that is what
+ * a run row, a burn-in link and a deep link all carry — while a preview is
+ * keyed by (project, PROJECT RUN). Only the project's own run list holds both,
+ * so this is the join, and it accepts either id because the two surfaces that
+ * navigate here disagree about which one they have: the Projects view emits
+ * `project.run.<traceId ?? projectRunId>`, falling back for a run whose trace
+ * does not exist yet.
+ *
+ * Null for a run reached from anywhere else. A run with no project run has no
+ * preview, and guessing one would offer a control that 404s.
+ */
+export function previewTargetForRun(
+  runs: readonly { readonly projectId: string; readonly projectRunId: string; readonly traceId: string | null }[],
+  selectedRunId: string | null,
+  index: readonly { readonly id: string; readonly projectId?: string; readonly projectRunId?: string }[] = []
+): { readonly projectId: string; readonly projectRunId: string } | null {
+  if (!selectedRunId) return null;
+  // THE INDEX ENTRY FIRST. It names its own project, so the join needs no
+  // selected project and no project-run list — both of which are empty after
+  // a reload, or when the viewer arrived through the Runs tab. Measured on a
+  // live run: summary card drawn, run `running`, and no Preview control,
+  // because nothing in this view knew which project the run belonged to.
+  const entry = index.find((candidate) => candidate.id === selectedRunId);
+  if (entry?.projectId) {
+    return { projectId: entry.projectId, projectRunId: entry.projectRunId ?? entry.id };
+  }
+  const match = runs.find(
+    (run) => run.traceId === selectedRunId || run.projectRunId === selectedRunId
+  );
+  return match ? { projectId: match.projectId, projectRunId: match.projectRunId } : null;
+}
+
+/**
  * Repair a stale selection without turning the first project into an implicit
  * selection. An empty list may be a loading transition, so it preserves the
  * current id until a non-empty response can prove that the project is gone.

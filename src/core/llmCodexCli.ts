@@ -4,8 +4,15 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { LlmClient, LlmCompletionRequest, LlmCompletionResponse } from './types.js';
+import { CHATGPT_SUBSCRIPTION_MODELS } from '../contracts/runPayers.js';
+import {
+  acquireLocalCodexHomeLease,
+  codexLeaseWrapperNodeArgs,
+  PERSONAL_CODEX_PROFILE_ROOT_ENV,
+} from './codexHomeLease.js';
 
 const codexJailRoots = new Set<string>();
+const leaseWrappedChildren = new WeakSet<ChildProcess>();
 
 /** Remove every ephemeral Codex cwd/instruction root owned by this process. */
 export function cleanupCodexJails(): void {
@@ -17,8 +24,9 @@ process.on('exit', cleanupCodexJails);
 
 /**
  * LlmClient backed by the LOCAL Codex CLI installation (`codex exec --json`),
- * authenticated by whatever `codex login` holds — typically a ChatGPT
- * Plus/Pro subscription. Reached through a tier pin's provider prefix:
+ * authenticated by the `codex login` held in the construction snapshot's
+ * CODEX_HOME — typically a ChatGPT Plus/Pro subscription. Reached through a
+ * tier pin's provider prefix:
  *
  *   ATOMA_MODEL_L3=codex:gpt-5.6-sol
  *
@@ -32,10 +40,10 @@ process.on('exit', cleanupCodexJails);
  *
  * === TIERS 2 AND 3 ONLY — L1 IS REFUSED, AND THE REFUSAL IS STRUCTURAL ===
  *
- * Codex offers no way to disable its OWN built-in tools (shell,
- * apply_patch, plan) while keeping external ones — openai/codex#6049, open
- * since 2025-10, PR #5001 closed, community contributions not accepted. So
- * the trick that makes `ClaudeCliLlmClient` safe for L1 (`tools: []` plus an
+ * Codex offers no way to expose ONLY atoma's external tools while removing
+ * every built-in: shell/unified-exec can now be disabled, but apply_patch
+ * still has no supported complete off switch (openai/codex#8161). So the
+ * trick that makes `ClaudeCliLlmClient` safe for L1 (`tools: []` plus an
  * in-process MCP bridge, hence every side effect routed through
  * `req.executor`) has no equivalent here. Handing this client a toolset
  * would mean the model acting on the filesystem OUTSIDE `ToolSandbox`:
@@ -64,9 +72,40 @@ process.on('exit', cleanupCodexJails);
  */
 
 /** Codex model slugs a ChatGPT subscription actually serves (2026-08-11). */
-export const CODEX_MODEL_FRONTIER = 'gpt-5.6-sol';
-export const CODEX_MODEL_MID = 'gpt-5.6-terra';
-export const CODEX_MODEL_SMALL = 'gpt-5.4-mini';
+export const CODEX_MODEL_FRONTIER = CHATGPT_SUBSCRIPTION_MODELS[0];
+export const CODEX_MODEL_MID = CHATGPT_SUBSCRIPTION_MODELS[1];
+export const CODEX_MODEL_SMALL = CHATGPT_SUBSCRIPTION_MODELS[2];
+
+/**
+ * Codex capabilities removed from Atoma's L2/L3 text-completion transport.
+ * Keep this explicit: account Apps, plugins, browser/computer controls and
+ * delegated agents are separate authorities from the command-network policy.
+ * `--strict-config` makes a Codex upgrade with renamed flags fail closed.
+ */
+export const CODEX_TEXT_ONLY_DISABLED_FEATURES = Object.freeze([
+  'shell_tool',
+  'unified_exec',
+  'apps',
+  'plugins',
+  'remote_plugin',
+  'plugin_sharing',
+  'browser_use',
+  'browser_use_external',
+  'browser_use_full_cdp_access',
+  'computer_use',
+  'image_generation',
+  'view_image',
+  'multi_agent',
+  'multi_agent_v2',
+  'hooks',
+  'skill_search',
+  'skill_mcp_dependency_install',
+  'workspace_dependencies',
+  'tool_suggest',
+  'auth_elicitation',
+  'tool_call_mcp_elicitation',
+  'sleep_tool',
+] as const);
 
 /**
  * INACTIVITY ceiling on a codex call — same contract, and same history, as
@@ -83,8 +122,8 @@ export const CODEX_MODEL_SMALL = 'gpt-5.4-mini';
  */
 export const DEFAULT_CODEX_CALL_TIMEOUT_MS = 10 * 60 * 1000;
 
-export function codexCallTimeoutMs(): number {
-  const raw = process.env['ATOMA_CODEX_CALL_TIMEOUT_MS'];
+export function codexCallTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env['ATOMA_CODEX_CALL_TIMEOUT_MS'];
   if (raw === undefined) return DEFAULT_CODEX_CALL_TIMEOUT_MS;
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_CODEX_CALL_TIMEOUT_MS;
@@ -116,8 +155,11 @@ export function resetCodexModelOverrideWarningForTests(): void {
  * there", and silently 400ing on it would be a worse answer than serving
  * the frontier slug.
  */
-export function resolveCodexModel(model: string): string {
-  const override = process.env['ATOMA_CODEX_MODEL'];
+export function resolveCodexModel(
+  model: string,
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  const override = env['ATOMA_CODEX_MODEL'];
   if (override && override.trim().length > 0) {
     // ATOMA_CLAUDE_MODEL gets a runner banner; this override had NONE
     // (review 2026-08-14 §1.13) — it silently rewrote every codex-routed
@@ -225,8 +267,84 @@ export function mapCodexUsage(u: {
  * the caller must see — mirrors `isCliTransportErrorText`'s 5xx-only rule,
  * widened for the subscription throttle this transport can actually hit.
  */
+function codexHttpStatus(message: string): number | undefined {
+  const jsonStatus = /["']?status(?:_code)?["']?\s*[:=]\s*["']?(\d{3})\b/i.exec(message);
+  const proseStatus =
+    /\b(?:http(?:\/\d(?:\.\d)?)?|status(?:\s+code)?)\s*[:=]?\s*(\d{3})\b/i.exec(message);
+  const raw = jsonStatus?.[1] ?? proseStatus?.[1];
+  return raw === undefined ? undefined : Number(raw);
+}
+
 export function isCodexTransientError(message: string): boolean {
-  return /"status"\s*:\s*(?:429|5\d\d)\b/.test(message) || /\b(?:429|5\d\d)\b.*rate limit/i.test(message);
+  const status = codexHttpStatus(message);
+  return (
+    status === 429 ||
+    (status !== undefined && status >= 500 && status <= 599) ||
+    /\b(?:429\b.*(?:rate limit|too many requests)|(?:rate limit|too many requests).*\b429)\b/i.test(
+      message
+    )
+  );
+}
+
+/** Stable, non-sensitive failure vocabulary allowed to leave this transport. */
+export type CodexFailureCode =
+  | 'authentication-required'
+  | 'rate-limited'
+  | 'service-unavailable'
+  | 'request-rejected'
+  | 'provider-error'
+  | 'transport-unavailable'
+  | 'empty-response'
+  | 'timeout';
+
+const RETRYABLE_CODEX_FAILURES = new Set<CodexFailureCode>([
+  'rate-limited',
+  'service-unavailable',
+]);
+
+function isRetryableCodexFailure(code: CodexFailureCode): boolean {
+  return RETRYABLE_CODEX_FAILURES.has(code);
+}
+
+/**
+ * Reduce provider-owned prose immediately. The raw string is used only to
+ * decide retry/auth/status semantics and is never attached as an Error cause,
+ * returned from the fold, logged, or persisted by an outer layer.
+ */
+function classifyCodexDiagnostic(
+  diagnostic: string,
+  fallback: CodexFailureCode = 'provider-error'
+): CodexFailureCode {
+  const status = codexHttpStatus(diagnostic);
+  if (status === 429 || /\b(?:rate limit(?:ed)?|too many requests)\b/i.test(diagnostic)) {
+    return 'rate-limited';
+  }
+  if (status !== undefined && status >= 500 && status <= 599) {
+    return 'service-unavailable';
+  }
+  if (
+    status === 401 ||
+    /\b(?:not logged in|login required|authentication required|unauthori[sz]ed|missing credentials?|invalid (?:access |refresh )?token|expired (?:access |refresh )?token)\b/i.test(
+      diagnostic
+    )
+  ) {
+    return 'authentication-required';
+  }
+  if (status !== undefined && status >= 400 && status <= 499) return 'request-rejected';
+  return fallback;
+}
+
+/** Error type outer layers may persist: its code/message contain no provider prose. */
+export class CodexTransportError extends Error {
+  readonly code: CodexFailureCode;
+  readonly retried: boolean;
+
+  constructor(code: CodexFailureCode, retried = false) {
+    super(`codex call failed [${code}]${retried ? ' after 1 retry' : ''}`);
+    this.name = 'CodexTransportError';
+    this.code = code;
+    this.retried = retried;
+  }
 }
 
 /**
@@ -242,12 +360,26 @@ export function isCodexTransientError(message: string): boolean {
  *                          the operator's own config.toml must not bleed
  *                          into an atom's prompt or model choice.
  *   --ignore-rules         same, for execpolicy .rules files.
- *   -s read-only           L2/L3 produce TEXT, and a plan call that could
- *                          edit the disk is a plan call that can corrupt the
- *                          workspace it is planning for.
- *   -C <empty dir>         THE LOAD-BEARING ONE. Codex still holds its own
- *                          shell/read tools (#6049), so the cwd bounds what
- *                          it can reach at all. An empty dir outside the
+ *   cli_auth_credentials   keeps refreshes in this run's private CODEX_HOME.
+ *                          `auto` may otherwise select the service account's
+ *                          keyring, which is shared across principals.
+ *   default_permissions    selects the inline, fail-closed `atoma-text-only`
+ *                          permission profile below. Permission profiles do
+ *                          not compose with `--sandbox`, so there is
+ *                          deliberately no legacy `-s read-only` flag.
+ *   :root=deny             deny all filesystem access by default.
+ *   :minimal=read          reopen only the runtime paths common tools need.
+ *   :workspace_roots=read reopen the empty jail itself, read-only.
+ *   network.enabled=false  model-owned commands get no network.
+ *   disabled features      command, Apps, plugin, browser/computer, image,
+ *                          skill and delegated-agent capabilities are absent.
+ *                          `apply_patch` has no supported complete off switch
+ *                          in Codex CLI, so the no-write profile is the
+ *                          enforcement boundary for that residual tool.
+ *   agents/orchestrator    disabled independently of feature rollout metadata.
+ *   -C <empty dir>         a second boundary around residual built-ins. The
+ *                          permission profile makes this the sole readable
+ *                          workspace. An empty dir outside the
  *                          repo keeps `atoma.db` and `skills/` off the map
  *                          entirely — the same reasoning that moved the
  *                          build workspace out of the repo, and that the
@@ -270,13 +402,37 @@ export function buildCodexArgs(opts: {
     '--ephemeral',
     '--ignore-user-config',
     '--ignore-rules',
-    '-s',
-    'read-only',
+    '--strict-config',
+    ...CODEX_TEXT_ONLY_DISABLED_FEATURES.flatMap((feature) => ['--disable', feature]),
     '-C',
     opts.cwd,
     '--skip-git-repo-check',
     '-m',
     opts.model,
+    '-c',
+    'cli_auth_credentials_store="file"',
+    '-c',
+    'approval_policy="never"',
+    '-c',
+    'allow_login_shell=false',
+    '-c',
+    'web_search="disabled"',
+    '-c',
+    'agents.enabled=false',
+    '-c',
+    'orchestrator.mcp.enabled=false',
+    '-c',
+    'orchestrator.skills.enabled=false',
+    '-c',
+    'shell_environment_policy.inherit="none"',
+    '-c',
+    'shell_environment_policy.ignore_default_excludes=false',
+    '-c',
+    'default_permissions="atoma-text-only"',
+    '-c',
+    'permissions.atoma-text-only.filesystem={":root"="deny",":minimal"="read",":workspace_roots"={"."="read"}}',
+    '-c',
+    'permissions.atoma-text-only.network.enabled=false',
     '-c',
     `model_instructions_file=${opts.instructionsFile}`,
     ...(opts.effort ? ['-c', `model_reasoning_effort=${opts.effort}`] : []),
@@ -290,7 +446,8 @@ export function buildCodexArgs(opts: {
 export interface CodexOutcome {
   text: string;
   usage: LlmCompletionResponse['usage'];
-  error?: string;
+  /** Stable classification only — never provider-owned diagnostic prose. */
+  error?: CodexFailureCode;
 }
 
 /**
@@ -302,7 +459,7 @@ export interface CodexOutcome {
 export function foldCodexEvents(lines: readonly string[]): CodexOutcome {
   let text = '';
   let usage: LlmCompletionResponse['usage'] = { inputTokens: 0, outputTokens: 0 };
-  let error: string | undefined;
+  let error: CodexFailureCode | undefined;
   for (const line of lines) {
     const trimmed = line.trim();
     if (trimmed.length === 0) continue;
@@ -331,29 +488,104 @@ export function foldCodexEvents(lines: readonly string[]): CodexOutcome {
     }
     if (type === 'error') {
       const m = e['message'];
-      if (typeof m === 'string') error = m;
+      if (typeof m === 'string') {
+        const classified = classifyCodexDiagnostic(m);
+        if (error === undefined || isRetryableCodexFailure(classified)) error = classified;
+      }
       continue;
     }
     if (type === 'turn.failed') {
       const err = e['error'] as { message?: string } | undefined;
-      if (typeof err?.message === 'string') error = err.message;
+      if (typeof err?.message === 'string') {
+        const classified = classifyCodexDiagnostic(err.message);
+        if (error === undefined || isRetryableCodexFailure(classified)) error = classified;
+      }
     }
   }
   return { text, usage, ...(error !== undefined ? { error } : {}) };
 }
 
+/**
+ * Variables the Codex harness itself may receive. This is deliberately not a
+ * pattern-based denylist: a newly added provider secret remains absent until a
+ * maintainer makes an explicit case for it here.
+ */
+export const CODEX_CHILD_ENV_KEYS = Object.freeze([
+  'PATH',
+  'HOME',
+  'TMPDIR',
+  'TMP',
+  'TEMP',
+  'USER',
+  'LOGNAME',
+  'SHELL',
+  'LANG',
+  'LC_ALL',
+  'TZ',
+  'SYSTEMROOT',
+  'WINDIR',
+  'COMSPEC',
+  'PATHEXT',
+  'HTTPS_PROXY',
+  'HTTP_PROXY',
+  'NO_PROXY',
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+  'NODE_EXTRA_CA_CERTS',
+  'CODEX_HOME',
+  'CODEX_SQLITE_HOME',
+  PERSONAL_CODEX_PROFILE_ROOT_ENV,
+] as const);
+
+/** Build the exact subprocess environment from one caller-owned snapshot. */
+export function codexChildEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const child: NodeJS.ProcessEnv = {};
+  for (const key of CODEX_CHILD_ENV_KEYS) {
+    const value = source[key];
+    if (value !== undefined) child[key] = value;
+  }
+  const profile = source['CODEX_HOME'];
+  if (profile !== undefined) {
+    // CODEX_HOME is authoritative for Codex itself. Align the conventional
+    // home variables too so an auxiliary library or future fallback can only
+    // fail inside this same principal-owned generation, never discover the
+    // service account's host profile.
+    child['HOME'] = profile;
+    child['USERPROFILE'] = profile;
+  }
+  return child;
+}
+
 /** Injectable spawn, so tests drive the transport without a real CLI. */
-export type CodexSpawn = (args: readonly string[], stdin: string) => ChildProcess;
+export type CodexSpawn = (
+  args: readonly string[],
+  stdin: string,
+  env: Readonly<NodeJS.ProcessEnv>,
+  cwd: string
+) => ChildProcess;
 
 export class CodexCliLlmClient implements LlmClient {
   private readonly callTimeoutMs: number;
   private readonly spawnFn: CodexSpawn;
+  private readonly modelEnv: NodeJS.ProcessEnv;
+  private readonly childEnv: NodeJS.ProcessEnv;
+  private readonly profileHome: string | undefined;
   private jail: { cwd: string; root: string } | undefined;
 
-  constructor(opts: { callTimeoutMs?: number; spawnFn?: CodexSpawn } = {}) {
+  constructor(
+    opts: { callTimeoutMs?: number; spawnFn?: CodexSpawn; env?: NodeJS.ProcessEnv } = {}
+  ) {
+    const sourceEnv = { ...(opts.env ?? process.env) };
     this.callTimeoutMs =
-      opts.callTimeoutMs && opts.callTimeoutMs > 0 ? opts.callTimeoutMs : codexCallTimeoutMs();
+      opts.callTimeoutMs && opts.callTimeoutMs > 0
+        ? opts.callTimeoutMs
+        : codexCallTimeoutMs(sourceEnv);
     this.spawnFn = opts.spawnFn ?? defaultCodexSpawn;
+    this.modelEnv = Object.freeze({
+      ATOMA_CODEX_MODEL: sourceEnv['ATOMA_CODEX_MODEL'],
+    });
+    this.childEnv = Object.freeze(codexChildEnvironment(sourceEnv));
+    this.profileHome = this.childEnv['CODEX_HOME']?.trim() || undefined;
   }
 
   async complete(req: LlmCompletionRequest): Promise<LlmCompletionResponse> {
@@ -362,29 +594,45 @@ export class CodexCliLlmClient implements LlmClient {
     if (req.executor !== undefined || (req.tools?.length ?? 0) > 0) {
       throw new Error(
         'codex provider serves tiers 2 and 3 only: it cannot host a tool loop because Codex ' +
-          'offers no way to disable its own built-in tools (openai/codex#6049), so tool calls ' +
+          'cannot expose only Atoma tools while disabling every built-in (openai/codex#8161), so tool calls ' +
           'would bypass ToolSandbox and the #8a scope gate. Pin L1 to a provider with a tool ' +
           'bridge (e.g. ATOMA_MODEL_L1=claude-haiku-4-5-20251001).'
       );
     }
 
-    // Resolved here as well as in completeOnce (same deterministic result)
-    // so the response can report what was ACTUALLY invoked: pricing on the
-    // pin billed `codex:claude-opus-5` at the /opus/i row for gpt-5.6-sol
-    // tokens (review 2026-08-14 §1.13).
-    const served = resolveCodexModel(req.model);
-    const first = await this.completeOnce(req);
-    if (first.error === undefined) return toResponse(first, served);
-    if (!isCodexTransientError(first.error)) {
-      throw new Error(`codex call failed: ${first.error.slice(0, 300)}`);
+    // Multiple L2/L3 lanes can share one personal generation. Codex may
+    // rotate auth.json during either call, so its complete child lifetime is
+    // serialized on CODEX_HOME. The project coordinator's machine-global run
+    // lease prevents a second run process from sharing that home concurrently.
+    let releaseProfile: (() => void) | null = null;
+    if (this.profileHome) {
+      try {
+        releaseProfile = await acquireLocalCodexHomeLease(this.profileHome, req.signal);
+      } catch {
+        if (req.signal?.aborted) throw req.signal.reason ?? new Error('aborted');
+        throw new CodexTransportError('transport-unavailable');
+      }
     }
-    // Transient (5xx / subscription throttle): one retry, then surface it
-    // as a real transport error so metrics record an error call instead of
-    // a parser crash far from the cause.
-    await new Promise((r) => setTimeout(r, 3000));
-    const second = await this.completeOnce(req);
-    if (second.error === undefined) return toResponse(second, served);
-    throw new Error(`codex call failed (after 1 retry): ${second.error.slice(0, 300)}`);
+    try {
+      // Resolved here as well as in completeOnce (same deterministic result)
+      // so the response can report what was ACTUALLY invoked: pricing on the
+      // pin billed `codex:claude-opus-5` at the /opus/i row for gpt-5.6-sol
+      // tokens (review 2026-08-14 §1.13).
+      const served = resolveCodexModel(req.model, this.modelEnv);
+      const first = await this.completeOnce(req);
+      if (first.error === undefined) return toResponse(first, served);
+      if (!isRetryableCodexFailure(first.error)) throw new CodexTransportError(first.error);
+      // Transient (5xx / subscription throttle): one retry, then surface it
+      // as a real transport error so metrics record an error call instead of
+      // a parser crash far from the cause. Only the stable classification
+      // crosses this boundary; provider prose was discarded by completeOnce.
+      await new Promise((r) => setTimeout(r, 3000));
+      const second = await this.completeOnce(req);
+      if (second.error === undefined) return toResponse(second, served);
+      throw new CodexTransportError(second.error, true);
+    } finally {
+      releaseProfile?.();
+    }
   }
 
   private async completeOnce(req: LlmCompletionRequest): Promise<CodexOutcome> {
@@ -395,24 +643,35 @@ export class CodexCliLlmClient implements LlmClient {
     writeFileSync(instructionsFile, req.systemPrompt, 'utf8');
 
     const args = buildCodexArgs({
-      model: resolveCodexModel(req.model),
+      model: resolveCodexModel(req.model, this.modelEnv),
       cwd: jail.cwd,
       instructionsFile,
       effort: codexEffortFor(req),
     });
 
-    const child = this.spawnFn(args, req.userContent);
+    let child: ChildProcess;
+    try {
+      child = this.spawnFn(args, req.userContent, this.childEnv, jail.cwd);
+    } catch {
+      rmSync(instructionsFile, { force: true });
+      return {
+        text: '',
+        usage: { inputTokens: 0, outputTokens: 0 },
+        error: 'transport-unavailable',
+      };
+    }
     const lines: string[] = [];
     let stdoutBuf = '';
+    // Provider-owned and potentially sensitive. It remains process-local only
+    // until classifyCodexDiagnostic reduces it to the public failure vocabulary.
     let stderrTail = '';
+    let spawnFailed = false;
     let timedOut = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    // Set by the Promise executor below, so the deadline can settle the
-    // wait ITSELF rather than trusting the child to close. Killing is not
-    // enough: a child whose spawn failed has no pid to signal and will
-    // never emit 'close', so a kill-only deadline hangs forever — the very
-    // failure mode this guard exists to remove. Found by the wedged-call
-    // test, which timed out instead of throwing.
+    // Set by the Promise executor below. A live child settles ONLY on close:
+    // releasing CODEX_HOME after sending SIGKILL but before reap lets another
+    // process rotate the same auth.json while the first is still dying. A
+    // failed spawn with no pid is the sole safe immediate-settle case.
     let settle: (() => void) | undefined;
 
     // Rearmed by every event: the deadline measures SILENCE, not duration.
@@ -421,19 +680,18 @@ export class CodexCliLlmClient implements LlmClient {
       timer = setTimeout(() => {
         timedOut = true;
         killTree(child);
-        settle?.();
+        if (child.pid === undefined) settle?.();
       }, this.callTimeoutMs);
     };
     bumpDeadline();
 
     const onAbort = (): void => {
       killTree(child);
-      settle?.();
+      if (child.pid === undefined) settle?.();
     };
-    req.signal?.addEventListener('abort', onAbort, { once: true });
 
     try {
-      await new Promise<void>((resolve, reject) => {
+      await new Promise<void>((resolve) => {
         settle = resolve;
         child.stdout?.on('data', (d: Buffer) => {
           bumpDeadline();
@@ -446,11 +704,18 @@ export class CodexCliLlmClient implements LlmClient {
           bumpDeadline();
           stderrTail = (stderrTail + d.toString()).slice(-2000);
         });
-        child.on('error', reject);
+        child.on('error', () => {
+          spawnFailed = true;
+          killTree(child);
+          if (child.pid === undefined) resolve();
+        });
         child.on('close', () => {
           if (stdoutBuf.trim().length > 0) lines.push(stdoutBuf);
           resolve();
         });
+        req.signal?.addEventListener('abort', onAbort, { once: true });
+        // Close the narrow gap between the entry check and listener install.
+        if (req.signal?.aborted) onAbort();
       });
     } finally {
       clearTimeout(timer);
@@ -459,11 +724,17 @@ export class CodexCliLlmClient implements LlmClient {
     }
 
     if (timedOut) {
-      throw new Error(
-        `codex call produced no output for ${this.callTimeoutMs}ms (idle — dropped connection?)`
-      );
+      throw new CodexTransportError('timeout');
     }
     if (req.signal?.aborted) throw req.signal.reason ?? new Error('aborted');
+
+    if (spawnFailed) {
+      return {
+        text: '',
+        usage: { inputTokens: 0, outputTokens: 0 },
+        error: 'transport-unavailable',
+      };
+    }
 
     const outcome = foldCodexEvents(lines);
     // A dead subprocess that emitted neither an answer nor a typed error
@@ -471,7 +742,10 @@ export class CodexCliLlmClient implements LlmClient {
     if (outcome.error === undefined && outcome.text.trim().length === 0) {
       return {
         ...outcome,
-        error: stderrTail.trim().length > 0 ? stderrTail.trim() : 'codex produced no output',
+        error:
+          stderrTail.trim().length > 0
+            ? classifyCodexDiagnostic(stderrTail, 'transport-unavailable')
+            : 'empty-response',
       };
     }
     return outcome;
@@ -504,16 +778,27 @@ function toResponse(o: CodexOutcome, servedModel: string): LlmCompletionResponse
  * leaves grandchildren orphaned, and this subprocess is an agent harness
  * that spawns its own.
  */
-function defaultCodexSpawn(args: readonly string[], stdin: string): ChildProcess {
-  const child = spawn('codex', [...args], {
-    stdio: ['pipe', 'pipe', 'pipe'],
-    detached: true,
-    // No API key is dropped here on purpose: OPENAI_API_KEY / CODEX_API_KEY
-    // being absent is exactly what makes the SDK reuse the `codex login`
-    // subscription credentials, and an operator who HAS exported a key
-    // presumably means to bill it.
-    env: process.env,
-  });
+function defaultCodexSpawn(
+  args: readonly string[],
+  stdin: string,
+  env: Readonly<NodeJS.ProcessEnv>,
+  cwd: string
+): ChildProcess {
+  const personalProfilesRoot = env[PERSONAL_CODEX_PROFILE_ROOT_ENV]?.trim();
+  const child = personalProfilesRoot
+    ? spawn(process.execPath, codexLeaseWrapperNodeArgs(args), {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        detached: true,
+        cwd,
+        env,
+      })
+    : spawn('codex', args, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        detached: true,
+        cwd,
+        env,
+      });
+  if (personalProfilesRoot) leaseWrappedChildren.add(child);
   child.stdin?.end(stdin);
   return child;
 }
@@ -529,6 +814,16 @@ function defaultCodexSpawn(args: readonly string[], stdin: string): ChildProcess
  * nothing at all and raised no error to reach the catch.
  */
 function killTree(child: ChildProcess): void {
+  if (leaseWrappedChildren.has(child)) {
+    try {
+      // The wrapper owns descendant termination and keeps the SQLite lease
+      // until the real Codex process tree has been reaped.
+      child.kill('SIGTERM');
+    } catch {
+      // It was already reaped.
+    }
+    return;
+  }
   if (child.pid !== undefined) {
     try {
       process.kill(-child.pid, 'SIGKILL');

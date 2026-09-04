@@ -41,20 +41,42 @@ Neighbours:
   the coordinator, and its own `process.env` IS the supplied snapshot; the
   developer path, which sets no such marker, is untouched.
 - The refusal reads `ATOMA_SUBSCRIPTION_TIERS`, the list of tiers the PARENT
-  authorised for the host subscription (`base`, `l1`, `l2`, `l3`). A
-  `claude-cli:` pin on a tier that list does not name reached the child another
-  way and throws at launch, before spend. The list only ever NARROWS what is
-  permitted: a forged one grants no credential, because that transport
-  authenticates from the host's own login session, which a tenant run has no
-  way to obtain. `codex:` is never authorisable. See
+  authorised for either the host or requesting principal's subscription
+  (`base`, `l1`, `l2`, `l3`). A
+  `claude-cli:` or `codex:` pin on a tier that list does not name reached the
+  child another way and throws at launch, before spend. The list only ever NARROWS what is
+  permitted: a forged one grants no credential, because the profile path is
+  injected only by the coordinator after its host-authority or exact-principal
+  check. Codex remains structurally impossible on L1. See
   [src/projects](../projects/AGENTS.md) for who may arm a tier, and
   `docs/subscription-per-tier-design-2026-08-28.md` for why.
+
+## Run host
+
+- `src/run/platform.ts` is the ONE definition of where a run may execute:
+  `darwin` and `linux`. It is not a preference — the run is a detached process
+  GROUP reaped through SIGTERM → grace → SIGKILL, and `npm` must be an
+  executable. Windows stays a DEVELOPMENT host — typecheck, lint, docs:check,
+  build and the compiled MCP smoke pass there; parts of the TEST SUITE are
+  POSIX-shaped on purpose (they drive shells, `chmod`, `tar` and process
+  groups, which is what makes them proof). WSL2 with the checkout on ext4 is
+  the named way to run, and to run the full suite; the per-platform procedure
+  is [`docs/development-setup.md`](../../docs/development-setup.md).
+- The refusal is enforced at the LAUNCHER (`spawnRun`), before the spawn, and
+  reuses the `--- spawn failed ---` log shape so every caller keeps reading
+  outcome `error` with the reason in the log. Doctor reports the same fact as
+  a hard failure. Both quote `platform.ts`; neither restates the list.
+- Do NOT add an override switch. The defect this contract replaces was not the
+  platform's limits but SILENCE — a run that died as a bare `spawn npm ENOENT`
+  several processes deep, and a cancellation that reported success over
+  orphans still running. A flag that starts a run where the kill sequence
+  cannot work restores exactly that.
 
 ## Provider construction
 
 - Provider construction has one switch: `makeBaseClient` in
   `src/run/providers.ts`, consumed by runner and curriculum. Never hand-roll
-  the ollama/claude-cli/anthropic ternary again. A `providerEnv` snapshot
+  the ollama/claude-cli/zai/anthropic switch again. A `providerEnv` snapshot
   must also drive the three `ATOMA_MODEL_L*` pins (`applyTierPins`); do not
   re-read `process.env` for pins the router already resolved from the snapshot.
 

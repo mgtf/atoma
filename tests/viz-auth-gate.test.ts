@@ -1,22 +1,33 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { generateKeyPairSync, randomBytes } from 'node:crypto';
+import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AUTH_COPY } from '../src/auth/copy.js';
 import { AuthStore, sha256Hex, type OrgRole } from '../src/auth/store.js';
 import { pkceChallenge } from '../src/auth/oidc.js';
 import { MAX_LOGOUT_SESSION_CANDIDATES } from '../src/auth/values.js';
 import { GITHUB_COPY } from '../src/github/http.js';
+import { ProjectStore } from '../src/projects/store.js';
+import { projectRunHostLayout } from '../src/projects/coordinator.js';
+import { sleepInhibitorHint } from '../src/sentinel/resident.js';
 
 /**
  * Process-level contract: real viz server, real SQLite and a local OAuth app.
  * The fake rejects a wrong PKCE verifier and records the canonical redirect,
  * so a passing test proves the boundaries rather than just the final status.
  */
+
+// Every test here boots at least one real tsx server, and the internal
+// watchdogs below (waitReady, waitForExit) are sized at 30s for a fully
+// parallel suite. The repo default of 15s would fire FIRST — a generic
+// "Test timed out" that swallows the child's stderr — so the file default
+// must sit comfortably above the watchdogs. The one test that boots four
+// servers in sequence carries its own larger budget.
+vi.setConfig({ testTimeout: 60_000 });
 
 const children: RunningChild[] = [];
 const servers: Server[] = [];
@@ -201,7 +212,19 @@ async function startFakeProvider(input: {
         }
         stats.verifiedPkce++;
         res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ access_token: 'fake-access-token' }));
+        // EXPIRING TOKENS, because that is the only supported GitHub App
+        // configuration: with "Expire user authorization tokens" disabled
+        // GitHub sends no `expires_in` and no refresh token, and
+        // `persistGitHubUserTokens` throws on every callback
+        // (src/github/tokens.ts). A fake that omits them modelled a
+        // deployment that cannot work, and silently left every logged-in
+        // viewer without the stored authorization the connect flow needs.
+        res.end(JSON.stringify({
+          access_token: 'fake-access-token',
+          expires_in: 28_800,
+          refresh_token: 'fake-refresh-token',
+          refresh_token_expires_in: 15_811_200,
+        }));
       });
       return;
     }
@@ -239,6 +262,7 @@ function cleanChildEnv(overrides: Record<string, string>): NodeJS.ProcessEnv {
     'ATOMA_VIZ_TRUSTED_PROXIES',
     'ATOMA_VIZ_DEV_URL',
     'ATOMA_DB_PATH',
+    'ATOMA_ACCOUNT_PROFILES_ROOT',
     // The watch reads these, and a developer's real values must not reach a
     // spawned harness: `ATOMA_RUNS_DIR` would point a resident journal writer
     // at the operator's live corpus, and the sentinel switches would decide
@@ -258,10 +282,23 @@ function cleanChildEnv(overrides: Record<string, string>): NodeJS.ProcessEnv {
 }
 
 function startViz(args: string[], env: Record<string, string>): RunningChild {
+  const generatedProfilesRoot = env.ATOMA_ACCOUNT_PROFILES_ROOT
+    ? null
+    : mkdtempSync(join(tmpdir(), 'atoma-account-profiles-'));
+  if (generatedProfilesRoot) roots.push(generatedProfilesRoot);
   const child = spawn(
     process.execPath,
     ['--import', 'tsx', 'src/viz/server.ts', ...args],
-    { cwd: process.cwd(), env: cleanChildEnv(env), stdio: ['ignore', 'pipe', 'pipe'] }
+    {
+      cwd: process.cwd(),
+      env: cleanChildEnv({
+        ...(generatedProfilesRoot
+          ? { ATOMA_ACCOUNT_PROFILES_ROOT: generatedProfilesRoot }
+          : {}),
+        ...env,
+      }),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }
   );
   const running: RunningChild = { process: child, stdout: [], stderr: [] };
   child.stdout?.setEncoding('utf8');
@@ -272,7 +309,12 @@ function startViz(args: string[], env: Record<string, string>): RunningChild {
   return running;
 }
 
-function waitForExit(child: ChildProcess, timeoutMs = 5_000): Promise<number | null> {
+// 30s, not 5s: this is a WATCHDOG, not an expected duration. A healthy child
+// exits in well under a second; the budget only binds when 238 test files
+// compete for the machine and a tsx boot alone takes longer than the old 5s
+// (measured 2026-08-30: this file needed 53.6s under full parallelism while
+// passing in isolation), so a green run pays nothing for the headroom.
+function waitForExit(child: ChildProcess, timeoutMs = 30_000): Promise<number | null> {
   if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(child.exitCode);
   return new Promise((resolve) => {
     const timeout = setTimeout(() => {
@@ -283,6 +325,24 @@ function waitForExit(child: ChildProcess, timeoutMs = 5_000): Promise<number | n
       resolve(code);
     });
   });
+}
+
+/**
+ * The exit code of a child that must die BY ITSELF. The watchdog's SIGKILL
+ * surfaces as code null, which `expect(code).not.toBe(0)` happily accepts —
+ * under a fully parallel suite that turned a hung boot into a silent pass of
+ * the fail-closed assertion, with only a confusing empty-stderr mismatch
+ * left behind. Refuse the kill loudly instead.
+ */
+async function ownExitCode(running: RunningChild): Promise<number> {
+  const code = await waitForExit(running.process);
+  if (running.process.signalCode !== null || code === null) {
+    throw new Error(
+      `child did not exit by itself (signal ${String(running.process.signalCode)}); ` +
+        `stderr: ${running.stderr.join('')}`
+    );
+  }
+  return code;
 }
 
 async function freePort(): Promise<number> {
@@ -297,7 +357,7 @@ async function freePort(): Promise<number> {
   });
 }
 
-async function waitReady(running: RunningChild, url: string, timeoutMs = 10_000): Promise<void> {
+async function waitReady(running: RunningChild, url: string, timeoutMs = 30_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (running.process.exitCode !== null) {
@@ -392,11 +452,11 @@ describe('viz auth gate (process level)', () => {
     const instance = tempInstance();
     const fallback = join(instance.root, 'ambient-fallback.db');
     const running = startViz([...instance.args, ...tail], { ATOMA_DB_PATH: fallback });
-    expect(await waitForExit(running.process)).not.toBe(0);
+    expect(await ownExitCode(running)).not.toBe(0);
     expect(running.stderr.join('')).toContain(message);
     expect(existsSync(fallback)).toBe(false);
     expect(existsSync(instance.dbPath)).toBe(false);
-  });
+  }, 60_000);
 
   it('leaves the localhost developer path open when auth is disabled', async () => {
     const instance = tempInstance();
@@ -417,7 +477,7 @@ describe('viz auth gate (process level)', () => {
       [...invalid.args, '--port', String(invalidPort)],
       { ATOMA_VIZ_AUTH: 'TRUE' }
     );
-    expect(await waitForExit(ambiguousSwitch.process)).not.toBe(0);
+    expect(await ownExitCode(ambiguousSwitch)).not.toBe(0);
     expect(ambiguousSwitch.stderr.join('')).toContain(
       'ATOMA_VIZ_AUTH must be one of: 0, false, 1, true'
     );
@@ -428,7 +488,7 @@ describe('viz auth gate (process level)', () => {
       ATOMA_VIZ_AUTH: '1',
       ATOMA_VIZ_PUBLIC_ORIGIN: `http://127.0.0.1:${portA}`,
     });
-    expect(await waitForExit(noProvider.process)).not.toBe(0);
+    expect(await ownExitCode(noProvider)).not.toBe(0);
     expect(noProvider.stderr.join('')).toContain('no complete login provider');
 
     const second = tempInstance();
@@ -438,7 +498,7 @@ describe('viz auth gate (process level)', () => {
       ATOMA_AUTH_GITHUB_CLIENT_ID: 'id',
       ATOMA_AUTH_GITHUB_CLIENT_SECRET: 'secret',
     });
-    expect(await waitForExit(noOrigin.process)).not.toBe(0);
+    expect(await ownExitCode(noOrigin)).not.toBe(0);
     expect(noOrigin.stderr.join('')).toContain('ATOMA_VIZ_PUBLIC_ORIGIN is required');
 
     const third = tempInstance();
@@ -450,11 +510,11 @@ describe('viz auth gate (process level)', () => {
       ATOMA_AUTH_GITHUB_CLIENT_ID: 'id',
       ATOMA_AUTH_GITHUB_CLIENT_SECRET: 'secret',
     });
-    expect(await waitForExit(unsafeProxy.process)).not.toBe(0);
+    expect(await ownExitCode(unsafeProxy)).not.toBe(0);
     expect(unsafeProxy.stderr.join('')).toContain(
       'ATOMA_VIZ_TRUSTED_PROXIES must contain at most 32 comma-separated IP literals'
     );
-  });
+  }, 120_000);
 
   it('creates an owner organisation for an unknown identity without an invitation', async () => {
     const instance = tempInstance();
@@ -494,6 +554,93 @@ describe('viz auth gate (process level)', () => {
       db.close();
     }
   });
+
+  it('names the project run behind every project-corpus entry of /api/runs', async () => {
+    // THE PREVIEW IS KEYED BY (project, project run); the Runs view is keyed
+    // by trace id. The client used to join the two through the SELECTED
+    // project's run list — which is empty after a reload or an arrival through
+    // the Runs tab, so a live run showed its summary card and no Preview
+    // control (measured 2026-09-02). The index entry now names its own project
+    // AND project run, and this is the seam that proves it: a real server, a
+    // real login, and the JSON a browser receives.
+    const instance = tempInstance();
+    // 43 canonical base64url characters, the only shape the login accepts.
+    const invitation = 'R'.repeat(43);
+    createInvitation(instance.dbPath, invitation, 'org:member');
+
+    // Seed one delivered project run into the bootstrapped organisation, the
+    // way the coordinator writes it: a row whose recorded paths are where the
+    // trace actually is.
+    const projectsRoot = join(instance.root, 'projects');
+    const seeded = (() => {
+      const db = new Database(instance.dbPath);
+      try {
+        const orgId = db.prepare('SELECT org_id FROM auth_organisations').pluck().get() as string;
+        const principalId = db.prepare('SELECT principal_id FROM auth_principals').pluck().get() as string;
+        const projects = new ProjectStore(db);
+        const project = projects.createProject({
+          orgId,
+          principalId,
+          project: {
+            name: 'Index carries the run',
+            slug: 'index-carries-the-run',
+            initialPrompt: '',
+            family: 'build',
+            repositoryTarget: { installationId: '999000002', owner: 'local', name: 'x', visibility: 'private' },
+          },
+        });
+        const projectRunId = randomUUID();
+        const layout = projectRunHostLayout(projectsRoot, orgId, project.projectId, projectRunId);
+        const created = projects.createProjectRun({
+          orgId,
+          projectId: project.projectId,
+          principalId,
+          projectRunId,
+          request: { goal: 'a run the index must attribute', idempotencyKey: 'k-index' },
+          hostPaths: {
+            workspacePath: layout.workspacePath,
+            runsPath: layout.runsPath,
+            logPath: layout.logPath,
+          },
+        });
+        if (!created) throw new Error('seed refused');
+        mkdirSync(layout.runsPath, { recursive: true });
+        writeFileSync(
+          join(layout.runsPath, `${projectRunId}.json`),
+          JSON.stringify({
+            id: projectRunId,
+            label: 'a run the index must attribute',
+            startedAt: '2026-09-02T12:00:00.000Z',
+            events: [],
+          })
+        );
+        return { projectId: project.projectId, projectRunId };
+      } finally {
+        db.close();
+      }
+    })();
+
+    const provider = await startFakeProvider({ port: await freePort(), subject: 303 });
+    const port = await freePort();
+    const base = `http://127.0.0.1:${port}`;
+    // Teardown is the suite's: `startViz` and `startFakeProvider` register
+    // what they start, and `afterEach` reaps it.
+    const running = startViz([...instance.args, '--port', String(port)], providerEnv(provider, base));
+    await waitReady(running, `${base}/auth/whoami`);
+    const jar = new CookieJar();
+    const login = await fetchWithJar(jar, `${base}/auth/login?provider=github&invite=${invitation}`);
+    expect(login.status).toBe(200);
+
+    const runs = await fetch(`${base}/api/runs`, { headers: { cookie: jar.header(base)! } });
+    expect(runs.status).toBe(200);
+    const entries = (await runs.json()) as Array<Record<string, unknown>>;
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      id: seeded.projectRunId,
+      projectId: seeded.projectId,
+      projectRunId: seeded.projectRunId,
+    });
+  }, 120_000);
 
   it('reserves operator surfaces and the admin control plane to a CLI-granted platform admin', async () => {
     const instance = tempInstance();
@@ -654,6 +801,8 @@ describe('viz auth gate (process level)', () => {
       defaults: Record<string, string>;
       catalog: Array<{ id: string; models: Array<{ id: string }> }>;
       hostSubscription?: unknown;
+      hostSubscriptions?: unknown;
+      personalSubscriptions: { codex: boolean; claude: boolean };
     };
     expect(defaults.pins).toEqual({ l1: null, l2: null, l3: null });
     expect(defaults.defaults['l3']).toContain('opus');
@@ -664,6 +813,59 @@ describe('viz auth gate (process level)', () => {
     // named to them at all — an offer a viewer cannot use is a payer they
     // should never see.
     expect(defaults.hostSubscription).toBeUndefined();
+    expect(defaults.hostSubscriptions).toBeUndefined();
+    expect(defaults.personalSubscriptions).toEqual({ codex: false, claude: false });
+
+    // Personal provider state is self-scoped and contains no account/token
+    // material. Starting a device flow is a same-origin mutation.
+    const subscriptions = await fetch(`${base}/api/account/subscriptions`, { headers: cookie });
+    expect(subscriptions.status).toBe(200);
+    expect(await subscriptions.json()).toEqual({
+      claude: {
+        provider: 'claude',
+        state: 'unavailable',
+        connectedAt: null,
+        lastVerifiedAt: null,
+        reason: 'provider-approval-required',
+      },
+      codex:
+        process.platform === 'win32'
+          ? {
+              provider: 'codex',
+              state: 'unavailable',
+              connectedAt: null,
+              lastVerifiedAt: null,
+              reason: 'profile-permissions-unsupported',
+            }
+          : {
+              provider: 'codex',
+              state: 'disconnected',
+              connectedAt: null,
+              lastVerifiedAt: null,
+              reason: null,
+            },
+      codexAttempt: null,
+    });
+    const crossSiteCodex = await fetch(
+      `${base}/api/account/subscriptions/codex/login`,
+      {
+        method: 'POST',
+        headers: { ...cookie, origin: 'https://evil.example' },
+      }
+    );
+    expect(crossSiteCodex.status).toBe(403);
+    const personalBeforeConnect = await fetch(`${base}/api/account/models`, {
+      method: 'PUT',
+      headers: { ...cookie, 'content-type': 'application/json', origin: base },
+      body: JSON.stringify({
+        pins: {
+          l1: null,
+          l2: 'principal-chatgpt-subscription:gpt-5.6-terra',
+          l3: null,
+        },
+      }),
+    });
+    expect(personalBeforeConnect.status).toBe(409);
     // And they cannot arm it by hand either.
     const refusedSubscription = await fetch(`${base}/api/account/models`, {
       method: 'PUT',
@@ -1108,7 +1310,14 @@ describe('viz auth gate (process level)', () => {
     // command, and it says what it started.
     const banner = running.stdout.join('');
     expect(banner).toMatch(/sentinel: watching every \d+s/);
-    expect(banner).toContain('caffeinate -i -m');
+    // The stay-awake advice is the HOST's own command, so this asserts against
+    // the one definition rather than a literal — it used to pin macOS's
+    // `caffeinate`, which was wrong on the very platform CI runs on. Where the
+    // host has nothing to say the line is absent, and the absence is the
+    // assertion.
+    const inhibitor = sleepInhibitorHint();
+    if (inhibitor) expect(banner).toContain(inhibitor);
+    else expect(banner).not.toMatch(/keep this machine awake/);
 
     const jar = new CookieJar();
     expect((await fetchWithJar(jar, `${base}/auth/login?provider=github`)).status).toBe(200);
@@ -1140,9 +1349,9 @@ describe('viz auth gate (process level)', () => {
     expect(body.watch.incumbent).toBeNull();
 
     // And the watch is not why the server refuses to die. `waitForExit`
-    // escalates to SIGKILL after five seconds, so the signal it actually died
-    // from is the assertion: SIGTERM means the term worked, SIGKILL would mean
-    // something held the loop open.
+    // escalates to SIGKILL after thirty seconds, so the signal it actually
+    // died from is the assertion: SIGTERM means the term worked, SIGKILL
+    // would mean something held the loop open.
     running.process.kill('SIGTERM');
     await waitForExit(running.process);
     expect(running.process.signalCode).toBe('SIGTERM');
@@ -1238,7 +1447,7 @@ describe('viz auth gate (process level)', () => {
     const after = await fetch(`${base}/api/org/models`, { headers: cookie });
     expect((await after.json() as { keys: unknown[] }).keys).toHaveLength(0);
 
-  }, 30_000);
+  });
 
   it('completes invited login, ignores hostile forwarded headers, and revokes on POST logout', async () => {
     const instance = tempInstance();
@@ -1265,6 +1474,17 @@ describe('viz auth gate (process level)', () => {
     const shell = await root.text();
     expect(shell).not.toContain(AUTH_COPY.pageTitle);
     expect(shell).toContain('<script');
+    expect(shell).toContain('<title>Atoma — Inspectable AI Agent Orchestration</title>');
+    expect(shell).toContain(`rel="canonical" href="${base}/"`);
+    expect(shell).toContain(`property="og:image" content="${base}/og-card.png"`);
+    expect(shell).toContain('type="application/ld+json"');
+    expect(shell).toContain('name="robots" content="index, follow, max-image-preview:large"');
+    const robots = await fetch(`${base}/robots.txt`);
+    expect(robots.status).toBe(200);
+    expect(await robots.text()).toContain(`Sitemap: ${base}/sitemap.xml`);
+    const sitemap = await fetch(`${base}/sitemap.xml`);
+    expect(sitemap.headers.get('content-type')).toContain('application/xml');
+    expect(await sitemap.text()).toContain(`<loc>${base}/</loc>`);
     // The capability probe tells the shell which providers to offer, without
     // a session and without a 401 that would loop it back here.
     const anonWhoami = await fetch(`${base}/auth/whoami`);
@@ -1279,6 +1499,7 @@ describe('viz auth gate (process level)', () => {
     expect(fallback.status).toBe(200);
     const fallbackPage = await fallback.text();
     expect(fallbackPage).toContain(`<title>${AUTH_COPY.pageTitle}</title>`);
+    expect(fallbackPage).toContain('name="robots" content="noindex, nofollow"');
     expect(fallbackPage).toContain(`invite=${invitation}`);
 
     const poisoned = await fetch(`${base}/auth/login?provider=github`, {
@@ -1429,7 +1650,7 @@ describe('viz auth gate (process level)', () => {
       selected.close();
     }
     expect(() => new Database(decoyDb, { readonly: true, fileMustExist: true })).toThrow();
-  }, 30_000);
+  });
 
   it('tells an invited user how to retry after the provider refuses login', async () => {
     const instance = tempInstance();
@@ -1497,7 +1718,7 @@ describe('viz auth gate (process level)', () => {
     });
     expect(replay.status).toBe(302);
     expect(replay.headers.get('location')).toBe('/?authNotice=expiredState');
-  }, 30_000);
+  });
 
   it('derives Secure and redirect_uri only from the configured HTTPS public origin', async () => {
     const instance = tempInstance();
@@ -1591,7 +1812,7 @@ describe('viz auth gate (process level)', () => {
     expect(connect.status).toBe(503);
     expect(await connect.json()).toEqual({ error: GITHUB_COPY.notConfigured });
     expect((await fetch(`${base}/webhooks/github`, { method: 'POST', body: '{}' })).status).toBe(404);
-  }, 30_000);
+  });
 
   it('routes GitHub App connect, CSRF and webhook boundaries', async () => {
     const instance = tempInstance();
@@ -1658,8 +1879,19 @@ describe('viz auth gate (process level)', () => {
     expect(forbidden.status).toBe(403);
     expect(await forbidden.json()).toEqual({ error: GITHUB_COPY.adminRequired });
 
+    const viewerCodex = await fetch(`${base}/api/account/subscriptions/codex/login`, {
+      method: 'POST',
+      headers: { cookie, origin: base },
+    });
+    expect(viewerCodex.status).toBe(403);
+
+    const viewerSubscriptions = await fetch(`${base}/api/account/subscriptions`, {
+      headers: { cookie },
+    });
+    expect(viewerSubscriptions.status).toBe(403);
+
     const listed = await fetch(`${base}/api/github/installations`, { headers: { cookie } });
     expect(listed.status).toBe(200);
     expect(await listed.json()).toEqual([]);
-  }, 30_000);
+  });
 });

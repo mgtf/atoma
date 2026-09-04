@@ -1140,7 +1140,75 @@ function drawRunSummaryCard(
     width: width - 20,
     height: cursor,
   });
-  return cursor + 18;
+  const previewRow = drawRunPreviewControl(ctx, snapshot, x, y + 10 + cursor + 6, width);
+  return cursor + 18 + previewRow;
+}
+
+/**
+ * The Preview control, a SIBLING of the summary card and never a child of it.
+ *
+ * Two Pixi mechanics decide this, and both were read from the engine rather
+ * than assumed. A parent `hitArea` PRUNES its whole subtree, so a control
+ * drawn inside the card but outside `new Rectangle(0, 0, width - 20, cursor)`
+ * would be unreachable — not merely covered. And a nested target that IS
+ * inside it still bubbles: `pointertap` propagates over the composed path, so
+ * one click would open the preview AND collapse the card. There is no
+ * `stopPropagation` precedent anywhere in this client, and adding one to work
+ * around a layout choice would be the wrong end to fix.
+ *
+ * So it sits below the card, on `ctx.root`, with its own measured target —
+ * which is exactly what the design asked for when it said the full-card toggle
+ * must not swallow it.
+ */
+function drawRunPreviewControl(
+  ctx: RendererCtx,
+  snapshot: GpuRenderSnapshot,
+  x: number,
+  y: number,
+  width: number
+): number {
+  const preview = snapshot.data.preview;
+  // Nothing to say for a run this deployment cannot preview: a control that
+  // fails after the click is worse than a stated absence, and the reason has
+  // already been decided at delivery.
+  if (!preview || preview.availability !== 'available') return 0;
+
+  const height = 30;
+  const label =
+    preview.state === 'ready'
+      ? snapshot.t('preview.open')
+      : preview.state === 'starting'
+        ? snapshot.t('preview.starting')
+        : preview.state === 'failed'
+          ? snapshot.t('preview.retry')
+          : snapshot.t('preview.start');
+  ctx.button(
+    ctx.root,
+    'run.preview.open',
+    'button',
+    label,
+    x + 10,
+    y,
+    Math.min(220, width - 20),
+    height,
+    preview.state === 'starting',
+    snapshot.onActivate
+  );
+  if (preview.state === 'ready') {
+    ctx.button(
+      ctx.root,
+      'run.preview.stop',
+      'button',
+      snapshot.t('preview.stop'),
+      x + 10 + Math.min(220, width - 20) + 8,
+      y,
+      110,
+      height,
+      false,
+      snapshot.onActivate
+    );
+  }
+  return height + 12;
 }
 
 function drawEventDetail(

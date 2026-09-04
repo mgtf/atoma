@@ -5458,5 +5458,5 @@ three revisions of the instrument.
 
 ## Language
 
-The user (`mgf@iotanet.net`) communicates in French. Respond in French;
+The user communicates in French. Respond in French;
 keep code, comments, and commit messages in English.
