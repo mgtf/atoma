@@ -51,11 +51,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          deploy_url_pattern='^https://[A-Za-z0-9._:/?&=%-]+$'
           [[ "${REVISION}" =~ ^[0-9a-f]{40}$ ]]
           [[ "${DEPLOY_HOST}" =~ ^[A-Za-z0-9.-]+$ ]]
           [[ "${DEPLOY_USER}" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]]
           [[ "${DEPLOY_PORT}" =~ ^[0-9]+$ ]] && (( DEPLOY_PORT >= 1 && DEPLOY_PORT <= 65535 ))
-          [[ "${DEPLOY_URL}" =~ ^https://[A-Za-z0-9._:/?&=%-]+$ ]]
+          [[ "${DEPLOY_URL}" =~ ${deploy_url_pattern} ]]
           [[ -n "${SSH_PRIVATE_KEY}" && -n "${SSH_KNOWN_HOSTS}" ]]
           cd deployment
           sha256sum -c "atoma-${REVISION}.tar.gz.sha256"

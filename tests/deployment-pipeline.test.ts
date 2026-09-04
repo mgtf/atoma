@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 
 const ci = readFileSync('.github/workflows/ci.yml', 'utf8');
@@ -41,6 +42,17 @@ describe('post-CI deployment pipeline', () => {
     expect(workflow).toContain('UserKnownHostsFile=');
     expect(workflow).not.toContain('actions/checkout');
     expect(workflow).not.toMatch(/git (pull|checkout|reset)/);
+  });
+
+  it('keeps the deployment input validation syntactically valid Bash', () => {
+    const start = workflow.indexOf('      - name: Verify deployment inputs and artifact');
+    const end = workflow.indexOf('      - name: Install pinned SSH identity and host key', start);
+    const step = workflow.slice(start, end);
+    const runMarker = '        run: |\n';
+    const script = step.slice(step.indexOf(runMarker) + runMarker.length).replace(/^ {10}/gm, '');
+    const parsed = spawnSync('bash', ['-n'], { input: script, encoding: 'utf8' });
+
+    expect(parsed.status, parsed.stderr).toBe(0);
   });
 
   it('drains before stopping and rolls back both code and worker identity on failed health', () => {
