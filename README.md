@@ -517,6 +517,25 @@ untrusted organisations. This is a private repository, shared deliberately rathe
 published. The dated current state, invariants and Track A/Track B roadmap are reconciled in
 [`docs/saas-architecture.md`](docs/saas-architecture.md).
 
+![atoma's subsystems and the paths between them, drawn from the AGENTS.md subsystem map](docs/architecture.svg)
+<sub>Regenerated from the repository by <code>npm run docs:architecture -- --apply --render --svg</code>; a subsystem
+that exists in `src/` and not in this picture fails <code>npm run docs:check</code>.</sub>
+
+<!-- atoma:facts:begin -->
+<!-- Generated from this checkout by `npm run docs:facts -- --apply`. Do not edit by hand. -->
+
+| Read out of this checkout | |
+| --- | --- |
+| Version | `0.1.4` |
+| Node | 22.13+ / 24+ (`.nvmrc` 22.13.0, `engines` ^22.13.0 \|\| >=24) |
+| Subsystems under their own contract | 17 |
+| MCP tools | 13 |
+| Curated agent names | 118 molecules · 40 cells · 20 tissues |
+| Controlled benchmark rounds | 12 (`benchmark/RESULT.md` + `ROUND<n>.md`) |
+| Interface locales | 13 catalogs — 1 source, 12 translated |
+
+<!-- atoma:facts:end -->
+
 **[→ How it works: components, flows and diagrams](docs/how-it-works.md)**
 
 ---

@@ -1,0 +1,297 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "atoma",
+    "subtitle": "17 subsystems, each under its own AGENTS.md contract",
+    "output": "docs/architecture.html"
+  },
+  "layout": {
+    "mode": "grid",
+    "origin": [
+      48,
+      120
+    ],
+    "cols": 4,
+    "gapX": 32,
+    "gapY": 60,
+    "cellW": 172,
+    "cellH": 64
+  },
+  "components": [
+    {
+      "id": "cli",
+      "type": "frontend",
+      "label": "CLI",
+      "sublabel": "operator commands",
+      "row": 0,
+      "col": 0
+    },
+    {
+      "id": "mcp",
+      "type": "messagebus",
+      "label": "MCP stdio",
+      "sublabel": "stdio control plane",
+      "row": 0,
+      "col": 1
+    },
+    {
+      "id": "viz",
+      "type": "frontend",
+      "label": "Web console",
+      "sublabel": "trace projection",
+      "row": 0,
+      "col": 2
+    },
+    {
+      "id": "run",
+      "type": "backend",
+      "label": "Run",
+      "sublabel": "startTask/runTask",
+      "row": 1,
+      "col": 0
+    },
+    {
+      "id": "atoms",
+      "type": "backend",
+      "label": "Atoms",
+      "sublabel": "supervision loop",
+      "row": 1,
+      "col": 1
+    },
+    {
+      "id": "core",
+      "type": "backend",
+      "label": "Core",
+      "sublabel": "LLM client and transports",
+      "row": 1,
+      "col": 2
+    },
+    {
+      "id": "tools",
+      "type": "security",
+      "label": "Tools",
+      "sublabel": "elements",
+      "row": 2,
+      "col": 0
+    },
+    {
+      "id": "registry",
+      "type": "database",
+      "label": "Registry",
+      "sublabel": "atom-type identity",
+      "row": 2,
+      "col": 1
+    },
+    {
+      "id": "skills",
+      "type": "database",
+      "label": "Skills",
+      "sublabel": "learn",
+      "row": 2,
+      "col": 2
+    },
+    {
+      "id": "contracts",
+      "type": "security",
+      "label": "Contracts",
+      "sublabel": "one schema per shape",
+      "row": 2,
+      "col": 3
+    },
+    {
+      "id": "launcher",
+      "type": "cloud",
+      "label": "Launcher",
+      "sublabel": "the one holder of container-e…",
+      "row": 3,
+      "col": 0
+    },
+    {
+      "id": "preview",
+      "type": "cloud",
+      "label": "Preview",
+      "sublabel": "result preview",
+      "row": 3,
+      "col": 1
+    },
+    {
+      "id": "auth",
+      "type": "security",
+      "label": "Auth",
+      "sublabel": "OAuth gate",
+      "row": 4,
+      "col": 0
+    },
+    {
+      "id": "projects",
+      "type": "database",
+      "label": "Projects",
+      "sublabel": "org-scoped projects",
+      "row": 4,
+      "col": 1
+    },
+    {
+      "id": "github",
+      "type": "external",
+      "label": "GitHub",
+      "sublabel": "GitHub App install",
+      "row": 4,
+      "col": 2
+    },
+    {
+      "id": "platform",
+      "type": "database",
+      "label": "Platform",
+      "sublabel": "the control-plane audit journ…",
+      "row": 5,
+      "col": 0
+    },
+    {
+      "id": "sentinel",
+      "type": "backend",
+      "label": "Sentinel",
+      "sublabel": "mechanical live watch over ru…",
+      "row": 5,
+      "col": 1
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Entry surfaces",
+      "wraps": [
+        "cli",
+        "mcp",
+        "viz"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "Supervision and accounting",
+      "wraps": [
+        "run",
+        "atoms",
+        "core"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "Elements and persisted identity",
+      "wraps": [
+        "tools",
+        "registry",
+        "skills",
+        "contracts"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "Container isolation",
+      "wraps": [
+        "launcher",
+        "preview"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "Gated control plane",
+      "wraps": [
+        "auth",
+        "projects",
+        "github"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "Audit and live watch",
+      "wraps": [
+        "platform",
+        "sentinel"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "from": "cli",
+      "to": "run",
+      "variant": "emphasis"
+    },
+    {
+      "from": "mcp",
+      "to": "run",
+      "variant": "emphasis"
+    },
+    {
+      "from": "viz",
+      "to": "run",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "from": "run",
+      "to": "atoms",
+      "variant": "emphasis"
+    },
+    {
+      "from": "atoms",
+      "to": "core",
+      "variant": "emphasis"
+    },
+    {
+      "from": "atoms",
+      "to": "tools",
+      "variant": "emphasis"
+    },
+    {
+      "from": "atoms",
+      "to": "registry"
+    },
+    {
+      "from": "atoms",
+      "to": "skills"
+    },
+    {
+      "from": "contracts",
+      "to": "core"
+    },
+    {
+      "from": "tools",
+      "to": "launcher",
+      "variant": "security"
+    },
+    {
+      "from": "launcher",
+      "to": "preview",
+      "variant": "security"
+    },
+    {
+      "from": "auth",
+      "to": "projects",
+      "variant": "security"
+    },
+    {
+      "from": "github",
+      "to": "projects"
+    },
+    {
+      "from": "projects",
+      "to": "platform"
+    },
+    {
+      "from": "sentinel",
+      "to": "platform"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Read out of this checkout",
+      "items": [
+        "13 MCP tools on the stdio control plane",
+        "118 molecules · 40 cells · 20 tissues",
+        "12 controlled benchmark rounds recorded"
+      ]
+    }
+  ]
+}

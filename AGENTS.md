@@ -108,6 +108,8 @@ npm run typecheck
 npm run lint
 npm test
 npm run check
+npm run docs:facts -- --apply         # rewrite the README's derived-facts block
+npm run docs:architecture -- --apply  # rewrite the architecture diagram IR
 npm run build
 npm run release:check
 npm run doctor
@@ -388,6 +390,20 @@ Read the archived sections before changing something that merely looks odd.
   product is multi-tenant. Trust counters remain runtime-local.
 - Keep outward-facing docs aligned with actual supported commands and packaged
   artifacts. Do not advertise development-only paths as release contracts.
+- `docs:check` now GENERATES what is tabular and ASSERTS what is prose. The
+  README block between `<!-- atoma:facts:begin -->` and its end marker belongs
+  to `scripts/readme-facts.mjs` — edit the derivation, never the block. The
+  sentences carrying the same numbers stay hand-written and are only CHECKED,
+  because a generator that rewrote prose would silently "correct" a claim whose
+  surrounding argument no longer holds. `scripts/repo-facts.mjs` is the single
+  derivation and names, in `KNOWN_NARRATIVE`, the README numbers it refuses to
+  invent. The architecture diagram follows the same split:
+  `docs/ir/atoma.architecture.json` takes its component list from the subsystem
+  map above, while placement and edges stay authored in
+  `scripts/architecture-ir.mjs`. Rendering it needs a third-party Archify
+  checkout and is development tooling — `docs:check` never renders, and CI
+  never clones it. Full rationale:
+  [`docs/documentation-freshness-2026-09-04.md`](docs/documentation-freshness-2026-09-04.md).
 
 ## Historical evidence
 
