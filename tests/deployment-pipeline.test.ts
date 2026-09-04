@@ -44,6 +44,12 @@ describe('post-CI deployment pipeline', () => {
     expect(workflow).not.toMatch(/git (pull|checkout|reset)/);
   });
 
+  it('keeps a quiet long-running activation alive across the SSH channel', () => {
+    expect(workflow).toContain('-o ServerAliveInterval=15');
+    expect(workflow).toContain('-o ServerAliveCountMax=20');
+    expect(workflow).toContain('-o TCPKeepAlive=yes');
+  });
+
   it('keeps the deployment input validation syntactically valid Bash', () => {
     const start = workflow.indexOf('      - name: Verify deployment inputs and artifact');
     const end = workflow.indexOf('      - name: Install pinned SSH identity and host key', start);
@@ -83,6 +89,9 @@ describe('post-CI deployment pipeline', () => {
     expect(hostDeploy).toMatch(
       /if \[\[ "\$\{status\}" -ne 0 && "\$\{ACTIVATION_STARTED\}" -eq 1 \]\]; then\s+restore_previous_generation/
     );
+    expect(hostDeploy).toContain("trap 'exit 129' HUP");
+    expect(hostDeploy).toContain("trap 'exit 130' INT");
+    expect(hostDeploy).toContain("trap 'exit 143' TERM");
     expect(hostDeploy.indexOf('ACTIVATION_STARTED=1')).toBeLessThan(
       hostDeploy.lastIndexOf('systemctl stop "${SERVICE_NAME}"')
     );

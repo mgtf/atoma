@@ -83,6 +83,9 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o "UserKnownHostsFile=${RUNNER_TEMP}/ssh/known_hosts" \
             -o ConnectTimeout=15 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=20 \
+            -o TCPKeepAlive=yes \
             -p "${DEPLOY_PORT}" \
             "${DEPLOY_USER}@${DEPLOY_HOST}" \
             "deploy ${REVISION} ${digest}" \

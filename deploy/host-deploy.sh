@@ -138,6 +138,12 @@ cleanup() {
   exit "${status}"
 }
 trap cleanup EXIT
+# A dropped SSH channel sends SIGHUP to the forced command. Route termination
+# signals through a normal exit so the EXIT cleanup restores the previous
+# generation whenever activation has already stopped the service.
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # The archive is streamed over the authenticated SSH channel. It never sits
 # in a deploy-user-writable inbox that another local process could replace.
