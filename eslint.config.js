@@ -56,6 +56,14 @@ export default tseslint.config(
       reportUnusedDisableDirectives: 'error',
     },
     rules: {
+      // ESLint 10 added these three rules to `eslint:recommended`. Keep this
+      // dependency migration behaviour-neutral: adopting a new mechanical
+      // gate requires its own measured review, rather than silently changing
+      // the calibrated lint contract during a major-version bump.
+      'no-unassigned-vars': 'off',
+      'no-useless-assignment': 'off',
+      'preserve-caught-error': 'off',
+
       // ── the rules that pay for the whole setup ──────────────────────────
       // Async correctness. Not stylistic: an unawaited promise in the
       // supervise loop is work the run does not wait for.
