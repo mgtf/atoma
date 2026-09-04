@@ -18,7 +18,11 @@ import { authPublicOrigin, openAuthGate, vizAuthEnabled } from '../auth/gate.js'
 import { AUTH_COPY } from '../auth/copy.js';
 import { snapshotProviderRegistry, type ProviderConfig } from '../auth/providers.js';
 import { fetchAvatarImage } from '../auth/avatar.js';
-import { HOST_SUBSCRIPTION_FAMILY, LLM_PROVIDER_CATALOG } from '../core/providerCatalog.js';
+import {
+  HOST_SUBSCRIPTION_FAMILIES,
+  HOST_SUBSCRIPTION_FAMILY,
+  LLM_PROVIDER_CATALOG,
+} from '../core/providerCatalog.js';
 import {
   hostSubscriptionSummary,
   isHostSubscriptionSelection,
@@ -1261,6 +1265,20 @@ function subscriptionTiersOf(pins: { l1: string | null; l2: string | null; l3: s
   });
 }
 
+/** Non-secret stored choices, used so switching Claude ↔ ChatGPT is journaled too. */
+function subscriptionSelectionsOf(
+  pins: { l1: string | null; l2: string | null; l3: string | null }
+): Record<string, string> {
+  return Object.fromEntries(
+    (['l1', 'l2', 'l3'] as const).flatMap((tier) => {
+      const value = pins[tier];
+      return typeof value === 'string' && isHostSubscriptionSelection(value)
+        ? [[tier, value] as const]
+        : [];
+    })
+  );
+}
+
 function listOperatorRunIndex(): VizRunIndexEntry[] {
   if (!existsSync(RUNS_DIR)) return [];
   const indexFile = join(RUNS_DIR, 'index.json');
@@ -2358,16 +2376,33 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
     // resolved session, the deployment's declaration, and whether the
     // viewer's ACTIVE organisation is the declared one. The picker greys the
     // family when it is offered-but-unusable and hides it entirely otherwise.
-    const hostSubscriptionOffer = (): { family: unknown; reason?: string } | undefined => {
+    const hostSubscriptionOffers = (): Array<{ family: unknown; reason?: string }> | undefined => {
       if (!viewer.platformAdmin) return undefined;
       const declared = process.env['ATOMA_HOST_SUBSCRIPTION_ORG']?.trim();
       if (!declared) {
-        return { family: HOST_SUBSCRIPTION_FAMILY, reason: 'undeclared' };
+        return HOST_SUBSCRIPTION_FAMILIES.map((family) => ({ family, reason: 'undeclared' }));
       }
       if (viewer.orgId !== declared) {
-        return { family: HOST_SUBSCRIPTION_FAMILY, reason: 'other-organisation' };
+        return HOST_SUBSCRIPTION_FAMILIES.map((family) => ({
+          family,
+          reason: 'other-organisation',
+        }));
       }
-      return { family: HOST_SUBSCRIPTION_FAMILY };
+      return HOST_SUBSCRIPTION_FAMILIES.map((family) => ({ family }));
+    };
+
+    const subscriptionPayload = (): Record<string, unknown> => {
+      const offers = hostSubscriptionOffers();
+      if (!offers) return {};
+      return {
+        hostSubscriptions: offers,
+        // Compatibility for a cached pre-upgrade client: it can still show
+        // and clear the Claude family while the new bundle loads.
+        hostSubscription: offers.find(
+          (offer) =>
+            (offer.family as { id?: string }).id === HOST_SUBSCRIPTION_FAMILY.id
+        ),
+      };
     };
 
     // ACCOUNT SELF-CARE — the viewer's own name and per-tier model pins.
@@ -2386,7 +2421,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           // pin without one falls through at run time, so the picker greys
           // the family instead of offering a dormant choice.
           ollamaAvailable: Boolean(process.env['OLLAMA_BASE_URL']?.trim()),
-          ...(hostSubscriptionOffer() ? { hostSubscription: hostSubscriptionOffer() } : {}),
+          ...subscriptionPayload(),
         });
         return;
       }
@@ -2429,7 +2464,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         // its account-level space admits the sentinel; whether THIS principal
         // may name it is decided here, from the resolved session, and again at
         // every run by the coordinator. A stored pin is data, never permission.
-        if (namesHostSubscription(requested) && !hostSubscriptionOffer()) {
+        if (namesHostSubscription(requested) && !hostSubscriptionOffers()) {
           sendJson(res, 403, {
             error: 'the host subscription is not offered to this account on this deployment',
           });
@@ -2440,9 +2475,10 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         // Journaled at the moment of the CHOICE. The run rows that follow are
         // written by whoever launches, which may be someone else entirely, so
         // they cannot answer "who decided the operator's login was spendable".
-        const armedBefore = subscriptionTiersOf(before);
         const armedAfter = subscriptionTiersOf(pins);
-        if (armedBefore.join(',') !== armedAfter.join(',')) {
+        const selectionsBefore = subscriptionSelectionsOf(before);
+        const selectionsAfter = subscriptionSelectionsOf(pins);
+        if (JSON.stringify(selectionsBefore) !== JSON.stringify(selectionsAfter)) {
           emit({
             kind: 'principal.subscription_pin',
             actorType: 'principal',
@@ -2452,7 +2488,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
               armedAfter.length > 0
                 ? `Host subscription armed on ${armedAfter.join(', ')}`
                 : 'Host subscription cleared from every tier',
-            detail: { tiers: armedAfter },
+            detail: { tiers: armedAfter, selections: selectionsAfter },
           });
         }
         sendJson(res, 200, {
@@ -2460,7 +2496,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           defaults: operatorTierDefaults(process.env),
           catalog: LLM_PROVIDER_CATALOG,
           ollamaAvailable: Boolean(process.env['OLLAMA_BASE_URL']?.trim()),
-          ...(hostSubscriptionOffer() ? { hostSubscription: hostSubscriptionOffer() } : {}),
+          ...subscriptionPayload(),
         });
       } catch {
         sendJson(res, 400, { error: 'each tier must be null or one of the offered models' });

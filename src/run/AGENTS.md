@@ -42,11 +42,11 @@ Neighbours:
   developer path, which sets no such marker, is untouched.
 - The refusal reads `ATOMA_SUBSCRIPTION_TIERS`, the list of tiers the PARENT
   authorised for the host subscription (`base`, `l1`, `l2`, `l3`). A
-  `claude-cli:` pin on a tier that list does not name reached the child another
-  way and throws at launch, before spend. The list only ever NARROWS what is
+  `claude-cli:` or `codex:` pin on a tier that list does not name reached the
+  child another way and throws at launch, before spend. The list only ever NARROWS what is
   permitted: a forged one grants no credential, because that transport
   authenticates from the host's own login session, which a tenant run has no
-  way to obtain. `codex:` is never authorisable. See
+  way to obtain. Codex remains structurally impossible on L1. See
   [src/projects](../projects/AGENTS.md) for who may arm a tier, and
   `docs/subscription-per-tier-design-2026-08-28.md` for why.
 
@@ -75,7 +75,7 @@ Neighbours:
 
 - Provider construction has one switch: `makeBaseClient` in
   `src/run/providers.ts`, consumed by runner and curriculum. Never hand-roll
-  the ollama/claude-cli/anthropic ternary again. A `providerEnv` snapshot
+  the ollama/claude-cli/zai/anthropic switch again. A `providerEnv` snapshot
   must also drive the three `ATOMA_MODEL_L*` pins (`applyTierPins`); do not
   re-read `process.env` for pins the router already resolved from the snapshot.
 

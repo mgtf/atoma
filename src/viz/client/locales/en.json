@@ -153,7 +153,7 @@
   "settings.ollamaUnavailable": "{{label}} (platform-hosted — not offered by this deployment)",
   "settings.hostSubscription": "{{label}}",
   "settings.hostSubscriptionUnavailable": "{{label}} — not offered to this account here",
-  "settings.hostSubscriptionHint": "Tiers on the host subscription spend the operator’s own Claude login. No key is billed for them, and every run that uses one is recorded in the platform journal.",
+  "settings.hostSubscriptionHint": "Tiers on a host subscription spend the operator’s own Claude or ChatGPT login. No key is billed for them, and every run that uses one is recorded in the platform journal.",
   "settings.keySave": "Save key",
   "settings.keyReplace": "Replace key",
   "settings.keyRemoved": "Key removed",

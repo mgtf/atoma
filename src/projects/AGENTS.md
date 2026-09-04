@@ -23,10 +23,10 @@ Neighbours:
 
 ## The subscription-transport door
 
-- A project run normally requires `ATOMA_LLM=anthropic` plus exactly one
-  per-run credential: the host's `ANTHROPIC_API_KEY`, or the organisation's
-  OWN anthropic provider key. A BYO-only deployment carrying no platform key
-  at all is therefore a supported shape, and an org key WINS over a host one.
+- A project run normally requires `ATOMA_LLM=anthropic` or `ATOMA_LLM=zai`
+  plus exactly one matching per-run credential: the host key, or the
+  organisation's OWN provider key. A BYO-only deployment carrying no platform
+  key at all is therefore a supported shape, and an org key WINS over a host one.
 - `ANTHROPIC_AUTH_TOKEN` is REFUSED here, not ignored. No tenant can supply
   one (the org key store is keyed by catalogue provider, and anthropic's
   credential variable is `ANTHROPIC_API_KEY`), and a bearer is refreshed from
@@ -80,11 +80,15 @@ Neighbours:
   credential forwarded at all. **B** is a platform admin's per-tier ACCOUNT
   pin, decided per run. Both survive on purpose; the host env is read before
   any preference, so A wins where it is set.
-- The stored value is a NON-ROUTABLE sentinel, `host-subscription:<alias>`.
-  It is not `claude-cli:` — the string `isCatalogueSelection` here and
+- The stored values are NON-ROUTABLE sentinels: `host-subscription:<alias>`
+  for Claude and `chatgpt-subscription:<model>` for Codex. They are not
+  `claude-cli:` / `codex:` — the strings `isCatalogueSelection` here and
   `assertTransportHonoursCredentials` in [src/run](../run/AGENTS.md) both
   exist to refuse — and it becomes a transport only inside
   `projectRunEnvironment`, downstream of the authority check.
+- ChatGPT/Codex is a supervisor subscription only: account storage, the UI,
+  the coordinator and the runner all refuse it on L1, whose tool loop must
+  remain inside ToolSandbox.
 - ADMISSIBLE BY CHAIN LEVEL, not merely by value: the ACCOUNT level only. An
   org default is inherited by every member by construction, and the host env
   is the third candidate for every tier; a sentinel at either level would be a

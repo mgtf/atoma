@@ -5,7 +5,11 @@ import { createSecretKey } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-import { hostSubscriptionAlias } from '../src/contracts/runPayers.js';
+import {
+  chatGptSubscriptionModel,
+  hostSubscriptionAlias,
+  hostSubscriptionRoute,
+} from '../src/contracts/runPayers.js';
 import {
   decryptBoundSecret,
   encryptBoundSecret,
@@ -17,6 +21,8 @@ import {
 import {
   LLM_PROVIDER_CATALOG,
   HOST_SUBSCRIPTION_FAMILY,
+  CHATGPT_SUBSCRIPTION_FAMILY,
+  HOST_SUBSCRIPTION_FAMILIES,
   isAccountTierSelection,
   llmProviderIds,
   isValidTierModelSelection,
@@ -24,6 +30,8 @@ import {
   orgProviderIsReady,
   tierModelSelectionLabel,
 } from '../src/core/providerCatalog.js';
+import { providerIsUnlocked } from '../src/viz/client-gl/OrgModelsForm.js';
+import type { VizLlmCatalogEntry } from '../src/viz/client/types.js';
 
 describe('shared secret envelope', () => {
   const key = createSecretKey(Buffer.alloc(32, 9));
@@ -137,6 +145,8 @@ describe('the host subscription is a neighbour, not a catalogue member', () => {
     // member is the thing this design refuses.
     expect(isValidTierModelSelection('host-subscription:opus')).toBe(false);
     expect(isAccountTierSelection('host-subscription:opus')).toBe(true);
+    expect(isAccountTierSelection('chatgpt-subscription:gpt-5.6-sol', 2)).toBe(true);
+    expect(isAccountTierSelection('chatgpt-subscription:gpt-5.6-sol', 1)).toBe(false);
     // And it is not `claude-cli:` — the string two independent guards refuse.
     expect(isAccountTierSelection('claude-cli:opus')).toBe(false);
     expect(isAccountTierSelection('anthropic:claude-opus-5')).toBe(true);
@@ -156,6 +166,38 @@ describe('the host subscription is a neighbour, not a catalogue member', () => {
     expect(hostSubscriptionAlias('host-subscription:sonnet')).toBe('sonnet');
     expect(hostSubscriptionAlias('host-subscription:gpt')).toBeNull();
     expect(hostSubscriptionAlias('anthropic:claude-opus-5')).toBeNull();
+  });
+
+  it('offers ChatGPT as a distinct supervisor-only subscription family', () => {
+    expect(HOST_SUBSCRIPTION_FAMILIES.map((family) => family.id)).toEqual([
+      'host-subscription',
+      'chatgpt-subscription',
+    ]);
+    expect(CHATGPT_SUBSCRIPTION_FAMILY.models.every((model) => model.tiers.includes(2))).toBe(true);
+    expect(CHATGPT_SUBSCRIPTION_FAMILY.models.every((model) => model.tiers.includes(3))).toBe(true);
+    expect(chatGptSubscriptionModel('chatgpt-subscription:gpt-5.6-sol')).toBe('gpt-5.6-sol');
+    expect(hostSubscriptionRoute('chatgpt-subscription:gpt-5.6-terra')).toEqual({
+      provider: 'codex',
+      model: 'gpt-5.6-terra',
+    });
+    expect(tierModelSelectionLabel('chatgpt-subscription:gpt-5.6-sol')).toBe(
+      'ChatGPT (host subscription) — GPT-5.6 Sol'
+    );
+    const family = CHATGPT_SUBSCRIPTION_FAMILY as unknown as VizLlmCatalogEntry;
+    expect(
+      providerIsUnlocked(family, new Set(), {
+        billedKeyReady: false,
+        ollamaAvailable: false,
+        hostSubscriptions: [{ family }],
+      })
+    ).toBe(true);
+    expect(
+      providerIsUnlocked(family, new Set(), {
+        billedKeyReady: true,
+        ollamaAvailable: true,
+        hostSubscriptions: [{ family, reason: 'undeclared' }],
+      })
+    ).toBe(false);
   });
 });
 

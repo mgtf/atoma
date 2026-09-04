@@ -6,7 +6,10 @@ import {
 } from '../../core/providerCatalog.js';
 import { formatDateTime } from '../client/date-format.js';
 import { api } from '../client/data-api.js';
-import { HOST_SUBSCRIPTION_PREFIX } from '../../contracts/runPayers.js';
+import {
+  CHATGPT_SUBSCRIPTION_PREFIX,
+  HOST_SUBSCRIPTION_PREFIX,
+} from '../../contracts/runPayers.js';
 import type { VizAccountModels, VizLlmCatalogEntry, VizOrganisation, VizOrgModels } from '../client/types.js';
 
 /**
@@ -99,8 +102,9 @@ export function OrgModelsForm({
   // means not offered at all; a `reason` means offered-but-unusable, which is
   // shown greyed rather than hidden — hiding it would make an already-armed
   // pin invisible in the very select that must be used to clear it.
-  const hostSubscription = account.hostSubscription;
-  const subscriptionUsable = Boolean(hostSubscription && !hostSubscription.reason);
+  const hostSubscriptions =
+    account.hostSubscriptions ?? (account.hostSubscription ? [account.hostSubscription] : []);
+  const subscriptionUsable = hostSubscriptions.some((subscription) => !subscription.reason);
   const canPickModels = billedKeyReady || subscriptionUsable;
   const tierIds = ['l1', 'l2', 'l3'] as const;
 
@@ -233,7 +237,7 @@ export function OrgModelsForm({
                 {catalogOptions(t, catalog, configuredProviders, org.models[tier], {
                   billedKeyReady,
                   ollamaAvailable,
-                })}
+                }, index + 1 as 1 | 2 | 3)}
               </select>
             </div>
           ))}
@@ -271,8 +275,8 @@ export function OrgModelsForm({
             {catalogOptions(t, catalog, configuredProviders, account.pins[tier], {
               billedKeyReady,
               ollamaAvailable,
-              ...(hostSubscription ? { hostSubscription } : {}),
-            })}
+              hostSubscriptions,
+            }, index + 1 as 1 | 2 | 3)}
           </select>
         </div>
       ))}
@@ -343,7 +347,7 @@ export interface CatalogueUnlocks {
   readonly billedKeyReady: boolean;
   readonly ollamaAvailable: boolean;
   /** The operator's login, when the server offered it to THIS requester. */
-  readonly hostSubscription?: VizAccountModels['hostSubscription'];
+  readonly hostSubscriptions?: VizAccountModels['hostSubscriptions'];
 }
 
 export function providerIsUnlocked(
@@ -352,8 +356,15 @@ export function providerIsUnlocked(
   opts: CatalogueUnlocks
 ): boolean {
   if (provider.id === 'ollama') return opts.ollamaAvailable;
-  if (provider.id === HOST_SUBSCRIPTION_PREFIX) {
-    return Boolean(opts.hostSubscription && !opts.hostSubscription.reason);
+  if (
+    provider.id === HOST_SUBSCRIPTION_PREFIX ||
+    provider.id === CHATGPT_SUBSCRIPTION_PREFIX
+  ) {
+    return Boolean(
+      opts.hostSubscriptions?.some(
+        (subscription) => subscription.family.id === provider.id && !subscription.reason
+      )
+    );
   }
   // NO BLANKET ADMIN UNLOCK. A platform admin picking a billed model still
   // needs the key that pays for it; the subscription is its own family, named.
@@ -371,17 +382,20 @@ function catalogOptions(
   catalog: VizLlmCatalogEntry[],
   configuredProviders: ReadonlySet<string>,
   selected: string | null,
-  opts: CatalogueUnlocks
+  opts: CatalogueUnlocks,
+  tier: 1 | 2 | 3
 ): ReactNode {
-  const families = opts.hostSubscription
-    ? [...catalog, opts.hostSubscription.family]
-    : catalog;
+  const families = [
+    ...catalog,
+    ...(opts.hostSubscriptions ?? []).map((subscription) => subscription.family),
+  ];
   return families.map((provider) => {
     // The honest label: ollama compute is the platform's, and where the
     // deployment declared no endpoint the family stays visible but locked —
     // hiding it would make the operator's choice look like a client bug.
     const isOllama = provider.id === 'ollama';
-    const isSubscription = provider.id === HOST_SUBSCRIPTION_PREFIX;
+    const isSubscription =
+      provider.id === HOST_SUBSCRIPTION_PREFIX || provider.id === CHATGPT_SUBSCRIPTION_PREFIX;
     const unlocked = providerIsUnlocked(provider, configuredProviders, opts);
     const label = isOllama
       ? t(opts.ollamaAvailable ? 'settings.ollamaHosted' : 'settings.ollamaUnavailable', {
@@ -394,7 +408,7 @@ function catalogOptions(
         : provider.label;
     return (
       <optgroup key={provider.id} label={label}>
-        {provider.models.map((model) => {
+        {provider.models.filter((model) => !model.tiers || model.tiers.includes(tier)).map((model) => {
           const value = `${provider.id}:${model.id}`;
           return (
             <option

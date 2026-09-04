@@ -1,7 +1,10 @@
 import { z } from 'zod';
 import { FALLBACK_OPUS, PIN_HAIKU, PIN_SONNET, modelForTier } from '../core/models.js';
 import { isValidTierModelSelection } from '../core/providerCatalog.js';
-import { isHostSubscriptionSelection } from './runPayers.js';
+import {
+  chatGptSubscriptionModel,
+  isHostSubscriptionSelection,
+} from './runPayers.js';
 
 /**
  * PER-TIER MODEL SELECTION — THE ONE CHOICE CONTRACT.
@@ -20,8 +23,9 @@ import { isHostSubscriptionSelection } from './runPayers.js';
  *   defaults and member overrides alike): the run child builds a routing
  *   client per referenced provider when the org has configured its key. The
  *   catalogue contains exactly the credential-honouring providers
- *   `docs/saas-architecture.md` permits on the tenant plane; claude-cli and
- *   codex cannot appear in a stored choice.
+ *   `docs/saas-architecture.md` permits on the tenant plane; raw claude-cli
+ *   and codex routes cannot appear in a stored choice. Account-only guarded
+ *   sentinels are the explicit exception described below.
  * - An unknown model id is only discovered at the first BILLABLE call,
  *   mid-run. Refusing it at the settings write is the cheap place to fail.
  * - The historical bare-id spelling (one of the built-in Anthropic pins,
@@ -74,10 +78,29 @@ export const tierModelPinsSchema = tierPinsSchemaFor(
  * shape; the ROUTE verifies authority, and the coordinator re-asks it per run
  * — a stored sentinel is data, never permission.
  */
-export const accountTierModelPinsSchema = tierPinsSchemaFor(
-  (value) => isValidTierModelSelection(value) || isHostSubscriptionSelection(value),
-  'must be a catalogue model or the host subscription'
-);
+function accountSelectionSchema(tier: 1 | 2 | 3) {
+  return z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .refine(
+      (value) =>
+        isValidTierModelSelection(value) ||
+        (isHostSubscriptionSelection(value) &&
+          // Codex cannot own L1's tool loop. Refuse the impossible choice at
+          // the settings write, before it can become a stored payer promise.
+          !(tier === 1 && chatGptSubscriptionModel(value))),
+      { message: 'must be a catalogue model or a host subscription available to this tier' }
+    )
+    .nullable();
+}
+
+export const accountTierModelPinsSchema = z.object({
+  l1: accountSelectionSchema(1),
+  l2: accountSelectionSchema(2),
+  l3: accountSelectionSchema(3),
+});
 
 export type TierModelPins = z.infer<typeof tierModelPinsSchema>;
 

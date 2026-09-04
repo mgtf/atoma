@@ -331,7 +331,7 @@ export interface VizAccountModels {
   defaults: { l1: string; l2: string; l3: string };
   catalog: VizLlmCatalogEntry[];
   /**
-   * The operator's own Claude login, offered per tier. ABSENT MEANS NOT
+   * Legacy singular offer for the operator's Claude login. ABSENT MEANS NOT
    * OFFERED — the inverse of `ollamaAvailable`'s tolerant default, and
    * deliberately so: an unknown endpoint is a dormant choice, an unknown
    * PAYER is somebody's money. `reason` present means offered-but-unusable,
@@ -342,6 +342,11 @@ export interface VizAccountModels {
     family: VizLlmCatalogEntry;
     reason?: 'undeclared' | 'other-organisation';
   };
+  /** All Claude/ChatGPT machine-bound subscriptions offered to this requester. */
+  hostSubscriptions?: Array<{
+    family: VizLlmCatalogEntry;
+    reason?: 'undeclared' | 'other-organisation';
+  }>;
   /**
    * Whether the deployment declared an Ollama endpoint (OLLAMA_BASE_URL).
    * Ollama runs on the OPERATOR's infrastructure — orgs pick its models,
@@ -360,7 +365,7 @@ export interface VizLlmCatalogEntry {
   credentialEnvVar: string | null;
   /** True when the model list reflects an inventory we cannot enumerate statically. */
   suggestive: boolean;
-  models: Array<{ id: string; label: string }>;
+  models: Array<{ id: string; label: string; tiers?: Array<1 | 2 | 3> }>;
 }
 
 /** One configured org provider key: presence and timestamp, never material. */

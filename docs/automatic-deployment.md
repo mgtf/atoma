@@ -125,6 +125,66 @@ ATOMA_MCP_RUN_LOCK=/home/atoma/state/mcp-run-lock.db
 ATOMA_DEPLOY_LOCK_PATH=/home/atoma/state/deploy.lock
 ```
 
+### Z.ai L1 with ChatGPT supervisors
+
+For the recommended production split, keep L1 on a credentialled Z.ai
+transport and offer the operator's ChatGPT subscription only on L2/L3. Put
+the Z.ai key in the root-owned host file above — not in a GitHub variable or
+secret — together with the organisation allowed to spend the machine-bound
+subscription:
+
+```dotenv
+PATH=/home/atoma/state/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ATOMA_LLM=zai
+ZAI_API_KEY=zai-...
+ZAI_BASE_URL=https://api.z.ai/api/anthropic
+ATOMA_MODEL_L1=zai:glm-4.5-air
+ATOMA_HOST_SUBSCRIPTION_ORG=<organisation-id>
+```
+
+The organisation id is shown in the Settings organisation card. Do not set
+`ATOMA_MODEL_L2` or `ATOMA_MODEL_L3` to `codex:` in this host file: hosted
+project runs deliberately accept a machine subscription only from a platform
+admin's own account choice, re-authorised on every run.
+
+Install Codex under the service account's real home, then use device-code
+login from the SSH session opened as `mgf`:
+
+```bash
+sudo -u atoma env HOME=/home/atoma/state sh -c \
+  'curl -fsSL https://chatgpt.com/codex/install.sh | sh'
+
+sudo -u atoma env \
+  HOME=/home/atoma/state \
+  PATH=/home/atoma/state/.local/bin:/usr/local/bin:/usr/bin:/bin \
+  codex login --device-auth
+
+sudo -u atoma env \
+  HOME=/home/atoma/state \
+  PATH=/home/atoma/state/.local/bin:/usr/local/bin:/usr/bin:/bin \
+  codex login status
+```
+
+Open the URL printed by the second command on your own browser and enter its
+one-time code. Device-code login may first need to be enabled in ChatGPT
+security settings. The resulting credentials live under the service account's
+Codex home (normally `/home/atoma/state/.codex`); treat them like a password,
+never copy them into the repository or GitHub. This follows OpenAI's
+[Codex CLI installation](https://learn.chatgpt.com/docs/codex/cli) and
+[headless authentication](https://learn.chatgpt.com/docs/auth) guidance.
+
+After a release containing this support is deployed, restart Atoma, sign in
+to the web app as the platform admin, and choose:
+
+- L1: `Z.ai — GLM-4.5 Air` (or inherit the host default);
+- L2: `ChatGPT (host subscription) — GPT-5.6-Terra`;
+- L3: `ChatGPT (host subscription) — GPT-5.6-Sol`.
+
+Claude CLI remains available as a separate host-subscription family. The
+ChatGPT route is intended only for a trusted self-hosted operator account;
+OpenAI recommends API-key or enterprise access-token authentication for
+general programmatic/public automation.
+
 ```bash
 sudo chown root:atoma /home/atoma/config/atoma.env
 sudo chmod 0640 /home/atoma/config/atoma.env

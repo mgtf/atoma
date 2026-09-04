@@ -259,6 +259,32 @@ describe('project run environment', () => {
     );
   });
 
+  it('uses Z.ai as the credentialled base provider', () => {
+    const base = {
+      dbPath: '/control/atoma.db',
+      workspacePath: '/control/workspace',
+      runsPath: '/control/runs',
+      skillsPath: '/control/skills',
+      runId: '3c584a3c-933d-4488-ac44-4cdcc8e66f31',
+      artifactManifestPath: '/control/manifest.json',
+    };
+    const host = projectRunEnvironment({
+      ...base,
+      hostEnv: { ATOMA_LLM: 'zai', ZAI_API_KEY: 'host-zai-key' },
+    });
+    expect(host.environment['ATOMA_LLM']).toBe('zai');
+    expect(host.environment['ZAI_API_KEY']).toBe('host-zai-key');
+    expect(host.payers.base).toMatchObject({ provider: 'zai', payer: 'host-key' });
+
+    const org = projectRunEnvironment({
+      ...base,
+      hostEnv: { ATOMA_LLM: 'zai', ZAI_API_KEY: 'host-zai-key' },
+      orgProviderKeys: { zai: 'org-zai-key' },
+    });
+    expect(org.environment['ZAI_API_KEY']).toBe('org-zai-key');
+    expect(org.payers.base).toMatchObject({ provider: 'zai', payer: 'org-key' });
+  });
+
   it('forwards only the provider keys this run can actually reach', () => {
     // 2026-08-27, 3.1. Every configured org key rode into every run, referenced
     // or not. CHILD_ENV_ALLOWLIST already keeps them out of tool subprocesses,
@@ -338,6 +364,50 @@ describe('project run environment', () => {
     expect(() => projectRunEnvironment({ ...base, orgId: 'org-tenant' })).toThrow(
       /belongs to another organisation/
     );
+  });
+
+  it('routes ChatGPT subscription pins through Codex on L2/L3 only', () => {
+    const base = {
+      dbPath: '/control/atoma.db',
+      workspacePath: '/control/workspace',
+      runsPath: '/control/runs',
+      skillsPath: '/control/skills',
+      runId: '3c584a3c-933d-4488-ac44-4cdcc8e66f31',
+      artifactManifestPath: '/control/manifest.json',
+      hostEnv: {
+        ATOMA_LLM: 'zai',
+        ZAI_API_KEY: 'host-zai-key',
+        ATOMA_HOST_SUBSCRIPTION_ORG: 'org-operator',
+      },
+      orgId: 'org-operator',
+      subscriptionTransport: { principalId: 'admin-1' },
+    };
+    const mixed = projectRunEnvironment({
+      ...base,
+      tierModels: {
+        l1: 'zai:glm-4.5-air',
+        l2: 'chatgpt-subscription:gpt-5.6-terra',
+        l3: 'chatgpt-subscription:gpt-5.6-sol',
+      },
+    });
+    expect(mixed.environment['ATOMA_MODEL_L1']).toBe('zai:glm-4.5-air');
+    expect(mixed.environment['ATOMA_MODEL_L2']).toBe('codex:gpt-5.6-terra');
+    expect(mixed.environment['ATOMA_MODEL_L3']).toBe('codex:gpt-5.6-sol');
+    expect(mixed.environment['ATOMA_SUBSCRIPTION_TIERS']).toBe('l2,l3');
+    expect(mixed.payers.l2).toMatchObject({ provider: 'codex', payer: 'host-subscription' });
+    expect(mixed.payers.l3).toMatchObject({ provider: 'codex', payer: 'host-subscription' });
+    expect(mixed.payers.base).toMatchObject({ provider: 'zai', payer: 'host-key' });
+
+    expect(() =>
+      projectRunEnvironment({
+        ...base,
+        tierModels: {
+          l1: 'chatgpt-subscription:gpt-5.4-mini',
+          l2: null,
+          l3: null,
+        },
+      })
+    ).toThrow(/cannot use the ChatGPT host subscription/);
   });
 
   it('refuses a host-subscription pin that arrives from the org or the host level', () => {

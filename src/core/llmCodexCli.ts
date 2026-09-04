@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { LlmClient, LlmCompletionRequest, LlmCompletionResponse } from './types.js';
+import { CHATGPT_SUBSCRIPTION_MODELS } from '../contracts/runPayers.js';
 
 const codexJailRoots = new Set<string>();
 
@@ -64,9 +65,9 @@ process.on('exit', cleanupCodexJails);
  */
 
 /** Codex model slugs a ChatGPT subscription actually serves (2026-08-11). */
-export const CODEX_MODEL_FRONTIER = 'gpt-5.6-sol';
-export const CODEX_MODEL_MID = 'gpt-5.6-terra';
-export const CODEX_MODEL_SMALL = 'gpt-5.4-mini';
+export const CODEX_MODEL_FRONTIER = CHATGPT_SUBSCRIPTION_MODELS[0];
+export const CODEX_MODEL_MID = CHATGPT_SUBSCRIPTION_MODELS[1];
+export const CODEX_MODEL_SMALL = CHATGPT_SUBSCRIPTION_MODELS[2];
 
 /**
  * INACTIVITY ceiling on a codex call — same contract, and same history, as

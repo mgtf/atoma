@@ -326,7 +326,7 @@ npm run doctor                    # quota-free Node, provider and optional Docke
 # one real task, pick your auth:
 ANTHROPIC_API_KEY=... npm run run:build -- "a Node CLI that converts CSV to JSON"
 ATOMA_LLM=claude-cli  npm run run:build -- "…"    # Claude subscription, no API key
-env -u OPENAI_API_KEY ZAI_API_KEY=... ATOMA_LLM=ollama \
+env -u OPENAI_API_KEY ZAI_API_KEY=... ATOMA_LLM=zai \
   ATOMA_MODEL_L1=zai:glm-4.5-air \
   ATOMA_MODEL_L2=codex:gpt-5.4-mini ATOMA_MODEL_L3=codex:gpt-5.6-sol \
   npm run run:build -- "…"                      # ChatGPT supervisors + Z.ai executor

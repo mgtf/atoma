@@ -928,6 +928,24 @@ describe('auth store — per-tier model pins', () => {
       .run('claude-sonnet-4', viewer.principalId);
     expect(store.modelPins(viewer.principalId)).toEqual({ l1: null, l2: null, l3: null });
   });
+
+  it('stores ChatGPT subscription pins for supervisors, never for L1', () => {
+    const store = freshStore();
+    const { viewer } = admit(store, identity('chatgpt-pins'), 'org:owner');
+    expect(() =>
+      store.setModelPins(viewer.principalId, {
+        l1: 'chatgpt-subscription:gpt-5.4-mini',
+        l2: null,
+        l3: null,
+      })
+    ).toThrow();
+    const pins = store.setModelPins(viewer.principalId, {
+      l1: null,
+      l2: 'chatgpt-subscription:gpt-5.6-terra',
+      l3: 'chatgpt-subscription:gpt-5.6-sol',
+    });
+    expect(store.modelPins(viewer.principalId)).toEqual(pins);
+  });
 });
 
 describe('auth store — organisation directory', () => {

@@ -11,7 +11,7 @@ import { z } from 'zod';
  * but an English summary.
  *
  * A per-tier subscription choice ends that. A run may now spend the operator's
- * own Claude login on L2 and L3 while L1 bills the organisation's Z.ai key, and
+ * own Claude or ChatGPT login on L2 and L3 while L1 bills the organisation's Z.ai key, and
  * a row that names the run cannot describe it. This module is the shape that
  * can: four rows, one per tier plus the BASE transport, each naming what was
  * selected, which provider served it and who paid.
@@ -33,6 +33,9 @@ import { z } from 'zod';
 /** The prefix a per-tier subscription selection is stored under. */
 export const HOST_SUBSCRIPTION_PREFIX = 'host-subscription';
 
+/** The distinct sentinel for the operator's ChatGPT-backed Codex login. */
+export const CHATGPT_SUBSCRIPTION_PREFIX = 'chatgpt-subscription';
+
 /**
  * What the transport can actually serve. `resolveCliModel` maps every pin onto
  * one of these three aliases and reports the ALIAS back as `servedModel`,
@@ -44,6 +47,24 @@ export const HOST_SUBSCRIPTION_PREFIX = 'host-subscription';
 export const HOST_SUBSCRIPTION_ALIASES = ['opus', 'sonnet', 'haiku'] as const;
 
 export type HostSubscriptionAlias = (typeof HOST_SUBSCRIPTION_ALIASES)[number];
+
+/**
+ * Exact Codex slugs offered by the account picker. Codex remains a supervisor
+ * transport: these selections are valid on L2/L3 only because L1 owns the
+ * tool loop and Codex cannot expose that loop through ToolSandbox.
+ */
+export const CHATGPT_SUBSCRIPTION_MODELS = [
+  'gpt-5.6-sol',
+  'gpt-5.6-terra',
+  'gpt-5.4-mini',
+] as const;
+
+export type ChatGptSubscriptionModel = (typeof CHATGPT_SUBSCRIPTION_MODELS)[number];
+
+export interface HostSubscriptionRoute {
+  readonly provider: 'claude-cli' | 'codex';
+  readonly model: HostSubscriptionAlias | ChatGptSubscriptionModel;
+}
 
 /**
  * A NON-ROUTABLE SENTINEL, deliberately not `claude-cli:opus`.
@@ -61,7 +82,7 @@ export type HostSubscriptionAlias = (typeof HOST_SUBSCRIPTION_ALIASES)[number];
  * check.
  */
 export function isHostSubscriptionSelection(value: string): boolean {
-  return hostSubscriptionAlias(value) !== null;
+  return hostSubscriptionRoute(value) !== null;
 }
 
 /** The alias a sentinel names, or null when the value is not one. */
@@ -78,6 +99,30 @@ export function hostSubscriptionAlias(value: string): HostSubscriptionAlias | nu
 /** The stored spelling for one alias. */
 export function hostSubscriptionSelection(alias: HostSubscriptionAlias): string {
   return `${HOST_SUBSCRIPTION_PREFIX}:${alias}`;
+}
+
+/** The Codex model named by a ChatGPT sentinel, or null. */
+export function chatGptSubscriptionModel(value: string): ChatGptSubscriptionModel | null {
+  const separator = value.indexOf(':');
+  if (separator <= 0) return null;
+  if (value.slice(0, separator) !== CHATGPT_SUBSCRIPTION_PREFIX) return null;
+  const model = value.slice(separator + 1);
+  return (CHATGPT_SUBSCRIPTION_MODELS as readonly string[]).includes(model)
+    ? (model as ChatGptSubscriptionModel)
+    : null;
+}
+
+/** The stored spelling for one ChatGPT subscription model. */
+export function chatGptSubscriptionSelection(model: ChatGptSubscriptionModel): string {
+  return `${CHATGPT_SUBSCRIPTION_PREFIX}:${model}`;
+}
+
+/** Translate a non-routable subscription sentinel into its guarded transport. */
+export function hostSubscriptionRoute(value: string): HostSubscriptionRoute | null {
+  const alias = hostSubscriptionAlias(value);
+  if (alias) return { provider: 'claude-cli', model: alias };
+  const model = chatGptSubscriptionModel(value);
+  return model ? { provider: 'codex', model } : null;
 }
 
 /**

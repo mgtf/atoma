@@ -67,9 +67,9 @@ function allowedStoredSelection(value: string | null): string | null {
  * D5). Reading it back as `null` here would BE that downgrade, silently
  * changing who pays: the defect class finding 2.2 closed on 2026-08-27.
  */
-function allowedPrincipalSelection(value: string | null): string | null {
+function allowedPrincipalSelection(value: string | null, tier: 1 | 2 | 3): string | null {
   if (value === null) return null;
-  return isAccountTierSelection(value) ? value : null;
+  return isAccountTierSelection(value, tier) ? value : null;
 }
 
 /**
@@ -1435,9 +1435,9 @@ export class AuthStore {
       | undefined;
     if (!row) return { ...EMPTY_TIER_MODEL_PINS };
     const parsed = accountTierModelPinsSchema.safeParse({
-      l1: allowedPrincipalSelection(row.model_l1),
-      l2: allowedPrincipalSelection(row.model_l2),
-      l3: allowedPrincipalSelection(row.model_l3),
+      l1: allowedPrincipalSelection(row.model_l1, 1),
+      l2: allowedPrincipalSelection(row.model_l2, 2),
+      l3: allowedPrincipalSelection(row.model_l3, 3),
     });
     return parsed.success ? parsed.data : { ...EMPTY_TIER_MODEL_PINS };
   }

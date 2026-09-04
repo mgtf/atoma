@@ -787,6 +787,7 @@ describe('viz auth gate (process level)', () => {
       defaults: Record<string, string>;
       catalog: Array<{ id: string; models: Array<{ id: string }> }>;
       hostSubscription?: unknown;
+      hostSubscriptions?: unknown;
     };
     expect(defaults.pins).toEqual({ l1: null, l2: null, l3: null });
     expect(defaults.defaults['l3']).toContain('opus');
@@ -797,6 +798,7 @@ describe('viz auth gate (process level)', () => {
     // named to them at all — an offer a viewer cannot use is a payer they
     // should never see.
     expect(defaults.hostSubscription).toBeUndefined();
+    expect(defaults.hostSubscriptions).toBeUndefined();
     // And they cannot arm it by hand either.
     const refusedSubscription = await fetch(`${base}/api/account/models`, {
       method: 'PUT',

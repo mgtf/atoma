@@ -38,11 +38,17 @@ describe('the child re-checks what the parent authorised', () => {
     expect(() =>
       assertTransportHonoursCredentials('anthropic', { ATOMA_MODEL_L2: 'claude-cli:sonnet' })
     ).toThrow(/cannot honour a supplied credential snapshot/);
-    // `codex:` is never authorisable — it is not a payer this feature can name.
+    // The parent may authorise the ChatGPT-backed Codex route on a supervisor tier.
     expect(() =>
       assertTransportHonoursCredentials('anthropic', {
-        ATOMA_MODEL_L3: 'codex:gpt-5',
+        ATOMA_MODEL_L3: 'codex:gpt-5.6-sol',
         ATOMA_SUBSCRIPTION_TIERS: 'l3',
+      })
+    ).not.toThrow();
+    expect(() =>
+      assertTransportHonoursCredentials('anthropic', {
+        ATOMA_MODEL_L3: 'codex:gpt-5.6-sol',
+        ATOMA_SUBSCRIPTION_TIERS: 'l2',
       })
     ).toThrow(/cannot honour a supplied credential snapshot/);
   });
@@ -58,10 +64,11 @@ describe('the child re-checks what the parent authorised', () => {
 });
 
 describe('base provider selection — one rule for runner and curriculum', () => {
-  it('defaults to Anthropic and recognises Ollama', () => {
+  it('defaults to Anthropic and recognises Z.ai and Ollama', () => {
     expect(resolveBaseProviderKind()).toBe('anthropic');
     expect(resolveBaseProviderKind('ANTHROPIC')).toBe('anthropic');
     expect(resolveBaseProviderKind('ollama')).toBe('ollama');
+    expect(resolveBaseProviderKind('ZAI')).toBe('zai');
   });
 
   it('normalises both Claude subscription aliases', () => {
@@ -146,6 +153,15 @@ describe('makeBaseClient — ONE construction switch for runner and curriculum',
     expect(() => makeBaseClient('anthropic')).toThrow(/opts\.anthropic/);
     const fake = { messages: { create: async () => ({}) } } as unknown as Anthropic;
     expect(makeBaseClient('anthropic', { anthropic: fake })).toBeInstanceOf(AnthropicLlmClient);
+  });
+
+  it('builds Z.ai as the base provider from the injected snapshot', () => {
+    expect(() => makeBaseClient('zai', { env: {} })).toThrow(/ZAI_API_KEY/);
+    expect(
+      makeBaseClient('zai', {
+        env: { ZAI_API_KEY: 'zai-key-from-snapshot' },
+      })
+    ).toBeInstanceOf(AnthropicLlmClient);
   });
 });
 

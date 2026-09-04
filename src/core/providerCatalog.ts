@@ -1,6 +1,9 @@
 import {
+  CHATGPT_SUBSCRIPTION_MODELS,
+  CHATGPT_SUBSCRIPTION_PREFIX,
   HOST_SUBSCRIPTION_ALIASES,
   HOST_SUBSCRIPTION_PREFIX,
+  chatGptSubscriptionModel,
   hostSubscriptionAlias,
   isHostSubscriptionSelection,
 } from '../contracts/runPayers.js';
@@ -32,7 +35,7 @@ import {
  * honest about their role through `suggestive: true`.
  *
  * THE HOST SUBSCRIPTION IS A NEIGHBOUR, NOT A MEMBER (design 2026-08-28, D4).
- * `HOST_SUBSCRIPTION_FAMILY` below is offered by the account picker beside
+ * `HOST_SUBSCRIPTION_FAMILIES` below are offered by the account picker beside
  * this catalogue, and is deliberately NOT a fourth entry, because three
  * mechanisms read `LLM_PROVIDER_CATALOG` as "things that may hold a key":
  * `orgProviderIsReady` returns TRUE for any entry whose `credentialEnvVar` is
@@ -141,14 +144,40 @@ export const LLM_PROVIDER_CATALOG: readonly LlmProviderEntry[] = [
 export const HOST_SUBSCRIPTION_FAMILY = {
   id: HOST_SUBSCRIPTION_PREFIX,
   label: 'Claude (host subscription)',
+  credentialEnvVar: null,
+  suggestive: false,
   models: HOST_SUBSCRIPTION_ALIASES.map((alias) => ({
     id: alias,
     label: aliasLabel(alias),
   })),
 } as const;
 
+/** The operator's ChatGPT subscription, routed through the local Codex CLI. */
+export const CHATGPT_SUBSCRIPTION_FAMILY = {
+  id: CHATGPT_SUBSCRIPTION_PREFIX,
+  label: 'ChatGPT (host subscription)',
+  credentialEnvVar: null,
+  suggestive: false,
+  models: CHATGPT_SUBSCRIPTION_MODELS.map((model) => ({
+    id: model,
+    label: modelLabel(model),
+    tiers: [2, 3] as const,
+  })),
+} as const;
+
+/** Every machine-bound family offered beside (never inside) the key catalogue. */
+export const HOST_SUBSCRIPTION_FAMILIES = [
+  HOST_SUBSCRIPTION_FAMILY,
+  CHATGPT_SUBSCRIPTION_FAMILY,
+] as const;
+
 function aliasLabel(alias: string): string {
   return alias.charAt(0).toUpperCase() + alias.slice(1);
+}
+
+function modelLabel(model: string): string {
+  const match = /^gpt-(\d+(?:\.\d+)?)-(.+)$/.exec(model);
+  return match ? `GPT-${match[1]} ${aliasLabel(match[2]!)}` : model;
 }
 
 /**
@@ -157,8 +186,10 @@ function aliasLabel(alias: string): string {
  * stays on `isValidTierModelSelection`, so widening the account space cannot
  * widen the org space by accident.
  */
-export function isAccountTierSelection(value: string): boolean {
-  return isValidTierModelSelection(value) || isHostSubscriptionSelection(value);
+export function isAccountTierSelection(value: string, tier?: 1 | 2 | 3): boolean {
+  if (isValidTierModelSelection(value)) return true;
+  if (!isHostSubscriptionSelection(value)) return false;
+  return !(tier === 1 && chatGptSubscriptionModel(value));
 }
 
 /** Every selectable provider id, e.g. handed to the routing tables. */
@@ -214,6 +245,10 @@ export function isValidTierModelSelection(value: string): boolean {
 export function tierModelSelectionLabel(value: string): string {
   const alias = hostSubscriptionAlias(value);
   if (alias) return `${HOST_SUBSCRIPTION_FAMILY.label} — ${aliasLabel(alias)}`;
+  const chatGptModel = chatGptSubscriptionModel(value);
+  if (chatGptModel) {
+    return `${CHATGPT_SUBSCRIPTION_FAMILY.label} — ${modelLabel(chatGptModel)}`;
+  }
   const colonIndex = value.indexOf(':');
   if (colonIndex === -1) return value;
   const provider = findProvider(value.slice(0, colonIndex));

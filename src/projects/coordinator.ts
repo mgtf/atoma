@@ -15,7 +15,7 @@ import type { TierModelPins } from '../contracts/tierModels.js';
 import { LLM_PROVIDER_CATALOG } from '../core/providerCatalog.js';
 import {
   HOST_SUBSCRIPTION_PREFIX,
-  hostSubscriptionAlias,
+  hostSubscriptionRoute,
   ledgerTouchesSubscription,
   runPayerLedgerSchema,
   subscriptionTiers,
@@ -276,11 +276,6 @@ function providerCredentialAvailable(
 ): boolean {
   const providerId = selectorProvider(value);
   if (providerId === null) return true;
-  if (providerId === 'anthropic') {
-    // Either forwarded from the host above or brought BYO-key by this org —
-    // and in both cases already written into the child's environment.
-    return Boolean(keys.anthropic || childEnv['ANTHROPIC_API_KEY']);
-  }
   if (providerId === 'ollama') {
     // Self-hosted, so no secret — but "the deployment HAS an Ollama" is
     // still a fact only the operator can assert, by exporting
@@ -292,7 +287,11 @@ function providerCredentialAvailable(
     // the platform's own process).
     return Boolean(childEnv['OLLAMA_BASE_URL']);
   }
-  return Boolean(keys[providerId as ProviderKeyProvider]);
+  const provider = LLM_PROVIDER_CATALOG.find((entry) => entry.id === providerId);
+  if (!provider?.credentialEnvVar) return false;
+  return Boolean(
+    keys[providerId as ProviderKeyProvider] || childEnv[provider.credentialEnvVar]
+  );
 }
 
 /**
@@ -340,7 +339,7 @@ function payerForProvider(
 ): PayerKind {
   if (providerId === null) return base.payer;
   if (providerId === 'ollama') return 'host-selfhosted';
-  if (providerId === 'anthropic') return keys.anthropic ? 'org-key' : base.payer;
+  if (providerId === base.provider) return base.payer;
   return keys[providerId as ProviderKeyProvider] ? 'org-key' : base.payer;
 }
 
@@ -415,7 +414,7 @@ export function projectRunEnvironment(input: {
    * A selection MAY now be a `provider:model` selector. That is safe by
    * construction: the values come from `contracts/tierModels.ts`, whose
    * catalogue admits exactly the credential-honouring providers of
-   * `core/providerCatalog.ts` (claude-cli/codex cannot appear), and each
+   * `core/providerCatalog.ts` (raw claude-cli/codex routes cannot appear), and each
    * referenced provider's credential is injected alongside the pin from the
    * org's own key store — a pin without its key is dropped before it can
    * reach the router and detonate mid-run. The historical bare-`:`
@@ -466,12 +465,19 @@ export function projectRunEnvironment(input: {
         'platform admin request the run — that is the one identity allowed through this door.'
     );
   }
-  if (!subscriptionRequested && selected !== 'anthropic') {
+  const baseProvider = selected.toLowerCase();
+  if (!subscriptionRequested && baseProvider !== 'anthropic' && baseProvider !== 'zai') {
     throw new ProjectRunConfigurationError(
-      `project runs do not support ATOMA_LLM=${selected}; use anthropic with a per-run credential`
+      `project runs do not support ATOMA_LLM=${selected}; use anthropic or zai with a per-run credential`
     );
   }
-  const apiKey = input.hostEnv['ANTHROPIC_API_KEY']?.trim();
+  const baseEntry = LLM_PROVIDER_CATALOG.find((provider) => provider.id === baseProvider);
+  const credentialEnvVar = baseEntry?.credentialEnvVar;
+  const hostBaseKey = credentialEnvVar ? input.hostEnv[credentialEnvVar]?.trim() : undefined;
+  const orgBaseKey =
+    baseProvider === 'anthropic' || baseProvider === 'zai'
+      ? input.orgProviderKeys?.[baseProvider]?.trim()
+      : undefined;
   // NO BEARER TOKEN ON THIS PATH. `ANTHROPIC_AUTH_TOKEN` is the SDK's other
   // credential slot, and a tenant has nowhere to supply one: the org key
   // store is keyed by catalogue provider, and anthropic's credential
@@ -486,11 +492,14 @@ export function projectRunEnvironment(input: {
   // all. Reading it here rather than only at injection time below is the
   // difference between that deployment working and every one of its runs
   // being refused while the encrypted key sits in the store.
-  const orgAnthropicKey = input.orgProviderKeys?.anthropic?.trim();
   // Refused rather than dropped: an operator who exported a bearer expecting
   // it to be spent must be told it is not, not watch runs bill a different
   // credential — or fail for "no credential" while a token sits in the shell.
-  if (!subscriptionRequested && input.hostEnv['ANTHROPIC_AUTH_TOKEN']?.trim()) {
+  if (
+    !subscriptionRequested &&
+    baseProvider === 'anthropic' &&
+    input.hostEnv['ANTHROPIC_AUTH_TOKEN']?.trim()
+  ) {
     throw new ProjectRunConfigurationError(
       'project runs do not accept ANTHROPIC_AUTH_TOKEN: a bearer token is refreshed from a login ' +
         'profile the run child cannot read, so it would expire mid-run. Use ANTHROPIC_API_KEY on ' +
@@ -500,10 +509,10 @@ export function projectRunEnvironment(input: {
   // The credential rule applies to the credentialled transport only. A
   // subscription run has no per-run credential BY DEFINITION, and demanding
   // one here would refuse exactly the case the door just allowed.
-  if (!subscriptionRequested && !apiKey && !orgAnthropicKey) {
+  if (!subscriptionRequested && !hostBaseKey && !orgBaseKey) {
     throw new ProjectRunConfigurationError(
-      'project runs require an anthropic credential: ANTHROPIC_API_KEY on the host, or this ' +
-        "organisation's own anthropic provider key"
+      `project runs require a ${baseProvider} credential: ${credentialEnvVar} on the host, or ` +
+        `this organisation's own ${baseProvider} provider key`
     );
   }
   const environment: NodeJS.ProcessEnv = {};
@@ -521,12 +530,12 @@ export function projectRunEnvironment(input: {
     // provider's own precedence rules. `usableOrgKeys` below is what makes
     // that true of the ORG's keys as well as the host's.
   } else {
-    environment['ATOMA_LLM'] = 'anthropic';
-    if (orgAnthropicKey) {
+    environment['ATOMA_LLM'] = baseProvider;
+    if (orgBaseKey && credentialEnvVar) {
       // BYO wins over the host: an org that brought its own key pays with it.
       // `injectOrgProviderKeys` writes the same value below; the branch here
       // is what keeps the host's gateway URL out of the child.
-      environment['ANTHROPIC_API_KEY'] = orgAnthropicKey;
+      environment[credentialEnvVar] = orgBaseKey;
       // A BYO KEY GOES TO ITS OWN ISSUER. `ANTHROPIC_BASE_URL` is how a host
       // points the anthropic transport at a gateway (Z.ai's own Claude Code
       // instructions are exactly this variable plus a bearer token), and
@@ -535,9 +544,11 @@ export function projectRunEnvironment(input: {
       // host's gateway applies to the host's own credential, not to a
       // tenant's, so the variable is dropped on this path.
     } else {
-      if (apiKey) environment['ANTHROPIC_API_KEY'] = apiKey;
-      const baseUrl = input.hostEnv['ANTHROPIC_BASE_URL']?.trim();
-      if (baseUrl) environment['ANTHROPIC_BASE_URL'] = baseUrl;
+      if (hostBaseKey && credentialEnvVar) environment[credentialEnvVar] = hostBaseKey;
+      for (const variable of baseEntry?.configurableEnvVars ?? []) {
+        const value = input.hostEnv[variable]?.trim();
+        if (value) environment[variable] = value;
+      }
     }
   }
   // THE BASE ROW OF THE PAYER LEDGER. The branch above just decided who pays
@@ -555,9 +566,9 @@ export function projectRunEnvironment(input: {
       }
     : {
         selection: null,
-        provider: 'anthropic',
-        payer: orgAnthropicKey ? 'org-key' : 'host-key',
-        source: orgAnthropicKey ? 'org' : 'host',
+        provider: baseProvider,
+        payer: orgBaseKey ? 'org-key' : 'host-key',
+        source: orgBaseKey ? 'org' : 'host',
       };
   // THE HOST'S OLLAMA ENDPOINT crosses on every branch: it selects no payer
   // (self-hosted, priced at zero), so unlike the anthropic gateway URL above
@@ -602,8 +613,14 @@ export function projectRunEnvironment(input: {
         tier,
       }),
       (candidate) => {
-        const alias = hostSubscriptionAlias(candidate.value);
-        if (alias) {
+        const subscription = hostSubscriptionRoute(candidate.value);
+        if (subscription) {
+          if (tier === 1 && subscription.provider === 'codex') {
+            throw new ProjectRunConfigurationError(
+              'ATOMA_MODEL_L1 cannot use the ChatGPT host subscription because Codex cannot ' +
+                'expose the L1 tool loop through ToolSandbox'
+            );
+          }
           assertSubscriptionPinIsHonourable({
             tier,
             level: candidate.level,
@@ -626,16 +643,16 @@ export function projectRunEnvironment(input: {
       }
     );
     if (!chosen) continue;
-    const alias = hostSubscriptionAlias(chosen.value);
-    if (alias) {
+    const subscription = hostSubscriptionRoute(chosen.value);
+    if (subscription) {
       // TRANSLATED HERE AND NOWHERE ELSE, downstream of the authority check.
       // The sentinel is what is STORED — non-routable on purpose, so no other
       // code path that forwards a pin into an environment can become a
       // subscription route by accident.
-      environment[`ATOMA_MODEL_L${tier}`] = `claude-cli:${alias}`;
+      environment[`ATOMA_MODEL_L${tier}`] = `${subscription.provider}:${subscription.model}`;
       ledger[key] = {
         selection: chosen.value,
-        provider: HOST_SUBSCRIPTION_PREFIX,
+        provider: subscription.provider,
         payer: 'host-subscription',
         source: chosen.level,
       };
@@ -668,7 +685,7 @@ export function projectRunEnvironment(input: {
   // would arm a provider no tier can name. The base transport is always
   // referenced on the credentialled branch: an unpinned tier routes there.
   const referencedProviders = new Set<string>();
-  if (!subscriptionRequested) referencedProviders.add('anthropic');
+  if (!subscriptionRequested) referencedProviders.add(baseProvider);
   for (const tier of [1, 2, 3] as const) {
     const resolved = environment[`ATOMA_MODEL_L${tier}`];
     const providerId = resolved ? selectorProvider(resolved) : null;
