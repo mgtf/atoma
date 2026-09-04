@@ -759,7 +759,7 @@
   "welcome.signInBusy": "{{label}}でサインイン中",
   "settings.hostSubscription": "{{label}}",
   "settings.hostSubscriptionUnavailable": "{{label}} — このアカウントでは利用できません",
-  "settings.hostSubscriptionHint": "ホストサブスクリプションのtierでは、運用者自身のClaudeログインを使用します。キーには請求されず、これらを使用するすべてのrunがプラットフォームのジャーナルに記録されます。",
+  "settings.hostSubscriptionHint": "ホストサブスクリプションのtierでは、運用者自身のClaudeまたはChatGPTログインを使用します。これらについてキーへの請求は発生せず、tierを使用したすべてのrunはプラットフォームジャーナルに記録されます。",
   "docs.user.audience": "エンドユーザー向け実践ガイド",
   "docs.user.intro": "ビジネス要件からレビュー可能なGitHubへの引き渡しまで、デリバリーチーム向けの実践的なガイダンスです。",
   "docs.user.topics": "ガイドのトピック",

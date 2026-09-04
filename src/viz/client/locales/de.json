@@ -759,7 +759,7 @@
   "welcome.signInBusy": "Anmeldung mit {{label}}",
   "settings.hostSubscription": "{{label}}",
   "settings.hostSubscriptionUnavailable": "{{label}} — für dieses Konto hier nicht verfügbar",
-  "settings.hostSubscriptionHint": "Tiers im Host-Abonnement nutzen die eigene Claude-Anmeldung des Betreibers. Dafür wird kein Schlüssel belastet, und jeder run, der einen solchen tier verwendet, wird im Plattformjournal protokolliert.",
+  "settings.hostSubscriptionHint": "Tiers in einem Host-Abonnement nutzen das eigene Claude- oder ChatGPT-Login des Betreibers. Dafür wird kein Schlüssel abgerechnet, und jeder run, der einen davon verwendet, wird im Plattformjournal protokolliert.",
   "docs.user.audience": "PRAXISLEITFADEN FÜR ENDANWENDER",
   "docs.user.intro": "Praktische Anleitung für Auslieferungsteams, vom geschäftlichen Briefing bis zur prüfbaren GitHub-Übergabe.",
   "docs.user.topics": "Leitfadenthemen",

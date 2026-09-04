@@ -759,7 +759,7 @@
   "welcome.signInBusy": "Connexion en cours avec {{label}}",
   "settings.hostSubscription": "{{label}}",
   "settings.hostSubscriptionUnavailable": "{{label}} — non proposé ici pour ce compte",
-  "settings.hostSubscriptionHint": "Les tiers de l’abonnement hôte utilisent la propre connexion Claude de l’opérateur. Aucune clé ne leur est facturée, et chaque run qui en utilise un est consigné dans le journal de la plateforme.",
+  "settings.hostSubscriptionHint": "Les tiers sur abonnement hôte utilisent la connexion Claude ou ChatGPT de l’opérateur. Aucune clé n’est facturée pour leur utilisation, et chaque run qui en utilise un est consigné dans le journal de la plateforme.",
   "docs.user.audience": "GUIDE PRATIQUE DE L’UTILISATEUR",
   "docs.user.intro": "Conseils pratiques pour les équipes de livraison, du brief métier à la transmission vérifiable sur GitHub.",
   "docs.user.topics": "Thèmes du guide",

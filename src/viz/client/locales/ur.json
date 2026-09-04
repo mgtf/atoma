@@ -759,7 +759,7 @@
   "announce.emptySegment": "کوئی ادارہ اس گروپ سے مطابقت نہیں رکھتا۔",
   "settings.hostSubscription": "{{label}}",
   "settings.hostSubscriptionUnavailable": "{{label}} — یہاں اس اکاؤنٹ کے لیے دستیاب نہیں",
-  "settings.hostSubscriptionHint": "میزبان سبسکرپشن کے tiers آپریٹر کا اپنا Claude لاگ اِن استعمال کرتے ہیں۔ ان کے لیے کسی key پر خرچ عائد نہیں ہوتا، اور انہیں استعمال کرنے والا ہر run پلیٹ فارم جرنل میں درج ہوتا ہے۔",
+  "settings.hostSubscriptionHint": "ہوسٹ سبسکرپشن کے tier آپریٹر کے اپنے Claude یا ChatGPT لاگ اِن کا استعمال کرتے ہیں۔ ان کے لیے کسی کلید پر بل نہیں لگتا، اور ان میں سے کسی ایک کو استعمال کرنے والا ہر run پلیٹ فارم کے جرنل میں ریکارڈ ہوتا ہے۔",
   "docs.user.audience": "آخری صارف کے لیے عملی رہنما",
   "docs.user.intro": "کاروباری بریف سے قابلِ جائزہ GitHub حوالگی تک، ڈیلیوری ٹیموں کے لیے عملی رہنمائی۔",
   "docs.user.topics": "رہنما کے موضوعات",

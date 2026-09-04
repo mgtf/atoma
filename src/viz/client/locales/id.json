@@ -759,7 +759,7 @@
   "welcome.signInBusy": "Sedang masuk dengan {{label}}",
   "settings.hostSubscription": "{{label}}",
   "settings.hostSubscriptionUnavailable": "{{label}} — tidak ditawarkan untuk akun ini di sini",
-  "settings.hostSubscriptionHint": "Tier pada langganan host menggunakan login Claude milik operator. Tidak ada kunci yang dibebankan untuk tier tersebut, dan setiap run yang menggunakannya dicatat dalam jurnal platform.",
+  "settings.hostSubscriptionHint": "Tier pada langganan host menggunakan login Claude atau ChatGPT milik operator sendiri. Tidak ada kunci yang ditagih untuk tier tersebut, dan setiap run yang menggunakannya dicatat dalam jurnal platform.",
   "docs.user.audience": "PANDUAN PRAKTIS PENGGUNA AKHIR",
   "docs.user.intro": "Panduan praktis bagi tim delivery, dari brief bisnis hingga serah terima GitHub yang dapat ditinjau.",
   "docs.user.topics": "Topik panduan",

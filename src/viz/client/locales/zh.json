@@ -759,7 +759,7 @@
   "welcome.signInBusy": "正在使用{{label}}登录",
   "settings.hostSubscription": "{{label}}",
   "settings.hostSubscriptionUnavailable": "{{label}}—此账户在这里无法使用",
-  "settings.hostSubscriptionHint": "主机订阅上的 tier 使用运营方自己的 Claude 登录。它们不会向任何密钥计费，使用它们的每个 run 都会记录在平台日志中。",
+  "settings.hostSubscriptionHint": "主机订阅中的 tier 会使用操作者自己的 Claude 或 ChatGPT 登录账号额度。它们不会向任何密钥计费，使用任一 tier 的每次 run 都会记录在平台日志中。",
   "docs.user.audience": "最终用户实用指南",
   "docs.user.intro": "面向交付团队的实用指南，涵盖从业务简报到可审核的 GitHub 移交。",
   "docs.user.topics": "指南主题",

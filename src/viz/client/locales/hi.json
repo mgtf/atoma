@@ -759,7 +759,7 @@
   "welcome.signInBusy": "{{label}} से साइन इन किया जा रहा है",
   "settings.hostSubscription": "{{label}}",
   "settings.hostSubscriptionUnavailable": "{{label}} — इस खाते के लिए यहाँ उपलब्ध नहीं है",
-  "settings.hostSubscriptionHint": "होस्ट सदस्यता के tiers ऑपरेटर के अपने Claude लॉगिन का उपयोग करते हैं। उनके लिए किसी कुंजी पर शुल्क नहीं लगता, और उनका उपयोग करने वाला हर run प्लेटफ़ॉर्म जर्नल में दर्ज होता है।",
+  "settings.hostSubscriptionHint": "होस्ट सदस्यता के tier, ऑपरेटर के अपने Claude या ChatGPT लॉगिन का उपयोग करते हैं। इनके लिए किसी कुंजी पर शुल्क नहीं लगता, और इनमें से किसी का उपयोग करने वाला हर run प्लेटफ़ॉर्म जर्नल में दर्ज किया जाता है।",
   "docs.user.audience": "अंतिम उपयोगकर्ता फील्ड गाइड",
   "docs.user.intro": "व्यावसायिक ब्रीफ़ से लेकर समीक्षा योग्य GitHub हैंड-ऑफ़ तक, डिलीवरी टीमों के लिए व्यावहारिक मार्गदर्शन।",
   "docs.user.topics": "गाइड के विषय",

@@ -759,7 +759,7 @@
   "announce.sent_one": "أُرسل إلى {{count}} مؤسسة.",
   "settings.hostSubscription": "{{label}}",
   "settings.hostSubscriptionUnavailable": "{{label}} — غير متاح لهذا الحساب هنا",
-  "settings.hostSubscriptionHint": "تستخدم مستويات tier في اشتراك المضيف تسجيل دخول Claude الخاص بالمشغّل. ولا تُحمَّل تكلفتها على أي مفتاح، ويُسجَّل كل run يستخدم أحدها في سجل المنصة.",
+  "settings.hostSubscriptionHint": "تستخدم خيارات tier في اشتراك المضيف تسجيل دخول المشغّل نفسه إلى Claude أو ChatGPT. ولا تُفرض رسوم على أي مفتاح مقابلها، ويُسجَّل في سجل المنصة كل run يستخدم أحدها.",
   "docs.user.audience": "الدليل الميداني للمستخدم النهائي",
   "docs.user.intro": "إرشادات عملية لفرق التسليم، بدءًا من موجز الأعمال ووصولًا إلى تسليم قابل للمراجعة على GitHub.",
   "docs.user.topics": "موضوعات الدليل",

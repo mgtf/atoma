@@ -759,7 +759,7 @@
   "welcome.signInBusy": "A iniciar sessão com {{label}}",
   "settings.hostSubscription": "{{label}}",
   "settings.hostSubscriptionUnavailable": "{{label}} — não disponível para esta conta aqui",
-  "settings.hostSubscriptionHint": "Os tiers da subscrição do host usam a própria sessão Claude do operador. Nenhuma chave é faturada por eles, e cada run que use um deles é registado no diário da plataforma.",
+  "settings.hostSubscriptionHint": "Os tiers de uma assinatura de host utilizam o login do próprio operador no Claude ou ChatGPT. Nenhuma chave é faturada por eles, e cada run que utiliza um deles é registado no diário da plataforma.",
   "docs.user.audience": "GUIA PRÁTICO DO UTILIZADOR FINAL",
   "docs.user.intro": "Orientações práticas para equipas de entrega, do briefing de negócio à entrega no GitHub pronta para revisão.",
   "docs.user.topics": "Tópicos do guia",
