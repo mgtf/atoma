@@ -11,6 +11,9 @@ import {
   type RunStats,
 } from '../src/contracts/runStats.js';
 import { hardTimeoutLogEpilogue, parseRunLog, terminateRunProcessGroup } from '../src/cli/burnin.js';
+import { forceKillTestProcessTree } from './helpers.js';
+
+const posixIt = it.skipIf(process.platform === 'win32');
 
 /**
  * The signal-cancel accounting hole (2026-08-15, from the wedging
@@ -61,7 +64,7 @@ describe('cancelled runs keep their economics', () => {
    * shape. Asserts the CSV side (parseRunLog on captured output) and the
    * trace side agree on outcome and cost.
    */
-  it('a SIGTERMed child leaves a parseable "cancelled" epilogue whose cost matches its trace', async () => {
+  posixIt('a SIGTERMed child leaves a parseable "cancelled" epilogue whose cost matches its trace', async () => {
     const root = mkdtempSync(join(tmpdir(), 'atoma-cancel-epilogue-'));
     const runsDir = join(root, 'runs');
     const hangingSockets: Socket[] = [];
@@ -148,6 +151,7 @@ describe('cancelled runs keep their economics', () => {
       expect(trace.totals?.calls).toBe(stats.llmCalls);
       expect(Number((trace.totals?.costUsd ?? NaN).toFixed(4))).toBe(stats.costUsd);
     } finally {
+      forceKillTestProcessTree(child.pid);
       for (const socket of hangingSockets) socket.destroy();
       await new Promise<void>((resolve) => server.close(() => resolve()));
       rmSync(root, { recursive: true, force: true });

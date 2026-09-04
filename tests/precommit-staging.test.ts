@@ -27,6 +27,7 @@ const dirs: string[] = [];
 // competed for the machine (measured 2026-08-31), while passing alone in a
 // fraction of it — the timeout is a watchdog, so headroom costs nothing.
 const HOOK_TEST_TIMEOUT_MS = 60_000;
+const posixIt = it.skipIf(process.platform === 'win32');
 
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -60,13 +61,13 @@ function repoWithHook(): string {
 }
 
 describe('the pre-commit hook preserves what was left unstaged', () => {
-  it('does not sweep the unstaged hunks of a partially staged file into the commit', () => {
+  posixIt('does not sweep the unstaged hunks of a partially staged file into the commit', () => {
     const dir = repoWithHook();
     const file = join(dir, 'sample.ts');
 
     writeFileSync(file, 'export const first = 1;\nexport const second = 2;\n');
     git(dir, ['add', '-A']);
-    git(dir, ['commit', '-qm', 'base']);
+    git(dir, ['commit', '--no-verify', '-qm', 'base']);
 
     // Two independent edits; only the first is staged. `git add -p` is what a
     // human does here — the same index state is produced by staging the file
@@ -88,13 +89,13 @@ describe('the pre-commit hook preserves what was left unstaged', () => {
     expect(git(dir, ['status', '--porcelain'])).toContain('sample.ts');
   }, HOOK_TEST_TIMEOUT_MS);
 
-  it('still fixes and re-stages a file that is staged whole', () => {
+  posixIt('still fixes and re-stages a file that is staged whole', () => {
     // The narrowing must not cost the hook its job on the ordinary case.
     const dir = repoWithHook();
     const file = join(dir, 'whole.ts');
     writeFileSync(file, 'export const value = 1;\n');
     git(dir, ['add', '-A']);
-    git(dir, ['commit', '-qm', 'base']);
+    git(dir, ['commit', '--no-verify', '-qm', 'base']);
 
     writeFileSync(file, 'export const value = 2;\n');
     git(dir, ['add', 'whole.ts']);
@@ -105,7 +106,7 @@ describe('the pre-commit hook preserves what was left unstaged', () => {
     expect(git(dir, ['status', '--porcelain']).trim()).toBe('');
   }, HOOK_TEST_TIMEOUT_MS);
 
-  it('does not stage a locale catalog that carries unstaged edits of its own', () => {
+  posixIt('does not stage a locale catalog that carries unstaged edits of its own', () => {
     // Same class, the i18n half: `invalidate-staged` writes target catalogs and
     // used to `git add` them whole, whatever else the author had in there.
     const dir = repoWithHook();
@@ -115,7 +116,7 @@ describe('the pre-commit hook preserves what was left unstaged', () => {
     writeFileSync(en, JSON.stringify({ greeting: 'hello', other: 'thing' }, null, 2) + '\n');
     writeFileSync(fr, JSON.stringify({ greeting: 'bonjour', other: 'chose' }, null, 2) + '\n');
     git(dir, ['add', '-A']);
-    git(dir, ['commit', '-qm', 'base']);
+    git(dir, ['commit', '--no-verify', '-qm', 'base']);
 
     // The EN rewording is staged; fr.json carries an unrelated unstaged edit.
     writeFileSync(en, JSON.stringify({ greeting: 'hi there', other: 'thing' }, null, 2) + '\n');

@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { ToolSandbox, sandboxChildEnv } from '../src/tools/sandbox.js';
 import { runShellTool } from '../src/tools/builtin.js';
 
+const posixIt = it.skipIf(process.platform === 'win32');
+
 /**
  * Tests for the two sandbox-security findings of the cost review (#7):
  *  a. child processes must NOT inherit the parent's secrets
@@ -50,7 +52,7 @@ describe('sandboxChildEnv — env allowlist (#7a)', () => {
     }
   });
 
-  it('run_shell reaps `&`-backgrounded grandchildren — no orphan survives the command (#7c)', async () => {
+  posixIt('run_shell reaps `&`-backgrounded grandchildren — no orphan survives the command (#7c)', async () => {
     // The double-fork vector: `bash -c "server &"` exits 0 immediately and
     // the promisified-execFile implementation left the grandchild running
     // FOREVER, outside the tracked-children list (observed live: two
@@ -93,7 +95,7 @@ describe('sandboxChildEnv — env allowlist (#7a)', () => {
     }
   });
 
-  it('run_shell timeout kills the whole group, not just the direct child', async () => {
+  posixIt('run_shell timeout kills the whole group, not just the direct child', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'atoma-timeout-'));
     const sandbox = new ToolSandbox(dir);
     try {

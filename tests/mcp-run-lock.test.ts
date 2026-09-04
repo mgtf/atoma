@@ -11,6 +11,9 @@ import {
   processFingerprint,
   RunLockBusyError,
 } from '../src/mcp/runLock.js';
+import { forceKillTestProcessTree } from './helpers.js';
+
+const posixIt = it.skipIf(process.platform === 'win32');
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS mcp_run_lease (
@@ -96,7 +99,7 @@ describe('MCP cross-process run lease', () => {
       "process.stdin.on('end', () => { lease.release(); process.exit(0); });",
       '})().catch((e) => { console.error(e); process.exit(1); });',
     ].join(' ');
-    const child = spawn('npx', ['tsx', '-e', script], {
+    const child = spawn(process.execPath, ['--import', 'tsx', '-e', script], {
       cwd: process.cwd(),
       env: { ...process.env, LOCK_PATH: lockPath },
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -169,11 +172,13 @@ describe('MCP cross-process run lease', () => {
     );
     expect(columns).toContain('owner_fingerprint');
     expect(columns).toContain('child_fingerprint');
-    expect(
-      (db.prepare('SELECT owner_fingerprint FROM mcp_run_lease').get() as {
+    const ownerFingerprint = (
+      db.prepare('SELECT owner_fingerprint FROM mcp_run_lease').get() as {
         owner_fingerprint: string | null;
-      }).owner_fingerprint
-    ).toEqual(expect.any(String));
+      }
+    ).owner_fingerprint;
+    if (process.platform === 'win32') expect(ownerFingerprint).toBeNull();
+    else expect(ownerFingerprint).toEqual(expect.any(String));
     db.close();
     lease.release();
   });
@@ -187,6 +192,10 @@ describe('MCP cross-process run lease', () => {
     ).run(process.pid, new Date().toISOString());
     db.close();
 
+    if (process.platform === 'win32') {
+      await expect(acquireRunLease('new-run', lockPath)).rejects.toThrow(/birth unverifiable/);
+      return;
+    }
     const recovered = await acquireRunLease('new-run', lockPath);
     const after = inspect();
     expect(
@@ -236,11 +245,7 @@ describe('MCP cross-process run lease', () => {
       expect(() => process.kill(child.pid!, 0)).not.toThrow();
       recovered.release();
     } finally {
-      try {
-        process.kill(-child.pid, 'SIGKILL');
-      } catch {
-        // Already gone is fine.
-      }
+      forceKillTestProcessTree(child.pid);
     }
   });
 
@@ -272,7 +277,7 @@ describe('MCP cross-process run lease', () => {
    * just destroyed a run could not explain the missing deliverable
    * (2026-08-14 review, MCP §). The lease must name what it killed.
    */
-  it('recovering a dead owner with a LIVE group reaps it AND reports what was reaped', async () => {
+  posixIt('recovering a dead owner with a LIVE group reaps it AND reports what was reaped', async () => {
     const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
       detached: true,
       stdio: ['ignore', 'ignore', 'ignore'],
@@ -302,11 +307,7 @@ describe('MCP cross-process run lease', () => {
       expect(() => process.kill(-child.pid!, 0)).toThrow();
       lease.release();
     } finally {
-      try {
-        process.kill(-child.pid, 'SIGKILL');
-      } catch {
-        // Already reaped is the expected case.
-      }
+      forceKillTestProcessTree(child.pid);
     }
   }, 15_000);
 
@@ -366,11 +367,7 @@ describe('MCP cross-process run lease', () => {
         child_pgid: child.pid,
       });
     } finally {
-      try {
-        process.kill(-child.pid, 'SIGKILL');
-      } catch {
-        // Already gone is fine.
-      }
+      forceKillTestProcessTree(child.pid);
     }
   });
 
@@ -399,6 +396,7 @@ describe('MCP cross-process run lease', () => {
       child: ChildProcessWithoutNullStreams;
       ready: string;
       verdict: Promise<string>;
+      closed: Promise<void>;
     } => {
       const ready = join(dir, `ready-${id}`);
       const script = [
@@ -417,10 +415,13 @@ describe('MCP cross-process run lease', () => {
         '}',
         '})().catch(() => process.exit(1));',
       ].join(' ');
-      const child = spawn('npx', ['tsx', '-e', script], {
+      const child = spawn(process.execPath, ['--import', 'tsx', '-e', script], {
         cwd: process.cwd(),
         env: { ...process.env, ID: id, READY: ready, GO: go, LOCK_PATH: lockPath },
         stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      const closed = new Promise<void>((resolveClosed) => {
+        child.once('close', () => resolveClosed());
       });
       const verdict = new Promise<string>((resolveVerdict) => {
         let stdout = '';
@@ -440,7 +441,7 @@ describe('MCP cross-process run lease', () => {
         // BUSY line always wins over this fallback.
         child.once('close', () => resolveVerdict(`DIED:${id}: ${childStderr.slice(0, 2000)}`));
       });
-      return { child, ready, verdict };
+      return { child, ready, verdict, closed };
     };
 
     const a = launch('A');
@@ -457,9 +458,15 @@ describe('MCP cross-process run lease', () => {
       expect(verdicts.filter((value) => value.startsWith('BUSY:'))).toHaveLength(1);
       a.child.stdin.end();
       b.child.stdin.end();
+      await Promise.all([a.closed, b.closed]);
     } finally {
-      if (a.child.exitCode === null) a.child.kill('SIGKILL');
-      if (b.child.exitCode === null) b.child.kill('SIGKILL');
+      for (const contender of [a, b]) {
+        contender.child.stdin.end();
+        if (contender.child.exitCode === null && contender.child.signalCode === null) {
+          contender.child.kill('SIGKILL');
+        }
+      }
+      await Promise.all([a.closed, b.closed]);
     }
   }, 60_000);
 });

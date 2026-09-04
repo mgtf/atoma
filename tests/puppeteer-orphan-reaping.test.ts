@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn, spawnSync, execSync } from 'node:child_process';
 
+const posixIt = it.skipIf(process.platform === 'win32');
+
 /**
  * Headless Chrome must die with its run, on the HARD exit path too.
  *
@@ -26,7 +28,7 @@ import { spawn, spawnSync, execSync } from 'node:child_process';
  * WITHOUT calling cleanup — exactly the shape that leaked.
  */
 describe('validate_html — the browser is reaped on a hard exit', () => {
-  it('kills headless Chrome when the run exits without cleanup', () => {
+  posixIt('kills headless Chrome when the run exits without cleanup', () => {
     const dir = mkdtempSync(join(tmpdir(), 'atoma-orphan-'));
     const script = join(dir, 'leak.mjs');
     const repo = process.cwd();
@@ -74,7 +76,7 @@ process.exit(0);   // hard exit — the leak's shape
     rmSync(dir, { recursive: true, force: true });
   }, 120_000);
 
-  it('the harness kill shape leaks NOTHING: detached child + group SIGTERM', async () => {
+  posixIt('the harness kill shape leaks NOTHING: detached child + group SIGTERM', async () => {
     // The faithful reproduction, and the measured reason the harness now
     // escalates instead of going straight to SIGKILL. Same shape as
     // burnin.ts (spawn detached, signal the whole group), A/B'd by hand:
