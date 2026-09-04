@@ -24,25 +24,45 @@ and the deployment workflow is skipped.
    recovery, and refuses while a project run or result preview is live.
 5. It stops the old service, installs production dependencies, runs the
    compiled release smoke, builds an immutable `atoma-worker:<sha>` image,
-   moves `atoma-worker:latest`, and atomically switches `/opt/atoma/current`.
+   moves `atoma-worker:latest`, and atomically switches `/home/atoma/current`.
 6. Any failure after service shutdown restores the previous release symlink,
    worker tag and service; this includes a failed loopback health check.
    The lease guard also removes the admission marker if its parent dies without
    running shell cleanup. GitHub then verifies the public HTTPS path too.
 
 Runtime stores, traces, skills, workspaces and secrets never enter a release
-directory. The service environment must point every state path at
-`/var/lib/atoma` (or another persistent root).
+directory. The supported host layout puts every application byte on the
+dedicated filesystem mounted at `/home/atoma`; only the root trust anchors
+(systemd unit, deployment config, sudoers rule and forced-command executables)
+stay in their standard system directories.
+The host activator verifies `/home/atoma` with `findmnt` before creating an
+incoming directory, and refuses the deployment if the disk is absent.
 
 ## One-time host bootstrap
 
 The commands below assume the names from the checked-in templates. Review them
-before running them on the host.
+before running them on the host. Mount the dedicated disk at `/home/atoma`
+first and make that mount persistent by UUID in `/etc/fstab`. Formatting a
+device destroys its existing contents: identify and verify the exact device
+with `lsblk --fs` and `findmnt` before running any partitioning or filesystem
+command. The required state before continuing is:
 
 ```bash
-sudo useradd --system --create-home --home-dir /var/lib/atoma --shell /usr/sbin/nologin atoma
-sudo useradd --system --create-home --shell /bin/bash atoma-deploy
-sudo install -d -m 0755 /opt/atoma /opt/atoma/releases /etc/atoma /var/lib/atoma
+findmnt --mountpoint /home/atoma
+sudo install -d -o root -g root -m 0755 /home/atoma
+```
+
+Use one root-owned mount with explicit ownership below it. The service and
+deployment users get separate homes on the same disk; the release root and
+Docker data remain root-owned.
+
+```bash
+sudo useradd --system --create-home --home-dir /home/atoma/state --shell /usr/sbin/nologin atoma
+sudo useradd --system --create-home --home-dir /home/atoma/deploy-user --shell /bin/bash atoma-deploy
+sudo install -d -o root -g root -m 0755 /home/atoma /home/atoma/releases /etc/atoma
+sudo install -d -o root -g atoma -m 0750 /home/atoma/config
+sudo install -d -o atoma -g atoma -m 0750 /home/atoma/state /home/atoma/state/runs /home/atoma/state/skills /home/atoma/state/projects /home/atoma/state/workspaces
+sudo install -d -o root -g root -m 0711 /home/atoma/docker
 sudo usermod -aG docker atoma
 
 sudo install -o root -g root -m 0755 deploy/host-deploy.sh /usr/local/sbin/atoma-deploy
@@ -55,23 +75,59 @@ sudo install -o root -g root -m 0600 deploy/deploy.env.example /etc/atoma/deploy
 cost of the launcher still being in-process; it is not the final containerised
 launcher boundary.
 
-Create `/etc/atoma/atoma.env` as a root-owned file readable by the `atoma`
-group. In addition to provider/auth/preview settings, use absolute durable
-paths:
+On a fresh Docker installation, put its image, layer, container and volume
+store on the dedicated disk by merging this property into
+`/etc/docker/daemon.json` (do not overwrite unrelated existing properties):
 
-```dotenv
-ATOMA_DB_PATH=/var/lib/atoma/atoma.db
-ATOMA_LEDGER_DB=/var/lib/atoma/atoma.db
-ATOMA_RUNS_DIR=/var/lib/atoma/runs
-ATOMA_SKILLS_DIR=/var/lib/atoma/skills
-ATOMA_PROJECTS_ROOT=/var/lib/atoma/projects
-ATOMA_BUILD_WORKSPACE=/var/lib/atoma/workspaces/build
-ATOMA_DEPLOY_LOCK_PATH=/var/lib/atoma/deploy.lock
+```json
+{
+  "data-root": "/home/atoma/docker"
+}
+```
+
+Restart Docker and prove which directory it actually uses before building an
+Atoma worker. Changing `data-root` on a host that already contains Docker data
+requires a separately planned migration; otherwise the existing images and
+volumes become invisible under the new root.
+
+Make Docker require the mount too, so a boot with the disk absent cannot put a
+second, hidden Docker store on the VPS root filesystem:
+
+```bash
+sudo install -d -o root -g root -m 0755 /etc/systemd/system/docker.service.d
+sudoedit /etc/systemd/system/docker.service.d/atoma-disk.conf
+```
+
+```ini
+# /etc/systemd/system/docker.service.d/atoma-disk.conf
+[Unit]
+RequiresMountsFor=/home/atoma
 ```
 
 ```bash
-sudo chown root:atoma /etc/atoma/atoma.env
-sudo chmod 0640 /etc/atoma/atoma.env
+sudo systemctl daemon-reload
+sudo systemctl restart docker
+sudo docker info --format '{{.DockerRootDir}}'
+```
+
+Create `/home/atoma/config/atoma.env` as a root-owned file readable by the
+`atoma` group. In addition to provider/auth/preview settings, use absolute
+durable paths:
+
+```dotenv
+ATOMA_DB_PATH=/home/atoma/state/atoma.db
+ATOMA_LEDGER_DB=/home/atoma/state/atoma.db
+ATOMA_RUNS_DIR=/home/atoma/state/runs
+ATOMA_SKILLS_DIR=/home/atoma/state/skills
+ATOMA_PROJECTS_ROOT=/home/atoma/state/projects
+ATOMA_BUILD_WORKSPACE=/home/atoma/state/workspaces/build
+ATOMA_MCP_RUN_LOCK=/home/atoma/state/mcp-run-lock.db
+ATOMA_DEPLOY_LOCK_PATH=/home/atoma/state/deploy.lock
+```
+
+```bash
+sudo chown root:atoma /home/atoma/config/atoma.env
+sudo chmod 0640 /home/atoma/config/atoma.env
 sudo visudo -f /etc/sudoers.d/atoma-deploy
 ```
 
@@ -82,8 +138,14 @@ atoma-deploy ALL=(root) NOPASSWD: /usr/local/sbin/atoma-deploy *
 ```
 
 Put the public half of a dedicated deployment key in
-`/home/atoma-deploy/.ssh/authorized_keys`, prefixed with the forced command and
-SSH restrictions:
+`/home/atoma/deploy-user/.ssh/authorized_keys`, prefixed with the forced
+command and SSH restrictions:
+
+```bash
+sudo install -d -o atoma-deploy -g atoma-deploy -m 0700 /home/atoma/deploy-user/.ssh
+sudo install -o atoma-deploy -g atoma-deploy -m 0600 /dev/null /home/atoma/deploy-user/.ssh/authorized_keys
+sudoedit /home/atoma/deploy-user/.ssh/authorized_keys
+```
 
 ```text
 restrict,command="/usr/local/sbin/atoma-deploy-ssh" ssh-ed25519 AAAA... github-actions-atoma
@@ -101,7 +163,7 @@ sudo systemctl enable atoma.service
 ```
 
 Do not start the empty service before its first release has created the
-`/opt/atoma/current` link.
+`/home/atoma/current` link.
 
 ## GitHub configuration
 
@@ -136,5 +198,5 @@ deployments without deleting credentials.
   not: production preview configuration is pinned to a registry digest by
   contract, so publishing and rotating that digest remains a separate release
   operation.
-- Releases are retained under `/opt/atoma/releases`. Pruning is deliberately
+- Releases are retained under `/home/atoma/releases`. Pruning is deliberately
   not automated until backup/retention policy is accepted.

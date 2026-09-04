@@ -6,6 +6,7 @@ const workflow = readFileSync('.github/workflows/deploy.yml', 'utf8');
 const hostDeploy = readFileSync('deploy/host-deploy.sh', 'utf8');
 const sshCommand = readFileSync('deploy/ssh-command.sh', 'utf8');
 const service = readFileSync('deploy/atoma.service', 'utf8');
+const deployEnv = readFileSync('deploy/deploy.env.example', 'utf8');
 const preflight = readFileSync('src/cli/deploy-preflight.ts', 'utf8');
 const releaseSmoke = readFileSync('scripts/release-smoke.mjs', 'utf8');
 
@@ -73,9 +74,23 @@ describe('post-CI deployment pipeline', () => {
     expect(sshCommand).toContain('SSH_ORIGINAL_COMMAND');
     expect(sshCommand).toMatch(/\^deploy\\ \(\[0-9a-f\]\{40\}\)\\ \(\[0-9a-f\]\{64\}\)\$/);
     expect(sshCommand).not.toContain('eval');
-    expect(service).toContain('WorkingDirectory=/opt/atoma/current');
-    expect(service).toContain('EnvironmentFile=/etc/atoma/atoma.env');
+    expect(service).toContain('WorkingDirectory=/home/atoma/current');
+    expect(service).toContain('EnvironmentFile=/home/atoma/config/atoma.env');
+    expect(service).toContain('RequiresMountsFor=/home/atoma');
     expect(service).not.toContain('.env.example');
+    expect(hostDeploy).toContain('DEPLOY_ROOT="${ATOMA_DEPLOY_ROOT:-/home/atoma}"');
+    expect(hostDeploy).toContain('findmnt --mountpoint "${REQUIRED_MOUNT}"');
+    expect(hostDeploy.indexOf('findmnt --mountpoint')).toBeLessThan(
+      hostDeploy.indexOf('install -d -m 0755 "${DEPLOY_ROOT}"')
+    );
+    expect(deployEnv).toContain('ATOMA_DEPLOY_ROOT=/home/atoma');
+    expect(deployEnv).toContain('ATOMA_DEPLOY_REQUIRED_MOUNT=/home/atoma');
+    expect(deployEnv).toContain('ATOMA_DEPLOY_APP_ENV=/home/atoma/config/atoma.env');
+    for (const legacyRoot of ['/opt/atoma', '/var/lib/atoma']) {
+      expect(hostDeploy).not.toContain(legacyRoot);
+      expect(service).not.toContain(legacyRoot);
+      expect(deployEnv).not.toContain(legacyRoot);
+    }
     expect(releaseSmoke).toContain("mkdtempSync(join(tmpdir(), 'atoma-release-smoke-'))");
     expect(releaseSmoke).not.toContain("join(root, 'smoke-store.db')");
     expect(releaseSmoke).not.toContain("join(root, 'smoke-runs')");

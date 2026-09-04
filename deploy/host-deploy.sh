@@ -24,10 +24,11 @@ set +a
 
 REVISION="${1:-}"
 EXPECTED_DIGEST="${2:-}"
-DEPLOY_ROOT="${ATOMA_DEPLOY_ROOT:-/opt/atoma}"
+DEPLOY_ROOT="${ATOMA_DEPLOY_ROOT:-/home/atoma}"
+REQUIRED_MOUNT="${ATOMA_DEPLOY_REQUIRED_MOUNT:-/home/atoma}"
 SERVICE_NAME="${ATOMA_DEPLOY_SERVICE:-atoma.service}"
 SERVICE_USER="${ATOMA_DEPLOY_USER:-atoma}"
-APP_ENV="${ATOMA_DEPLOY_APP_ENV:-/etc/atoma/atoma.env}"
+APP_ENV="${ATOMA_DEPLOY_APP_ENV:-/home/atoma/config/atoma.env}"
 HEALTH_URL="${ATOMA_DEPLOY_HEALTH_URL:-http://127.0.0.1:4111/}"
 
 fail() {
@@ -44,6 +45,7 @@ valid_absolute_path() {
 [[ "${REVISION}" =~ ^[0-9a-f]{40}$ ]] || fail "revision must be a full Git commit SHA"
 [[ "${EXPECTED_DIGEST}" =~ ^[0-9a-f]{64}$ ]] || fail "archive digest must be SHA-256"
 valid_absolute_path "${DEPLOY_ROOT}" || fail "ATOMA_DEPLOY_ROOT must be a narrow absolute path"
+valid_absolute_path "${REQUIRED_MOUNT}" || fail "ATOMA_DEPLOY_REQUIRED_MOUNT must be a narrow absolute path"
 [[ "${SERVICE_NAME}" =~ ^[A-Za-z0-9_.@-]+$ ]] || fail "invalid systemd service name"
 [[ "${SERVICE_USER}" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] || fail "invalid service user"
 [[ "${HEALTH_URL}" =~ ^http://(127\.0\.0\.1|localhost):[0-9]+/ ]] ||
@@ -51,9 +53,15 @@ valid_absolute_path "${DEPLOY_ROOT}" || fail "ATOMA_DEPLOY_ROOT must be a narrow
 [[ -f "${APP_ENV}" && ! -L "${APP_ENV}" ]] || fail "application environment is missing or symlinked: ${APP_ENV}"
 id "${SERVICE_USER}" >/dev/null 2>&1 || fail "service user does not exist: ${SERVICE_USER}"
 
-for command in node npm docker curl systemctl runuser tar sha256sum realpath getent flock; do
+for command in node npm docker curl systemctl runuser tar sha256sum realpath getent flock findmnt; do
   command -v "${command}" >/dev/null 2>&1 || fail "required command is missing: ${command}"
 done
+
+findmnt --mountpoint "${REQUIRED_MOUNT}" >/dev/null 2>&1 ||
+  fail "required deployment filesystem is not mounted: ${REQUIRED_MOUNT}"
+REQUIRED_MOUNT="$(realpath -e "${REQUIRED_MOUNT}")"
+[[ "${DEPLOY_ROOT}" == "${REQUIRED_MOUNT}" || "${DEPLOY_ROOT}" == "${REQUIRED_MOUNT}/"* ]] ||
+  fail "ATOMA_DEPLOY_ROOT must stay on ${REQUIRED_MOUNT}"
 
 install -d -m 0755 "${DEPLOY_ROOT}" "${DEPLOY_ROOT}/releases"
 DEPLOY_ROOT="$(realpath -e "${DEPLOY_ROOT}")"
