@@ -1,5 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -45,11 +53,18 @@ function repoWithHook(): string {
   cpSync(join(REPO_ROOT, '.husky', 'pre-commit'), join(dir, 'hooks', 'pre-commit'));
   execFileSync('chmod', ['+x', join(dir, 'hooks', 'pre-commit')]);
   // The hook shells out to `node scripts/i18n.mjs` and `npx eslint`, both of
-  // which must resolve from the fixture: scripts/ is copied, and eslint is
-  // reached through this repository's own node_modules via NODE_PATH-free
-  // `npx` falling back to the parent — so the fixture keeps a config that
-  // makes eslint a no-op instead of pulling the real ruleset.
+  // which must resolve from the fixture: scripts/ is copied, while a local
+  // node_modules link exposes the exact eslint installed by the outer `npm
+  // ci`. The fixture lives under /tmp on CI, so relying on ancestor lookup
+  // makes `npx` download eslint and turns this behavioural test into a network
+  // timeout. The empty config keeps eslint focused on the hook's index logic.
   cpSync(join(REPO_ROOT, 'scripts'), join(dir, 'scripts'), { recursive: true });
+  mkdirSync(join(dir, 'node_modules', '.bin'), { recursive: true });
+  symlinkSync(join(REPO_ROOT, 'node_modules', 'eslint'), join(dir, 'node_modules', 'eslint'), 'dir');
+  symlinkSync(
+    join('..', 'eslint', 'bin', 'eslint.js'),
+    join(dir, 'node_modules', '.bin', 'eslint'),
+  );
   mkdirSync(join(dir, 'src', 'viz', 'client', 'locales'), { recursive: true });
   writeFileSync(join(dir, 'eslint.config.js'), 'export default [];\n');
   writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'fixture', type: 'module' }) + '\n');
