@@ -85,6 +85,7 @@ ARCHIVE_ROOT="atoma-${REVISION}"
 TARGET_RELEASE="${RELEASES}/${REVISION}"
 MARKER_PATH=""
 GUARD_PID=""
+GUARD_DIR=""
 GUARD_RELEASE_FILE=""
 ACTIVATION_STARTED=0
 WORKER_LATEST_CHANGED=0
@@ -125,6 +126,11 @@ cleanup() {
   fi
   if [[ -n "${MARKER_PATH}" ]]; then
     rm -f -- "${MARKER_PATH}"
+  fi
+  if [[ -n "${GUARD_DIR}" ]]; then
+    case "${GUARD_DIR}" in
+      "${DEPLOY_ROOT}"/.deploy-guard-*) rm -rf -- "${GUARD_DIR}" ;;
+    esac
   fi
   case "${WORK_DIR}" in
     "${DEPLOY_ROOT}"/.incoming-*) rm -rf -- "${WORK_DIR}" ;;
@@ -194,7 +200,10 @@ if [[ -n "${OLD_RELEASE}" ]]; then
   install -d -m 0755 "$(dirname "${MARKER_PATH}")"
   install -m 0644 /dev/null "${MARKER_PATH}"
 
-  GUARD_DIR="${WORK_DIR}/guard"
+  # The service user cannot traverse WORK_DIR: mktemp deliberately creates it
+  # as 0700 root. Keep the private guard beneath the root-owned 0755 deploy
+  # root so only its explicitly assigned owner can enter it.
+  GUARD_DIR="$(mktemp -d "${DEPLOY_ROOT}/.deploy-guard-${REVISION}.XXXXXX")"
   install -d -m 0700 -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${GUARD_DIR}"
   GUARD_READY_FILE="${GUARD_DIR}/ready"
   GUARD_RELEASE_FILE="${GUARD_DIR}/release"

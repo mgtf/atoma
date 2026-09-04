@@ -63,6 +63,14 @@ describe('post-CI deployment pipeline', () => {
       hostDeploy.lastIndexOf('systemctl stop "${SERVICE_NAME}"')
     );
     expect(hostDeploy).toContain('GUARD_READY_FILE');
+    expect(hostDeploy).toContain(
+      'GUARD_DIR="$(mktemp -d "${DEPLOY_ROOT}/.deploy-guard-${REVISION}.XXXXXX")"'
+    );
+    expect(hostDeploy).not.toContain('GUARD_DIR="${WORK_DIR}/guard"');
+    expect(hostDeploy).toContain(
+      'install -d -m 0700 -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${GUARD_DIR}"'
+    );
+    expect(hostDeploy).toContain('"${DEPLOY_ROOT}"/.deploy-guard-*) rm -rf -- "${GUARD_DIR}"');
     expect(hostDeploy).toContain('--admission-marker "${MARKER_PATH}"');
     expect(hostDeploy).toContain('WORKER_ROLLBACK_TAG="atoma-worker:rollback-${OLD_REVISION}"');
     expect(hostDeploy).toContain('mv -Tf "${rollback_link}" "${CURRENT}"');
