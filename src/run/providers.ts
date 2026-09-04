@@ -117,12 +117,13 @@ const PROVIDER_FACTORIES: Record<string, (env: NodeJS.ProcessEnv) => LlmClient> 
   // caller supplied a credential snapshot.
   'claude-cli': () => makeBaseClient('claude-cli'),
   // Local Codex CLI on a ChatGPT subscription (`codex login`) — TIERS 2/3
-  // ONLY. It cannot host a tool loop (openai/codex#6049: Codex's own
-  // built-in tools cannot be disabled, so calls would bypass ToolSandbox
-  // and the #8a scope gate), and CodexCliLlmClient.complete throws when
-  // handed tools rather than degrading silently. Needs no key: an ABSENT
-  // OPENAI_API_KEY is what makes it reuse the subscription login.
-  codex: () => new CodexCliLlmClient(),
+  // ONLY. It cannot host a tool loop (Codex cannot expose only Atoma tools
+  // while disabling every built-in, so calls would bypass ToolSandbox and
+  // the #8a scope gate), and CodexCliLlmClient.complete throws when
+  // handed tools rather than degrading silently. The client captures THIS
+  // run's environment snapshot: CODEX_HOME selects the authorised principal
+  // profile, while its subprocess allowlist strips every API/provider key.
+  codex: (env) => new CodexCliLlmClient({ env }),
 };
 
 /** Provider names a tier pin may reference via the `provider:` prefix. */

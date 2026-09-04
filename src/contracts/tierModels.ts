@@ -3,7 +3,9 @@ import { FALLBACK_OPUS, PIN_HAIKU, PIN_SONNET, modelForTier } from '../core/mode
 import { isValidTierModelSelection } from '../core/providerCatalog.js';
 import {
   chatGptSubscriptionModel,
+  isPrincipalSubscriptionSelection,
   isHostSubscriptionSelection,
+  principalChatGptSubscriptionModel,
 } from './runPayers.js';
 
 /**
@@ -90,8 +92,13 @@ function accountSelectionSchema(tier: 1 | 2 | 3) {
         (isHostSubscriptionSelection(value) &&
           // Codex cannot own L1's tool loop. Refuse the impossible choice at
           // the settings write, before it can become a stored payer promise.
-          !(tier === 1 && chatGptSubscriptionModel(value))),
-      { message: 'must be a catalogue model or a host subscription available to this tier' }
+          !(tier === 1 && chatGptSubscriptionModel(value))) ||
+        (isPrincipalSubscriptionSelection(value) &&
+          !(tier === 1 && principalChatGptSubscriptionModel(value))),
+      {
+        message:
+          'must be a catalogue model or an account subscription available to this tier',
+      }
     )
     .nullable();
 }

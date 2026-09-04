@@ -262,6 +262,7 @@ function cleanChildEnv(overrides: Record<string, string>): NodeJS.ProcessEnv {
     'ATOMA_VIZ_TRUSTED_PROXIES',
     'ATOMA_VIZ_DEV_URL',
     'ATOMA_DB_PATH',
+    'ATOMA_ACCOUNT_PROFILES_ROOT',
     // The watch reads these, and a developer's real values must not reach a
     // spawned harness: `ATOMA_RUNS_DIR` would point a resident journal writer
     // at the operator's live corpus, and the sentinel switches would decide
@@ -281,10 +282,23 @@ function cleanChildEnv(overrides: Record<string, string>): NodeJS.ProcessEnv {
 }
 
 function startViz(args: string[], env: Record<string, string>): RunningChild {
+  const generatedProfilesRoot = env.ATOMA_ACCOUNT_PROFILES_ROOT
+    ? null
+    : mkdtempSync(join(tmpdir(), 'atoma-account-profiles-'));
+  if (generatedProfilesRoot) roots.push(generatedProfilesRoot);
   const child = spawn(
     process.execPath,
     ['--import', 'tsx', 'src/viz/server.ts', ...args],
-    { cwd: process.cwd(), env: cleanChildEnv(env), stdio: ['ignore', 'pipe', 'pipe'] }
+    {
+      cwd: process.cwd(),
+      env: cleanChildEnv({
+        ...(generatedProfilesRoot
+          ? { ATOMA_ACCOUNT_PROFILES_ROOT: generatedProfilesRoot }
+          : {}),
+        ...env,
+      }),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }
   );
   const running: RunningChild = { process: child, stdout: [], stderr: [] };
   child.stdout?.setEncoding('utf8');
@@ -788,6 +802,7 @@ describe('viz auth gate (process level)', () => {
       catalog: Array<{ id: string; models: Array<{ id: string }> }>;
       hostSubscription?: unknown;
       hostSubscriptions?: unknown;
+      personalSubscriptions: { codex: boolean; claude: boolean };
     };
     expect(defaults.pins).toEqual({ l1: null, l2: null, l3: null });
     expect(defaults.defaults['l3']).toContain('opus');
@@ -799,6 +814,58 @@ describe('viz auth gate (process level)', () => {
     // should never see.
     expect(defaults.hostSubscription).toBeUndefined();
     expect(defaults.hostSubscriptions).toBeUndefined();
+    expect(defaults.personalSubscriptions).toEqual({ codex: false, claude: false });
+
+    // Personal provider state is self-scoped and contains no account/token
+    // material. Starting a device flow is a same-origin mutation.
+    const subscriptions = await fetch(`${base}/api/account/subscriptions`, { headers: cookie });
+    expect(subscriptions.status).toBe(200);
+    expect(await subscriptions.json()).toEqual({
+      claude: {
+        provider: 'claude',
+        state: 'unavailable',
+        connectedAt: null,
+        lastVerifiedAt: null,
+        reason: 'provider-approval-required',
+      },
+      codex:
+        process.platform === 'win32'
+          ? {
+              provider: 'codex',
+              state: 'unavailable',
+              connectedAt: null,
+              lastVerifiedAt: null,
+              reason: 'profile-permissions-unsupported',
+            }
+          : {
+              provider: 'codex',
+              state: 'disconnected',
+              connectedAt: null,
+              lastVerifiedAt: null,
+              reason: null,
+            },
+      codexAttempt: null,
+    });
+    const crossSiteCodex = await fetch(
+      `${base}/api/account/subscriptions/codex/login`,
+      {
+        method: 'POST',
+        headers: { ...cookie, origin: 'https://evil.example' },
+      }
+    );
+    expect(crossSiteCodex.status).toBe(403);
+    const personalBeforeConnect = await fetch(`${base}/api/account/models`, {
+      method: 'PUT',
+      headers: { ...cookie, 'content-type': 'application/json', origin: base },
+      body: JSON.stringify({
+        pins: {
+          l1: null,
+          l2: 'principal-chatgpt-subscription:gpt-5.6-terra',
+          l3: null,
+        },
+      }),
+    });
+    expect(personalBeforeConnect.status).toBe(409);
     // And they cannot arm it by hand either.
     const refusedSubscription = await fetch(`${base}/api/account/models`, {
       method: 'PUT',
@@ -1811,6 +1878,17 @@ describe('viz auth gate (process level)', () => {
     });
     expect(forbidden.status).toBe(403);
     expect(await forbidden.json()).toEqual({ error: GITHUB_COPY.adminRequired });
+
+    const viewerCodex = await fetch(`${base}/api/account/subscriptions/codex/login`, {
+      method: 'POST',
+      headers: { cookie, origin: base },
+    });
+    expect(viewerCodex.status).toBe(403);
+
+    const viewerSubscriptions = await fetch(`${base}/api/account/subscriptions`, {
+      headers: { cookie },
+    });
+    expect(viewerSubscriptions.status).toBe(403);
 
     const listed = await fetch(`${base}/api/github/installations`, { headers: { cookie } });
     expect(listed.status).toBe(200);

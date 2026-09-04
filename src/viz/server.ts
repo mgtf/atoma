@@ -26,7 +26,12 @@ import {
 import {
   hostSubscriptionSummary,
   isHostSubscriptionSelection,
+  isPrincipalSubscriptionSelection,
+  ledgerTouchesPrincipalSubscription,
+  ledgerTouchesSubscription,
+  principalSubscriptionSummary,
   runPayerDetail,
+  selectionsMixCodexOwners,
 } from '../contracts/runPayers.js';
 import { operatorTierDefaults } from '../contracts/tierModels.js';
 import {
@@ -40,6 +45,13 @@ import {
   type Viewer,
 } from '../auth/store.js';
 import { resolveSecretEncryption, SECRET_ENCRYPTION_ENV } from '../auth/secretEncryption.js';
+import {
+  AccountSubscriptionService,
+  ACCOUNT_PROFILES_ROOT_ENV,
+  CodexSubscriptionCapacityError,
+  CodexSubscriptionConflictError,
+  CodexSubscriptionUnavailableError,
+} from '../auth/subscriptionProfiles.js';
 import {
   buildAuthorizeUrl,
   exchangeCode,
@@ -437,6 +449,45 @@ const emit: (input: Parameters<PlatformEventLog['append']>[0]) => void = (input)
   EVENTS?.append(input);
 };
 
+/**
+ * PERSONAL PROVIDER PROFILES. Only authenticated deployments have principals,
+ * so the profile authority follows the auth gate. Credential bytes stay in
+ * provider-owned private directories; callbacks journal only provider names.
+ */
+const ACCOUNT_SUBSCRIPTIONS: AccountSubscriptionService | null = AUTH?.store
+  ? new AccountSubscriptionService({
+      auth: AUTH.store,
+      sourceEnv: process.env,
+      ...(process.env[ACCOUNT_PROFILES_ROOT_ENV]?.trim()
+        ? { profilesRoot: process.env[ACCOUNT_PROFILES_ROOT_ENV].trim() }
+        : {}),
+      onConnected: ({ principalId, orgId }) => {
+        emit({
+          kind: 'principal.subscription_connected',
+          actorType: 'principal',
+          actorId: principalId,
+          orgId,
+          summary: 'Personal Codex subscription connected',
+          detail: { provider: 'codex' },
+        });
+      },
+      onDisconnected: ({ principalId, orgId }) => {
+        emit({
+          kind: 'principal.subscription_disconnected',
+          actorType: 'principal',
+          actorId: principalId,
+          orgId,
+          summary: 'Personal Codex subscription disconnected',
+          detail: { provider: 'codex' },
+        });
+      },
+    })
+  : null;
+
+// Closing is synchronous at this boundary: pending profile app-servers receive
+// SIGTERM before Node exits. A startup reconciliation handles hard crashes.
+process.once('exit', () => ACCOUNT_SUBSCRIPTIONS?.close());
+
 if (AUTH?.store) {
   const sweepTimer = setInterval(() => {
     try {
@@ -675,23 +726,43 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
     ...(AUTH?.store
       ? { platformAdmins: (principalId: string) => AUTH.store!.isPlatformAdmin(principalId) }
       : {}),
-    // A run billed to the host's own login session is journaled, never
-    // pushed. Same one-delivery-path rule as `onRunFinished`: no audit-free
-    // side channel.
+    ...(ACCOUNT_SUBSCRIPTIONS
+      ? {
+          principalCodexProfileFor: (principalId: string) =>
+            ACCOUNT_SUBSCRIPTIONS.codexProfileForRun(principalId),
+        }
+      : {}),
+    // A run billed to a host or requester login is journaled, never pushed.
+    // Same one-delivery-path rule as `onRunFinished`: no audit-free side
+    // channel.
     onSubscriptionTransport: (use) => {
-      emit({
-        kind: 'run.host_subscription',
-        actorType: 'principal',
-        actorId: use.principalId,
-        orgId: use.orgId,
-        projectId: use.projectId,
-        runId: use.projectRunId,
-        // ONE summary and one detail shape, shared with the CLI emitter: the
-        // two used to word the same fact differently, so the row read
-        // differently depending on which surface started the run.
-        summary: hostSubscriptionSummary(use.payers),
-        detail: runPayerDetail(use.payers),
-      });
+      if (ledgerTouchesSubscription(use.payers)) {
+        emit({
+          kind: 'run.host_subscription',
+          actorType: 'principal',
+          actorId: use.principalId,
+          orgId: use.orgId,
+          projectId: use.projectId,
+          runId: use.projectRunId,
+          // ONE summary and one detail shape, shared with the CLI emitter: the
+          // two used to word the same fact differently, so the row read
+          // differently depending on which surface started the run.
+          summary: hostSubscriptionSummary(use.payers),
+          detail: runPayerDetail(use.payers),
+        });
+      }
+      if (ledgerTouchesPrincipalSubscription(use.payers)) {
+        emit({
+          kind: 'run.principal_subscription',
+          actorType: 'principal',
+          actorId: use.principalId,
+          orgId: use.orgId,
+          projectId: use.projectId,
+          runId: use.projectRunId,
+          summary: principalSubscriptionSummary(use.payers),
+          detail: runPayerDetail(use.payers),
+        });
+      }
     },
     // The terminal-run hook JOURNALS; the router turns that row into pushes.
     // There is deliberately no direct notifier call here any more — one
@@ -1257,11 +1328,23 @@ function namesHostSubscription(pins: unknown): boolean {
   );
 }
 
+/** Does a submitted account pin set name the requester's own subscription? */
+function namesPrincipalSubscription(pins: unknown): boolean {
+  if (!pins || typeof pins !== 'object') return false;
+  return Object.values(pins as Record<string, unknown>).some(
+    (value) => typeof value === 'string' && isPrincipalSubscriptionSelection(value)
+  );
+}
+
+function isAnyAccountSubscriptionSelection(value: string): boolean {
+  return isHostSubscriptionSelection(value) || isPrincipalSubscriptionSelection(value);
+}
+
 /** The tiers a saved pin set arms the subscription on, in tier order. */
 function subscriptionTiersOf(pins: { l1: string | null; l2: string | null; l3: string | null }): string[] {
   return (['l1', 'l2', 'l3'] as const).filter((tier) => {
     const value = pins[tier];
-    return typeof value === 'string' && isHostSubscriptionSelection(value);
+    return typeof value === 'string' && isAnyAccountSubscriptionSelection(value);
   });
 }
 
@@ -1272,7 +1355,7 @@ function subscriptionSelectionsOf(
   return Object.fromEntries(
     (['l1', 'l2', 'l3'] as const).flatMap((tier) => {
       const value = pins[tier];
-      return typeof value === 'string' && isHostSubscriptionSelection(value)
+      return typeof value === 'string' && isAnyAccountSubscriptionSelection(value)
         ? [[tier, value] as const]
         : [];
     })
@@ -1749,7 +1832,7 @@ function invitationTokenFrom(value: string | null): string | null {
 function methodAllowed(
   req: import('node:http').IncomingMessage,
   res: import('node:http').ServerResponse,
-  method: 'GET' | 'POST' | 'PATCH' | 'PUT'
+  method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
 ): boolean {
   if (req.method === method) return true;
   res.writeHead(405, { allow: method, 'content-length': '0', 'cache-control': 'no-store' });
@@ -2393,17 +2476,133 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
 
     const subscriptionPayload = (): Record<string, unknown> => {
       const offers = hostSubscriptionOffers();
-      if (!offers) return {};
       return {
-        hostSubscriptions: offers,
+        personalSubscriptions: {
+          codex:
+            roleAtLeast(viewer.role, 'org:member') &&
+            Boolean(ACCOUNT_SUBSCRIPTIONS?.codexProfileForRun(viewer.principalId)),
+          // Anthropic requires prior approval before a third-party product may
+          // offer claude.ai subscription login. Keep the capability explicit
+          // and server-owned; the client cannot turn it on.
+          claude: false,
+        },
+        ...(offers ? { hostSubscriptions: offers } : {}),
         // Compatibility for a cached pre-upgrade client: it can still show
         // and clear the Claude family while the new bundle loads.
-        hostSubscription: offers.find(
-          (offer) =>
-            (offer.family as { id?: string }).id === HOST_SUBSCRIPTION_FAMILY.id
-        ),
+        ...(offers
+          ? {
+              hostSubscription: offers.find(
+                (offer) =>
+                  (offer.family as { id?: string }).id === HOST_SUBSCRIPTION_FAMILY.id
+              ),
+            }
+          : {}),
       };
     };
+
+    // PERSONAL SUBSCRIPTIONS — every route is self-scoped by the resolved
+    // session. Device material is short-lived and memory-only; provider
+    // credential bytes never cross this HTTP surface.
+    if (pathname === '/api/account/subscriptions') {
+      if (!methodAllowed(req, res, 'GET')) return;
+      if (!roleAtLeast(viewer.role, 'org:member')) {
+        // A viewer downgraded during an in-flight login must not keep reading
+        // its short-lived device code.
+        sendJson(res, 403, { error: 'org:member role or above is required' });
+        return;
+      }
+      if (!ACCOUNT_SUBSCRIPTIONS) {
+        sendJson(res, 503, { error: 'personal subscriptions are unavailable' });
+        return;
+      }
+      sendJson(
+        res,
+        200,
+        await ACCOUNT_SUBSCRIPTIONS.status(viewer.principalId, {
+          // A run child owns this exact auth.json generation. Return the
+          // persisted receipt while it is live instead of starting a second
+          // provider process that could rotate the same credentials.
+          verify: !PROJECTS_RUNTIME?.coordinator.hasActiveRunForPrincipal(
+            viewer.principalId
+          ),
+        })
+      );
+      return;
+    }
+
+    if (pathname === '/api/account/subscriptions/codex/login') {
+      if (!roleAtLeast(viewer.role, 'org:member')) {
+        sendJson(res, 403, { error: 'org:member role or above is required' });
+        return;
+      }
+      if (!ACCOUNT_SUBSCRIPTIONS) {
+        sendJson(res, 503, { error: 'personal subscriptions are unavailable' });
+        return;
+      }
+      if (req.method === 'POST') {
+        if (!sameOrigin(req, res)) return;
+        const rate = acceptLoginAttempt(req, AUTH_RUNTIME!.trustedProxies);
+        if (!rate.accepted) {
+          res.setHeader('retry-after', String(rate.retryAfterSeconds));
+          sendJson(res, 429, { error: 'too many login attempts' });
+          return;
+        }
+        try {
+          sendJson(
+            res,
+            200,
+            await ACCOUNT_SUBSCRIPTIONS.startCodexLogin(
+              viewer.principalId,
+              viewer.orgId
+            )
+          );
+        } catch (error) {
+          if (error instanceof CodexSubscriptionConflictError) {
+            sendJson(res, 409, { error: error.message });
+          } else if (error instanceof CodexSubscriptionCapacityError) {
+            sendJson(res, 429, { error: 'too many pending Codex logins' });
+          } else if (error instanceof CodexSubscriptionUnavailableError) {
+            sendJson(res, 503, { error: 'Codex CLI is unavailable on this deployment' });
+          } else {
+            console.error('[viz subscriptions] Codex login start failed', error);
+            sendJson(res, 502, { error: 'Codex login could not start' });
+          }
+        }
+        return;
+      }
+      if (!methodAllowed(req, res, 'DELETE')) return;
+      if (!sameOrigin(req, res)) return;
+      sendJson(res, 200, {
+        cancelled: await ACCOUNT_SUBSCRIPTIONS.cancelCodexLogin(viewer.principalId),
+      });
+      return;
+    }
+
+    if (pathname === '/api/account/subscriptions/codex') {
+      if (!roleAtLeast(viewer.role, 'org:member')) {
+        sendJson(res, 403, { error: 'org:member role or above is required' });
+        return;
+      }
+      if (!methodAllowed(req, res, 'DELETE')) return;
+      if (!sameOrigin(req, res)) return;
+      if (!ACCOUNT_SUBSCRIPTIONS) {
+        sendJson(res, 503, { error: 'personal subscriptions are unavailable' });
+        return;
+      }
+      if (PROJECTS_RUNTIME?.coordinator.hasActiveRunForPrincipal(viewer.principalId)) {
+        sendJson(res, 409, {
+          error: 'cancel the active run before disconnecting its Codex subscription',
+        });
+        return;
+      }
+      sendJson(res, 200, {
+        disconnected: await ACCOUNT_SUBSCRIPTIONS.disconnectCodex(
+          viewer.principalId,
+          viewer.orgId
+        ),
+      });
+      return;
+    }
 
     // ACCOUNT SELF-CARE — the viewer's own name and per-tier model pins.
     // Self-scoped by construction: the principal id comes from the resolved
@@ -2470,6 +2669,32 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           });
           return;
         }
+        if (namesPrincipalSubscription(requested)) {
+          if (!roleAtLeast(viewer.role, 'org:member')) {
+            sendJson(res, 403, {
+              error: 'org:member role or above is required to use a personal subscription',
+            });
+            return;
+          }
+          if (!ACCOUNT_SUBSCRIPTIONS?.codexProfileForRun(viewer.principalId)) {
+            sendJson(res, 409, {
+              error: 'connect your Codex subscription before selecting it for a tier',
+            });
+            return;
+          }
+        }
+        if (
+          requested &&
+          typeof requested === 'object' &&
+          selectionsMixCodexOwners(Object.values(requested as Record<string, unknown>).map(
+            (value) => typeof value === 'string' ? value : null
+          ))
+        ) {
+          sendJson(res, 409, {
+            error: 'one account pin set cannot mix host and personal ChatGPT subscriptions',
+          });
+          return;
+        }
         const before = authStore.modelPins(viewer.principalId);
         const pins = authStore.setModelPins(viewer.principalId, requested);
         // Journaled at the moment of the CHOICE. The run rows that follow are
@@ -2486,8 +2711,8 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
             orgId: viewer.orgId,
             summary:
               armedAfter.length > 0
-                ? `Host subscription armed on ${armedAfter.join(', ')}`
-                : 'Host subscription cleared from every tier',
+                ? `Account subscription armed on ${armedAfter.join(', ')}`
+                : 'Account subscription cleared from every tier',
             detail: { tiers: armedAfter, selections: selectionsAfter },
           });
         }
@@ -2547,11 +2772,14 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         // payer-bearing value there would need a fail-closed re-ask on every
         // tenant run. `setOrgTierModels` refuses it through the narrower
         // schema; this says WHICH rule refused, instead of "not a model".
-        if (namesHostSubscription((body as { models?: unknown }).models)) {
+        if (
+          namesHostSubscription((body as { models?: unknown }).models) ||
+          namesPrincipalSubscription((body as { models?: unknown }).models)
+        ) {
           sendJson(res, 400, {
             error:
-              'the host subscription cannot be an organisation default; it is an account pin, ' +
-              'held by a platform admin',
+              'a subscription cannot be an organisation default; it is an account pin chosen ' +
+              'by the account that will spend it',
           });
           return;
         }

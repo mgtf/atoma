@@ -10,6 +10,7 @@ import { makeAnthropicClient } from '../src/run/auth.js';
 import { RunnerConfigError } from '../src/core/errors.js';
 import { AnthropicLlmClient } from '../src/core/llm.js';
 import { ClaudeCliLlmClient } from '../src/core/llmClaudeCli.js';
+import { CodexCliLlmClient } from '../src/core/llmCodexCli.js';
 import { OllamaLlmClient } from '../src/core/llmOllama.js';
 import type Anthropic from '@anthropic-ai/sdk';
 
@@ -215,6 +216,14 @@ describe('makeAnthropicClient — credentials are a per-run value, not process s
         ZAI_API_KEY: 'zai-key-from-snapshot',
       });
       expect(Object.keys(built)).toEqual(['zai']);
+
+      // Codex construction takes the same snapshot so CODEX_HOME can bind a
+      // run to one principal profile instead of the ambient host login.
+      const codex = buildReferencedProviders({
+        ATOMA_MODEL_L2: 'codex:gpt-5.6-terra',
+        CODEX_HOME: '/profiles/principal-a/codex',
+      });
+      expect(codex['codex']).toBeInstanceOf(CodexCliLlmClient);
     } finally {
       if (previous === undefined) delete process.env['ATOMA_MODEL_L1'];
       else process.env['ATOMA_MODEL_L1'] = previous;

@@ -114,6 +114,18 @@ Neighbours:
 - Design and the owner's decisions:
   [docs/subscription-per-tier-design-2026-08-28.md](../../docs/subscription-per-tier-design-2026-08-28.md).
 
+## Per-tier personal Codex subscription
+
+- `principal-chatgpt-subscription:<model>` is an ACCOUNT-only, L2/L3-only
+  sentinel. The coordinator resolves it from the requesting principal's exact
+  private Codex generation at launch, translates it to `codex:<model>`, records
+  payer `principal-subscription`, and injects only that generation's
+  `CODEX_HOME`/`CODEX_SQLITE_HOME`.
+- Missing, revoked, wrong-chain-level and mixed host/personal Codex profiles
+  THROW. None may fall through to a host login, organisation key or lower
+  preference level. Disconnect is refused while that principal has an active
+  run, so credential deletion cannot race an already captured generation.
+
 - The door does NOT change the lifecycle settings a project run pins. Those
   are stated once, under "What a tenant run may learn" below.
 

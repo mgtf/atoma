@@ -9,6 +9,9 @@ import {
   chatGptSubscriptionModel,
   hostSubscriptionAlias,
   hostSubscriptionRoute,
+  principalChatGptSubscriptionModel,
+  selectionsMixCodexOwners,
+  principalSubscriptionRoute,
 } from '../src/contracts/runPayers.js';
 import {
   decryptBoundSecret,
@@ -22,6 +25,7 @@ import {
   LLM_PROVIDER_CATALOG,
   HOST_SUBSCRIPTION_FAMILY,
   CHATGPT_SUBSCRIPTION_FAMILY,
+  PRINCIPAL_CHATGPT_SUBSCRIPTION_FAMILY,
   HOST_SUBSCRIPTION_FAMILIES,
   isAccountTierSelection,
   llmProviderIds,
@@ -198,6 +202,40 @@ describe('the host subscription is a neighbour, not a catalogue member', () => {
         hostSubscriptions: [{ family, reason: 'undeclared' }],
       })
     ).toBe(false);
+  });
+
+  it("keeps a requester's ChatGPT subscription distinct from the host payer", () => {
+    expect(PRINCIPAL_CHATGPT_SUBSCRIPTION_FAMILY.models.every((model) =>
+      model.tiers.includes(2)
+    )).toBe(true);
+    expect(PRINCIPAL_CHATGPT_SUBSCRIPTION_FAMILY.models.every((model) =>
+      model.tiers.includes(3)
+    )).toBe(true);
+    expect(
+      isAccountTierSelection('principal-chatgpt-subscription:gpt-5.6-sol', 2)
+    ).toBe(true);
+    expect(
+      isAccountTierSelection('principal-chatgpt-subscription:gpt-5.6-sol', 1)
+    ).toBe(false);
+    expect(
+      principalChatGptSubscriptionModel(
+        'principal-chatgpt-subscription:gpt-5.6-terra'
+      )
+    ).toBe('gpt-5.6-terra');
+    expect(
+      principalSubscriptionRoute('principal-chatgpt-subscription:gpt-5.6-sol')
+    ).toEqual({ provider: 'codex', model: 'gpt-5.6-sol' });
+    expect(
+      tierModelSelectionLabel('principal-chatgpt-subscription:gpt-5.6-sol')
+    ).toBe('ChatGPT (your subscription) — GPT-5.6 Sol');
+    expect(selectionsMixCodexOwners([
+      'chatgpt-subscription:gpt-5.6-sol',
+      'principal-chatgpt-subscription:gpt-5.6-terra',
+    ])).toBe(true);
+    expect(selectionsMixCodexOwners([
+      'host-subscription:sonnet',
+      'principal-chatgpt-subscription:gpt-5.6-terra',
+    ])).toBe(false);
   });
 });
 

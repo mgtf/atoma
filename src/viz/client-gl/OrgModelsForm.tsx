@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import {
   orgHasBilledProviderKey,
   orgProviderIsReady,
+  PRINCIPAL_CHATGPT_SUBSCRIPTION_FAMILY,
   tierModelSelectionLabel,
 } from '../../core/providerCatalog.js';
 import { formatDateTime } from '../client/date-format.js';
@@ -9,8 +10,18 @@ import { api } from '../client/data-api.js';
 import {
   CHATGPT_SUBSCRIPTION_PREFIX,
   HOST_SUBSCRIPTION_PREFIX,
+  PRINCIPAL_CHATGPT_SUBSCRIPTION_PREFIX,
+  chatGptSubscriptionModel,
+  principalChatGptSubscriptionModel,
 } from '../../contracts/runPayers.js';
-import type { VizAccountModels, VizLlmCatalogEntry, VizOrganisation, VizOrgModels } from '../client/types.js';
+import type {
+  VizAccountModels,
+  VizAccountSubscriptions,
+  VizLlmCatalogEntry,
+  VizOrganisation,
+  VizOrgModels,
+} from '../client/types.js';
+import { useAccountSubscriptions } from './queries.js';
 
 /**
  * SETTINGS BODY — BYO-keys first, then org defaults, account pins, and the
@@ -51,7 +62,11 @@ export function OrgModelsForm({
   const [org, setOrg] = useState<VizOrgModels | null>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null);
   const [draftKeys, setDraftKeys] = useState<Record<string, string>>({});
+  const canUsePersonalSubscriptions =
+    organisation !== null && roleCanUsePersonalSubscriptions(organisation.viewerRole);
+  const subscriptions = useAccountSubscriptions(enabled && canUsePersonalSubscriptions);
 
   const refresh = useCallback(async (): Promise<boolean> => {
     try {
@@ -74,6 +89,11 @@ export function OrgModelsForm({
     void refresh();
   }, [enabled, refresh]);
 
+  useEffect(() => {
+    if (subscriptions.data?.codex.state !== 'connected') return;
+    void refresh();
+  }, [refresh, subscriptions.data?.codex.state]);
+
   const apply = async (action: () => Promise<unknown>, successKey: string): Promise<void> => {
     setBusy(true);
     setStatus(null);
@@ -85,6 +105,38 @@ export function OrgModelsForm({
       onError(error instanceof Error ? error.message : t('settings.actionFailed'));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const applySubscription = async (
+    action: () => Promise<void>,
+    successKey: string
+  ): Promise<void> => {
+    setBusy(true);
+    setSubscriptionStatus(null);
+    try {
+      await action();
+      const [subscriptionResult, modelsReady] = await Promise.all([
+        subscriptions.refetch(),
+        refresh(),
+      ]);
+      if (subscriptionResult.error) throw subscriptionResult.error;
+      if (modelsReady) setSubscriptionStatus(t(successKey));
+    } catch (error) {
+      onError(error instanceof Error ? error.message : t('settings.actionFailed'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copyCodexCode = async (code: string): Promise<void> => {
+    setSubscriptionStatus(null);
+    try {
+      await navigator.clipboard.writeText(code);
+      setSubscriptionStatus(t('settings.subscriptionCodeCopied'));
+      onError(null);
+    } catch {
+      onError(t('settings.subscriptionCopyFailed'));
     }
   };
 
@@ -106,6 +158,22 @@ export function OrgModelsForm({
     account.hostSubscriptions ?? (account.hostSubscription ? [account.hostSubscription] : []);
   const subscriptionUsable = hostSubscriptions.some((subscription) => !subscription.reason);
   const canPickModels = billedKeyReady || subscriptionUsable;
+  const personalSubscriptionState =
+    canUsePersonalSubscriptions && subscriptions.error === null
+      ? subscriptions.data?.codex.state
+      : undefined;
+  const personalSubscriptionUsable =
+    account.personalSubscriptions?.codex === true && personalSubscriptionState === 'connected';
+  const canPickAccountModels = canPickModels || personalSubscriptionUsable;
+  const retainPersonalCodexFamily = Object.values(account.pins).some((selection) =>
+    selection?.startsWith(`${PRINCIPAL_CHATGPT_SUBSCRIPTION_PREFIX}:`)
+  );
+  const hostCodexSelected = Object.values(account.pins).some(
+    (selection) => Boolean(selection && chatGptSubscriptionModel(selection))
+  );
+  const personalCodexSelected = Object.values(account.pins).some(
+    (selection) => Boolean(selection && principalChatGptSubscriptionModel(selection))
+  );
   const tierIds = ['l1', 'l2', 'l3'] as const;
 
   const inheritLabel = (tier: (typeof tierIds)[number]): string => {
@@ -119,6 +187,35 @@ export function OrgModelsForm({
       className={`gpu-panel-skin gpu-org-models-form${overlaysInert ? ' gpu-overlays-veiled' : ''}`}
       inert={overlaysInert}
     >
+      <PersonalSubscriptionsPanel
+        t={t}
+        subscriptions={subscriptions.data ?? null}
+        loading={canUsePersonalSubscriptions && subscriptions.isPending}
+        error={subscriptions.error instanceof Error ? subscriptions.error.message : null}
+        canUse={canUsePersonalSubscriptions}
+        busy={busy}
+        status={subscriptionStatus}
+        onStartCodex={() =>
+          applySubscription(
+            api.startCodexSubscriptionLogin,
+            'settings.subscriptionLoginStarted'
+          )
+        }
+        onCancelCodex={() =>
+          applySubscription(
+            api.cancelCodexSubscriptionLogin,
+            'settings.subscriptionLoginCancelled'
+          )
+        }
+        onDisconnectCodex={() =>
+          applySubscription(
+            api.disconnectCodexSubscription,
+            'settings.subscriptionDisconnected'
+          )
+        }
+        onCopyCodex={copyCodexCode}
+      />
+
       {canManageOrg ? (
         <>
           <p className="gpu-org-models-title">{t('settings.orgProviderKeys')}</p>
@@ -246,7 +343,7 @@ export function OrgModelsForm({
 
       <p className="gpu-org-models-title">{t('settings.models')}</p>
       <p className="gpu-org-models-hint">{t('settings.modelsHint')}</p>
-      {!canPickModels && !canManageOrg ? (
+      {!canPickAccountModels && !canManageOrg ? (
         <p className="gpu-org-models-hint" role="note">
           {t('settings.modelsNeedKey')}
         </p>
@@ -261,21 +358,26 @@ export function OrgModelsForm({
             value={account.pins[tier] ?? ''}
             onChange={(event) => {
               const value = event.target.value === '' ? null : event.target.value;
-              if (!canPickModels && value !== null) return;
-              if (value === '' && !org.models[tier]) return;
+              if (!canPickAccountModels && value !== null) return;
+              if (value === null && !org.models[tier]) return;
               void apply(
                 () => api.saveAccountModels({ ...account.pins, [tier]: value }),
                 'settings.saved'
               );
             }}
           >
-            <option value="" disabled={!canPickModels || !org.models[tier]}>
+            <option value="" disabled={!org.models[tier]}>
               {inheritLabel(tier)}
             </option>
             {catalogOptions(t, catalog, configuredProviders, account.pins[tier], {
               billedKeyReady,
               ollamaAvailable,
               hostSubscriptions,
+              personalSubscriptions: account.personalSubscriptions,
+              personalSubscriptionState,
+              retainPersonalCodexFamily,
+              hostCodexSelected,
+              personalCodexSelected,
             }, index + 1 as 1 | 2 | 3)}
           </select>
         </div>
@@ -337,6 +439,174 @@ export function OrgModelsForm({
   );
 }
 
+export interface PersonalSubscriptionsPanelProps {
+  readonly t: (key: string, vars?: Record<string, unknown>) => string;
+  readonly subscriptions: VizAccountSubscriptions | null;
+  readonly loading: boolean;
+  readonly error: string | null;
+  readonly canUse: boolean;
+  readonly busy: boolean;
+  readonly status: string | null;
+  readonly onStartCodex: () => Promise<void>;
+  readonly onCancelCodex: () => Promise<void>;
+  readonly onDisconnectCodex: () => Promise<void>;
+  readonly onCopyCodex: (code: string) => Promise<void>;
+}
+
+export function roleCanUsePersonalSubscriptions(role: string): boolean {
+  return role === 'org:owner' || role === 'org:admin' || role === 'org:member';
+}
+
+/**
+ * ACCOUNT-OWNED LOGIN CARDS. They live inside the one existing Settings DOM
+ * scroll, not in a new overlay. Device codes are rendered only from the
+ * short-lived GET projection and are never put into component persistence.
+ */
+export function PersonalSubscriptionsPanel({
+  t,
+  subscriptions,
+  loading,
+  error,
+  canUse,
+  busy,
+  status,
+  onStartCodex,
+  onCancelCodex,
+  onDisconnectCodex,
+  onCopyCodex,
+}: PersonalSubscriptionsPanelProps) {
+  const codex = subscriptions?.codex ?? null;
+  const attempt = subscriptions?.codexAttempt ?? null;
+  const connecting = codex?.state === 'connecting' || attempt?.state === 'connecting';
+  const codexUnavailable =
+    error !== null || codex?.state === 'unavailable' || codex?.state === 'error';
+  const reconnect = codex?.state === 'reauth_required';
+  const disconnect =
+    codex?.state === 'connected' ||
+    (Boolean(codex?.connectedAt) &&
+      (error !== null || codex?.state === 'error' || codex?.state === 'unavailable'));
+  const codexReason = attempt?.reason ?? codex?.reason ?? null;
+  const displayedCodexState = error
+    ? 'unavailable'
+    : loading && !codex
+      ? 'loading'
+      : (codex?.state ?? 'disconnected');
+
+  return (
+    <section className="gpu-personal-subscriptions" aria-labelledby="personal-subscriptions-title">
+      <p id="personal-subscriptions-title" className="gpu-org-models-title">
+        {t('settings.personalSubscriptions')}
+      </p>
+      <p className="gpu-org-models-hint">{t('settings.personalSubscriptionsHint')}</p>
+      {!canUse ? (
+        <p className="gpu-org-models-hint" role="note">
+          {t('settings.personalSubscriptionsViewer')}
+        </p>
+      ) : null}
+      {error ? (
+        <p className="gpu-subscription-message gpu-subscription-error" role="alert">
+          {t('settings.personalSubscriptionsLoadFailed')}: {error}
+        </p>
+      ) : null}
+
+      <div className="gpu-subscription-grid">
+        <article className="gpu-subscription-card">
+          <div className="gpu-subscription-card-head">
+            <span className="gpu-subscription-name">{t('settings.subscriptionClaude')}</span>
+            <span className="gpu-subscription-state" data-state="unavailable">
+              {t('settings.subscriptionState.unavailable')}
+            </span>
+          </div>
+          <p>{t('settings.subscriptionClaudeApproval')}</p>
+        </article>
+
+        <article className="gpu-subscription-card">
+          <div className="gpu-subscription-card-head">
+            <span className="gpu-subscription-name">{t('settings.subscriptionCodex')}</span>
+            <span
+              className="gpu-subscription-state"
+              data-state={displayedCodexState}
+            >
+              {t(`settings.subscriptionState.${displayedCodexState}`)}
+            </span>
+          </div>
+          <p>{t('settings.subscriptionCodexHint')}</p>
+
+          {codexReason ? (
+            <p className="gpu-subscription-message" role="note">
+              {t(`settings.subscriptionReason.${codexReason}`)}
+            </p>
+          ) : null}
+
+          {canUse && attempt?.state === 'connecting' ? (
+            <div className="gpu-subscription-device">
+              <p>{t('settings.subscriptionDeviceInstructions')}</p>
+              {attempt.userCode ? (
+                <div className="gpu-subscription-code-row">
+                  <code>{attempt.userCode}</code>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      if (attempt.userCode) void onCopyCodex(attempt.userCode);
+                    }}
+                  >
+                    {t('settings.subscriptionCopyCode')}
+                  </button>
+                </div>
+              ) : null}
+              <div className="gpu-subscription-actions">
+                {attempt.verificationUrl ? (
+                  <a
+                    className="gpu-subscription-link"
+                    href={attempt.verificationUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {t('settings.subscriptionOpenLogin')}
+                  </a>
+                ) : null}
+                <button type="button" disabled={busy} onClick={() => void onCancelCodex()}>
+                  {t('settings.subscriptionCancelLogin')}
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {canUse ? (
+            <div className="gpu-subscription-actions">
+              {disconnect ? (
+                <button type="button" disabled={busy} onClick={() => void onDisconnectCodex()}>
+                  {t('settings.subscriptionDisconnect')}
+                </button>
+              ) : !connecting && !codexUnavailable ? (
+                <button type="button" disabled={busy || loading} onClick={() => void onStartCodex()}>
+                  {t(
+                    reconnect
+                      ? 'settings.subscriptionReconnect'
+                      : 'settings.subscriptionConnect'
+                  )}
+                </button>
+              ) : null}
+              {attempt && attempt.state !== 'connecting' ? (
+                <button type="button" disabled={busy} onClick={() => void onCancelCodex()}>
+                  {t('settings.subscriptionDismissAttempt')}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </article>
+      </div>
+
+      {status ? (
+        <p className="gpu-subscription-message" role="status">
+          {status}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
 /**
  * PURE, AND THAT IS THE POINT. Every unlock decision is computed here from
  * declared facts, so what the picker offers can be proven without a browser —
@@ -348,6 +618,15 @@ export interface CatalogueUnlocks {
   readonly ollamaAvailable: boolean;
   /** The operator's login, when the server offered it to THIS requester. */
   readonly hostSubscriptions?: VizAccountModels['hostSubscriptions'];
+  /** The requester's own provider login, usable only by that account. */
+  readonly personalSubscriptions?: VizAccountModels['personalSubscriptions'];
+  /** Detailed state independently read from the account self-care endpoint. */
+  readonly personalSubscriptionState?: VizAccountSubscriptions['codex']['state'];
+  /** Keep a disconnected selected family visible so its pin can be cleared. */
+  readonly retainPersonalCodexFamily?: boolean;
+  /** Hide choices that would mix two credential homes in one run process. */
+  readonly hostCodexSelected?: boolean;
+  readonly personalCodexSelected?: boolean;
 }
 
 export function providerIsUnlocked(
@@ -364,6 +643,11 @@ export function providerIsUnlocked(
       opts.hostSubscriptions?.some(
         (subscription) => subscription.family.id === provider.id && !subscription.reason
       )
+    );
+  }
+  if (provider.id === PRINCIPAL_CHATGPT_SUBSCRIPTION_PREFIX) {
+    return (
+      opts.personalSubscriptions?.codex === true && opts.personalSubscriptionState === 'connected'
     );
   }
   // NO BLANKET ADMIN UNLOCK. A platform admin picking a billed model still
@@ -388,7 +672,12 @@ function catalogOptions(
   const families = [
     ...catalog,
     ...(opts.hostSubscriptions ?? []).map((subscription) => subscription.family),
-  ];
+    ...personalSubscriptionFamilies(opts),
+  ].filter((provider) => {
+    if (provider.id === CHATGPT_SUBSCRIPTION_PREFIX && opts.personalCodexSelected) return false;
+    if (provider.id === PRINCIPAL_CHATGPT_SUBSCRIPTION_PREFIX && opts.hostCodexSelected) return false;
+    return true;
+  });
   return families.map((provider) => {
     // The honest label: ollama compute is the platform's, and where the
     // deployment declared no endpoint the family stays visible but locked —
@@ -396,6 +685,7 @@ function catalogOptions(
     const isOllama = provider.id === 'ollama';
     const isSubscription =
       provider.id === HOST_SUBSCRIPTION_PREFIX || provider.id === CHATGPT_SUBSCRIPTION_PREFIX;
+    const isPersonalSubscription = provider.id === PRINCIPAL_CHATGPT_SUBSCRIPTION_PREFIX;
     const unlocked = providerIsUnlocked(provider, configuredProviders, opts);
     const label = isOllama
       ? t(opts.ollamaAvailable ? 'settings.ollamaHosted' : 'settings.ollamaUnavailable', {
@@ -405,6 +695,13 @@ function catalogOptions(
         ? t(unlocked ? 'settings.hostSubscription' : 'settings.hostSubscriptionUnavailable', {
             label: provider.label,
           })
+        : isPersonalSubscription
+          ? t(
+              unlocked
+                ? 'settings.personalSubscription'
+                : 'settings.personalSubscriptionUnavailable',
+              { label: provider.label }
+            )
         : provider.label;
     return (
       <optgroup key={provider.id} label={label}>
@@ -423,4 +720,11 @@ function catalogOptions(
       </optgroup>
     );
   });
+}
+
+/** The personal Codex family appears when usable, or while one of its pins remains selected. */
+export function personalSubscriptionFamilies(opts: CatalogueUnlocks): VizLlmCatalogEntry[] {
+  if (opts.hostCodexSelected) return [];
+  if (!opts.personalSubscriptions?.codex && !opts.retainPersonalCodexFamily) return [];
+  return [PRINCIPAL_CHATGPT_SUBSCRIPTION_FAMILY as unknown as VizLlmCatalogEntry];
 }

@@ -12,11 +12,15 @@ import type {
   Publication,
 } from '../contracts/projects.js';
 import type { TierModelPins } from '../contracts/tierModels.js';
+import { PERSONAL_CODEX_PROFILE_ROOT_ENV } from '../core/codexHomeLease.js';
 import { LLM_PROVIDER_CATALOG } from '../core/providerCatalog.js';
 import {
   HOST_SUBSCRIPTION_PREFIX,
   hostSubscriptionRoute,
+  ledgerTouchesAnySubscription,
   ledgerTouchesSubscription,
+  principalSubscriptionRoute,
+  principalSubscriptionTiers,
   runPayerLedgerSchema,
   subscriptionTiers,
   type PayerKind,
@@ -123,10 +127,18 @@ export interface ProjectCoordinatorOptions {
    */
   readonly platformAdmins?: (principalId: string) => boolean;
   /**
-   * Observer, fired when a run is allowed to spend the HOST's subscription
-   * instead of a per-run credential. The caller journals it; nothing here
-   * writes an audit row, so there is one delivery path as with
-   * `onRunFinished`.
+   * Resolve the requesting principal's CURRENT personal Codex generation.
+   * The resolver is asked at launch, never trusted from an HTTP request. A
+   * missing/throwing resolver is a hard refusal only when a personal sentinel
+   * was selected; it can never fall through to the host's Codex login.
+   */
+  readonly principalCodexProfileFor?: (
+    principalId: string
+  ) => PrincipalCodexProfile | null;
+  /**
+   * Observer fired when a run spends any CLI subscription (host or requesting
+   * principal). The payer ledger distinguishes them; the caller journals it,
+   * so there is one delivery path as with `onRunFinished`.
    */
   readonly onSubscriptionTransport?: (info: SubscriptionTransportUse) => void;
   /**
@@ -197,7 +209,15 @@ export class ProjectRunConfigurationError extends Error {
 
 interface ActiveRun {
   readonly orgId: string;
+  readonly principalId: string;
   readonly controller: AbortController;
+}
+
+/** Non-secret, exact generation passed from the account-profile authority. */
+export interface PrincipalCodexProfile {
+  readonly profileId: string;
+  readonly homePath: string;
+  readonly profilesRoot: string;
 }
 
 const FORWARDED_HOST_ENV = [
@@ -391,6 +411,32 @@ function assertSubscriptionPinIsHonourable(input: {
   }
 }
 
+/**
+ * A personal subscription is valid only as the requester's own account pin.
+ * Unlike a missing catalogue key, loss of the exact profile is never a
+ * fall-through: changing payer after the user selected their subscription
+ * would make both the bill and the audit row false.
+ */
+function assertPrincipalSubscriptionPinIsHonourable(input: {
+  readonly tier: 1 | 2 | 3;
+  readonly level: TierChainLevel;
+  readonly profile: PrincipalCodexProfile | undefined;
+}): void {
+  const where = `ATOMA_MODEL_L${input.tier}`;
+  if (input.level !== 'account') {
+    throw new ProjectRunConfigurationError(
+      `${where} names a personal subscription from the ${input.level} level; only the ` +
+        "requesting member's own account pin may spend their subscription"
+    );
+  }
+  if (!input.profile) {
+    throw new ProjectRunConfigurationError(
+      `${where} names the requester's ChatGPT subscription, but their Codex account is no ` +
+        'longer connected. Reconnect it in Settings or clear the pin'
+    );
+  }
+}
+
 export interface ProjectRunEnvironment {
   readonly environment: NodeJS.ProcessEnv;
   /** Who paid for what, per tier plus the base transport. */
@@ -454,6 +500,8 @@ export function projectRunEnvironment(input: {
    * the store on disk, can mint it.
    */
   readonly subscriptionTransport?: { readonly principalId: string };
+  /** Exact personal Codex generation resolved for the requesting principal. */
+  readonly principalCodexProfile?: PrincipalCodexProfile;
 }): ProjectRunEnvironment {
   const selected = input.hostEnv['ATOMA_LLM']?.trim() || 'anthropic';
   const subscriptionRequested = isSubscriptionTransport(selected);
@@ -613,6 +661,21 @@ export function projectRunEnvironment(input: {
         tier,
       }),
       (candidate) => {
+        const personalSubscription = principalSubscriptionRoute(candidate.value);
+        if (personalSubscription) {
+          if (tier === 1) {
+            throw new ProjectRunConfigurationError(
+              'ATOMA_MODEL_L1 cannot use the requester ChatGPT subscription because Codex ' +
+                'cannot expose the L1 tool loop through ToolSandbox'
+            );
+          }
+          assertPrincipalSubscriptionPinIsHonourable({
+            tier,
+            level: candidate.level,
+            profile: input.principalCodexProfile,
+          });
+          return 'take';
+        }
         const subscription = hostSubscriptionRoute(candidate.value);
         if (subscription) {
           if (tier === 1 && subscription.provider === 'codex') {
@@ -643,6 +706,21 @@ export function projectRunEnvironment(input: {
       }
     );
     if (!chosen) continue;
+    const personalSubscription = principalSubscriptionRoute(chosen.value);
+    if (personalSubscription) {
+      // The persisted sentinel is deliberately not routable. Translation is
+      // downstream of the self-scoped profile check above, so no other caller
+      // can turn a string into access to a principal's credential generation.
+      environment[`ATOMA_MODEL_L${tier}`] =
+        `${personalSubscription.provider}:${personalSubscription.model}`;
+      ledger[key] = {
+        selection: chosen.value,
+        provider: personalSubscription.provider,
+        payer: 'principal-subscription',
+        source: chosen.level,
+      };
+      continue;
+    }
     const subscription = hostSubscriptionRoute(chosen.value);
     if (subscription) {
       // TRANSLATED HERE AND NOWHERE ELSE, downstream of the authority check.
@@ -672,6 +750,31 @@ export function projectRunEnvironment(input: {
     l2: ledger.l2,
     l3: ledger.l3,
   });
+  if (principalSubscriptionTiers(payers).length > 0) {
+    if (!input.principalCodexProfile) {
+      // Kept next to the environment mutation as a defensive invariant even
+      // though the candidate gate above already refuses this state.
+      throw new ProjectRunConfigurationError(
+        "the requester's Codex profile disappeared while constructing the run"
+      );
+    }
+    const rows = [payers.base, payers.l1, payers.l2, payers.l3];
+    if (
+      rows.some(
+        (row) => row.provider === 'codex' && row.payer === 'host-subscription'
+      )
+    ) {
+      throw new ProjectRunConfigurationError(
+        'one run cannot mix the host and requester ChatGPT subscriptions because Codex has ' +
+          'one credential home per process'
+      );
+    }
+    environment['CODEX_HOME'] = path.resolve(input.principalCodexProfile.homePath);
+    environment['CODEX_SQLITE_HOME'] = path.resolve(input.principalCodexProfile.homePath);
+    environment[PERSONAL_CODEX_PROFILE_ROOT_ENV] = path.resolve(
+      input.principalCodexProfile.profilesRoot
+    );
+  }
   if (ledgerTouchesSubscription(payers)) {
     // A GATEWAY AND A SUBSCRIPTION DO NOT SHARE A RUN. `ANTHROPIC_BASE_URL`
     // redirects the anthropic transport at a third party; the subscription
@@ -738,9 +841,10 @@ export function projectRunEnvironment(input: {
     // authorised (design 2026-08-28, Q8).
     ATOMA_TENANT_RUN: '1',
   });
-  const authorisedTiers = subscriptionTiers(payers).map((tier) =>
-    tier === 'base' ? 'base' : tier
-  );
+  const authorisedTiers = [
+    ...subscriptionTiers(payers),
+    ...principalSubscriptionTiers(payers),
+  ];
   if (authorisedTiers.length > 0) {
     environment['ATOMA_SUBSCRIPTION_TIERS'] = authorisedTiers.join(',');
   }
@@ -967,6 +1071,9 @@ export class ProjectRunCoordinator {
     provider: ProviderKeyProvider
   ) => string | null;
   private readonly platformAdmins?: (principalId: string) => boolean;
+  private readonly principalCodexProfileFor?: (
+    principalId: string
+  ) => PrincipalCodexProfile | null;
   private readonly onSubscriptionTransport?: (info: SubscriptionTransportUse) => void;
   private readonly describeDeliveredPreview?: (input: DeliveredPreviewSubject) => void;
   private readonly cwd: string;
@@ -987,6 +1094,9 @@ export class ProjectRunCoordinator {
     if (options.orgTierModelsFor) this.orgTierModelsFor = options.orgTierModelsFor;
     if (options.orgProviderKeyFor) this.orgProviderKeyFor = options.orgProviderKeyFor;
     if (options.platformAdmins) this.platformAdmins = options.platformAdmins;
+    if (options.principalCodexProfileFor) {
+      this.principalCodexProfileFor = options.principalCodexProfileFor;
+    }
     if (options.onSubscriptionTransport) {
       this.onSubscriptionTransport = options.onSubscriptionTransport;
     }
@@ -1088,6 +1198,25 @@ export class ProjectRunCoordinator {
     }
   }
 
+  /**
+   * Resolve the exact personal credential generation at launch. Authority
+   * lookups fail closed: only a selected personal sentinel observes absence,
+   * and that absence becomes an explicit configuration error in the builder.
+   */
+  private resolvePrincipalCodexProfile(
+    principalId: string
+  ): PrincipalCodexProfile | undefined {
+    if (!this.principalCodexProfileFor) return undefined;
+    try {
+      return this.principalCodexProfileFor(principalId) ?? undefined;
+    } catch {
+      process.stderr.write(
+        `[atoma projects] personal Codex profile lookup failed for ${principalId}; refusing personal subscription pins\n`
+      );
+      return undefined;
+    }
+  }
+
   async start(input: {
     readonly orgId: string;
     readonly principalId: string;
@@ -1156,6 +1285,7 @@ export class ProjectRunCoordinator {
       artifactManifestPath: layout.artifactManifestPath,
     };
     const subscriptionGrant = this.resolveSubscriptionGrant(input.principalId);
+    const principalCodexProfile = this.resolvePrincipalCodexProfile(input.principalId);
     let environment: NodeJS.ProcessEnv;
     try {
       const built = projectRunEnvironment({
@@ -1171,14 +1301,15 @@ export class ProjectRunCoordinator {
         orgTierModels: this.resolveOrgTierModels(input.orgId),
         orgProviderKeys: this.resolveOrgProviderKeys(input.orgId),
         ...(subscriptionGrant ? { subscriptionTransport: subscriptionGrant } : {}),
+        ...(principalCodexProfile ? { principalCodexProfile } : {}),
       });
       environment = built.environment;
       // FIRED FROM THE LEDGER, not from the host env. A run may now spend the
       // subscription on some tiers and a key on others, so "did this run touch
-      // the operator's login" is a question about what was RESOLVED — the old
+      // a CLI login" is a question about what was RESOLVED — the old
       // `isSubscriptionTransport(hostEnv.ATOMA_LLM)` test could only see the
       // whole-deployment regime and would stay silent on every mixed run.
-      if (ledgerTouchesSubscription(built.payers)) {
+      if (ledgerTouchesAnySubscription(built.payers)) {
         this.onSubscriptionTransport?.({
           orgId: input.orgId,
           projectId: input.projectId,
@@ -1212,7 +1343,11 @@ export class ProjectRunCoordinator {
       throw error;
     }
     const controller = new AbortController();
-    this.active.set(run.projectRunId, { orgId: input.orgId, controller });
+    this.active.set(run.projectRunId, {
+      orgId: input.orgId,
+      principalId: input.principalId,
+      controller,
+    });
 
     const seedFrom = previousDeliveredWorkspace(this.store, input.orgId, input.projectId);
     let driven: Promise<string>;
@@ -1449,6 +1584,14 @@ export class ProjectRunCoordinator {
     const active = this.active.get(projectRunId);
     if (active?.orgId === orgId) active.controller.abort(new Error('project run cancelled'));
     return current;
+  }
+
+  /** Disconnecting a profile cannot race a run that already captured it. */
+  hasActiveRunForPrincipal(principalId: string): boolean {
+    for (const active of this.active.values()) {
+      if (active.principalId === principalId) return true;
+    }
+    return false;
   }
 
   waitForIdle(): Promise<void> {

@@ -33,7 +33,19 @@ Neighbours:
   *plan* more iterations than the run can still pay.
 - Claude CLI and Codex CLI transports run with user tools/config isolated.
   Project `.claude/settings.json` never grants shell permission; personal grants
-  belong in ignored local settings. Codex MCP registration is local too.
+  belong in ignored local settings. Codex MCP registration is local too. A
+  principal Codex transport receives an allowlisted environment snapshot and a
+  strict root-deny/workspace-read-only permission profile; provider keys and
+  every other principal's profile stay outside the child. Both login and run
+  force file-backed auth in that exact `CODEX_HOME`; never allow `auto` to move
+  a refresh into the service account's shared keyring. The text-only transport
+  explicitly disables Apps, plugins, browser/computer, image, skill and
+  delegated-agent capabilities in addition to shell and network access;
+  `--strict-config` must fail closed when a Codex upgrade renames one. Every
+  Codex child lifetime is serialized by its canonical `CODEX_HOME`; the CLI
+  may rotate `auth.json` even when calls are otherwise independent. The shared
+  lease is both FIFO in-process and SQLite-backed across processes, and remains
+  held through actual child reap after timeout or cancellation.
 - Do not confuse interactive Codex with the Codex transport. The transport uses
   explicit safe flags and never inherits the interactive agent's tools.
 - Auth checks must match the selected transport without leaking credentials.

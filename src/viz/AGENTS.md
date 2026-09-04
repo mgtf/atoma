@@ -513,6 +513,13 @@ npm run viz:mark-turn:analyze
   gated members get org surfaces only; the ungated developer path is unchanged.
   True per-org registry scoping would need org-attributed registry rows — a
   schema project, not a route guard.
+- `/api/account/subscriptions*` is self-scoped from the resolved session and
+  never accepts a principal id. Status is secret-free; device login material
+  is memory-only; connect/cancel/disconnect are same-origin and require
+  `org:member+`. Settings keeps Claude visible but unavailable until Anthropic
+  approval, and offers personal Codex models only while the server confirms
+  the requester's private profile. Disconnect refuses an active run and never
+  deletes another principal's generation.
 
 ## Web push
 

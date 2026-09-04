@@ -102,14 +102,16 @@ Neighbours:
   punished on 2026-08-27.
 - The stored spellings are NON-ROUTABLE sentinels:
   `host-subscription:<alias>` for Claude and
-  `chatgpt-subscription:<model>` for Codex, never their CLI route prefixes.
-  They become transports only inside the coordinator, downstream of the
-  authority check; the ChatGPT family is L2/L3-only.
+  `chatgpt-subscription:<model>` for host Codex, plus
+  `principal-chatgpt-subscription:<model>` for requester Codex, never their CLI
+  route prefixes. They become transports only inside the coordinator,
+  downstream of the matching authority/profile check; both ChatGPT families
+  are L2/L3-only.
 - Nothing here carries a secret: a payer names a KIND and, for a key, its
   provider. This detail is journaled beside `project_runs.error`, which is
   served to tenants.
-- One summary string, `hostSubscriptionSummary`, rendered by both emitters.
-  They used to word the same fact differently.
+- Summary helpers distinguish host and requester subscription spend; both use
+  the same structured `runPayerDetail` ledger.
 
 ## Publication receipts
 

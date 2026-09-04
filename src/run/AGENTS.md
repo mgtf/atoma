@@ -41,12 +41,13 @@ Neighbours:
   the coordinator, and its own `process.env` IS the supplied snapshot; the
   developer path, which sets no such marker, is untouched.
 - The refusal reads `ATOMA_SUBSCRIPTION_TIERS`, the list of tiers the PARENT
-  authorised for the host subscription (`base`, `l1`, `l2`, `l3`). A
+  authorised for either the host or requesting principal's subscription
+  (`base`, `l1`, `l2`, `l3`). A
   `claude-cli:` or `codex:` pin on a tier that list does not name reached the
   child another way and throws at launch, before spend. The list only ever NARROWS what is
-  permitted: a forged one grants no credential, because that transport
-  authenticates from the host's own login session, which a tenant run has no
-  way to obtain. Codex remains structurally impossible on L1. See
+  permitted: a forged one grants no credential, because the profile path is
+  injected only by the coordinator after its host-authority or exact-principal
+  check. Codex remains structurally impossible on L1. See
   [src/projects](../projects/AGENTS.md) for who may arm a tier, and
   `docs/subscription-per-tier-design-2026-08-28.md` for why.
 

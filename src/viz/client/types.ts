@@ -1,3 +1,5 @@
+import type { AccountSubscriptionsResponse } from '../../contracts/accountSubscriptions.js';
+
 export interface RunIndexEntry {
   id: string;
   label: string;
@@ -324,6 +326,12 @@ export interface VizOrganisation {
   pendingInvitations: number | null;
 }
 
+/** Picker capabilities only; detailed connection state comes from its own endpoint. */
+export interface VizPersonalSubscriptionCapabilities {
+  claude: boolean;
+  codex: boolean;
+}
+
 /** Per-tier model pins plus the labels the account page needs to show. */
 export interface VizAccountModels {
   pins: { l1: string | null; l2: string | null; l3: string | null };
@@ -348,6 +356,13 @@ export interface VizAccountModels {
     reason?: 'undeclared' | 'other-organisation';
   }>;
   /**
+   * Personal provider logins currently usable by this account. Detailed
+   * connection/device-code state lives on `/api/account/subscriptions`; this
+   * compact capability only decides whether a personal family may be picked.
+   * Optional so an older server remains a safe "not connected".
+   */
+  personalSubscriptions?: VizPersonalSubscriptionCapabilities;
+  /**
    * Whether the deployment declared an Ollama endpoint (OLLAMA_BASE_URL).
    * Ollama runs on the OPERATOR's infrastructure — orgs pick its models,
    * never its destination — so absent declaration the picker greys the
@@ -356,6 +371,9 @@ export interface VizAccountModels {
    */
   ollamaAvailable?: boolean;
 }
+
+/** The secret-free self-care projection from `/api/account/subscriptions`. */
+export type VizAccountSubscriptions = AccountSubscriptionsResponse;
 
 /** One provider family the server offers for tier/model selection. */
 export interface VizLlmCatalogEntry {

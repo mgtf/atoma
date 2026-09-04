@@ -3,9 +3,12 @@ import {
   CHATGPT_SUBSCRIPTION_PREFIX,
   HOST_SUBSCRIPTION_ALIASES,
   HOST_SUBSCRIPTION_PREFIX,
+  PRINCIPAL_CHATGPT_SUBSCRIPTION_PREFIX,
   chatGptSubscriptionModel,
   hostSubscriptionAlias,
   isHostSubscriptionSelection,
+  isPrincipalSubscriptionSelection,
+  principalChatGptSubscriptionModel,
 } from '../contracts/runPayers.js';
 
 /**
@@ -165,6 +168,19 @@ export const CHATGPT_SUBSCRIPTION_FAMILY = {
   })),
 } as const;
 
+/** The signed-in requester's own ChatGPT subscription. Account-only. */
+export const PRINCIPAL_CHATGPT_SUBSCRIPTION_FAMILY = {
+  id: PRINCIPAL_CHATGPT_SUBSCRIPTION_PREFIX,
+  label: 'ChatGPT (your subscription)',
+  credentialEnvVar: null,
+  suggestive: false,
+  models: CHATGPT_SUBSCRIPTION_MODELS.map((model) => ({
+    id: model,
+    label: modelLabel(model),
+    tiers: [2, 3] as const,
+  })),
+} as const;
+
 /** Every machine-bound family offered beside (never inside) the key catalogue. */
 export const HOST_SUBSCRIPTION_FAMILIES = [
   HOST_SUBSCRIPTION_FAMILY,
@@ -188,8 +204,13 @@ function modelLabel(model: string): string {
  */
 export function isAccountTierSelection(value: string, tier?: 1 | 2 | 3): boolean {
   if (isValidTierModelSelection(value)) return true;
-  if (!isHostSubscriptionSelection(value)) return false;
-  return !(tier === 1 && chatGptSubscriptionModel(value));
+  if (isHostSubscriptionSelection(value)) {
+    return !(tier === 1 && chatGptSubscriptionModel(value));
+  }
+  if (isPrincipalSubscriptionSelection(value)) {
+    return !(tier === 1 && principalChatGptSubscriptionModel(value));
+  }
+  return false;
 }
 
 /** Every selectable provider id, e.g. handed to the routing tables. */
@@ -248,6 +269,10 @@ export function tierModelSelectionLabel(value: string): string {
   const chatGptModel = chatGptSubscriptionModel(value);
   if (chatGptModel) {
     return `${CHATGPT_SUBSCRIPTION_FAMILY.label} — ${modelLabel(chatGptModel)}`;
+  }
+  const principalChatGptModel = principalChatGptSubscriptionModel(value);
+  if (principalChatGptModel) {
+    return `${PRINCIPAL_CHATGPT_SUBSCRIPTION_FAMILY.label} — ${modelLabel(principalChatGptModel)}`;
   }
   const colonIndex = value.indexOf(':');
   if (colonIndex === -1) return value;

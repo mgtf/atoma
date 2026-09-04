@@ -316,6 +316,30 @@ export function useAccountModels(active: boolean) {
   });
 }
 
+/**
+ * Personal provider state is account self-care, separate from model pins.
+ * Only an active Codex device flow needs polling; a settled connection is
+ * refreshed explicitly after each mutation.
+ */
+export function useAccountSubscriptions(active: boolean) {
+  return useQuery({
+    queryKey: ['viz', 'account', 'subscriptions'],
+    queryFn: api.accountSubscriptions,
+    enabled: active,
+    staleTime: 1_000,
+    // A device code is transient login material. Once Settings unmounts it
+    // leaves the browser query cache immediately rather than waiting for the
+    // ordinary five-minute garbage-collection window.
+    gcTime: 0,
+    refetchInterval: (query) =>
+      active &&
+      (query.state.data?.codex.state === 'connecting' ||
+        query.state.data?.codexAttempt?.state === 'connecting')
+        ? 1_000
+        : false,
+  });
+}
+
 export function useOrgModels(active: boolean) {
   return useQuery({
     queryKey: ['viz', 'org', 'models'],

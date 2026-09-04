@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -10,7 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve as resolvePath } from 'node:path';
 import { AuthStore } from '../src/auth/store.js';
 import { formatRunStatsEpilogue, type RunStats } from '../src/contracts/runStats.js';
 import { closeStoreHandles } from '../src/core/stores.js';
@@ -410,6 +411,112 @@ describe('project run environment', () => {
     ).toThrow(/cannot use the ChatGPT host subscription/);
   });
 
+  it("binds personal ChatGPT pins to the requesting principal's exact Codex profile", () => {
+    const base = {
+      dbPath: '/control/atoma.db',
+      workspacePath: '/control/workspace',
+      runsPath: '/control/runs',
+      skillsPath: '/control/skills',
+      runId: '3c584a3c-933d-4488-ac44-4cdcc8e66f31',
+      artifactManifestPath: '/control/manifest.json',
+      hostEnv: {
+        ATOMA_LLM: 'zai',
+        ZAI_API_KEY: 'host-zai-key',
+        OPENAI_API_KEY: 'must-not-cross',
+      },
+      orgId: 'org-member',
+      tierModels: {
+        l1: 'zai:glm-4.5-air',
+        l2: 'principal-chatgpt-subscription:gpt-5.6-terra',
+        l3: 'principal-chatgpt-subscription:gpt-5.6-sol',
+      },
+    } as const;
+    const personal = projectRunEnvironment({
+      ...base,
+      principalCodexProfile: {
+        profileId: '741b6cd5-b8c1-4456-9908-2396a9016ae1',
+        homePath: '/private/profiles/member/codex/generation',
+        profilesRoot: '/private/profiles',
+      },
+    });
+    expect(personal.environment['ATOMA_MODEL_L2']).toBe('codex:gpt-5.6-terra');
+    expect(personal.environment['ATOMA_MODEL_L3']).toBe('codex:gpt-5.6-sol');
+    expect(personal.environment['CODEX_HOME']).toBe(
+      resolvePath('/private/profiles/member/codex/generation')
+    );
+    expect(personal.environment['CODEX_SQLITE_HOME']).toBe(
+      personal.environment['CODEX_HOME']
+    );
+    expect(personal.environment['ATOMA_PERSONAL_CODEX_PROFILE_ROOT']).toBe(
+      resolvePath('/private/profiles')
+    );
+    expect(personal.environment['OPENAI_API_KEY']).toBeUndefined();
+    expect(personal.environment['ATOMA_SUBSCRIPTION_TIERS']).toBe('l2,l3');
+    expect(personal.payers.l2).toMatchObject({
+      provider: 'codex',
+      payer: 'principal-subscription',
+      source: 'account',
+    });
+
+    // Revocation is a refusal, never a quiet fall-through to the host key.
+    expect(() => projectRunEnvironment(base)).toThrow(/no longer connected/);
+    expect(() =>
+      projectRunEnvironment({
+        ...base,
+        tierModels: { l1: 'principal-chatgpt-subscription:gpt-5.4-mini', l2: null, l3: null },
+        principalCodexProfile: {
+          profileId: '741b6cd5-b8c1-4456-9908-2396a9016ae1',
+          homePath: '/private/profile',
+          profilesRoot: '/private',
+        },
+      })
+    ).toThrow(/L1 cannot use the requester ChatGPT subscription/);
+  });
+
+  it('refuses personal subscription pins inherited from an org and mixed Codex owners', () => {
+    const base = {
+      dbPath: '/control/atoma.db',
+      workspacePath: '/control/workspace',
+      runsPath: '/control/runs',
+      skillsPath: '/control/skills',
+      runId: '3c584a3c-933d-4488-ac44-4cdcc8e66f31',
+      artifactManifestPath: '/control/manifest.json',
+      hostEnv: {
+        ATOMA_LLM: 'zai',
+        ZAI_API_KEY: 'host-zai-key',
+        ATOMA_HOST_SUBSCRIPTION_ORG: 'org-member',
+      },
+      orgId: 'org-member',
+      principalCodexProfile: {
+        profileId: '741b6cd5-b8c1-4456-9908-2396a9016ae1',
+        homePath: '/private/profile',
+        profilesRoot: '/private',
+      },
+    } as const;
+    expect(() =>
+      projectRunEnvironment({
+        ...base,
+        orgTierModels: {
+          l1: null,
+          l2: 'principal-chatgpt-subscription:gpt-5.6-terra',
+          l3: null,
+        },
+      })
+    ).toThrow(/personal subscription from the org level/);
+
+    expect(() =>
+      projectRunEnvironment({
+        ...base,
+        subscriptionTransport: { principalId: 'platform-admin' },
+        tierModels: {
+          l1: null,
+          l2: 'chatgpt-subscription:gpt-5.6-terra',
+          l3: 'principal-chatgpt-subscription:gpt-5.6-sol',
+        },
+      })
+    ).toThrow(/cannot mix the host and requester ChatGPT subscriptions/);
+  });
+
   it('refuses a host-subscription pin that arrives from the org or the host level', () => {
     // An org default is inherited by every member by construction, and the
     // host env is the third candidate for EVERY tier: a sentinel at either
@@ -707,6 +814,37 @@ describe('ProjectRunCoordinator', () => {
       )
     );
     expect(started.hostPaths.runsPath).toBe(driver.mock.calls[0]?.[0].env?.['ATOMA_RUNS_DIR']);
+  });
+
+  it('exposes whether the requesting principal still owns an active run', async () => {
+    const f = fixture();
+    let settle: ((value: string) => void) | undefined;
+    const driver = vi.fn(
+      () => new Promise<string>((resolve) => {
+        settle = resolve;
+      })
+    );
+    const coordinator = new ProjectRunCoordinator({
+      store: f.store,
+      dbPath: f.dbPath,
+      projectsRoot: f.root,
+      hostEnv: { PATH: process.env['PATH'], ANTHROPIC_API_KEY: 'model-key' },
+      driver,
+      acquireLease: async () => lease(),
+    });
+    await coordinator.start({
+      orgId: f.viewer.orgId,
+      principalId: f.viewer.principalId,
+      projectId: f.project.projectId,
+      request: { idempotencyKey: 'active-owner', goal: 'Wait.' },
+    });
+    expect(coordinator.hasActiveRunForPrincipal(f.viewer.principalId)).toBe(true);
+    expect(coordinator.hasActiveRunForPrincipal(randomUUID())).toBe(false);
+    settle?.(
+      `${formatRunStatsEpilogue({ ...DELIVERED_STATS, outcome: 'failed' })}\n✖ stopped\n`
+    );
+    await coordinator.waitForIdle();
+    expect(coordinator.hasActiveRunForPrincipal(f.viewer.principalId)).toBe(false);
   });
 
   it('emits one terminal onRunFinished event with the requesting principal', async () => {
@@ -1256,6 +1394,55 @@ describe('the subscription-transport door, at the coordinator', () => {
     // An admin on a credentialled transport is an ordinary run: the audit row
     // means "billed to the host subscription", and this one was not.
     expect(seen).toEqual([]);
+  });
+
+  it("resolves a personal Codex generation from the run's requesting principal", async () => {
+    const f = fixture();
+    const lookedUp: string[] = [];
+    const seen: Array<{ principalId: string; payer: string }> = [];
+    const driver = deliveringDriver();
+    const profileHome = join(f.root, 'account-profiles', f.viewer.principalId, 'codex', 'one');
+    const coordinator = new ProjectRunCoordinator({
+      store: f.store,
+      dbPath: f.dbPath,
+      projectsRoot: f.root,
+      hostEnv: { PATH: process.env['PATH'], ANTHROPIC_API_KEY: 'model-key' },
+      driver: driver as unknown as ProjectRunDriver,
+      acquireLease: async () => lease(),
+      tierModelsFor: () => ({
+        l1: null,
+        l2: 'principal-chatgpt-subscription:gpt-5.6-terra',
+        l3: null,
+      }),
+      principalCodexProfileFor: (principalId) => {
+        lookedUp.push(principalId);
+        return {
+          profileId: '741b6cd5-b8c1-4456-9908-2396a9016ae1',
+          homePath: profileHome,
+          profilesRoot: join(f.root, 'account-profiles'),
+        };
+      },
+      onSubscriptionTransport: (info) => {
+        seen.push({ principalId: info.principalId, payer: info.payers.l2.payer });
+      },
+    });
+    await coordinator.start({
+      orgId: f.viewer.orgId,
+      principalId: f.viewer.principalId,
+      projectId: f.project.projectId,
+      request: { idempotencyKey: 'personal-codex', goal: 'Build a clock.' },
+    });
+    expect(lookedUp).toEqual([f.viewer.principalId]);
+    expect(seen).toEqual([
+      { principalId: f.viewer.principalId, payer: 'principal-subscription' },
+    ]);
+    const passed = driver.mock.calls[0]![0] as SpawnRunOptions;
+    expect(passed.env?.['CODEX_HOME']).toBe(resolvePath(profileHome));
+    expect(passed.env?.['ATOMA_PERSONAL_CODEX_PROFILE_ROOT']).toBe(
+      resolvePath(join(f.root, 'account-profiles'))
+    );
+    expect(passed.env?.['ATOMA_MODEL_L2']).toBe('codex:gpt-5.6-terra');
+    await coordinator.waitForIdle();
   });
 });
 

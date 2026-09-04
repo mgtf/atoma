@@ -1,6 +1,6 @@
 # atoma SaaS architecture
 
-> **CURRENT REVIEW: 2026-08-28 · repository state `0a7104b`.**
+> **CURRENT REVIEW: 2026-09-04.**
 >
 > This document is the architecture boundary for hosted atoma. It is organised
 > in four layers on purpose:
@@ -19,7 +19,7 @@
 > system. Do not use the existence of auth tables or projects as evidence that
 > the atom catalogue, trust state or lifecycle ledger are tenant-safe.
 
-## 1. Current state — 2026-08-28
+## 1. Current state — 2026-09-04
 
 ### Status and claim boundary
 
@@ -28,7 +28,8 @@ dedicated-instance gate:
 
 - `AuthStore` persists principals, provider identities, organisations,
   memberships, sessions, invitations, account model pins, organisation model
-  defaults and encrypted organisation provider keys.
+  defaults, encrypted organisation provider keys and non-secret personal
+  subscription receipts.
 - An unknown provider subject logging in without an invitation creates a new
   personal organisation. An invitation joins its target organisation. A
   principal may belong to several organisations and select an active one.
@@ -105,6 +106,7 @@ Current resource scopes:
 | Prefilter decisions | instance SQLite table | Content-addressed and transactionally stored, but disabled for project runs because policy on the cross-org existence signal is not settled. |
 | Provider credentials | organisation or host, injected per run | Organisation keys are encrypted at rest. Selection follows account pin → organisation default → host default; the resolved run receives only its credential snapshot. |
 | Host subscription | operator exception | Whole-run and per-tier regimes exist only through the platform-admin door; the per-tier form is limited to one operator-declared organisation and re-authorised per run. |
+| Personal Codex subscription | principal | `org:member+` connects a private Codex profile. Only runs requested by that principal may resolve its exact profile generation; Codex remains L2/L3-only. |
 | Operator CLI/MCP run corpus | instance operator scope | It remains separate from the gated project corpus and is not exposed as tenant data. |
 
 ### Implemented safeguards
@@ -139,13 +141,17 @@ errors throw `RunnerConfigError` instead of exiting the process. Machine-bound
 transports are refused for tenant work unless the parent explicitly authorised
 the platform-admin host-subscription exception and the child receives the exact
 authorised tier set. `RunPayerLedger` computes the payer for base, L1, L2 and
-L3. Today that full ledger is persisted only when a run touches the host
-subscription; pure organisation-key or host-key attribution remains transient.
+L3. Today that full ledger is persisted when a run touches the host or
+requesting principal's subscription; pure organisation-key or host-key
+attribution remains transient.
 
 Provider login remains identity only. It never grants inference entitlement.
 Per-run organisation or host API-key snapshots and the operator's deliberately
-narrow host-subscription exception are inference funding mechanisms; an end
-user's ChatGPT, Claude or other consumer subscription is not.
+narrow host-subscription exception are inference funding mechanisms. Personal
+Codex connection is a separate, explicit account-self-care flow: credentials
+remain in a principal-private provider profile and only that principal's runs
+may spend it. Personal Claude subscription login remains unavailable pending
+the third-party approval Anthropic requires.
 
 ### Missing production substrate
 
@@ -314,7 +320,11 @@ grant the right to spend budget or execute model-authored code.
 They are never ambient mutable process state. A machine-bound transport is
 operator-only except for the explicit platform-admin, declared-organisation
 host-subscription path, re-authorised per run, re-checked by the child and
-recorded in the payer ledger.
+recorded in the payer ledger, or an exact principal-owned Codex generation
+resolved from the requesting identity. Absence or revocation never falls back
+to a host profile or another payer. Every access to that generation holds the
+same cross-process SQLite lease through provider-child reap, including timeout
+and cancellation paths.
 
 ### Shared-learning construction
 
@@ -519,6 +529,7 @@ resolve through the legacy map below.
 | 2026-08-20 | Auth/projects/GitHub gate landed while registry and trust remained instance-global. | Multi-org control plane is current; it is explicitly not Track B. | commit `4459dc0` and current subsystem contracts |
 | 2026-08-23 | Four-post offer workflow proposed: pre-screen, script attestation, powerless dossier, human approval. | Design only. Project-local learning, its independent first step, later landed. | [platform skill offer review](platform-skill-offer-review-2026-08-23.md), [session snapshot](decided-not-built-2026-08-23.md) |
 | 2026-08-27–28 | Encrypted BYO keys and per-tier model precedence landed. A narrow operator host-subscription exception was decided and implemented. | Current control-plane behavior; no consumer-subscription passthrough. | [subscription decision](subscription-per-tier-design-2026-08-28.md), commit `6a033b3` |
+| 2026-09-04 | Principal-scoped Codex device login, private provider profiles and personal payer rows landed. | ChatGPT personal subscriptions are requester-only and L2/L3-only; personal Claude login remains blocked pending Anthropic approval. | `src/auth/subscriptionProfiles.ts`, `src/contracts/runPayers.ts` |
 | 2026-08-28 | SaaS deployment selected Docker images plus one in-house launcher; Kubernetes deferred behind the interface. | Decided, not implemented. | [launcher decision](deployment-docker-launcher-2026-08-28.md) |
 
 <a id="3-prerequisite-f1-the-sandbox-is-not-an-isolation-boundary"></a>

@@ -62,6 +62,7 @@ sudo useradd --system --create-home --home-dir /home/atoma/deploy-user --shell /
 sudo install -d -o root -g root -m 0755 /home/atoma /home/atoma/releases /etc/atoma
 sudo install -d -o root -g atoma -m 0750 /home/atoma/config
 sudo install -d -o atoma -g atoma -m 0750 /home/atoma/state /home/atoma/state/runs /home/atoma/state/skills /home/atoma/state/projects /home/atoma/state/workspaces
+sudo install -d -o atoma -g atoma -m 0700 /home/atoma/state/account-profiles
 sudo install -d -o root -g root -m 0711 /home/atoma/docker
 sudo usermod -aG docker atoma
 
@@ -120,6 +121,7 @@ ATOMA_LEDGER_DB=/home/atoma/state/atoma.db
 ATOMA_RUNS_DIR=/home/atoma/state/runs
 ATOMA_SKILLS_DIR=/home/atoma/state/skills
 ATOMA_PROJECTS_ROOT=/home/atoma/state/projects
+ATOMA_ACCOUNT_PROFILES_ROOT=/home/atoma/state/account-profiles
 ATOMA_BUILD_WORKSPACE=/home/atoma/state/workspaces/build
 ATOMA_MCP_RUN_LOCK=/home/atoma/state/mcp-run-lock.db
 ATOMA_DEPLOY_LOCK_PATH=/home/atoma/state/deploy.lock
@@ -128,10 +130,10 @@ ATOMA_DEPLOY_LOCK_PATH=/home/atoma/state/deploy.lock
 ### Z.ai L1 with ChatGPT supervisors
 
 For the recommended production split, keep L1 on a credentialled Z.ai
-transport and offer the operator's ChatGPT subscription only on L2/L3. Put
-the Z.ai key in the root-owned host file above — not in a GitHub variable or
-secret — together with the organisation allowed to spend the machine-bound
-subscription:
+transport and use ChatGPT only on L2/L3. Put the Z.ai key in the root-owned
+host file above — not in a GitHub variable or secret. The optional
+`ATOMA_HOST_SUBSCRIPTION_ORG` declaration below is needed only if the platform
+admin will also use the machine's host Codex profile:
 
 ```dotenv
 PATH=/home/atoma/state/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -144,15 +146,39 @@ ATOMA_HOST_SUBSCRIPTION_ORG=<organisation-id>
 
 The organisation id is shown in the Settings organisation card. Do not set
 `ATOMA_MODEL_L2` or `ATOMA_MODEL_L3` to `codex:` in this host file: hosted
-project runs deliberately accept a machine subscription only from a platform
-admin's own account choice, re-authorised on every run.
+project runs accept Codex only from a guarded account choice. That choice is
+resolved again for every run as either the platform admin's host exception or
+the requesting member's exact personal profile.
 
-Install Codex under the service account's real home, then use device-code
-login from the SSH session opened as `mgf`:
+Install Codex under the service account's real home. This binary serves both
+the operator-only host profile and each member's isolated personal profile:
 
 ```bash
 sudo -u atoma env HOME=/home/atoma/state sh -c \
   'curl -fsSL https://chatgpt.com/codex/install.sh | sh'
+```
+
+After deploying this version, every `org:owner`, `org:admin` or `org:member`
+can open **Settings → Personal subscriptions → Codex**, start the device-code
+flow, and authenticate their own ChatGPT subscription in their browser. Atoma
+stores the provider-owned credentials only below
+`ATOMA_ACCOUNT_PROFILES_ROOT`, in a private profile belonging to that
+principal. The database and audit journal contain only a non-secret connection
+receipt and provider-name lifecycle events, respectively. A run resolves the
+profile of the member who requested it; a missing or disconnected profile
+fails explicitly and never falls back to the host. App-server checks and run
+children share a crash-safe SQLite lease beside each profile, so a restart or
+overlapping process cannot rotate the same `auth.json` concurrently.
+
+Codex is a supervisor transport, so personal ChatGPT choices are offered only
+on L2/L3. Keep L1 on Z.ai, Anthropic or another credentialled tool-capable
+transport.
+
+The commands below are optional and create the legacy **host subscription**
+used only by the platform-admin exception. They are not needed for members'
+personal connections:
+
+```bash
 
 sudo -u atoma env \
   HOME=/home/atoma/state \
@@ -165,7 +191,7 @@ sudo -u atoma env \
   codex login status
 ```
 
-Open the URL printed by the second command on your own browser and enter its
+Open the URL printed by the device-login command in your own browser and enter its
 one-time code. Device-code login may first need to be enabled in ChatGPT
 security settings. The resulting credentials live under the service account's
 Codex home (normally `/home/atoma/state/.codex`); treat them like a password,
@@ -173,17 +199,19 @@ never copy them into the repository or GitHub. This follows OpenAI's
 [Codex CLI installation](https://learn.chatgpt.com/docs/codex/cli) and
 [headless authentication](https://learn.chatgpt.com/docs/auth) guidance.
 
-After a release containing this support is deployed, restart Atoma, sign in
-to the web app as the platform admin, and choose:
+For the optional host profile, sign in as the platform admin and choose:
 
 - L1: `Z.ai — GLM-4.5 Air` (or inherit the host default);
 - L2: `ChatGPT (host subscription) — GPT-5.6-Terra`;
 - L3: `ChatGPT (host subscription) — GPT-5.6-Sol`.
 
 Claude CLI remains available as a separate host-subscription family. The
-ChatGPT route is intended only for a trusted self-hosted operator account;
-OpenAI recommends API-key or enterprise access-token authentication for
-general programmatic/public automation.
+Settings page does not offer personal Claude subscription login: Anthropic
+requires prior approval before a third-party product may offer `claude.ai`
+login or route Free/Pro/Max subscription credentials. The disabled card makes
+that boundary visible until such approval exists. See Anthropic's
+[Agent SDK authentication boundary](https://code.claude.com/docs/en/agent-sdk#authentication)
+and [legal and compliance guidance](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use).
 
 ```bash
 sudo chown root:atoma /home/atoma/config/atoma.env
