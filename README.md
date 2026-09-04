@@ -513,8 +513,9 @@ What does not: full tenant isolation or a hosted service. Authenticated projects
 workspaces, traces and project skills are scoped to the viewer's active organisation; the
 platform admin can read across organisations. The atom catalogue, atom trust and lifecycle
 ledger remain instance-global, however, so the control plane is not yet safe for mutually
-untrusted organisations. This is a private repository, shared deliberately rather than
-published. The dated current state, invariants and Track A/Track B roadmap are reconciled in
+untrusted organisations. The repository is public and source-available so that the sandbox,
+the egress path and the cost accounting can be audited; the hosted service does not exist yet.
+The dated current state, invariants and Track A/Track B roadmap are reconciled in
 [`docs/saas-architecture.md`](docs/saas-architecture.md).
 
 ![atoma's subsystems and the paths between them, drawn from the AGENTS.md subsystem map](docs/architecture.svg)
@@ -537,6 +538,28 @@ that exists in `src/` and not in this picture fails <code>npm run docs:check</co
 <!-- atoma:facts:end -->
 
 **[→ How it works: components, flows and diagrams](docs/how-it-works.md)**
+
+## License
+
+atoma is **source-available** under the
+[Functional Source License, FSL-1.1-ALv2](LICENSE.md). You may use, modify and
+redistribute it for any purpose except a *Competing Use*: offering it, or a
+product built on it, as a commercial product or service that competes with
+atoma or with a service its author offers on top of it. Internal production use,
+non-commercial education and research, and professional services around it are
+expressly permitted. Each release becomes available under the Apache License 2.0
+two years after it is published. This is not an OSI-approved open-source licence;
+see [fsl.software](https://fsl.software) for the rationale behind that choice.
+
+Contributions are welcome under the [CLA](CLA.md); start with
+[`CONTRIBUTING.md`](CONTRIBUTING.md). Vulnerabilities go through
+[`SECURITY.md`](SECURITY.md), not the issue tracker.
+
+The model transports are your own accounts under each provider's terms: the
+Anthropic API and Claude Code, OpenAI Codex, Z.ai and Ollama are called with the
+credentials you supply, and the `@anthropic-ai/claude-agent-sdk` dependency is
+distributed by Anthropic under its own licence, not under this one. The 3D assets
+under `src/viz/public/` carry their CC0 and CC-BY-4.0 notices beside the files.
 
 ---
 

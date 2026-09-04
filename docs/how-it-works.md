@@ -465,7 +465,8 @@ Recorded so nobody has to discover it in a demo:
   trust and lifecycle ledger remain instance-global, so this is not yet safe for mutually
   untrusted organisations; see the dated boundary in
   [`saas-architecture.md`](saas-architecture.md).
-- **No hosted service.** This is a private repository, not a published project.
+- **No hosted service.** The repository is public and source-available under the
+  [FSL-1.1-ALv2](../LICENSE.md); nothing runs it for you yet.
 - **The browser-based family cannot reach zero cost yet.** Compiled scripts have no browser, so
   the compiler correctly refuses to compile web-validation recipes. Every compiled script in the
   catalogue belongs to the command-line and documentation bucket; other families borrow them

@@ -4,6 +4,11 @@
 
 ### Added
 
+- The repository is public under the Functional Source License (FSL-1.1-ALv2):
+  `LICENSE.md`, a `license` field in `package.json`, a README licence section,
+  `CONTRIBUTING.md`, a contributor licence agreement (`CLA.md`) and
+  `SECURITY.md`. Release archives now carry the licence and the security
+  policy.
 - The GPU visualizer now includes an in-product Docs surface, a grouped left
   navigation rail, and account Settings reached only from the account menu.
   Platform admins are offered the curated platform-alert subscription at

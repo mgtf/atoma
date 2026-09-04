@@ -132,7 +132,7 @@ They need separate `node_modules` (native modules, above).
 ### Windows traps worth knowing
 
 - **Two different `$HOME`s.** Git Bash reports `MINGW64 ~/dev/atoma` with
-  `HOME=/c/Users/mgf`; the distro reports `HOME=/home/mgf`. Same-looking `~`,
+  `HOME=/c/Users/<you>`; the distro reports `HOME=/home/<you>`. Same-looking `~`,
   two checkouts and two SSH keystores. Copy the key GitHub accepts into
   `~/.ssh` inside WSL2 (mode 600) if you push from there.
 - **The viz is reachable from the Windows browser.** WSL2 forwards
