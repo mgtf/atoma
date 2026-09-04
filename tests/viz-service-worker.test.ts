@@ -136,14 +136,16 @@ describe('viz service worker cache boundary', () => {
     harness.caches.keys.mockResolvedValueOnce([
       'atoma-viz-shell-v1',
       'atoma-viz-shell-v2',
+      'atoma-viz-shell-v3',
       'unrelated-cache',
     ]);
 
     await dispatchLifecycle(harness, 'activate');
 
-    expect(harness.caches.delete).toHaveBeenCalledTimes(2);
+    expect(harness.caches.delete).toHaveBeenCalledTimes(3);
     expect(harness.caches.delete).toHaveBeenCalledWith('atoma-viz-shell-v1');
     expect(harness.caches.delete).toHaveBeenCalledWith('atoma-viz-shell-v2');
+    expect(harness.caches.delete).toHaveBeenCalledWith('atoma-viz-shell-v3');
     expect(harness.claim).toHaveBeenCalledOnce();
   });
 
@@ -216,7 +218,7 @@ describe('viz service worker cache boundary', () => {
     });
 
     expect(await response).toBe(cached);
-    expect(harness.caches.open).toHaveBeenCalledWith('atoma-viz-shell-v3');
+    expect(harness.caches.open).toHaveBeenCalledWith('atoma-viz-shell-v4');
     expect(harness.cache.match).toHaveBeenCalledWith('/');
   });
 
