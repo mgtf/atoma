@@ -124,14 +124,14 @@ export function McpAccessPanel({
         </article>
       ) : (
         <form
-          className="gpu-settings-form gpu-mcp-create"
+          className="gpu-mcp-create"
           onSubmit={(event) => {
             event.preventDefault();
             const trimmed = label.trim();
             void onCreate(trimmed.length > 0 ? trimmed : t('settings.mcpDefaultLabel')).then(() => setLabel(''));
           }}
         >
-          <label className="gpu-settings-username">
+          <label className="gpu-mcp-label">
             <span>{t('settings.mcpLabel')}</span>
             <input
               className="gpu-dom-input"

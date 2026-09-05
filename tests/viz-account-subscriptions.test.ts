@@ -4,7 +4,7 @@ import '@testing-library/jest-dom/vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
-import { createElement } from 'react';
+import { createElement, type ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PRINCIPAL_CHATGPT_SUBSCRIPTION_FAMILY } from '../src/core/providerCatalog.js';
 import {
@@ -108,22 +108,26 @@ function panel(overrides: Partial<PersonalSubscriptionsPanelProps> = {}) {
   return render(createElement(PersonalSubscriptionsPanel, props));
 }
 
-function orgModelsForm(viewerRole: string, enabled = true) {
+function orgModelsForm(viewerRole: string, enabled = true, children?: ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     createElement(
       QueryClientProvider,
       { client },
-      createElement(OrgModelsForm, {
-        t: (key: string, vars?: Record<string, unknown>) => translate('en', key, vars),
-        locale: 'en',
-        enabled,
-        canManageOrg: false,
-        platformAdmin: false,
-        organisation: organisation(viewerRole),
-        overlaysInert: false,
-        onError: vi.fn(),
-      })
+      createElement(
+        OrgModelsForm,
+        {
+          t: (key: string, vars?: Record<string, unknown>) => translate('en', key, vars),
+          locale: 'en',
+          enabled,
+          canManageOrg: false,
+          platformAdmin: false,
+          organisation: organisation(viewerRole),
+          overlaysInert: false,
+          onError: vi.fn(),
+        },
+        children
+      )
     )
   );
 }
@@ -188,6 +192,19 @@ describe('personal subscription settings', () => {
       expect(subscriptions).not.toHaveBeenCalled();
     }
   );
+
+  it('renders its children inside the Settings frame, above the subscriptions', async () => {
+    vi.spyOn(api, 'accountModels').mockResolvedValue(ACCOUNT_MODELS);
+    vi.spyOn(api, 'orgModels').mockResolvedValue(ORG_MODELS);
+    vi.spyOn(api, 'accountSubscriptions').mockResolvedValue(DISCONNECTED);
+    const { container } = orgModelsForm('org:member', true, createElement('p', { 'data-testid': 'settings-child' }, 'child'));
+
+    const child = await screen.findByTestId('settings-child');
+    const frame = container.querySelector('.gpu-org-models-form');
+    expect(frame).not.toBeNull();
+    expect(frame!.contains(child)).toBe(true);
+    expect(frame!.firstElementChild).toBe(child);
+  });
 
   it('requests the self-care subscription endpoint for an organisation member', async () => {
     vi.spyOn(api, 'accountModels').mockResolvedValue(ACCOUNT_MODELS);

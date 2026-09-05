@@ -1186,8 +1186,6 @@ function GpuAppContent({
             state.view === 'settings' &&
             authSnapshot !== null &&
             authSnapshot.viewer.activeOrganisation !== null ? (
-              <>
-              <McpAccess t={t} locale={state.locale} onError={setAccountError} />
               <OrgModelsForm
                 t={t}
                 locale={state.locale}
@@ -1203,8 +1201,9 @@ function GpuAppContent({
                   state.accountMenuOpen || state.localeMenuOpen || state.notificationsMenuOpen
                 }
                 onError={setAccountError}
-              />
-              </>
+              >
+                <McpAccess t={t} locale={state.locale} onError={setAccountError} />
+              </OrgModelsForm>
             ) : null
           }
         />
