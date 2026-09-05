@@ -3601,7 +3601,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
     }
     const authStore = AUTH.store;
     if (pathname === '/api/tokens' && req.method === 'GET') {
-      sendJson(res, 200, { mode: 'bearer', tokens: authStore.listApiTokens(viewer.principalId), mcpUrl: new URL('/mcp', AUTH_RUNTIME!.publicOrigin).href });
+      sendJson(res, 200, { mode: 'bearer', tokens: authStore.listApiTokens(viewer.principalId), mcpUrl: new URL('/mcp', AUTH_RUNTIME.publicOrigin).href });
       return;
     }
     if (pathname === '/api/tokens' && req.method === 'POST') {
@@ -3630,7 +3630,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         summary: `API token created for the MCP (${eventLabel(typeof body.label === 'string' ? body.label : 'MCP token')})`,
         detail: { tokenId: minted.tokenId },
       });
-      sendJson(res, 201, { ...minted, mcpUrl: new URL('/mcp', AUTH_RUNTIME!.publicOrigin).href });
+      sendJson(res, 201, { ...minted, mcpUrl: new URL('/mcp', AUTH_RUNTIME.publicOrigin).href });
       return;
     }
     const revoke = pathname.match(/^\/api\/tokens\/([^/]+)$/);
