@@ -28,10 +28,17 @@ import type {
 } from './types.js';
 import { redirectIfAuthenticationRequired } from './session-guard.js';
 
+export class ApiHttpError extends Error {
+  constructor(readonly status: number, path: string, detail?: string) {
+    super(detail ?? `HTTP ${status} for ${path}`);
+    this.name = 'ApiHttpError';
+  }
+}
+
 export async function fetchJson<T>(path: string): Promise<T> {
   const response = await fetch(path);
   redirectIfAuthenticationRequired(response.status);
-  if (!response.ok) throw new Error(`HTTP ${response.status} for ${path}`);
+  if (!response.ok) throw new ApiHttpError(response.status, path);
   return (await response.json()) as T;
 }
 
@@ -182,7 +189,7 @@ export const api = {
       headers: { accept: 'application/json' },
     });
     redirectIfAuthenticationRequired(response.status);
-    if (!response.ok) throw new Error(`HTTP ${response.status} for tokens`);
+    if (!response.ok) throw new ApiHttpError(response.status, '/api/tokens');
     return (await response.json()) as { revoked: boolean };
   },
   orgModels: () => fetchJson<VizOrgModels>('/api/org/models'),
@@ -260,6 +267,6 @@ async function assertMutationSucceeded(response: Response, path: string): Promis
     } catch {
       // Keep the status line when the body is not JSON.
     }
-    throw new Error(detail);
+    throw new ApiHttpError(response.status, path, detail);
   }
 }

@@ -3580,6 +3580,82 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
     return;
   }
 
+  // API TOKENS — a principal's bearer for the MCP, self-scoped from the
+  // session, bound to the ACTIVE organisation, revocable, journaled at both
+  // ends. The plaintext is returned once by the POST and never again.
+  if (pathname === '/api/tokens' || pathname.startsWith('/api/tokens/')) {
+    if (!AUTH_RUNTIME || !AUTH?.store) {
+      if (pathname === '/api/tokens' && req.method === 'GET') {
+        sendJson(res, 200, {
+          mode: 'operator', tokens: [], mcpUrl: `http://127.0.0.1:${cli.port}/mcp`,
+        });
+      } else {
+        sendJson(res, 409, { error: 'API tokens require an authenticated deployment' });
+      }
+      return;
+    }
+    const viewer = AUTH.resolve(req);
+    if (!viewer) {
+      sendJson(res, 401, { error: 'authentication required' });
+      return;
+    }
+    const authStore = AUTH.store;
+    if (pathname === '/api/tokens' && req.method === 'GET') {
+      sendJson(res, 200, { mode: 'bearer', tokens: authStore.listApiTokens(viewer.principalId), mcpUrl: new URL('/mcp', AUTH_RUNTIME!.publicOrigin).href });
+      return;
+    }
+    if (pathname === '/api/tokens' && req.method === 'POST') {
+      if (!sameOrigin(req, res)) return;
+      if (!roleAtLeast(viewer.role, 'org:viewer')) {
+        sendJson(res, 403, { error: 'organisation membership required' });
+        return;
+      }
+      let body: { label?: unknown } = {};
+      try {
+        body = JSON.parse((await readBodyBounded(req, 2_048)).toString('utf8') || '{}') as { label?: unknown };
+      } catch {
+        sendJson(res, 400, { error: 'request body is not valid JSON' });
+        return;
+      }
+      const minted = authStore.createApiToken({
+        principalId: viewer.principalId,
+        orgId: viewer.orgId,
+        label: typeof body.label === 'string' ? body.label : 'MCP token',
+      });
+      emit({
+        kind: 'token.created',
+        actorType: 'principal',
+        actorId: viewer.principalId,
+        orgId: viewer.orgId,
+        summary: `API token created for the MCP (${eventLabel(typeof body.label === 'string' ? body.label : 'MCP token')})`,
+        detail: { tokenId: minted.tokenId },
+      });
+      sendJson(res, 201, { ...minted, mcpUrl: new URL('/mcp', AUTH_RUNTIME!.publicOrigin).href });
+      return;
+    }
+    const revoke = pathname.match(/^\/api\/tokens\/([^/]+)$/);
+    if (revoke && req.method === 'DELETE') {
+      if (!sameOrigin(req, res)) return;
+      const tokenId = decodePathComponent(revoke[1]!);
+      const revoked = tokenId ? authStore.revokeApiToken(viewer.principalId, tokenId) : false;
+      if (revoked) {
+        emit({
+          kind: 'token.revoked',
+          actorType: 'principal',
+          actorId: viewer.principalId,
+          orgId: viewer.orgId,
+          summary: 'API token revoked',
+          detail: { tokenId },
+        });
+      }
+      sendJson(res, revoked ? 200 : 404, { revoked });
+      return;
+    }
+    res.writeHead(405, { allow: 'GET, POST, DELETE', 'content-length': '0', 'cache-control': 'no-store' });
+    res.end();
+    return;
+  }
+
   if (PROJECTS_RUNTIME && AUTH) {
     const viewer = AUTH.resolve(req);
     if (pathname === '/api/github/installations') {
@@ -3589,71 +3665,6 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         return;
       }
       sendJson(res, 200, PROJECTS_RUNTIME.projects.listInstallations(viewer));
-      return;
-    }
-
-    // API TOKENS — a principal's bearer for the MCP, self-scoped from the
-    // session, bound to the ACTIVE organisation, revocable, journaled at both
-    // ends. The plaintext is returned once by the POST and never again.
-    if (pathname === '/api/tokens' || pathname.startsWith('/api/tokens/')) {
-      if (!viewer) {
-        sendJson(res, 401, { error: 'authentication required' });
-        return;
-      }
-      const authStore = AUTH.store!;
-      if (pathname === '/api/tokens' && req.method === 'GET') {
-        sendJson(res, 200, { tokens: authStore.listApiTokens(viewer.principalId), mcpUrl: new URL('/mcp', AUTH_RUNTIME!.publicOrigin).href });
-        return;
-      }
-      if (pathname === '/api/tokens' && req.method === 'POST') {
-        if (!sameOrigin(req, res)) return;
-        if (!roleAtLeast(viewer.role, 'org:viewer')) {
-          sendJson(res, 403, { error: 'organisation membership required' });
-          return;
-        }
-        let body: { label?: unknown } = {};
-        try {
-          body = JSON.parse((await readBodyBounded(req, 2_048)).toString('utf8') || '{}') as { label?: unknown };
-        } catch {
-          sendJson(res, 400, { error: 'request body is not valid JSON' });
-          return;
-        }
-        const minted = authStore.createApiToken({
-          principalId: viewer.principalId,
-          orgId: viewer.orgId,
-          label: typeof body.label === 'string' ? body.label : 'MCP token',
-        });
-        emit({
-          kind: 'token.created',
-          actorType: 'principal',
-          actorId: viewer.principalId,
-          orgId: viewer.orgId,
-          summary: `API token created for the MCP (${eventLabel(typeof body.label === 'string' ? body.label : 'MCP token')})`,
-          detail: { tokenId: minted.tokenId },
-        });
-        sendJson(res, 201, { ...minted, mcpUrl: new URL('/mcp', AUTH_RUNTIME!.publicOrigin).href });
-        return;
-      }
-      const revoke = pathname.match(/^\/api\/tokens\/([^/]+)$/);
-      if (revoke && req.method === 'DELETE') {
-        if (!sameOrigin(req, res)) return;
-        const tokenId = decodePathComponent(revoke[1]!);
-        const revoked = tokenId ? authStore.revokeApiToken(viewer.principalId, tokenId) : false;
-        if (revoked) {
-          emit({
-            kind: 'token.revoked',
-            actorType: 'principal',
-            actorId: viewer.principalId,
-            orgId: viewer.orgId,
-            summary: 'API token revoked',
-            detail: { tokenId },
-          });
-        }
-        sendJson(res, revoked ? 200 : 404, { revoked });
-        return;
-      }
-      res.writeHead(405, { allow: 'GET, POST, DELETE', 'content-length': '0', 'cache-control': 'no-store' });
-      res.end();
       return;
     }
 

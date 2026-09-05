@@ -36,6 +36,11 @@ export default defineConfig({
     port: devPort,
     strictPort: true,
     proxy: {
+      '/mcp': {
+        target: `http://127.0.0.1:${apiPort}`,
+        // Local MCP pins the API Host; gated MCP pins the public origin.
+        changeOrigin: !['1', 'true'].includes(process.env['ATOMA_VIZ_AUTH'] ?? ''),
+      },
       '/api': `http://127.0.0.1:${apiPort}`,
       '/auth': `http://127.0.0.1:${apiPort}`,
       '/webhooks': `http://127.0.0.1:${apiPort}`,

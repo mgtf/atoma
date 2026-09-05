@@ -1202,7 +1202,12 @@ function GpuAppContent({
                 }
                 onError={setAccountError}
               >
-                <McpAccess t={t} locale={state.locale} onError={setAccountError} />
+                <McpAccess
+                  key={`${authSnapshot.viewer.principalId}:${authSnapshot.viewer.activeOrganisation.id}`}
+                  t={t}
+                  locale={state.locale}
+                  onError={setAccountError}
+                />
               </OrgModelsForm>
             ) : null
           }

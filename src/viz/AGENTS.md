@@ -521,7 +521,9 @@ npm run viz:mark-turn:analyze
   organisation; the plaintext leaves the server once, in the POST response.
   The Settings panel `McpAccessPanel` is that route's client: address,
   procedure, token shown once with the Claude Code line, list and revoke.
-  It never re-reads a secret and shows only labels and dates afterwards.
+  It never re-reads a secret and resets when the active identity/org changes.
+  GET also describes ungated operator access (no token); token mutations there
+  return 409. A failed refresh preserves a newly minted secret for copying.
 - `/api/account/subscriptions*` is self-scoped from the resolved session and
   never accepts a principal id. Status is secret-free; device login material
   is memory-only; connect/cancel/disconnect are same-origin and require

@@ -40,6 +40,11 @@ const freePort = async () =>
  * completion, and a deliberately refused call.
  */
 const mcpSmoke = async (base) => {
+  const accessResponse = await fetch(`${base}/api/tokens`);
+  const access = await accessResponse.json();
+  if (!accessResponse.ok || access.mode !== 'operator' || access.mcpUrl !== `${base}/mcp`) {
+    throw new Error('compiled MCP access discovery did not publish the operator URL');
+  }
   let sessionId = null;
   let nextId = 1;
   const call = async (method, params = {}) => {

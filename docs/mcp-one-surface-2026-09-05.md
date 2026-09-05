@@ -69,3 +69,49 @@ Host pinning (DNS-rebinding protection) is kept for the browser case.
   AI agent (MCP)" panel in Settings (`src/viz/client-gl/McpAccessPanel.tsx`)
   shows the address, the procedure, mints a token shown once with the exact
   Claude Code line, and lists and revokes the viewer's tokens.
+
+## Settings connection and deployment troubleshooting
+
+Settings registers a **Streamable HTTP client with a Bearer token**. It does
+not perform OAuth for the MCP and a web session cookie cannot authenticate
+that client. A client offering only an OAuth sign-in flow cannot use this
+procedure. Select the organisation first, create one token per client, copy
+it while shown, and configure the public `/mcp` URL in the client.
+
+The Claude Code command is for a bash/zsh/WSL terminal on the user's machine,
+uses private user scope, and quotes the URL and Authorization header as shell
+arguments. Verify with `/mcp`, then ask for a read action such as listing
+projects. Other clients need Streamable HTTP plus either an Authorization
+header (`Bearer <token>`) or a dedicated Bearer field (token only). Never
+commit the secret to shared client configuration. The command and verification
+steps follow the [Claude Code MCP reference](https://code.claude.com/docs/en/mcp).
+
+Failure cases have different remedies:
+
+- **GET `/api/tokens` returns 404:** this route is present in the current API.
+  Check that the web client and API are the same release and that the reverse
+  proxy forwards `/api/tokens` to that API. Settings offers Retry and disables
+  creation until discovery succeeds; an error is never presented as an empty
+  token list. Token routes are independent of project-route registration.
+- **Local mode without authentication:** GET returns `mode: operator`, an
+  empty list and the API's loopback MCP URL. No token is required; POST/DELETE
+  return 409. The client must run on the same machine. Gated discovery returns
+  `mode: bearer` and the configured public origin, never the request's Host.
+- **Initial `/mcp` returns 404:** check the complete URL and proxy routing.
+  Vite forwards `/mcp`, preserving the public Host when authentication is on
+  and using the API Host on loopback so MCP's Host check remains effective.
+- **An established MCP session returns 404:** reconnect and initialize again;
+  sessions are in memory and a restart or idle expiry forgets their IDs.
+- **401/403:** check the token or current organisation role respectively.
+  Revocation takes effect on the next MCP request. OAuth discovery errors
+  require a client configured for Bearer authentication, not a website login.
+
+A successful token mutation followed by a failed list refresh is reported as
+such. The new token and URL remain copyable; a revoked entry stays removed.
+Switching the active identity or organisation remounts MCP access and clears
+the one-time secret. Last-used is evidence of valid token presentation, not
+proof of a successful tool call.
+
+Regression coverage includes the real Settings fetch lifecycle, the actual
+HTTP token-create → MCP initialize/tool-list → revoke flow, and the compiled
+operator discovery smoke. No external model request is needed for these checks.

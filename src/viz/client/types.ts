@@ -405,6 +405,8 @@ export interface VizApiToken {
 }
 
 export interface VizApiTokens {
+  /** Older gated servers omit this field. Local operators need no token. */
+  mode?: 'bearer' | 'operator';
   tokens: VizApiToken[];
   /** The MCP address to register, on this deployment's public origin. */
   mcpUrl: string;

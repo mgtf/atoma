@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { api } from '../client/data-api.js';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { api, ApiHttpError } from '../client/data-api.js';
 import { formatDateTime } from '../client/date-format.js';
 import type { VizApiToken, VizApiTokens } from '../client/types.js';
 
@@ -20,6 +20,8 @@ export interface McpAccessPanelProps {
   readonly t: (key: string, vars?: Record<string, unknown>) => string;
   readonly locale: string;
   readonly mcpUrl: string | null;
+  readonly mode?: 'bearer' | 'operator';
+  readonly onRetry: () => Promise<void>;
   readonly tokens: readonly VizApiToken[];
   readonly loading: boolean;
   readonly error: string | null;
@@ -33,14 +35,31 @@ export interface McpAccessPanelProps {
   readonly onDismissMinted: () => void;
 }
 
-export function claudeMcpCommand(mcpUrl: string, token: string): string {
-  return `claude mcp add atoma --transport http ${mcpUrl} --header "Authorization: Bearer ${token}"`;
+/** POSIX shell quoting keeps a deployment URL from becoming shell syntax. */
+function shellQuote(value: string): string {
+  return "'" + value.replaceAll("'", "'\"'\"'") + "'";
+}
+
+export function claudeMcpCommand(mcpUrl: string, token?: string): string {
+  const command = `claude mcp add --transport http --scope user atoma ${shellQuote(mcpUrl)}`;
+  return token ? `${command} --header ${shellQuote(`Authorization: Bearer ${token}`)}` : command;
+}
+
+function errorMessage(failure: unknown, t: McpAccessPanelProps['t']): string {
+  if (failure instanceof ApiHttpError) {
+    if (failure.status === 404) return t('settings.mcpApiMissing');
+    if (failure.status === 401) return t('settings.mcpSignInAgain');
+    if (failure.status === 403) return t('settings.mcpForbidden');
+  }
+  return t('settings.mcpUnavailable');
 }
 
 export function McpAccessPanel({
   t,
   locale,
   mcpUrl,
+  mode = 'bearer',
+  onRetry,
   tokens,
   loading,
   error,
@@ -53,19 +72,25 @@ export function McpAccessPanel({
   onDismissMinted,
 }: McpAccessPanelProps) {
   const [label, setLabel] = useState('');
+  const operator = mode === 'operator';
+  const ready = !loading && !error && Boolean(mcpUrl);
   const live = tokens.filter((token) => token.revokedAt === null);
-  const command = minted && mcpUrl ? claudeMcpCommand(mcpUrl, minted.token) : null;
+  const command = mcpUrl && (minted || operator)
+    ? claudeMcpCommand(mcpUrl, operator ? undefined : minted?.token) : null;
 
   return (
     <section className="gpu-mcp-access" aria-labelledby="mcp-access-title">
       <p id="mcp-access-title" className="gpu-org-models-title">
         {t('settings.mcpTitle')}
       </p>
-      <p className="gpu-org-models-hint">{t('settings.mcpHint')}</p>
+      <p className="gpu-org-models-hint">{t(operator ? 'settings.mcpLocalHint' : 'settings.mcpHint')}</p>
       {error ? (
-        <p className="gpu-subscription-message gpu-subscription-error" role="alert">
-          {t('settings.mcpLoadFailed')}: {error}
-        </p>
+        <div className="gpu-subscription-message gpu-subscription-error" role="alert">
+          <p>{t('settings.mcpLoadFailed')}: {error}</p>
+          <button type="button" disabled={busy || loading} onClick={() => void onRetry()}>
+            {t('settings.mcpRetry')}
+          </button>
+        </div>
       ) : null}
 
       <article className="gpu-subscription-card">
@@ -82,28 +107,36 @@ export function McpAccessPanel({
         ) : (
           <p>{loading ? t('settings.subscriptionState.loading') : t('settings.mcpAddressUnknown')}</p>
         )}
-        <ol className="gpu-mcp-steps">
-          <li>{t('settings.mcpStepCreate')}</li>
-          <li>{t('settings.mcpStepCopy')}</li>
-          <li>{t('settings.mcpStepRegister')}</li>
-        </ol>
+        {!operator ? (
+          <ol className="gpu-mcp-steps">
+            <li>{t('settings.mcpStepCreate')}</li>
+            <li>{t('settings.mcpStepCopy')}</li>
+            <li>{t('settings.mcpStepRegister')}</li>
+          </ol>
+        ) : <p>{t('settings.mcpLocalSteps')}</p>}
+        <p>{t('settings.mcpTransportHint')}</p>
+        {!operator ? <p>{t('settings.mcpCompatibility')}</p> : null}
       </article>
 
-      {minted ? (
+      {minted || (operator && command) ? (
         <article className="gpu-subscription-card gpu-mcp-minted" role="status" aria-live="polite">
-          <div className="gpu-subscription-card-head">
-            <span className="gpu-subscription-name">{t('settings.mcpMintedTitle')}</span>
-            <span className="gpu-subscription-state" data-state="connected">
-              {t('settings.mcpMintedOnce')}
-            </span>
-          </div>
-          <p>{t('settings.mcpMintedHint')}</p>
-          <div className="gpu-subscription-code-row">
-            <code data-testid="mcp-token">{minted.token}</code>
-            <button type="button" disabled={busy} onClick={() => void onCopy(minted.token)}>
-              {t('settings.mcpCopy')}
-            </button>
-          </div>
+          {minted ? (
+            <>
+              <div className="gpu-subscription-card-head">
+                <span className="gpu-subscription-name">{t('settings.mcpMintedTitle')}</span>
+                <span className="gpu-subscription-state" data-state="connected">
+                  {t('settings.mcpMintedOnce')}
+                </span>
+              </div>
+              <p>{t('settings.mcpMintedHint')}</p>
+              <div className="gpu-subscription-code-row">
+                <code data-testid="mcp-token">{minted.token}</code>
+                <button type="button" disabled={busy} onClick={() => void onCopy(minted.token)}>
+                  {t('settings.mcpCopy')}
+                </button>
+              </div>
+            </>
+          ) : null}
           {command ? (
             <>
               <p>{t('settings.mcpClaudeCodeHint')}</p>
@@ -113,22 +146,23 @@ export function McpAccessPanel({
                   {t('settings.mcpCopy')}
                 </button>
               </div>
-              <p>{t('settings.mcpOtherClientsHint')}</p>
+              {!operator ? <p>{t('settings.mcpOtherClientsHint')}</p> : null}
             </>
           ) : null}
-          <div className="gpu-subscription-actions">
+          {minted ? <div className="gpu-subscription-actions">
             <button type="button" onClick={onDismissMinted}>
               {t('settings.mcpMintedDone')}
             </button>
-          </div>
+          </div> : null}
         </article>
-      ) : (
+      ) : !operator ? (
         <form
           className="gpu-mcp-create"
           onSubmit={(event) => {
             event.preventDefault();
+            if (!ready || busy) return;
             const trimmed = label.trim();
-            void onCreate(trimmed.length > 0 ? trimmed : t('settings.mcpDefaultLabel')).then(() => setLabel(''));
+            void onCreate(trimmed.length > 0 ? trimmed : t('settings.mcpDefaultLabel'));
           }}
         >
           <label className="gpu-mcp-label">
@@ -144,16 +178,24 @@ export function McpAccessPanel({
             />
           </label>
           <div className="gpu-settings-actions">
-            <button type="submit" disabled={busy || loading}>
+            <button type="submit" disabled={busy || !ready}>
               {t('settings.mcpCreate')}
             </button>
           </div>
         </form>
-      )}
+      ) : null}
 
-      <p className="gpu-subscription-message" role="note">
+      {!operator ? <p className="gpu-subscription-message" role="note">
         {t('settings.mcpWarning')}
-      </p>
+      </p> : null}
+
+      <details className="gpu-subscription-card">
+        <summary>{t('settings.mcpCheckTitle')}</summary>
+        <p>{t('settings.mcpCheckSteps')}</p>
+        <p>{t('settings.mcpCheckUsage')}</p>
+        <p>{t('settings.mcpTroubleshootAuth')}</p>
+        <p>{t('settings.mcpTroubleshoot404')}</p>
+      </details>
 
       {live.length > 0 ? (
         <ul className="gpu-mcp-tokens" aria-label={t('settings.mcpTokens')}>
@@ -175,7 +217,7 @@ export function McpAccessPanel({
             </li>
           ))}
         </ul>
-      ) : !loading ? (
+      ) : ready && !operator ? (
         <p className="gpu-subscription-message">{t('settings.mcpNoTokens')}</p>
       ) : null}
 
@@ -203,32 +245,46 @@ export function McpAccess({ t, locale, onError }: McpAccessProps) {
   const [status, setStatus] = useState<string | null>(null);
   const [minted, setMinted] = useState<{ tokenId: string; token: string } | null>(null);
 
-  const refresh = useCallback(async (): Promise<void> => {
+  const mounted = useRef(false);
+  const locked = useRef(false);
+  const refresh = useCallback(async (): Promise<boolean> => {
+    setLoading(true);
     try {
-      setData(await api.apiTokens());
+      const next = await api.apiTokens();
+      if (!mounted.current) return false;
+      setData(next);
       setError(null);
+      return true;
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : t('settings.actionFailed'));
+      if (mounted.current) setError(errorMessage(failure, t));
+      return false;
     } finally {
-      setLoading(false);
+      if (mounted.current) setLoading(false);
     }
   }, [t]);
 
   useEffect(() => {
+    mounted.current = true;
     void refresh();
+    return () => { mounted.current = false; };
   }, [refresh]);
 
   const run = async (work: () => Promise<void>, successKey: string): Promise<void> => {
+    if (locked.current) return;
+    locked.current = true;
     setBusy(true);
     setStatus(null);
+    onError(null);
     try {
       await work();
-      await refresh();
-      setStatus(t(successKey));
+      if (!mounted.current) return;
+      const refreshed = await refresh();
+      if (mounted.current) setStatus(refreshed ? t(successKey) : t('settings.mcpChangedRefreshFailed'));
     } catch (failure) {
-      onError(failure instanceof Error ? failure.message : t('settings.actionFailed'));
+      if (mounted.current) onError(errorMessage(failure, t));
     } finally {
-      setBusy(false);
+      locked.current = false;
+      if (mounted.current) setBusy(false);
     }
   };
 
@@ -237,6 +293,8 @@ export function McpAccess({ t, locale, onError }: McpAccessProps) {
       t={t}
       locale={locale}
       mcpUrl={data?.mcpUrl ?? null}
+      mode={data?.mode ?? 'bearer'}
+      onRetry={async () => { await refresh(); }}
       tokens={data?.tokens ?? []}
       loading={loading}
       error={error}
@@ -246,13 +304,20 @@ export function McpAccess({ t, locale, onError }: McpAccessProps) {
       onCreate={(label) =>
         run(async () => {
           const created = await api.createApiToken(label);
+          if (!mounted.current) return;
           setMinted({ tokenId: created.tokenId, token: created.token });
+          // The POST already succeeded: retain its canonical URL if GET fails.
+          setData((previous) => ({ ...previous, tokens: previous?.tokens ?? [], mcpUrl: created.mcpUrl }));
         }, 'settings.mcpCreated')
       }
       onRevoke={(tokenId) =>
         run(async () => {
           await api.revokeApiToken(tokenId);
+          if (!mounted.current) return;
           if (minted?.tokenId === tokenId) setMinted(null);
+          setData((previous) => previous ? {
+            ...previous, tokens: previous.tokens.filter((token) => token.tokenId !== tokenId),
+          } : previous);
         }, 'settings.mcpRevoked')
       }
       onCopy={async (text) => {
