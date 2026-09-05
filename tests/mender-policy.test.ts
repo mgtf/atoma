@@ -11,7 +11,7 @@ import {
   sanitiseFinding,
   WITHHELD_QUOTE,
 } from '../src/supervisor/menderPolicy.js';
-import { menderProvider } from '../src/supervisor/session.js';
+import { menderProvider, providerChildEnv } from '../src/supervisor/session.js';
 
 /**
  * The mender's pure half. What these hold:
@@ -133,6 +133,26 @@ describe('menderProvider', () => {
     expect(
       menderProvider({ ATOMA_MENDER_MODEL: 'claude-opus-5', ATOMA_ANALYST_BASE_URL: 'https://z', ATOMA_ANALYST_AUTH_TOKEN: 't' })
     ).toMatchObject({ model: 'claude-opus-5', baseUrl: null, authToken: null, source: 'mender' });
+  });
+
+  it('treats an empty variable as unset — a CI runner hands absent repository variables over as empty strings', () => {
+    expect(menderProvider({ ATOMA_MENDER_MODEL: '', ATOMA_MENDER_BASE_URL: '', ATOMA_MENDER_AUTH_TOKEN: '' })).toMatchObject({ source: 'default' });
+    expect(menderProvider({ ATOMA_MENDER_MODEL: '', ATOMA_MENDER_BASE_URL: '', ATOMA_MENDER_AUTH_TOKEN: 'sk-ant-x' })).toMatchObject({
+      model: 'claude-sonnet-5',
+      baseUrl: null,
+      authToken: 'sk-ant-x',
+      source: 'mender',
+    });
+  });
+
+  it('hands an Anthropic key to the CLI as its API key and a gateway token as a bearer', () => {
+    const anthropic = providerChildEnv({ model: 'claude-sonnet-5', baseUrl: null, authToken: 'sk-ant-abc', source: 'mender' }, { ANTHROPIC_AUTH_TOKEN: 'stale' });
+    expect(anthropic['ANTHROPIC_API_KEY']).toBe('sk-ant-abc');
+    expect(anthropic['ANTHROPIC_AUTH_TOKEN']).toBeUndefined();
+    const gateway = providerChildEnv({ model: 'glm-5.3', baseUrl: 'https://z', authToken: 'zai-abc', source: 'analyst' }, { ANTHROPIC_API_KEY: 'stale' });
+    expect(gateway['ANTHROPIC_AUTH_TOKEN']).toBe('zai-abc');
+    expect(gateway['ANTHROPIC_BASE_URL']).toBe('https://z');
+    expect(gateway['ANTHROPIC_API_KEY']).toBeUndefined();
   });
 });
 

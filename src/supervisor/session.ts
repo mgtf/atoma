@@ -124,16 +124,22 @@ export const DEFAULT_SUPERVISOR_MODEL = 'claude-sonnet-5';
 const ANALYST_VARS = ['ATOMA_ANALYST_MODEL', 'ATOMA_ANALYST_BASE_URL', 'ATOMA_ANALYST_AUTH_TOKEN'] as const;
 const MENDER_VARS = ['ATOMA_MENDER_MODEL', 'ATOMA_MENDER_BASE_URL', 'ATOMA_MENDER_AUTH_TOKEN'] as const;
 
+/** A CI runner hands an unset repository variable over as an EMPTY string; that is "unset". */
+function present(value: string | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
 function providerSet(
   env: NodeJS.ProcessEnv,
   names: readonly [string, string, string],
   source: ProviderSource
 ): SupervisorProvider | null {
-  if (!names.some((name) => env[name] !== undefined)) return null;
+  if (!names.some((name) => present(env[name]) !== null)) return null;
   return {
-    model: env[names[0]] ?? DEFAULT_SUPERVISOR_MODEL,
-    baseUrl: env[names[1]] ?? null,
-    authToken: env[names[2]] ?? null,
+    model: present(env[names[0]]) ?? DEFAULT_SUPERVISOR_MODEL,
+    baseUrl: present(env[names[1]]),
+    authToken: present(env[names[2]]),
     source,
   };
 }
@@ -166,10 +172,16 @@ export function providerChildEnv(
   const child: NodeJS.ProcessEnv = { ...env };
   if (provider.baseUrl) child['ANTHROPIC_BASE_URL'] = provider.baseUrl;
   if (provider.authToken) {
-    child['ANTHROPIC_AUTH_TOKEN'] = provider.authToken;
-    // A stale ANTHROPIC_API_KEY left in the child can shadow the token at the
-    // gateway. Dropped from the child only.
-    delete child['ANTHROPIC_API_KEY'];
+    // An Anthropic API key (`sk-ant-…`) travels as the API key the CLI reads
+    // natively; anything else is a gateway bearer (Z.ai, a proxy). Either way
+    // the OTHER variable is dropped so a stale one cannot shadow this one.
+    if (/^sk-ant-/.test(provider.authToken)) {
+      child['ANTHROPIC_API_KEY'] = provider.authToken;
+      delete child['ANTHROPIC_AUTH_TOKEN'];
+    } else {
+      child['ANTHROPIC_AUTH_TOKEN'] = provider.authToken;
+      delete child['ANTHROPIC_API_KEY'];
+    }
   }
   return child;
 }
