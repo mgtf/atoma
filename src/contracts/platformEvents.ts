@@ -78,6 +78,22 @@ export const platformEventKindSchema = z.enum([
    * nothing downstream may act on it automatically.
    */
   'security.flagged',
+  /**
+   * THE SUPERVISOR'S OWN ACTIONS (`src/supervisor`). The analyst recorded a
+   * verdict on a finished run; the mender started on a cited defect, declined
+   * it, was refused by its own harness, opened a pull request, or failed.
+   * Every row names the run and the stage and carries only machine facts —
+   * grade, finding kinds, defect key, branch, PR URL, cost, model served.
+   * Never the finding's title or the model's summary: those are model-authored
+   * prose and stay in the git-ignored `supervisor/` records, where a reader
+   * opens them knowing what they are.
+   */
+  'supervisor.verdict',
+  'mender.started',
+  'mender.declined',
+  'mender.refused',
+  'mender.pr_opened',
+  'mender.failed',
   // --- Platform and security.
   /**
    * A project run was allowed to spend the HOST's subscription instead of a
@@ -297,6 +313,16 @@ export const PLATFORM_EVENT_SEVERITY: Record<PlatformEventKind, PlatformEventSev
   'github.installation_status': 'warning',
   'run.anomaly': 'warning',
   'security.flagged': 'security',
+  // A verdict is a fact about a finished run; what it FOUND is in detail.
+  'supervisor.verdict': 'info',
+  'mender.started': 'info',
+  'mender.declined': 'info',
+  // The harness stopped the model's own work: worth a look, not an alarm.
+  'mender.refused': 'warning',
+  'mender.pr_opened': 'info',
+  // A harness or session failure with a worktree left behind is an error the
+  // operator has to clean up after.
+  'mender.failed': 'error',
   'run.host_subscription': 'security',
   'run.principal_subscription': 'security',
   'principal.subscription_pin': 'security',

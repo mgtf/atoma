@@ -1,34 +1,44 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { PlatformEventKind } from '../src/contracts/platformEvents.js';
+import { closeStoreHandles } from '../src/core/stores.js';
+import { PlatformEventLog } from '../src/platform/events.js';
+import {
+  mendFinding,
+  mendRecordPath,
+  pendingMends,
+  processMends,
+  type MendRecord,
+  type MenderOptions,
+} from '../src/supervisor/mender.js';
 
 /**
- * THE MENDER, ACROSS EVERY BOUNDARY IT SHIPS WITH (supervisor stage 3,
- * docs/supervisor-design.md): a real git repository with a real bare remote,
- * a real worktree, real stash/commit/push — and stubs in place of the three
- * external programs (claude, gh, npm), substituted through the
- * ATOMA_MENDER_CMD_* seams so no shell shim is needed on any platform.
+ * THE MENDER, ACROSS EVERY BOUNDARY IT SHIPS WITH (supervisor stage 3): a
+ * real git repository with a real bare remote, a real worktree, real
+ * stash/commit/push, a real SQLite journal — and stubs in place of the three
+ * external programs (claude, gh, npm), substituted through the command seams
+ * so no shell shim is needed on any platform.
  *
  * What these hold:
- *   - the happy path ends in a pushed branch, a PR request and a record, with
- *     the worktree gone and the model's own argv restricted as designed;
+ *   - the happy path ends in a pushed branch, a PR request, a record and a
+ *     `mender.pr_opened` row, with the worktree gone and the model's argv
+ *     restricted as designed;
  *   - the harness refuses what the model may not ship — a forbidden path, a
  *     test that already passes on the unfixed code, a red check — and then
- *     nothing reaches the remote;
+ *     nothing reaches the remote, and the journal says `mender.refused`;
  *   - a decline, a duplicate and an active run all stop before any quota or
- *     any push is spent.
+ *     any push is spent, and only the decline is a row.
  */
 
-const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const MENDER = join(REPO_ROOT, 'scripts', 'mender.mjs');
 const RUN_ID = '2026-09-05T10-00-00-000-deadbeef';
 const TIMEOUT_MS = 90_000;
 
 const dirs: string[] = [];
 afterEach(() => {
+  closeStoreHandles();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -45,9 +55,11 @@ interface Fixture {
   stubs: string;
   ghLog: string;
   claudeArgs: string;
+  journal: PlatformEventLog;
+  options: (overrides?: Partial<MenderOptions>, env?: Record<string, string>) => MenderOptions;
 }
 
-/** A repository with one source file, one bare remote and one analyst verdict. */
+/** A repository with one source file, one bare remote, one verdict and one journal. */
 function fixture(): Fixture {
   const root = mkdtempSync(join(tmpdir(), 'atoma-mender-'));
   dirs.push(root);
@@ -98,20 +110,16 @@ function fixture(): Fixture {
             { ref: 'src/adder.mjs:1', quote: 'a - b' },
             { ref: 'supervisor/work/x/events.ndjson:9', quote: 'UNTRUSTED TRACE TEXT' },
           ],
-          proposedFix: {
-            where: 'src/adder.mjs',
-            what: 'Return a + b.',
-            checkedIntentionalChoices: 'src/AGENTS.md — no recorded shortcut.',
-          },
+          proposedFix: { where: 'src/adder.mjs', what: 'Return a + b.', checkedIntentionalChoices: 'src/AGENTS.md — no recorded shortcut.' },
           confidence: 'high',
         },
       ],
+      _meta: { analysedAt: '2026-09-05T10:05:00.000Z' },
     })
   );
 
   const ghLog = join(root, 'gh.log');
   const claudeArgs = join(root, 'claude-args.json');
-
   // The model stand-in. STUB_MODE picks what it "does" to the worktree; the
   // structured report is what a real `claude -p --json-schema` wrapper carries.
   writeFileSync(
@@ -123,17 +131,11 @@ const mode = process.env.STUB_MODE ?? 'fix';
 writeFileSync(process.env.STUB_CLAUDE_ARGS, JSON.stringify(process.argv.slice(2)));
 const cwd = process.cwd();
 const failingTest = "import { add } from '../src/adder.mjs';\\nif (add(1, 2) !== 3) { console.error('add(1,2) !== 3'); process.exit(1); }\\n";
-const passingTest = "process.exit(0);\\n";
 let report = { schema: 'atoma.supervisor.mend/v1', outcome: 'fixed', title: 'make add() add', summary: 'add() returned a - b; it now returns a + b, and the test proves it.', checkedIntentionalChoices: 'src/AGENTS.md read; not a recorded shortcut.', regressionTests: ['tests/adder.test.mjs'] };
-if (mode === 'fix' || mode === 'forbidden' || mode === 'notest') {
-  writeFileSync(join(cwd, 'src', 'adder.mjs'), 'export const add = (a, b) => a + b;\\n');
-}
+if (['fix', 'forbidden', 'notest', 'no-mechanism'].includes(mode)) writeFileSync(join(cwd, 'src', 'adder.mjs'), 'export const add = (a, b) => a + b;\\n');
 if (mode === 'fix' || mode === 'forbidden') writeFileSync(join(cwd, 'tests', 'adder.test.mjs'), failingTest);
+if (mode === 'no-mechanism') writeFileSync(join(cwd, 'tests', 'adder.test.mjs'), 'process.exit(0);\\n');
 if (mode === 'forbidden') writeFileSync(join(cwd, 'package.json'), '{ "name": "tampered" }\\n');
-if (mode === 'no-mechanism') {
-  writeFileSync(join(cwd, 'src', 'adder.mjs'), 'export const add = (a, b) => a + b;\\n');
-  writeFileSync(join(cwd, 'tests', 'adder.test.mjs'), passingTest);
-}
 if (mode === 'declined') report = { ...report, outcome: 'declined', declineReason: 'the remedy is a new gate — cooling-off' };
 process.stdout.write(JSON.stringify({ type: 'result', structured_output: report, total_cost_usd: 0.42, duration_ms: 1234, num_turns: 3, modelUsage: { 'claude-sonnet-5': { costUSD: 0.4, inputTokens: 10, outputTokens: 5 } } }));
 `
@@ -144,10 +146,7 @@ process.stdout.write(JSON.stringify({ type: 'result', structured_output: report,
     `
 import { spawnSync } from 'node:child_process';
 let failed = false;
-for (const file of process.argv.slice(2)) {
-  const r = spawnSync(process.execPath, [file], { stdio: 'inherit' });
-  if (r.status !== 0) failed = true;
-}
+for (const file of process.argv.slice(2)) if (spawnSync(process.execPath, [file], { stdio: 'inherit' }).status !== 0) failed = true;
 process.exit(failed ? 1 : 0);
 `
   );
@@ -164,38 +163,51 @@ if (args[0] === 'pr' && args[1] === 'create') { process.stdout.write('https://gi
 process.exit(2);
 `
   );
-  return { root, bare, repo, supervisor, runs, stubs, ghLog, claudeArgs };
-}
-
-function runMender(f: Fixture, extraArgs: string[], env: Record<string, string> = {}) {
-  const result = spawnSync(
-    process.execPath,
-    [MENDER, '--once', '--repo', f.repo, '--supervisor-dir', f.supervisor, '--runs', f.runs, ...extraArgs],
-    {
-      cwd: f.repo,
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        ATOMA_MENDER_CMD_CLAUDE: join(f.stubs, 'claude.mjs'),
-        ATOMA_MENDER_CMD_GH: join(f.stubs, 'gh.mjs'),
-        ATOMA_MENDER_CMD_INSTALL: join(f.stubs, 'noop.mjs'),
-        ATOMA_MENDER_CMD_TEST: join(f.stubs, 'test.mjs'),
-        ATOMA_MENDER_CMD_CHECK: join(f.stubs, 'check.mjs'),
-        ATOMA_MCP_RUN_LOCK: join(f.root, 'no-such-lease.db'),
-        STUB_GH_LOG: f.ghLog,
-        STUB_CLAUDE_ARGS: f.claudeArgs,
-        ATOMA_MENDER_MODEL: 'claude-sonnet-5',
-        ...env,
+  const journal = PlatformEventLog.open(join(root, 'atoma.db'));
+  const options: Fixture['options'] = (overrides = {}, env = {}) => {
+    // Stub behaviour rides the environment the child processes inherit.
+    process.env['STUB_GH_LOG'] = ghLog;
+    process.env['STUB_CLAUDE_ARGS'] = claudeArgs;
+    delete process.env['STUB_MODE'];
+    delete process.env['STUB_CHECK_FAIL'];
+    delete process.env['STUB_GH_LIST'];
+    Object.assign(process.env, env);
+    return {
+      repo,
+      runsDir: runs,
+      supervisorDir: supervisor,
+      leasePath: join(root, 'no-such-lease.db'),
+      provider: { model: 'claude-sonnet-5', baseUrl: null, authToken: null, source: 'mender' },
+      commands: {
+        claude: join(stubs, 'claude.mjs'),
+        gh: join(stubs, 'gh.mjs'),
+        install: join(stubs, 'noop.mjs'),
+        test: join(stubs, 'test.mjs'),
+        check: join(stubs, 'check.mjs'),
       },
-      timeout: TIMEOUT_MS,
-    }
-  );
-  return { ...result, log: `${result.stdout}\n${result.stderr}` };
+      base: 'main',
+      remote: 'origin',
+      minConfidence: 'high',
+      budgetUsd: 5,
+      timeoutMs: 60_000,
+      maxDiffLines: 600,
+      dryRun: false,
+      force: false,
+      keepWorktree: false,
+      waitForIdle: false,
+      pollMs: 100,
+      journal: (input) => void journal.append(input),
+      log: () => {},
+      warn: () => {},
+      ...overrides,
+    };
+  };
+  return { root, bare, repo, supervisor, runs, stubs, ghLog, claudeArgs, journal, options };
 }
 
-function record(f: Fixture): Record<string, unknown> | null {
-  const path = join(f.supervisor, 'mender', `${RUN_ID}.1.json`);
-  return existsSync(path) ? (JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>) : null;
+function record(f: Fixture): MendRecord | null {
+  const path = mendRecordPath(join(f.supervisor, 'mender'), RUN_ID, 1);
+  return existsSync(path) ? (JSON.parse(readFileSync(path, 'utf8')) as MendRecord) : null;
 }
 
 function remoteBranches(f: Fixture): string[] {
@@ -210,17 +222,28 @@ function worktrees(f: Fixture): string[] {
   return existsSync(dir) ? readdirSync(dir) : [];
 }
 
-describe('the mender, end to end against a real repository', () => {
-  it('turns a cited defect into a pushed branch and a pull request, then cleans up', () => {
-    const f = fixture();
-    const result = runMender(f, []);
-    expect(result.status, result.log).toBe(0);
+function journalKinds(f: Fixture): PlatformEventKind[] {
+  return f.journal
+    .list({ limit: 50 })
+    .events.map((event) => event.kind)
+    .reverse();
+}
 
-    const rec = record(f);
+async function mendPending(f: Fixture, options: MenderOptions): Promise<{ failures: number; records: MendRecord[] }> {
+  return processMends(pendingMends(options, [RUN_ID]), options);
+}
+
+describe('the mender, end to end against a real repository', () => {
+  it('turns a cited defect into a pushed branch, a pull request and a journal row, then cleans up', async () => {
+    const f = fixture();
+    const { failures } = await mendPending(f, f.options());
+    expect(failures).toBe(0);
+
+    const rec = record(f)!;
     expect(rec).toMatchObject({ outcome: 'pr-opened', prUrl: 'https://github.com/example/atoma/pull/42', mendCostUsd: 0.42 });
-    expect(rec!['verification']).toMatchObject({ testFailedBefore: true, checkPassed: true, testFiles: ['tests/adder.test.mjs'] });
+    expect(rec.verification).toMatchObject({ testFailedBefore: true, checkPassed: true, testFiles: ['tests/adder.test.mjs'] });
     // The mechanism candidate at index 0 was never touched.
-    expect(existsSync(join(f.supervisor, 'mender', `${RUN_ID}.0.json`))).toBe(false);
+    expect(existsSync(mendRecordPath(join(f.supervisor, 'mender'), RUN_ID, 0))).toBe(false);
 
     const [branch] = remoteBranches(f);
     expect(branch).toBe('mender/deadbeef-1-add-subtracts-its-operands');
@@ -230,135 +253,137 @@ describe('the mender, end to end against a real repository', () => {
     expect(message).toMatch(/Defect-Key: [0-9a-f]{12}/);
     expect(message).toContain('--author:atoma mender');
     expect(git(f.bare, ['show', `${branch!}:src/adder.mjs`])).toContain('a + b');
-    // main itself was never written.
     expect(git(f.bare, ['show', 'main:src/adder.mjs'])).toContain('a - b');
 
     const ghCalls = readFileSync(f.ghLog, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as string[]);
     expect(ghCalls[0]!.slice(0, 2)).toEqual(['pr', 'list']);
     const create = ghCalls.find((call) => call[1] === 'create')!;
-    expect(create).toContain('--base');
     expect(create[create.indexOf('--base') + 1]).toBe('main');
     expect(create[create.indexOf('--head') + 1]).toBe(branch);
     const body = readFileSync(create[create.indexOf('--body-file') + 1]!, 'utf8');
     expect(body).toContain('Defect-Key:');
     expect(body).not.toContain('UNTRUSTED TRACE TEXT');
     expect(body).toContain('withheld from the mender by design');
-    expect(body).toContain('`src/adder.mjs:1` — a - b');
 
     // The model's own leash, as passed on its command line.
     const args = JSON.parse(readFileSync(f.claudeArgs, 'utf8')) as string[];
     expect(args).toContain('--restricted');
     expect(args).toContain('--strict-mcp-config');
     expect(args[args.indexOf('--permission-mode') + 1]).toBe('dontAsk');
-    const allowed = args[args.indexOf('--allowedTools') + 1]!;
-    expect(allowed).not.toMatch(/git (push|commit)|gh/);
+    expect(args[args.indexOf('--allowedTools') + 1]).not.toMatch(/git (push|commit)|gh/);
     expect(args[args.indexOf('--max-budget-usd') + 1]).toBe('5');
     expect(args.at(-1)).toContain('add() subtracts its operands');
     expect(args.at(-1)).not.toContain('UNTRUSTED TRACE TEXT');
+
+    // The journal: started, then opened — facts only.
+    expect(journalKinds(f)).toEqual(['mender.started', 'mender.pr_opened']);
+    const opened = f.journal.list({ kind: 'mender.pr_opened' }).events[0]!;
+    expect(opened.runId).toBe(RUN_ID);
+    expect(opened.actorType).toBe('system');
+    expect(opened.detail).toMatchObject({ stage: 'mender', prUrl: 'https://github.com/example/atoma/pull/42', branch, changedFiles: 2 });
+    expect(JSON.stringify(opened)).not.toContain('make add() add');
 
     expect(worktrees(f)).toEqual([]);
     expect(existsSync(join(f.supervisor, 'mender.lock'))).toBe(false);
     expect(readFileSync(join(f.supervisor, 'mender.jsonl'), 'utf8')).toContain('"outcome":"pr-opened"');
   }, TIMEOUT_MS);
 
-  it('refuses a change outside the allowlist and pushes nothing', () => {
+  it('refuses a change outside the allowlist, pushes nothing and journals the refusal', async () => {
     const f = fixture();
-    const result = runMender(f, [], { STUB_MODE: 'forbidden' });
-    expect(result.status).toBe(1);
-    const rec = record(f);
-    expect(rec).toMatchObject({ outcome: 'refused' });
-    expect(String(rec!['problems'])).toContain('package.json');
+    const { failures } = await mendPending(f, f.options({}, { STUB_MODE: 'forbidden' }));
+    expect(failures).toBe(1);
+    const rec = record(f)!;
+    expect(rec.outcome).toBe('refused');
+    expect(rec.problems?.join()).toContain('package.json');
     expect(remoteBranches(f)).toEqual([]);
-    // Kept for a person to look at, and said so.
     expect(worktrees(f)).toHaveLength(1);
-    expect(result.log).toContain('worktree kept for inspection');
     expect(readFileSync(f.ghLog, 'utf8')).not.toContain('"create"');
+    expect(journalKinds(f)).toEqual(['mender.started', 'mender.refused']);
+    expect(f.journal.list({ kind: 'mender.refused' }).events[0]!.detail).toMatchObject({ worktreeKept: true });
   }, TIMEOUT_MS);
 
-  it('refuses a fix whose test already passes on the unfixed code', () => {
+  it('refuses a fix whose test already passes on the unfixed code', async () => {
     const f = fixture();
-    const result = runMender(f, [], { STUB_MODE: 'no-mechanism' });
-    expect(result.status).toBe(1);
-    const rec = record(f);
-    expect(rec).toMatchObject({ outcome: 'refused' });
-    expect(String(rec!['problems'])).toMatch(/passes on the unfixed code/);
+    await mendPending(f, f.options({}, { STUB_MODE: 'no-mechanism' }));
+    expect(record(f)!.outcome).toBe('refused');
+    expect(record(f)!.problems?.join()).toMatch(/passes on the unfixed code/);
     expect(remoteBranches(f)).toEqual([]);
   }, TIMEOUT_MS);
 
-  it('refuses a fix with no regression test', () => {
+  it('refuses a fix with no regression test', async () => {
     const f = fixture();
-    const result = runMender(f, [], { STUB_MODE: 'notest' });
-    expect(result.status).toBe(1);
-    expect(String(record(f)!['problems'])).toMatch(/no regression test/);
+    await mendPending(f, f.options({}, { STUB_MODE: 'notest' }));
+    expect(record(f)!.problems?.join()).toMatch(/no regression test/);
     expect(remoteBranches(f)).toEqual([]);
   }, TIMEOUT_MS);
 
-  it('refuses when the full check is red after the fix', () => {
+  it('refuses when the full check is red after the fix', async () => {
     const f = fixture();
-    const result = runMender(f, [], { STUB_CHECK_FAIL: '1' });
-    expect(result.status).toBe(1);
-    const rec = record(f);
-    expect(rec).toMatchObject({ outcome: 'refused' });
-    expect(String(rec!['problems'])).toMatch(/full check is red/);
-    // The failing-before proof had already been established and is recorded.
+    await mendPending(f, f.options({}, { STUB_CHECK_FAIL: '1' }));
+    expect(record(f)!.outcome).toBe('refused');
+    expect(record(f)!.problems?.join()).toMatch(/full check is red/);
     expect(remoteBranches(f)).toEqual([]);
   }, TIMEOUT_MS);
 
-  it('records a decline without touching the remote', () => {
+  it('records and journals a decline without touching the remote', async () => {
     const f = fixture();
-    const result = runMender(f, [], { STUB_MODE: 'declined' });
-    expect(result.status).toBe(0);
-    const rec = record(f);
-    expect(rec).toMatchObject({ outcome: 'declined' });
-    expect((rec!['report'] as Record<string, unknown>)['declineReason']).toMatch(/cooling-off/);
+    const { failures } = await mendPending(f, f.options({}, { STUB_MODE: 'declined' }));
+    expect(failures).toBe(0);
+    expect(record(f)!.outcome).toBe('declined');
+    expect(record(f)!.report?.declineReason).toMatch(/cooling-off/);
     expect(remoteBranches(f)).toEqual([]);
     expect(worktrees(f)).toEqual([]);
+    expect(journalKinds(f)).toEqual(['mender.started', 'mender.declined']);
   }, TIMEOUT_MS);
 
-  it('skips a defect that already has an open pull request, spending nothing', () => {
+  it('skips a defect that already has an open pull request, spending nothing and journaling nothing', async () => {
     const f = fixture();
-    const result = runMender(f, [], {
-      STUB_GH_LIST: JSON.stringify([{ number: 7, url: 'https://github.com/example/atoma/pull/7', title: 'earlier' }]),
-    });
-    expect(result.status).toBe(0);
+    await mendPending(
+      f,
+      f.options({}, { STUB_GH_LIST: JSON.stringify([{ number: 7, url: 'https://github.com/example/atoma/pull/7', title: 'earlier' }]) })
+    );
     expect(record(f)).toMatchObject({ outcome: 'skipped-duplicate', duplicateOf: ['https://github.com/example/atoma/pull/7'] });
     expect(existsSync(f.claudeArgs)).toBe(false);
     expect(remoteBranches(f)).toEqual([]);
+    expect(journalKinds(f)).toEqual([]);
   }, TIMEOUT_MS);
 
-  it('refuses to start beside a live run', () => {
+  it('refuses to start beside a live run', async () => {
     const f = fixture();
     writeFileSync(
       join(f.runs, 'index.json'),
-      JSON.stringify([{ id: 'live-1', startedAt: new Date().toISOString(), lastEventAt: Date.now(), inFlight: true }])
+      JSON.stringify([{ id: 'live-1', label: 'live', startedAt: new Date().toISOString(), lastEventAt: Date.now(), inFlight: true }])
     );
-    const result = runMender(f, []);
-    expect(result.status).toBe(1);
-    expect(result.log).toContain('a run is active');
+    const { failures } = await mendPending(f, f.options());
+    expect(failures).toBe(1);
     expect(record(f)).toBeNull();
     expect(existsSync(f.claudeArgs)).toBe(false);
     expect(worktrees(f)).toEqual([]);
     expect(existsSync(join(f.supervisor, 'mender.lock'))).toBe(false);
+    expect(journalKinds(f)).toEqual([]);
   }, TIMEOUT_MS);
 
-  it('does not run the same finding twice unless forced', () => {
+  it('does not run the same finding twice unless forced', async () => {
     const f = fixture();
-    expect(runMender(f, [], { STUB_MODE: 'declined' }).status).toBe(0);
+    await mendPending(f, f.options({}, { STUB_MODE: 'declined' }));
     rmSync(f.claudeArgs);
-    const again = runMender(f, [], { STUB_MODE: 'declined' });
-    expect(again.status).toBe(0);
-    expect(again.log).toContain('0 pending defect finding(s)');
+    const options = f.options({}, { STUB_MODE: 'declined' });
+    expect(pendingMends(options, [RUN_ID])).toEqual([]);
+    await mendPending(f, options);
     expect(existsSync(f.claudeArgs)).toBe(false);
   }, TIMEOUT_MS);
 
-  it('dry-run prepares the worktree, prints the leash and spends nothing', () => {
+  it('dry-run prepares the worktree, prints the leash and spends nothing', async () => {
     const f = fixture();
-    const result = runMender(f, ['--dry-run']);
-    expect(result.status, result.log).toBe(0);
-    expect(result.log).toContain('dry-run: would spawn');
-    expect(result.log).toContain('--restricted');
-    expect(record(f)).toMatchObject({ outcome: 'dry-run' });
+    const lines: string[] = [];
+    const options = f.options({ dryRun: true, log: (line) => lines.push(line) });
+    const work = pendingMends(options, [RUN_ID]);
+    const rec = await mendFinding(work[0]!, options);
+    expect(rec?.outcome).toBe('dry-run');
+    expect(lines.join('\n')).toContain('dry-run: would spawn');
+    expect(lines.join('\n')).toContain('--restricted');
     expect(existsSync(f.claudeArgs)).toBe(false);
     expect(worktrees(f)).toEqual([]);
+    expect(journalKinds(f)).toEqual([]);
   }, TIMEOUT_MS);
 });

@@ -233,12 +233,17 @@ real usage, grades split cleanly from findings.
 
 ## Stage 3 — the mender and green/blue (P2/P3)
 
-LANDED 2026-09-05 as P2, out of product like the analyst:
-`scripts/mender.mjs` (the harness), `scripts/mender-core.mjs` (the pure
-half: eligibility, diff policy, naming, PR body), `scripts/mender-prompt.md`,
-and `scripts/supervisor-common.mjs`, which now holds the ONE idle predicate
-both stages gate on. Two corrections to the design below, both settling an
-open decision:
+LANDED 2026-09-05 as P2, and MOVED IN-PRODUCT the same day together with
+the analyst: `src/supervisor/` (`analyst.ts`, `mender.ts`, `menderPolicy.ts`
+for the pure half, `activity.ts` for the ONE idle predicate both stages gate
+on, `journal.ts`, `session.ts`), the contracts `src/contracts/supervisorVerdict.ts`
+and `supervisorMend.ts` with the session JSON Schema DERIVED from them, the
+journal kinds `supervisor.verdict` and `mender.*`, and the compiled CLIs
+`npm run analyst` / `npm run mender`. The out-of-product scripts are gone:
+a stage with write power needs the contracts, the journal and the typed tests
+a script could not have. The normative rules live in
+[src/supervisor/AGENTS.md](../src/supervisor/AGENTS.md). Two corrections to
+the design below, both settling an open decision:
 
 - **The pull request IS the human gate, and the existing deploy path IS the
   green/blue.** A merge on `main` already runs CI, packages the exact
@@ -279,14 +284,18 @@ open decision:
   each heavy phase (install, model, full check); a machine-wide
   `supervisor/mender.lock` keeps mends serial. Records land in
   `supervisor/mender/<runId>.<finding>.json` and `supervisor/mender.jsonl`.
-- **Not yet**: a journal row per mend (the scripts do not write
-  `platform_events`; that comes with moving the stage in-product), a push
-  notification when a PR opens, and any autonomy widening (P4). Decision 2
-  closes as proposal-only.
+- **Journaled**: every verdict is a `supervisor.verdict` row; every mend
+  that touched the deployment is a `mender.started` row followed by one of
+  `mender.declined`, `mender.refused`, `mender.pr_opened`, `mender.failed`.
+  Rows carry facts only. `mender.pr_opened` and `mender.failed` push to
+  platform admins; the rest are audit-only. Not yet: any autonomy widening
+  (P4). Decision 2 closes as proposal-only.
 - **Proof**: `tests/mender-pipeline.test.ts` drives the real harness against
-  a real repository with a bare remote, substituting the three external
-  programs through the `ATOMA_MENDER_CMD_*` seams; `tests/mender-core.test.ts`
-  holds the pure half.
+  a real repository with a bare remote and a real SQLite journal, substituting
+  the three external programs through the `ATOMA_MENDER_CMD_*` seams;
+  `tests/mender-policy.test.ts` holds the pure half, `tests/analyst.test.ts`
+  the analyst with a stub model, `tests/supervisor-contracts.test.ts` the
+  schemas and their derived JSON Schema.
 
 The original design text, kept for the reasoning:
 
@@ -334,7 +343,8 @@ inhibitor (`caffeinate`) because the machine sleeps on battery.
 
 ## Phasing
 
-- **P0 (this commit)** — out-of-product validation of the analyst loop:
+- **P0** — out-of-product validation of the analyst loop (since moved to
+  `src/supervisor/analyst.ts`, 2026-09-05):
   `scripts/analyst-watch.mjs` (watcher: detects terminal runs from
   `runs/index.json`, checks the lease and live-run activity, digests the
   trace, drives `claude -p`, validates and routes the verdict) and
@@ -346,7 +356,7 @@ inhibitor (`caffeinate`) because the machine sleeps on battery.
   runs, and the quota sequencing holds.
 - **P1** — the in-product sentinel: rule table, new journal kinds, push.
 - **P2** — the gated mender: worktree, branch, PR, approval. LANDED
-  2026-09-05 (`scripts/mender.mjs`); the push notification is still open.
+  2026-09-05 (`src/supervisor/mender.ts`), journaled and pushed to admins.
 - **P3** — ~~green/blue slots, lease-gated switch, rollback, deploy journal~~
   SUPERSEDED: the merge on `main` already runs the packaged deployment
   (`.github/workflows/deploy.yml`), which is the green/blue this stage needed.
@@ -444,31 +454,30 @@ Ordered by what the next session should do first. Each item names the file
 it lands in, so none of them needs re-designing.
 
 1. **First real mend.** The model's leash — `--restricted`,
-   `--permission-mode dontAsk`, the `--allowedTools` list in
-   `scripts/mender.mjs` — has only been DRY-RUN against this repository,
+   `--permission-mode dontAsk`, `MENDER_ALLOWED_TOOLS` in
+   `src/supervisor/mender.ts` — has only been DRY-RUN against this repository,
    never exercised against the real `claude` binary. Procedure: analyse a
    failed run (`npm run analyst -- --run <id>`), confirm the verdict carries
    a cited high-confidence `defect`, run `npm run mender -- --once --dry-run`,
-   then without `--dry-run`. Read `supervisor/mender/<runId>.<n>.json`:
-   `model-failed` or `invalid-report` with a kept worktree means a flag the
-   CLI version rejects, and the fix is in `claudeArgs`. Record the outcome,
-   cost and turns here as the first P2 measurement.
-2. **Journal row per mend.** The scripts do not write `platform_events`; a
-   PR opened by a machine is an attributable action the journal design
-   requires. Needs a new closed kind (e.g. `mender.pr_opened`) in
-   `src/contracts/platformEvents.ts` with severity and audience stated, and
-   either an in-product mender or a small CLI the script calls. Prefer the
-   move in-product: `src/supervisor/` beside `src/sentinel/`, with the pure
-   half (`scripts/mender-core.mjs`) ported first because its tests already
-   hold it.
-3. **Push notification when a PR opens.** Follows from 2: the kind's route in
-   `src/viz/push/routes.ts`, platform-admin audience, body naming the PR
-   URL and the Defect-Key — never the finding text.
-4. **Analyst → mender coupling.** Today the mender polls
-   `supervisor/verdicts/`. Once both are in-product, one watcher should own
-   `run finished → analyse → mend` with the same idle predicate
-   (`scripts/supervisor-common.mjs`, `anyRunActive`) and the analyst's
-   batch-end coalescing.
+   then without `--dry-run`. Read `supervisor/mender/<runId>.<n>.json` and
+   the `mender.*` journal rows: `model-failed` or `invalid-report` with a
+   kept worktree means a flag the CLI version rejects, and the fix is in
+   `menderSessionArgs`. Record the outcome, cost and turns here as the first
+   P2 measurement.
+2. ~~**Journal row per mend.**~~ DONE 2026-09-05 with the move in-product:
+   `supervisor.verdict` and the five `mender.*` kinds, rows carrying facts
+   only (`src/supervisor/journal.ts`).
+3. ~~**Push notification when a PR opens.**~~ DONE 2026-09-05:
+   `mender.pr_opened` and `mender.failed` route to platform admins with a
+   body naming the branch and the PR URL, never the finding text. Not yet
+   fired for real — see item 1.
+4. **Analyst → mender coupling.** Today the analyst polls `runs/index.json`
+   and the mender polls `supervisor/verdicts/`, as two processes. One
+   watcher owning `run finished → analyse → mend` with the shared idle
+   predicate (`src/supervisor/activity.ts`) and the analyst's batch-end
+   coalescing is the next structural step. Settle first whether the viz
+   server may host it as it hosts the sentinel: that would put a
+   quota-spending process inside the gated server.
 5. **Defect-Key calibration.** The key is a normalised hash of
    `proposedFix.where` + title. Measure on real verdicts whether two runs
    surfacing one defect collide (wanted) and whether two defects in one file
@@ -481,8 +490,8 @@ it lands in, so none of them needs re-designing.
    deliberately not taken because it would refuse product runs for a
    background improver. Revisit with data from item 1.
 7. **P4, autonomy widening.** Proposal-only until a measured count of mends
-   merged without retouch exists per defect class. Count from the ledger
-   (`supervisor/mender.jsonl`, `pr-opened`) against merged PRs carrying
+   merged without retouch exists per defect class. Count from the journal
+   (`mender.pr_opened` rows) against merged PRs carrying
    `Authored-By: atoma mender`. Nothing to build before the count exists.
 8. **Sentinel kill switch** — open decision 4 below, unchanged. Independent
    of the mender.

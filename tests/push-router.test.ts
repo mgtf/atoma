@@ -149,6 +149,12 @@ describe('PUSH_ROUTES', () => {
       // has a measured noise floor. See src/viz/push/routes.ts.
       'run.anomaly',
       'security.flagged',
+      // The supervisor's bookkeeping: only the PR waiting for review and a
+      // failure that left a worktree behind reach a person.
+      'supervisor.verdict',
+      'mender.started',
+      'mender.declined',
+      'mender.refused',
     ] as const) {
       expect(PUSH_ROUTES[kind], kind).toBeNull();
     }

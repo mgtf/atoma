@@ -529,7 +529,7 @@ that exists in `src/` and not in this picture fails <code>npm run docs:check</co
 | --- | --- |
 | Version | `0.1.4` |
 | Node | 22.13+ / 24+ (`.nvmrc` 22.13.0, `engines` ^22.13.0 \|\| >=24) |
-| Subsystems under their own contract | 17 |
+| Subsystems under their own contract | 18 |
 | MCP tools | 13 |
 | Curated agent names | 118 molecules · 40 cells · 20 tissues |
 | Controlled benchmark rounds | 12 (`benchmark/RESULT.md` + `ROUND<n>.md`) |
