@@ -253,6 +253,51 @@ sudo systemctl enable atoma.service
 Do not start the empty service before its first release has created the
 `/home/atoma/current` link.
 
+## Self-repair: the analyst on the host, the mender in CI
+
+Stages 2 and 3 of [the supervisor design](supervisor-design.md) split across
+two machines on purpose. The **analyst** runs INSIDE the production server
+(`ATOMA_VIZ_ANALYST=1`): it is read-only over finished runs, spends a
+separate provider credential, and journals one `supervisor.verdict` row per
+run. The **mender** never runs on the serving host — it needs a git checkout,
+the devDependencies, `gh` and a model credential, and its full check would
+compete with customer runs — so a cited high-confidence defect is DISPATCHED
+to this repository's `Mender` workflow, which opens a pull request. A person
+merges; the merge rides the deployment above.
+
+On the host, once:
+
+```bash
+sudo npm install -g @anthropic-ai/claude-code       # the headless model CLI the analyst drives
+sudo install -d -o atoma -g atoma -m 0750 /home/atoma/state/supervisor
+```
+
+In `/home/atoma/config/atoma.env`:
+
+```dotenv
+ATOMA_VIZ_ANALYST=1
+ATOMA_ANALYST_MODEL=glm-5.3                      # the measured analyst (docs/supervisor-design.md)
+ATOMA_ANALYST_BASE_URL=https://api.z.ai/api/anthropic
+ATOMA_ANALYST_AUTH_TOKEN=…
+ATOMA_SUPERVISOR_DIR=/home/atoma/state/supervisor
+ATOMA_MENDER_DISPATCH_REPO=<owner>/atoma
+ATOMA_MENDER_DISPATCH_TOKEN=…                    # fine-grained PAT: this repository, contents: write
+ATOMA_MENDER_DISPATCH_INSTANCE=<your instance hostname>
+```
+
+In the repository, for `.github/workflows/mender.yml`: the variables
+`ATOMA_MENDER_MODEL` and `ATOMA_MENDER_BASE_URL`, the secret
+`ATOMA_MENDER_AUTH_TOKEN`, and — unless *Allow GitHub Actions to create and
+approve pull requests* is enabled in the repository's Actions settings — the
+secret `ATOMA_MENDER_GITHUB_TOKEN` (a PAT with `contents` and
+`pull-requests` write). The workflow also accepts the request by hand
+(`workflow_dispatch`), which is how the first mend is driven and observed.
+
+What to read afterwards: the journal rows `supervisor.verdict`,
+`mender.dispatched`, then on the workflow side the `mender-<run>` artifact
+and the pull request. The analyst's verdicts, backlog and alerts stay under
+`ATOMA_SUPERVISOR_DIR` on the host.
+
 ## GitHub configuration
 
 Create an environment named `production`, restricted to the protected `main`

@@ -19,6 +19,9 @@ import type { FindingKind, VerdictGrade, VerdictRunStatus } from '../contracts/s
 
 export interface VerdictJournalFacts {
   readonly runId: string;
+  /** Attribution for a project run; null for the operator corpus. */
+  readonly orgId?: string | null;
+  readonly projectId?: string | null;
   readonly runStatus: VerdictRunStatus;
   readonly grade: VerdictGrade;
   readonly worstFindingKind: FindingKind | null;
@@ -34,6 +37,8 @@ export function verdictEvent(facts: VerdictJournalFacts): PlatformEventInput {
   return {
     kind: 'supervisor.verdict',
     actorType: 'system',
+    orgId: facts.orgId ?? null,
+    projectId: facts.projectId ?? null,
     runId: facts.runId,
     summary: `Analyst graded a ${facts.runStatus} run ${facts.grade}${worst}`,
     detail: {
@@ -122,6 +127,35 @@ export function mendEvent(facts: MendJournalFacts): PlatformEventInput | null {
       ...(facts.changedLines !== undefined ? { changedLines: facts.changedLines } : {}),
       ...(facts.problems !== undefined ? { problems: facts.problems.map((p) => p.slice(0, 160)).slice(0, 5) } : {}),
       ...(facts.worktreeKept !== undefined ? { worktreeKept: facts.worktreeKept } : {}),
+    },
+  };
+}
+
+export interface DispatchJournalFacts {
+  readonly runId: string;
+  readonly findingIndex: number;
+  readonly key: string;
+  readonly repo: string;
+  readonly eventType: string;
+  readonly orgId: string | null;
+  readonly projectId: string | null;
+}
+
+/** The analyst handed a cited defect to the mender workflow. Facts only. */
+export function dispatchedEvent(facts: DispatchJournalFacts): PlatformEventInput {
+  return {
+    kind: 'mender.dispatched',
+    actorType: 'system',
+    orgId: facts.orgId,
+    projectId: facts.projectId,
+    runId: facts.runId,
+    summary: 'Analyst dispatched a cited defect to the mender workflow',
+    detail: {
+      stage: 'analyst',
+      findingIndex: facts.findingIndex,
+      key: facts.key,
+      repo: facts.repo,
+      eventType: facts.eventType,
     },
   };
 }

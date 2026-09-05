@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { SupervisorMendReport } from '../contracts/supervisorMend.js';
+import { WITHHELD_QUOTE, type SanitisedFinding, type SupervisorMendReport } from '../contracts/supervisorMend.js';
 import type {
   FindingConfidence,
   SupervisorVerdict,
@@ -55,16 +55,8 @@ export function eligibleFindings(
 
 /** Repository paths the mender may quote verbatim to the model. */
 const SOURCE_REF = /^(src|tests|docs|scripts|benchmark|deploy|docker)\//;
-export const WITHHELD_QUOTE = '[trace excerpt withheld from the mender by design]';
-
-export interface SanitisedFinding {
-  readonly kind: VerdictFinding['kind'];
-  readonly title: string;
-  readonly detail: string;
-  readonly confidence: FindingConfidence;
-  readonly proposedFix: { where: string; what: string; checkedIntentionalChoices: string };
-  readonly evidence: { ref: string; quote: string }[];
-}
+export { WITHHELD_QUOTE };
+export type { SanitisedFinding };
 
 /**
  * The finding as the mender's model is allowed to see it. Evidence quotes
@@ -75,7 +67,7 @@ export interface SanitisedFinding {
  * The model still cannot open those pointers: its worktree has no `runs/` and
  * no `supervisor/`.
  */
-export function sanitiseFinding(finding: VerdictFinding): SanitisedFinding {
+export function sanitiseFinding(finding: VerdictFinding | SanitisedFinding): SanitisedFinding {
   const fix = finding.proposedFix;
   return {
     kind: finding.kind,
@@ -105,7 +97,7 @@ export function sanitiseFinding(finding: VerdictFinding): SanitisedFinding {
  * approximation, documented as one; it rides the commit and the PR body as a
  * `Defect-Key:` line for `gh pr list --search`.
  */
-export function defectKey(finding: VerdictFinding): string {
+export function defectKey(finding: Pick<VerdictFinding, 'title' | 'proposedFix'>): string {
   const norm = (text: string | undefined): string =>
     (text ?? '')
       .toLowerCase()
@@ -133,7 +125,7 @@ export function shortRunId(runId: string): string {
   return runId.split('-').pop()?.slice(0, 8) ?? 'run';
 }
 
-export function branchName(runId: string, findingIndex: number, finding: VerdictFinding): string {
+export function branchName(runId: string, findingIndex: number, finding: Pick<VerdictFinding, 'title'>): string {
   return `mender/${shortRunId(runId)}-${findingIndex}-${slugify(finding.title)}`;
 }
 
@@ -258,7 +250,9 @@ export interface DiffStat {
 
 export function pullRequestBody(input: {
   report: SupervisorMendReport;
-  finding: VerdictFinding;
+  finding: VerdictFinding | SanitisedFinding;
+  /** Which deployment asked, when the request came across a boundary. */
+  instance?: string | null;
   runId: string;
   key: string;
   verification: MendVerification;
@@ -311,6 +305,7 @@ export function pullRequestBody(input: {
     `- models served: ${servedLine}`,
     `- mend cost: ${input.costUsd != null ? `$${input.costUsd.toFixed(4)}` : 'not reported'}`,
     `- Defect-Key: ${input.key}`,
+    ...(input.instance ? [`- requested by: ${input.instance}`] : []),
     '',
     '---',
     '',

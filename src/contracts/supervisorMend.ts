@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { jsonSchemaFromZod } from './jsonSchema.js';
+import { findingConfidenceSchema, findingKindSchema, verdictGradeSchema, verdictRunStatusSchema } from './supervisorVerdict.js';
 
 /**
  * THE MENDER'S REPORT — what the headless session must end with (supervisor
@@ -82,6 +83,82 @@ export const mendRecordOutcomeSchema = z.enum([
   'dry-run',
 ]);
 export type MendRecordOutcome = z.infer<typeof mendRecordOutcomeSchema>;
+
+/**
+ * THE FINDING AS THE MENDER'S MODEL MAY SEE IT. Evidence quotes survive only
+ * for refs into the repository source; every other quote is the withheld
+ * marker. This is the shape the analyst hands across a process or a network
+ * boundary, so the mender never has to decide what to strip.
+ */
+export const WITHHELD_QUOTE = '[trace excerpt withheld from the mender by design]';
+
+export const sanitisedFindingSchema = z
+  .object({
+    kind: findingKindSchema,
+    title: z.string().min(1).max(400),
+    detail: z.string().min(1).max(4400),
+    confidence: findingConfidenceSchema,
+    proposedFix: z
+      .object({
+        where: z.string().min(1).max(400),
+        what: z.string().min(1).max(2200),
+        checkedIntentionalChoices: z.string().min(1).max(1200),
+      })
+      .strict(),
+    evidence: z.array(z.object({ ref: z.string().min(1).max(400), quote: z.string().max(400) }).strict()).max(12),
+  })
+  .strict();
+export type SanitisedFinding = z.infer<typeof sanitisedFindingSchema>;
+
+/**
+ * ONE MEND, REQUESTED ACROSS A BOUNDARY: what a production analyst sends to
+ * the repository's mender workflow (`repository_dispatch` client payload) and
+ * what `npm run mender -- --finding-file` reads. Flat, at most ten top-level
+ * keys (GitHub's payload rule), and never trace text: `finding` is already
+ * sanitised. `key` is the analyst's own computation of the defect key so the
+ * two sides agree on duplicates.
+ */
+export const MEND_REQUEST_SCHEMA_TAG = 'atoma.supervisor.mend-request/v1';
+
+export const mendRequestSchema = z
+  .object({
+    schema: z.enum([MEND_REQUEST_SCHEMA_TAG]),
+    runId: z.string().min(1).max(128),
+    findingIndex: z.number().int().min(0),
+    key: z.string().regex(/^[0-9a-f]{12}$/),
+    runStatus: verdictRunStatusSchema,
+    runGrade: verdictGradeSchema,
+    finding: sanitisedFindingSchema,
+    /** Which deployment asked, for the PR body and the reviewer. Not an authority. */
+    instance: z.string().max(200).optional(),
+  })
+  .strict();
+export type MendRequest = z.infer<typeof mendRequestSchema>;
+
+export const EXAMPLE_MEND_REQUEST: MendRequest = mendRequestSchema.parse({
+  schema: MEND_REQUEST_SCHEMA_TAG,
+  runId: '2026-08-21T11-02-26-148-48faa963',
+  findingIndex: 0,
+  key: '0123456789ab',
+  runStatus: 'failed',
+  runGrade: 'deficient',
+  finding: {
+    kind: 'defect',
+    title: 'validate_html accepts a pre-flight rejection as a pass',
+    detail: 'The tool reports ok on a rejected smoke when the body parses.',
+    confidence: 'high',
+    proposedFix: {
+      where: 'src/tools/browserProbe.ts',
+      what: 'Check the pre-flight verdict before the body.',
+      checkedIntentionalChoices: 'src/tools/AGENTS.md — a tool verdict fix, not the rejected prompt shortcut.',
+    },
+    evidence: [
+      { ref: 'src/tools/browserProbe.ts:88', quote: 'if (parsed) return { ok: true }' },
+      { ref: 'supervisor/work/x/events.ndjson:9', quote: WITHHELD_QUOTE },
+    ],
+  },
+  instance: 'atoma.example.com',
+});
 
 /** Schema-validated example, parsed at module load (contracts convention). */
 export const EXAMPLE_SUPERVISOR_MEND_REPORT: SupervisorMendReport = supervisorMendReportSchema.parse({

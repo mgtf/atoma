@@ -471,13 +471,16 @@ it lands in, so none of them needs re-designing.
    `mender.pr_opened` and `mender.failed` route to platform admins with a
    body naming the branch and the PR URL, never the finding text. Not yet
    fired for real — see item 1.
-4. **Analyst → mender coupling.** Today the analyst polls `runs/index.json`
-   and the mender polls `supervisor/verdicts/`, as two processes. One
-   watcher owning `run finished → analyse → mend` with the shared idle
-   predicate (`src/supervisor/activity.ts`) and the analyst's batch-end
-   coalescing is the next structural step. Settle first whether the viz
-   server may host it as it hosts the sentinel: that would put a
-   quota-spending process inside the gated server.
+4. ~~**Analyst → mender coupling.**~~ SETTLED 2026-09-05, as three hosts:
+   the production viz server hosts the ANALYST as an opt-in resident
+   (`ATOMA_VIZ_ANALYST=1`, triggered by the journal's own `run.finished`
+   rows, quiet period and idle gate kept); a cited defect is DISPATCHED to
+   the repository's `Mender` workflow as a `MendRequest`; the CI runner
+   hosts the MENDER with the idle gate off, and opens the pull request. The
+   serving host never runs the mender. Contract and reasoning in
+   [src/supervisor/AGENTS.md](../src/supervisor/AGENTS.md); operator
+   procedure in [automatic-deployment.md](automatic-deployment.md). What
+   remains is item 1: the first real mend, now driven from production.
 5. **Defect-Key calibration.** The key is a normalised hash of
    `proposedFix.where` + title. Measure on real verdicts whether two runs
    surfacing one defect collide (wanted) and whether two defects in one file

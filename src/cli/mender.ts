@@ -15,7 +15,7 @@
  * record under supervisor/mender/ and — when it touched the deployment — one
  * journal row.
  */
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { storeDbPath } from '../core/stores.js';
 import { mcpRunLockPath } from '../mcp/runLock.js';
@@ -25,6 +25,7 @@ import {
   eligibleForVerdict,
   listVerdicts,
   MENDER_DEFAULT_POLL_MS,
+  mendInputFromRequest,
   menderCommandsFromEnv,
   menderPaths,
   pendingMends,
@@ -41,7 +42,8 @@ import { applyCheckoutDotenvForSourceEntry } from './loadDotenv.js';
 const USAGE = `atoma mender — a cited defect verdict becomes a pull request on main
 
 usage:
-  npm run mender [-- --once [--backfill <n>]] [--verdict <runId> [--finding <n>]] [--dry-run]
+  npm run mender [-- --once [--backfill <n>]] [--verdict <runId> [--finding <n>]]
+                 [--finding-file <request.json>] [--no-idle-gate] [--dry-run]
                  [--force] [--keep-worktree] [--min-confidence high|medium|low]
                  [--budget-usd <usd>] [--timeout-ms <ms>] [--max-diff-lines <n>]
                  [--poll-ms <ms>] [--base <branch>] [--remote <name>] [--repo <path>]
@@ -70,6 +72,9 @@ commands (env, for tests and unusual hosts):
   ATOMA_MENDER_CMD_CHECK (npm run check)
 
 flags:
+  --finding-file <path>  mend ONE request (atoma.supervisor.mend-request/v1) — what a
+                         production analyst dispatches to .github/workflows/mender.yml
+  --no-idle-gate         skip the live-run gate; only for a machine with nothing else to do (CI)
   --once                 mend pending findings (all, or the --backfill newest verdicts), exit
   --backfill <n>         limit --once to the n newest verdicts; in watch mode, re-queue them
   --verdict <runId>      mend the eligible findings of one verdict (--finding <n> for one)
@@ -117,9 +122,9 @@ function confidence(raw: string | undefined): FindingConfidence {
 async function main(): Promise<void> {
   applyCheckoutDotenvForSourceEntry();
   const args = parseCliArgs(process.argv, {
-    booleanFlags: ['help', 'once', 'dry-run', 'force', 'keep-worktree'],
+    booleanFlags: ['help', 'once', 'dry-run', 'force', 'keep-worktree', 'no-idle-gate'],
     valueFlags: [
-      'verdict', 'finding', 'backfill', 'min-confidence', 'budget-usd', 'timeout-ms', 'max-diff-lines',
+      'verdict', 'finding', 'finding-file', 'backfill', 'min-confidence', 'budget-usd', 'timeout-ms', 'max-diff-lines',
       'poll-ms', 'base', 'remote', 'repo', 'runs', 'supervisor-dir', 'db',
     ],
     undeclared: 'discard',
@@ -146,6 +151,7 @@ async function main(): Promise<void> {
   const warn = (line: string): void => void process.stderr.write(`[mender ${new Date().toISOString()}] WARN ${line}\n`);
   const once = args.flags['once'] === 'true';
   const verdictId = args.flags['verdict'];
+  const findingFile = args.flags['finding-file'];
   const options: MenderOptions = {
     repo,
     runsDir: resolve(args.flags['runs'] || process.env['ATOMA_RUNS_DIR'] || './runs'),
@@ -162,7 +168,8 @@ async function main(): Promise<void> {
     dryRun: args.flags['dry-run'] === 'true',
     force: args.flags['force'] === 'true',
     keepWorktree: args.flags['keep-worktree'] === 'true',
-    waitForIdle: !once && !verdictId,
+    idleGate: args.flags['no-idle-gate'] !== 'true',
+    waitForIdle: !once && !verdictId && !findingFile,
     pollMs: positiveNumber(args.flags['poll-ms'], '--poll-ms', MENDER_DEFAULT_POLL_MS),
     journal: journal ? (input) => void journal.append(input) : null,
     log,
@@ -179,6 +186,24 @@ async function main(): Promise<void> {
   );
 
   const backfill = nonNegativeInteger(args.flags['backfill'], '--backfill');
+  if (findingFile) {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(readFileSync(findingFile, 'utf8'));
+    } catch (error) {
+      fail(`cannot read ${findingFile}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    let input: ReturnType<typeof mendInputFromRequest>;
+    try {
+      input = mendInputFromRequest(raw);
+    } catch (error) {
+      fail(`${findingFile} is not a mend request: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (!options.idleGate) log('idle gate OFF — this machine is expected to have nothing else to do');
+    const { failures } = await processMends([input], options);
+    process.exitCode = failures > 0 ? 1 : 0;
+    return;
+  }
   if (verdictId) {
     const verdict = readVerdict(paths.verdictsDir, verdictId);
     if (!verdict) fail(`no valid verdict for ${verdictId} under ${paths.verdictsDir}`);
@@ -188,7 +213,12 @@ async function main(): Promise<void> {
       fail(`no eligible defect finding in ${verdictId} (kind=defect, confidence ≥ ${options.minConfidence}, proposedFix cited)`);
     }
     const { failures } = await processMends(
-      eligible.map(({ index, finding }) => ({ runId: verdictId, index, verdict, finding })),
+      eligible.map(({ index, finding }) => ({
+        runId: verdictId,
+        index,
+        run: { runStatus: verdict.runStatus, grade: verdict.runAssessment.grade },
+        finding,
+      })),
       options
     );
     process.exitCode = failures > 0 ? 1 : 0;

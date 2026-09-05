@@ -6,8 +6,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { PlatformEventKind } from '../src/contracts/platformEvents.js';
 import { closeStoreHandles } from '../src/core/stores.js';
 import { PlatformEventLog } from '../src/platform/events.js';
+import { EXAMPLE_MEND_REQUEST } from '../src/contracts/supervisorMend.js';
 import {
   mendFinding,
+  mendInputFromRequest,
   mendRecordPath,
   pendingMends,
   processMends,
@@ -194,6 +196,7 @@ process.exit(2);
       dryRun: false,
       force: false,
       keepWorktree: false,
+      idleGate: true,
       waitForIdle: false,
       pollMs: 100,
       journal: (input) => void journal.append(input),
@@ -361,6 +364,41 @@ describe('the mender, end to end against a real repository', () => {
     expect(worktrees(f)).toEqual([]);
     expect(existsSync(join(f.supervisor, 'mender.lock'))).toBe(false);
     expect(journalKinds(f)).toEqual([]);
+  }, TIMEOUT_MS);
+
+  it('mends a dispatched request file exactly like a local verdict, and the PR names the requester', async () => {
+    const f = fixture();
+    const request = {
+      ...EXAMPLE_MEND_REQUEST,
+      runId: RUN_ID,
+      findingIndex: 1,
+      finding: {
+        ...EXAMPLE_MEND_REQUEST.finding,
+        title: 'add() subtracts its operands',
+        proposedFix: { ...EXAMPLE_MEND_REQUEST.finding.proposedFix, where: 'src/adder.mjs' },
+      },
+      instance: 'atoma.example.com',
+    };
+    const { failures } = await processMends([mendInputFromRequest(request)], f.options());
+    expect(failures).toBe(0);
+    expect(record(f)).toMatchObject({ outcome: 'pr-opened', prUrl: 'https://github.com/example/atoma/pull/42' });
+    expect(remoteBranches(f)).toEqual(['mender/deadbeef-1-add-subtracts-its-operands']);
+    const ghCalls = readFileSync(f.ghLog, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as string[]);
+    const create = ghCalls.find((call) => call[1] === 'create')!;
+    const body = readFileSync(create[create.indexOf('--body-file') + 1]!, 'utf8');
+    expect(body).toContain('requested by: atoma.example.com');
+    expect(journalKinds(f)).toEqual(['mender.started', 'mender.pr_opened']);
+  }, TIMEOUT_MS);
+
+  it('proceeds beside a live run only when the idle gate is explicitly off', async () => {
+    const f = fixture();
+    writeFileSync(
+      join(f.runs, 'index.json'),
+      JSON.stringify([{ id: 'live-1', label: 'live', startedAt: new Date().toISOString(), lastEventAt: Date.now(), inFlight: true }])
+    );
+    const { failures } = await mendPending(f, f.options({ idleGate: false }));
+    expect(failures).toBe(0);
+    expect(record(f)?.outcome).toBe('pr-opened');
   }, TIMEOUT_MS);
 
   it('does not run the same finding twice unless forced', async () => {

@@ -14,6 +14,7 @@ import {
 import { readBoundedJson } from '../sentinel/sources.js';
 import type { VizRun, VizRunIndexEntry } from '../viz/trace.js';
 import { anyRunActive, finishedRuns } from './activity.js';
+import { dispatchMendRequests, mendRequestsFor, type DispatchConfig, type FetchLike } from './dispatch.js';
 import { truncate, writeDigest } from './digest.js';
 import { ANALYST_HARDENING, ANALYST_PROMPT_VERSION, buildAnalystPrompt } from './analystPrompt.js';
 import { safeSink, verdictEvent } from './journal.js';
@@ -63,10 +64,37 @@ export function analystPaths(supervisorDir: string): AnalystPaths {
   };
 }
 
+/** What the analyst needs of `ProjectStore`, and nothing more. */
+export interface ProjectFinishedTraceReader {
+  listFinishedRunTraces(): readonly {
+    readonly projectRunId: string;
+    readonly orgId: string;
+    readonly projectId: string;
+    readonly projectSlug: string;
+    readonly endedAt: string;
+    readonly file: string | null;
+  }[];
+}
+
+/** One run to analyse: where its trace is and whom a verdict about it belongs to. */
+export interface AnalysisTarget {
+  readonly runId: string;
+  readonly tracePath: string;
+  readonly corpus: 'operator' | 'project';
+  readonly orgId: string | null;
+  readonly projectId: string | null;
+  readonly endedAt: string | null;
+}
+
 export interface AnalystOptions {
   /** The checkout the session runs in and paths are shown relative to. */
   readonly repoRoot: string;
   readonly runsDir: string;
+  /** The tenant corpus, when this store holds one. Operator corpus only without it. */
+  readonly projectReader?: ProjectFinishedTraceReader | null;
+  /** Hand eligible defects to the mender workflow. Null: keep them in the verdict. */
+  readonly dispatch?: DispatchConfig | null;
+  readonly fetchImpl?: FetchLike;
   readonly supervisorDir: string;
   readonly leasePath: string;
   readonly provider: SupervisorProvider;
@@ -96,6 +124,8 @@ export interface AnalyseResult {
   readonly outcome: AnalyseOutcome;
   readonly verdictPath: string | null;
   readonly detail?: string;
+  /** How many mend requests reached the workflow, when dispatch is configured. */
+  readonly dispatched?: number;
 }
 
 /** The exact P0 argument shape, measured 2026-08-22 against the real CLI. */
@@ -132,7 +162,8 @@ export function routeVerdict(
   paths: AnalystPaths,
   journal: PlatformEventSink,
   log: (line: string) => void,
-  warn: (line: string) => void
+  warn: (line: string) => void,
+  attribution: { orgId: string | null; projectId: string | null } = { orgId: null, projectId: null }
 ): string {
   mkdirSync(paths.verdictsDir, { recursive: true });
   const verdictPath = join(paths.verdictsDir, `${verdict.runId}.json`);
@@ -167,6 +198,8 @@ export function routeVerdict(
   journal(
     verdictEvent({
       runId: verdict.runId,
+      orgId: attribution.orgId,
+      projectId: attribution.projectId,
       runStatus: verdict.runStatus,
       grade: verdict.runAssessment.grade,
       worstFindingKind: meta.worstFindingKind,
@@ -189,7 +222,28 @@ export function verdictPathFor(supervisorDir: string, runId: string): string {
   return join(analystPaths(supervisorDir).verdictsDir, `${runId}.json`);
 }
 
+/** The operator corpus's target for a run id: `<runsDir>/<runId>.json`. */
+export function operatorTarget(runsDir: string, runId: string, endedAt: string | null = null): AnalysisTarget {
+  return { runId, tracePath: join(runsDir, `${runId}.json`), corpus: 'operator', orgId: null, projectId: null, endedAt };
+}
+
+/** Resolve a run id against both corpora: the operator file, else the tenant store. */
+export function resolveTarget(runId: string, options: Pick<AnalystOptions, 'runsDir' | 'projectReader'>): AnalysisTarget {
+  const operator = operatorTarget(options.runsDir, runId);
+  if (existsSync(operator.tracePath)) return operator;
+  const row = options.projectReader?.listFinishedRunTraces().find((r) => r.projectRunId === runId);
+  if (row?.file) {
+    return { runId, tracePath: row.file, corpus: 'project', orgId: row.orgId, projectId: row.projectId, endedAt: row.endedAt };
+  }
+  return operator;
+}
+
 export async function analyseRun(runId: string, options: AnalystOptions): Promise<AnalyseResult> {
+  return analyseTarget(resolveTarget(runId, options), options);
+}
+
+export async function analyseTarget(target: AnalysisTarget, options: AnalystOptions): Promise<AnalyseResult> {
+  const { runId } = target;
   const paths = analystPaths(options.supervisorDir);
   const journal = safeSink(options.journal, options.warn);
   const verdictPath = join(paths.verdictsDir, `${runId}.json`);
@@ -197,7 +251,7 @@ export async function analyseRun(runId: string, options: AnalystOptions): Promis
     options.log(`verdict already exists for ${runId} (use --force to redo); skipping`);
     return { runId, outcome: 'already-analysed', verdictPath };
   }
-  const runFile = join(options.runsDir, `${runId}.json`);
+  const runFile = target.tracePath;
   const run = readBoundedJson<VizRun>(runFile);
   if (!run) return { runId, outcome: 'no-trace', verdictPath: null, detail: `no readable trace at ${runFile}` };
 
@@ -276,8 +330,28 @@ export async function analyseRun(runId: string, options: AnalystOptions): Promis
     analysisTurns: session.usage.turns,
     sessionId: session.usage.sessionId,
   };
-  const written = routeVerdict(verdict, meta, paths, journal, options.log, options.warn);
-  return { runId, outcome: 'analysed', verdictPath: written };
+  const written = routeVerdict(verdict, meta, paths, journal, options.log, options.warn, {
+    orgId: target.orgId,
+    projectId: target.projectId,
+  });
+  let dispatched = 0;
+  if (options.dispatch) {
+    const requests = mendRequestsFor(verdict, options.dispatch);
+    if (requests.length > 0) {
+      const outcomes = await dispatchMendRequests({
+        requests,
+        config: options.dispatch,
+        journal,
+        orgId: target.orgId,
+        projectId: target.projectId,
+        warn: options.warn,
+        ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+      });
+      dispatched = outcomes.filter((outcome) => outcome.ok).length;
+      options.log(`dispatched ${dispatched}/${requests.length} mend request(s) to ${options.dispatch.repo}`);
+    }
+  }
+  return { runId, outcome: 'analysed', verdictPath: written, dispatched };
 }
 
 /* ─────────────────────────────── the loop ─────────────────────────────── */
@@ -314,9 +388,38 @@ function isAnalysed(supervisorDir: string, runId: string): boolean {
   return existsSync(verdictPathFor(supervisorDir, runId));
 }
 
-/** Finished runs not yet analysed, oldest first; the newest `limit` of them when bounded. */
+/** Finished operator runs not yet analysed, oldest first; the newest `limit` of them when bounded. */
 export function pendingRuns(options: Pick<AnalystOptions, 'runsDir' | 'supervisorDir'>, limit?: number): VizRunIndexEntry[] {
   const pending = finishedRuns(options.runsDir).filter((entry) => !isAnalysed(options.supervisorDir, entry.id));
+  return limit !== undefined && limit >= 0 ? pending.slice(-limit) : pending;
+}
+
+/** Every finished run of BOTH corpora, oldest first; a project run without a trace on disk is left out. */
+export function finishedTargets(options: Pick<AnalystOptions, 'runsDir' | 'projectReader'>): AnalysisTarget[] {
+  const operator = finishedRuns(options.runsDir).map((entry) =>
+    operatorTarget(options.runsDir, entry.id, typeof entry.endedAt === 'string' ? entry.endedAt : null)
+  );
+  const project: AnalysisTarget[] = [];
+  for (const row of options.projectReader?.listFinishedRunTraces() ?? []) {
+    if (row.file === null) continue;
+    project.push({
+      runId: row.projectRunId,
+      tracePath: row.file,
+      corpus: 'project',
+      orgId: row.orgId,
+      projectId: row.projectId,
+      endedAt: row.endedAt,
+    });
+  }
+  return [...operator, ...project].sort((a, b) => String(a.endedAt ?? '').localeCompare(String(b.endedAt ?? '')));
+}
+
+/** Finished runs of both corpora not yet analysed, oldest first; the newest `limit` when bounded. */
+export function pendingTargets(
+  options: Pick<AnalystOptions, 'runsDir' | 'supervisorDir' | 'projectReader'>,
+  limit?: number
+): AnalysisTarget[] {
+  const pending = finishedTargets(options).filter((target) => !isAnalysed(options.supervisorDir, target.runId));
   return limit !== undefined && limit >= 0 ? pending.slice(-limit) : pending;
 }
 
@@ -330,26 +433,26 @@ export async function runAnalystLoop(loop: AnalystLoopOptions): Promise<void> {
   const { analyst, signal } = loop;
   const quietMs = loop.quietMs ?? ANALYST_DEFAULT_QUIET_MS;
   const pollMs = loop.pollMs ?? ANALYST_DEFAULT_POLL_MS;
-  const baseline = new Set(finishedRuns(analyst.runsDir).map((entry) => entry.id));
+  const baseline = new Set(finishedTargets(analyst).map((target) => target.runId));
   if (loop.backfill && loop.backfill > 0) {
-    for (const entry of pendingRuns(analyst, loop.backfill)) baseline.delete(entry.id);
+    for (const target of pendingTargets(analyst, loop.backfill)) baseline.delete(target.runId);
   }
   while (!signal.aborted) {
-    const ready = finishedRuns(analyst.runsDir).filter(
-      (entry) =>
-        !baseline.has(entry.id) &&
-        !isAnalysed(analyst.supervisorDir, entry.id) &&
-        Date.now() - Date.parse(String(entry.endedAt)) >= quietMs
+    const ready = finishedTargets(analyst).filter(
+      (target) =>
+        !baseline.has(target.runId) &&
+        !isAnalysed(analyst.supervisorDir, target.runId) &&
+        Date.now() - Date.parse(String(target.endedAt ?? '')) >= quietMs
     );
     if (ready.length > 0 && !anyRunActive({ runsDir: analyst.runsDir, leasePath: analyst.leasePath })) {
-      for (const entry of ready) {
+      for (const target of ready) {
         if (signal.aborted) break;
         try {
-          loop.onResult?.(await analyseRun(entry.id, analyst));
+          loop.onResult?.(await analyseTarget(target, analyst));
         } catch (error) {
-          analyst.warn(`analysis of ${entry.id} failed: ${String(error)}`);
+          analyst.warn(`analysis of ${target.runId} failed: ${String(error)}`);
         } finally {
-          baseline.add(entry.id);
+          baseline.add(target.runId);
         }
         if (anyRunActive({ runsDir: analyst.runsDir, leasePath: analyst.leasePath })) break;
       }

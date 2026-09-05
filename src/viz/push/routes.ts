@@ -197,6 +197,7 @@ const PUSH_ROUTE_SOURCES: Record<PlatformEventKind, PushRouteSource | null> = {
   // person are the pull request waiting for a review and a failure that left
   // a worktree behind. Bodies name refs and URLs, never model-authored text.
   'supervisor.verdict': null,
+  'mender.dispatched': null,
   'mender.started': null,
   'mender.declined': null,
   'mender.refused': null,

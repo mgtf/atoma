@@ -89,6 +89,7 @@ export const platformEventKindSchema = z.enum([
    * opens them knowing what they are.
    */
   'supervisor.verdict',
+  'mender.dispatched',
   'mender.started',
   'mender.declined',
   'mender.refused',
@@ -315,6 +316,8 @@ export const PLATFORM_EVENT_SEVERITY: Record<PlatformEventKind, PlatformEventSev
   'security.flagged': 'security',
   // A verdict is a fact about a finished run; what it FOUND is in detail.
   'supervisor.verdict': 'info',
+  // The analyst handed a cited defect to a mender elsewhere (the CI workflow).
+  'mender.dispatched': 'info',
   'mender.started': 'info',
   'mender.declined': 'info',
   // The harness stopped the model's own work: worth a look, not an alarm.

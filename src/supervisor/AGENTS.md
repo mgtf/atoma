@@ -15,7 +15,9 @@ Neighbours:
 - [`src/platform`](../platform/AGENTS.md) — the journal every stage action lands in
 - [`src/sentinel`](../sentinel/AGENTS.md) — the bounded trace reader this reuses, and the stage that never spends
 - [`src/mcp`](../mcp/AGENTS.md) — the run lease the idle predicate peeks at
-- [`src/cli`](../cli/AGENTS.md) — `analyst` and `mender`, the two hosts
+- [`src/cli`](../cli/AGENTS.md) — `analyst` and `mender`, two of the hosts
+- [`src/viz`](../viz/AGENTS.md) — the gated server that hosts the resident analyst
+- [`src/projects`](../projects/AGENTS.md) — the tenant corpus the analyst reads
 
 ## Three risk profiles, one boundary between them
 
@@ -49,8 +51,42 @@ Neighbours:
   requested id — the same lie `servedModel` prevents in the product's traces.
   A pin absent from what was served is warned about as "not comparable".
 
+## Where each stage runs — three machines, by design
+
+- THE PRODUCTION HOST runs the sentinel and the ANALYST, nothing more. The
+  analyst is a resident shell inside the gated viz server (`resident.ts`,
+  `ATOMA_VIZ_ANALYST=1`): it subscribes to the journal's own `run.finished`
+  rows — the one fact "a run ended" the platform already records — waits the
+  quiet period, asserts the idle predicate, analyses one run at a time, and
+  re-queues at boot whatever the store lists as ended and un-analysed. OPT-IN
+  where the sentinel is opt-out, because it spends quota. It needs a `claude`
+  binary on the host and the `ATOMA_ANALYST_*` set in the service env.
+- THE MENDER NEVER RUNS ON THE SERVING HOST. That machine has no git checkout,
+  no devDependencies, no `gh`, and a full check beside a customer run is what
+  the idle gate exists to prevent. A verdict's eligible defects are DISPATCHED
+  (`dispatch.ts`): one `repository_dispatch` per defect, whose payload is the
+  `MendRequest` contract — the SANITISED finding, the key, the run's status
+  and grade, at most ten flat keys. Half a configuration (`_REPO` without
+  `_TOKEN`) dispatches nothing; a refused POST warns and journals nothing.
+  Each accepted one is a `mender.dispatched` row.
+- THE REPOSITORY'S CI runs the mender (`.github/workflows/mender.yml`):
+  `npm run mender:dev -- --finding-file <payload> --no-idle-gate`. That flag
+  exists for exactly one host, the runner, which has nothing else to do; the
+  CLI says so out loud when it is set. The workflow is queued one mend at a
+  time, never merges, and keeps its `supervisor/` records as an artifact
+  whatever happened. Its journal is the pull request and the artifact; the
+  production journal holds the verdict and the dispatch.
+- The developer machine keeps the local loop for the operator corpus:
+  `npm run analyst` and `npm run mender` over `runs/` and
+  `supervisor/verdicts/`, with the idle gate on.
+
 ## The analyst
 
+- TWO CORPORA, like the sentinel: the operator index through the bounded
+  reader, and every ENDED project run through `ProjectStore.listFinishedRunTraces`
+  (`ended_at` is the transactional fact). A project verdict's row carries
+  `orgId`/`projectId` as ATTRIBUTION, never as audience. The tenant reader is
+  attached only where the store already holds project tables.
 - READ-ONLY BY CONSTRUCTION: `--tools Read,Glob,Grep`, `--strict-mcp-config`,
   no session persistence, a spend ceiling, a wall clock. Verification is
   read-only and never replays model-authored commands — applied to the
@@ -148,6 +184,15 @@ Neighbours:
   lease during a mend (as `deploy:preflight --hold` does) would refuse product
   runs for a background improver; the trade is documented as open work in the
   design document, with the data to revisit it.
+- The idle gate is a decision, not an inference. `--no-idle-gate` is a flag
+  the CI workflow passes, never a default derived from `CI=true`: an
+  environment variable that silently disabled a safety gate on a developer's
+  machine would be the exact silence the run-host contract exists to end.
+- The dispatch token is a fine-grained PAT (or an App installation token) read
+  from the service env, scoped to one repository and `contents: write`. Using
+  the project-publishing GitHub App for it was considered and deferred: the
+  App is installed per TENANT organisation for their repositories, and the
+  atoma repository is the operator's, so the identities do not line up.
 - Prompts are TypeScript constants (`analystPrompt.ts`, `menderPrompt.ts`),
   not Markdown assets: `tsc` ships nothing but `.js`, and a prompt the
   compiled CLI cannot find is a release-path failure typecheck never sees.

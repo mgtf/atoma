@@ -3,7 +3,9 @@ import { z } from 'zod';
 import { jsonSchemaFromZod } from '../src/contracts/jsonSchema.js';
 import { platformEventInputSchema } from '../src/contracts/platformEvents.js';
 import {
+  EXAMPLE_MEND_REQUEST,
   EXAMPLE_SUPERVISOR_MEND_REPORT,
+  mendRequestSchema,
   SUPERVISOR_MEND_JSON_SCHEMA,
   supervisorMendReportSchema,
 } from '../src/contracts/supervisorMend.js';
@@ -102,6 +104,15 @@ describe('the mend report contract', () => {
       additionalProperties: false,
       required: ['schema', 'outcome', 'title', 'summary', 'checkedIntentionalChoices'],
     });
+  });
+});
+
+describe('the mend request contract', () => {
+  it('parses its example, stays under ten top-level keys, and is strict', () => {
+    expect(mendRequestSchema.parse(EXAMPLE_MEND_REQUEST)).toEqual(EXAMPLE_MEND_REQUEST);
+    expect(Object.keys(EXAMPLE_MEND_REQUEST).length).toBeLessThanOrEqual(10);
+    expect(mendRequestSchema.safeParse({ ...EXAMPLE_MEND_REQUEST, trace: 'raw text' }).success).toBe(false);
+    expect(mendRequestSchema.safeParse({ ...EXAMPLE_MEND_REQUEST, key: 'zz' }).success).toBe(false);
   });
 });
 

@@ -22,11 +22,14 @@ import { resolve } from 'node:path';
 import { storeDbPath } from '../core/stores.js';
 import { mcpRunLockPath } from '../mcp/runLock.js';
 import { PlatformEventLog } from '../platform/events.js';
+import { hasProjectTables, ProjectStore } from '../projects/store.js';
+import { dispatchConfigFromEnv, type DispatchConfig } from '../supervisor/dispatch.js';
 import {
   ANALYST_DEFAULT_POLL_MS,
   ANALYST_DEFAULT_QUIET_MS,
   analyseRun,
-  pendingRuns,
+  analyseTarget,
+  pendingTargets,
   runAnalystLoop,
   type AnalystOptions,
 } from '../supervisor/analyst.js';
@@ -42,12 +45,16 @@ usage:
                   [--timeout-ms <ms>] [--runs <dir>] [--supervisor-dir <dir>] [--db <path>]
 
 what it does:
-  Watches the operator run index, and once a finished run has been quiet for
-  --quiet-ms and no run is active, drives ONE read-only headless claude session
+  Watches BOTH run corpora — the operator index and, when this store holds a
+  tenant control plane, every finished project run — and once a run has been
+  quiet for --quiet-ms and no run is active, drives ONE read-only headless claude session
   over a mechanical digest of its trace. The structured verdict is validated
   against src/contracts/supervisorVerdict.ts, written to supervisor/verdicts/,
   routed (mechanism candidates → backlog.jsonl, security → ALERTS.jsonl) and
   journaled as supervisor.verdict when this checkout has a product store.
+  With ATOMA_MENDER_DISPATCH_REPO and _TOKEN set, every cited high-confidence
+  defect is also sent to that repository's mender workflow (repository_dispatch)
+  and journaled as mender.dispatched.
 
 what it does NOT do:
   Run beside a run, write anything but its own outputs, or follow trace text.
@@ -68,6 +75,7 @@ flags:
   --timeout-ms <ms>      wall clock per analysis (default 900000)
   --runs <dir>           operator runs directory (default ATOMA_RUNS_DIR or ./runs)
   --supervisor-dir <dir> where verdicts live (default ./supervisor)
+  --operator-only        do not read project runs even if this store has them
   --db <path>            product store holding the journal (default ATOMA_DB_PATH or ./atoma.db)
   --help                 show this help`;
 
@@ -93,7 +101,7 @@ function nonNegativeInteger(raw: string | undefined, label: string): number {
 async function main(): Promise<void> {
   applyCheckoutDotenvForSourceEntry();
   const args = parseCliArgs(process.argv, {
-    booleanFlags: ['help', 'once', 'dry-run', 'force'],
+    booleanFlags: ['help', 'once', 'dry-run', 'force', 'operator-only'],
     valueFlags: ['run', 'backfill', 'quiet-ms', 'poll-ms', 'budget-usd', 'timeout-ms', 'runs', 'supervisor-dir', 'db'],
     undeclared: 'discard',
   });
@@ -122,12 +130,27 @@ async function main(): Promise<void> {
   // DDL, and an analyst must not bring a control plane into being by writing
   // to it. An ungated checkout keeps its file outputs and journals nothing.
   const journal = existsSync(dbPath) ? PlatformEventLog.open(dbPath) : null;
+  // The tenant corpus is read only where the store ALREADY holds it, like the
+  // sentinel: `ProjectStore.open` applies DDL, and a reader must not bring a
+  // control plane into being by looking at it.
+  const projectReader =
+    args.flags['operator-only'] !== 'true' && existsSync(dbPath) && hasProjectTables(dbPath)
+      ? ProjectStore.open(dbPath)
+      : null;
+  let dispatch: DispatchConfig | null = null;
+  try {
+    dispatch = dispatchConfigFromEnv();
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+  }
 
   const log = (line: string): void => void process.stdout.write(`[analyst ${new Date().toISOString()}] ${line}\n`);
   const warn = (line: string): void => void process.stderr.write(`[analyst ${new Date().toISOString()}] WARN ${line}\n`);
   const analyst: AnalystOptions = {
     repoRoot,
     runsDir,
+    projectReader,
+    dispatch,
     supervisorDir,
     leasePath: mcpRunLockPath(),
     provider,
@@ -144,8 +167,10 @@ async function main(): Promise<void> {
     `atoma analyst — read-only post-mortem, never beside a run\n` +
       `  runs       ${runsDir}\n` +
       `  verdicts   ${supervisorDir}/verdicts\n` +
+      `  projects   ${projectReader ? 'on (finished project_runs)' : args.flags['operator-only'] === 'true' ? 'off (--operator-only)' : 'off (no project control plane in this store)'}\n` +
       `  journal    ${journal ? dbPath : 'none (no product store at ' + dbPath + ')'}\n` +
-      `  provider   ${provider.model} (${provider.source}${provider.baseUrl ? `, ${provider.baseUrl}` : ''})\n`
+      `  provider   ${provider.model} (${provider.source}${provider.baseUrl ? `, ${provider.baseUrl}` : ''})\n` +
+      `  dispatch   ${dispatch ? `${dispatch.repo} (${dispatch.eventType}, confidence ≥ ${dispatch.minConfidence})` : 'off (ATOMA_MENDER_DISPATCH_REPO / _TOKEN unset)'}\n`
   );
 
   const runId = args.flags['run'];
@@ -162,11 +187,11 @@ async function main(): Promise<void> {
       warn('--once without --backfill or --run has nothing to do (watch mode baselines instead)');
       return;
     }
-    const queue = pendingRuns(analyst, backfill);
-    log(`once: analysing ${queue.length} run(s): ${queue.map((entry) => entry.id).join(', ') || 'none'}`);
+    const queue = pendingTargets(analyst, backfill);
+    log(`once: analysing ${queue.length} run(s): ${queue.map((target) => `${target.runId} (${target.corpus})`).join(', ') || 'none'}`);
     let failures = 0;
-    for (const entry of queue) {
-      const result = await analyseRun(entry.id, analyst);
+    for (const target of queue) {
+      const result = await analyseTarget(target, analyst);
       if (result.outcome !== 'analysed' && result.outcome !== 'dry-run') failures += 1;
     }
     process.exitCode = failures > 0 ? 1 : 0;

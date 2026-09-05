@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { closeStoreHandles } from '../src/core/stores.js';
 import { PlatformEventLog } from '../src/platform/events.js';
-import { analyseRun, pendingRuns, type AnalystOptions } from '../src/supervisor/analyst.js';
+import { analyseRun, analyseTarget, pendingRuns, pendingTargets, resolveTarget, type AnalystOptions } from '../src/supervisor/analyst.js';
+import type { FetchLike } from '../src/supervisor/dispatch.js';
 import { digestRun, runStatusOf } from '../src/supervisor/digest.js';
 
 /**
@@ -215,6 +216,51 @@ describe('analyseRun', () => {
     );
     expect((await analyseRun(RUN_ID, g.options())).outcome).toBe('refused-active');
     expect(existsSync(g.claudeArgs)).toBe(false);
+  });
+
+  it('reads a finished project run through the store reader, attributes the row, and dispatches its defect', async () => {
+    const f = fixture();
+    // The project trace lives in its own directory, never in runs/.
+    const projectRunId = '3f1c6f9e-1c2b-4f1a-9a3e-6d5b4c3a2b10';
+    const traceDir = join(f.root, 'orgs', 'o1', 'projects', 'p1', 'runs', projectRunId, 'traces');
+    mkdirSync(traceDir, { recursive: true });
+    const trace = { ...finishedTrace(), id: projectRunId };
+    writeFileSync(join(traceDir, `${projectRunId}.json`), JSON.stringify(trace));
+    const reader = {
+      listFinishedRunTraces: () => [
+        { projectRunId, orgId: 'o1', projectId: 'p1', projectSlug: 'stopwatch', endedAt: '2026-09-05T10:02:00.000Z', file: join(traceDir, `${projectRunId}.json`) },
+        { projectRunId: 'no-trace-yet', orgId: 'o1', projectId: 'p1', projectSlug: 'stopwatch', endedAt: '2026-09-05T10:03:00.000Z', file: null },
+      ],
+    };
+    const calls: { url: string; body: string }[] = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push({ url, body: init.body });
+      return Promise.resolve({ status: 204, text: () => Promise.resolve('') });
+    };
+    const options = f.options({
+      projectReader: reader,
+      dispatch: { repo: 'mgtf/atoma', token: 't', eventType: 'atoma-mend', minConfidence: 'high', instance: 'prod', apiBase: 'https://api.example' },
+      fetchImpl,
+    });
+    // Both corpora are pending, oldest first; the trace-less row is left out.
+    expect(pendingTargets(options).map((t) => `${t.corpus}:${t.runId}`)).toEqual([`operator:${RUN_ID}`, `project:${projectRunId}`]);
+    const target = resolveTarget(projectRunId, options);
+    expect(target).toMatchObject({ corpus: 'project', orgId: 'o1', projectId: 'p1' });
+
+    process.env['STUB_VERDICT'] = JSON.stringify({ ...verdict, runId: projectRunId });
+    const result = await analyseTarget(target, options);
+    expect(result).toMatchObject({ outcome: 'analysed', dispatched: 1 });
+    const row = f.journal.list({ kind: 'supervisor.verdict' }).events[0]!;
+    expect(row).toMatchObject({ runId: projectRunId, orgId: 'o1', projectId: 'p1' });
+    const dispatched = f.journal.list({ kind: 'mender.dispatched' }).events[0]!;
+    expect(dispatched).toMatchObject({ runId: projectRunId, orgId: 'o1', projectId: 'p1' });
+    expect(dispatched.detail).toMatchObject({ repo: 'mgtf/atoma', findingIndex: 0 });
+    expect(calls).toHaveLength(1);
+    const payload = JSON.parse(calls[0]!.body) as { client_payload: { runId: string; instance: string; finding: { title: string } } };
+    expect(payload.client_payload).toMatchObject({ runId: projectRunId, instance: 'prod' });
+    expect(payload.client_payload.finding.title).toBe('validate_html reports ok on a rejected smoke');
+    // The candidate and the security incident were never dispatched.
+    expect(JSON.stringify(calls)).not.toContain('repeated-tool-name');
   });
 
   it('dry-run writes the digest and spends nothing', async () => {

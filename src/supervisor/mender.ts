@@ -12,9 +12,12 @@ import {
 import { dirname, join } from 'node:path';
 import type { PlatformEventSink } from '../contracts/platformEvents.js';
 import {
+  mendRequestSchema,
   SUPERVISOR_MEND_JSON_SCHEMA,
   supervisorMendReportSchema,
   type MendRecordOutcome,
+  type MendRequest,
+  type SanitisedFinding,
   type SupervisorMendReport,
 } from '../contracts/supervisorMend.js';
 import {
@@ -152,6 +155,13 @@ export interface MenderOptions {
   readonly dryRun: boolean;
   readonly force: boolean;
   readonly keepWorktree: boolean;
+  /**
+   * Assert the shared idle predicate before every heavy phase. OFF only on a
+   * machine that has nothing else to do — the CI runner — where the operator
+   * corpus and the run lease do not exist and would read as idle anyway; the
+   * flag makes that a decision rather than an accident of the environment.
+   */
+  readonly idleGate: boolean;
   /** Wait for an idle machine (watch mode) or refuse (once / one verdict). */
   readonly waitForIdle: boolean;
   readonly pollMs: number;
@@ -299,7 +309,7 @@ async function openPullRequestsWithKey(
 }
 
 async function requireIdle(options: MenderOptions, phase: string): Promise<boolean> {
-  if (options.dryRun) return true;
+  if (options.dryRun || !options.idleGate) return true;
   const probe = { runsDir: options.runsDir, leasePath: options.leasePath };
   if (!options.waitForIdle) {
     if (anyRunActive(probe)) {
@@ -320,8 +330,24 @@ async function requireIdle(options: MenderOptions, phase: string): Promise<boole
 export interface MendInput {
   readonly runId: string;
   readonly index: number;
-  readonly verdict: SupervisorVerdict;
-  readonly finding: VerdictFinding;
+  /** The run's own assessment, for the prompt. */
+  readonly run: { readonly runStatus: SupervisorVerdict['runStatus']; readonly grade: SupervisorVerdict['runAssessment']['grade'] };
+  /** A verdict finding, or one already sanitised by an analyst elsewhere. */
+  readonly finding: VerdictFinding | SanitisedFinding;
+  /** Which deployment asked, when the request crossed a boundary. */
+  readonly instance?: string | null;
+}
+
+/** A request file (`--finding-file`), as the CI workflow hands it over. */
+export function mendInputFromRequest(raw: unknown): MendInput {
+  const request: MendRequest = mendRequestSchema.parse(raw);
+  return {
+    runId: request.runId,
+    index: request.findingIndex,
+    run: { runStatus: request.runStatus, grade: request.runGrade },
+    finding: request.finding,
+    instance: request.instance ?? null,
+  };
 }
 
 /**
@@ -332,7 +358,7 @@ export interface MendInput {
 export async function mendFinding(input: MendInput, options: MenderOptions): Promise<MendRecord | null> {
   const paths = menderPaths(options);
   const journal = safeSink(options.journal, options.warn);
-  const { runId, index, verdict, finding } = input;
+  const { runId, index, run, finding } = input;
   const recordPath = mendRecordPath(paths.menderDir, runId, index);
   if (existsSync(recordPath) && !options.force) {
     options.log(`record already exists for ${runId}#${index} (use --force to redo); skipping`);
@@ -429,8 +455,8 @@ export async function mendFinding(input: MendInput, options: MenderOptions): Pro
 
     const prompt = buildMenderPrompt({
       runId,
-      runStatus: verdict.runStatus,
-      runGrade: verdict.runAssessment.grade,
+      runStatus: run.runStatus,
+      runGrade: run.grade,
       findingIndex: index,
       findingJson: JSON.stringify(sanitiseFinding(finding), null, 2),
     });
@@ -574,7 +600,7 @@ export async function mendFinding(input: MendInput, options: MenderOptions): Pro
     const bodyPath = join(paths.menderDir, `${runId}.${index}.pr.md`);
     writeFileSync(
       bodyPath,
-      pullRequestBody({ report, finding, runId, key, verification, provider, served: session.usage.served, costUsd: session.usage.costUsd, diffStat })
+      pullRequestBody({ report, finding, instance: input.instance ?? null, runId, key, verification, provider, served: session.usage.served, costUsd: session.usage.costUsd, diffStat })
     );
     const pr = await runCommand(
       options.commands.gh,
@@ -633,7 +659,7 @@ export function pendingMends(options: MenderOptions, runIds: readonly string[]):
     if (!verdict) continue;
     for (const { index, finding } of eligibleFindings(verdict, options.minConfidence)) {
       if (existsSync(mendRecordPath(paths.menderDir, runId, index)) && !options.force) continue;
-      work.push({ runId, index, verdict, finding });
+      work.push({ runId, index, run: { runStatus: verdict.runStatus, grade: verdict.runAssessment.grade }, finding });
     }
   }
   return work;
