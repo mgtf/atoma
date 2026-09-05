@@ -253,6 +253,21 @@ sudo systemctl enable atoma.service
 Do not start the empty service before its first release has created the
 `/home/atoma/current` link.
 
+## Plugging an agent into the instance (MCP)
+
+The instance serves ONE MCP at `https://<host>/mcp`. A signed-in principal
+mints a bearer token for its active organisation (`POST /api/tokens`, or the
+operator on the host: `npm run auth -- token --principal <id-or-email> --org
+<org-id-or-name> --label "<what for>"`), then registers the URL:
+
+```bash
+claude mcp add atoma --transport http https://<host>/mcp --header "Authorization: Bearer <token>"
+```
+
+The tools the agent sees follow the principal's role; a platform admin's token
+sees the operator tools as well. Tokens are listed and revoked through
+`/api/tokens`, and every mint and revocation is a journal row.
+
 ## Self-repair: the analyst on the host, the mender in CI
 
 Stages 2 and 3 of [the supervisor design](supervisor-design.md) split across

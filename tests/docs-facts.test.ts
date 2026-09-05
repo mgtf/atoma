@@ -117,7 +117,7 @@ describe('the prose assertions', () => {
   });
 
   it('catches a tool count that drifted away from the server', () => {
-    const drifted = readme.replace(/\*\*Thirteen tools\.\*\*/, '**Eleven tools.**');
+    const drifted = readme.replace(/\*\*Twenty-four tools\.\*\*/, '**Eleven tools.**');
     expect(proseFailures({ readme: drifted, agents, facts })).toContainEqual(
       expect.stringContaining('says "Eleven tools"'),
     );

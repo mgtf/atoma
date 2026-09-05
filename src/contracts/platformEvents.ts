@@ -129,6 +129,12 @@ export const platformEventKindSchema = z.enum([
   'admin.revoked',
   'invitation.created',
   /**
+   * An API token — a principal's bearer for the MCP — was minted or revoked.
+   * Rows carry the token id and its label, never the secret or its hash.
+   */
+  'token.created',
+  'token.revoked',
+  /**
    * An organisation admin changed the org's per-tier model defaults or its
    * provider credentials. Journaled, never pushed: routine self-service on
    * a multi-org instance, but the audit trail must answer "who pointed
@@ -334,6 +340,8 @@ export const PLATFORM_EVENT_SEVERITY: Record<PlatformEventKind, PlatformEventSev
   'admin.granted': 'security',
   'admin.revoked': 'security',
   'invitation.created': 'security',
+  'token.created': 'security',
+  'token.revoked': 'security',
   // Self-service preference changes: worth the audit trail, not an alert.
   'org.models_updated': 'info',
   'org.provider_key_set': 'info',

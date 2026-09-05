@@ -1008,6 +1008,15 @@ export class ProjectStore {
     return row ? runFromRow(row) : null;
   }
 
+  /** A platform admin's READ across organisations; never a write path. */
+  getProjectRunAnyOrg(projectRunIdInput: string): ProjectRun | null {
+    const projectRunId = projectRunIdSchema.parse(projectRunIdInput);
+    const row = this.db
+      .prepare('SELECT * FROM project_runs WHERE project_run_id = ?')
+      .get(projectRunId) as ProjectRunRow | undefined;
+    return row ? runFromRow(row) : null;
+  }
+
   listProjectRuns(orgIdInput: string, projectIdInput: string): ProjectRun[] | null {
     const orgId = organisationIdSchema.parse(orgIdInput);
     const projectId = projectIdSchema.parse(projectIdInput);

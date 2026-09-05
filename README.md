@@ -467,28 +467,29 @@ than asserted.
 
 ## Drive it from the agent you already use (MCP)
 
-atoma exposes itself as an [MCP](https://modelcontextprotocol.io) server, so an existing agent can
-hand it a task and read back what the system has learned. One line registers it:
+atoma exposes itself as an [MCP](https://modelcontextprotocol.io) server on the same origin as
+the console, so an existing agent can hand it a task and read back what the system has learned. One
+line registers it — a URL and a bearer:
 
 ```bash
-npm run build
-claude mcp add atoma -s local -- node "$PWD/dist/mcp/stdio.js"   # then start a new session
+claude mcp add atoma --transport http https://<your-instance>/mcp \
+  --header "Authorization: Bearer <token from Settings, or npm run auth -- token>"
+# locally, ungated: npm run viz, then http://127.0.0.1:4110/mcp with no token
 ```
 
-`npm run mcp:dev` keeps the source-level `tsx` entrypoint available to contributors;
-the supported release path uses compiled `dist/`.
+**Twenty-four tools.** ONE MCP for everyone, and what you see depends on who you are. An organisation member
+sees its projects and runs — start one and get an id to poll, cancel, retry a publication, read a
+trace's shape. An organisation admin also sees its members and model defaults. The platform admin
+(or the operator on a local ungated server) sees everything above plus operator runs, the agent
+catalogue with its earned trust, the recipe library and its lifecycle, the audit ledger's integrity
+projection, the operator run corpus, the tool-friction report and the audit journal. The caller pays
+for one tool call and atoma does the tiering.
 
-**Thirteen tools.** One starts a run and returns immediately with an id to poll; one cancels a run;
-the other eleven are read-only — the agent catalogue with its earned trust, the recipe library and
-its lifecycle, the audit ledger's integrity projection, run traces, and the tool-friction report.
-The caller pays for one tool call and atoma does the tiering.
-
-**Its general-purpose control plane speaks over standard input, and refusing a port is the security
-argument rather than a limitation.** A run reaches the shell and the network by design, so a public
-HTTP equivalent of `atoma_start` would have to defend against *the run itself*. The web console's
-project launcher is a separate, narrower product surface: it requires the optional authenticated
-gate, binds writes to the active organisation, checks same-origin mutations and records work under
-that project. The MCP launcher remains stdio-only, so it hands a run no control-plane socket.
+**Identity is the security argument.** A token is minted by a signed-in principal for one
+organisation, stored hashed, revocable, journaled; every call is bound to that organisation and
+re-checks the role, and a run itself holds no token. The earlier stdio-only rule described a
+framework on the operator's machine; the deployed product answered that question with its
+authentication gate ([decision record](docs/mcp-one-surface-2026-09-05.md)).
 
 Two properties are declared to the host rather than left to be discovered: starting a run is
 **destructive** — it archives the shared workspace unless told otherwise, and it mutates the
@@ -530,7 +531,7 @@ that exists in `src/` and not in this picture fails <code>npm run docs:check</co
 | Version | `0.1.4` |
 | Node | 22.13+ / 24+ (`.nvmrc` 22.13.0, `engines` ^22.13.0 \|\| >=24) |
 | Subsystems under their own contract | 18 |
-| MCP tools | 13 |
+| MCP tools | 24 |
 | Curated agent names | 118 molecules · 40 cells · 20 tissues |
 | Controlled benchmark rounds | 12 (`benchmark/RESULT.md` + `ROUND<n>.md`) |
 | Interface locales | 13 catalogs — 1 source, 12 translated |

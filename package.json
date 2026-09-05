@@ -20,8 +20,6 @@
     "docs:architecture": "node scripts/architecture-ir.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "mcp": "node dist/mcp/stdio.js",
-    "mcp:dev": "tsx src/mcp/stdio.ts",
     "doctor": "node dist/cli/doctor.js",
     "doctor:dev": "tsx src/cli/doctor.ts",
     "deploy:preflight": "node dist/cli/deploy-preflight.js",

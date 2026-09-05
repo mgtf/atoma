@@ -513,6 +513,12 @@ npm run viz:mark-turn:analyze
   gated members get org surfaces only; the ungated developer path is unchanged.
   True per-org registry scoping would need org-attributed registry rows — a
   schema project, not a route guard.
+- `/mcp` is the ONE MCP (contract in [src/mcp](../mcp/AGENTS.md)): bearer
+  API token behind the gate, the operator on the ungated loopback, Host
+  pinned either way. `/api/tokens` mints (POST, same-origin, journaled
+  `token.created`), lists (GET, secret-free) and revokes (DELETE, journaled
+  `token.revoked`) the SESSION's principal's tokens for its ACTIVE
+  organisation; the plaintext leaves the server once, in the POST response.
 - `/api/account/subscriptions*` is self-scoped from the resolved session and
   never accepts a principal id. Status is secret-free; device login material
   is memory-only; connect/cancel/disconnect are same-origin and require

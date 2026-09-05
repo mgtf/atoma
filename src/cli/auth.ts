@@ -30,6 +30,7 @@ usage:
   npm run auth -- invite --org <org-id> [--role <role>] [--ttl-hours <hours>] [--db path]
   npm run auth -- grant-admin --principal <id-or-email> [--db path]
   npm run auth -- revoke-admin --principal <id-or-email> [--db path]
+  npm run auth -- token --principal <id-or-email> --org <org-id-or-name> [--label <text>] [--db path]
 
 roles:
   org:owner | org:admin | org:member | org:viewer
@@ -40,8 +41,15 @@ platform admin:
   run by the operator against the store on disk, can mint it. An email
   reference must match exactly one principal.
 
+token:
+  Mints a principal's bearer for the MCP (<origin>/mcp), bound to ONE
+  organisation the principal belongs to. Shown once, never stored in clear;
+  the principal lists and revokes it from Settings or /api/tokens. Journaled
+  as token.created by this CLI.
+
 flags:
   --db <path>              use this product store
+  --label <text>           what this token is for (token)
   --org <org-id>           target organisation (required for invite)
   --role <role>            invitation role (default org:member)
   --ttl-hours <hours>      invitation lifetime, 0 < hours <= 720 (default 24)
@@ -109,7 +117,7 @@ export function runAuthCli(
 ): number {
   const parsed = parseCliArgs(argv, {
     booleanFlags: ['help'],
-    valueFlags: ['db', 'org', 'role', 'ttl-hours', 'principal'],
+    valueFlags: ['db', 'org', 'role', 'ttl-hours', 'principal', 'label'],
     undeclared: 'discard',
   });
   const command = parsed.command ?? 'list';
@@ -123,20 +131,20 @@ export function runAuthCli(
     console.error(USAGE);
     return 1;
   }
-  const KNOWN_COMMANDS = ['list', 'invite', 'grant-admin', 'revoke-admin'];
+  const KNOWN_COMMANDS = ['list', 'invite', 'grant-admin', 'revoke-admin', 'token'];
   if (parsed.positional.length > 0 || !KNOWN_COMMANDS.includes(command)) {
     console.error(`unknown auth command or argument: ${safeTerminal(parsed.positional[0] ?? command)}`);
     console.error(USAGE);
     return 1;
   }
-  const missingValue = ['db', 'org', 'role', 'ttl-hours', 'principal'].find(
+  const missingValue = ['db', 'org', 'role', 'ttl-hours', 'principal', 'label'].find(
     (flag) => parsed.flags[flag] !== undefined && parsed.flags[flag].trim().length === 0
   );
   if (missingValue) {
     console.error(`--${missingValue} requires a non-empty value`);
     return 1;
   }
-  if (command !== 'invite' && (
+  if (command !== 'invite' && command !== 'token' && (
     parsed.flags['org'] !== undefined ||
     parsed.flags['role'] !== undefined ||
     parsed.flags['ttl-hours'] !== undefined
@@ -145,7 +153,7 @@ export function runAuthCli(
     return 1;
   }
   const adminCommand = command === 'grant-admin' || command === 'revoke-admin';
-  if (!adminCommand && parsed.flags['principal'] !== undefined) {
+  if (!adminCommand && command !== 'token' && parsed.flags['principal'] !== undefined) {
     console.error('--principal is valid only with auth grant-admin / revoke-admin');
     return 1;
   }
@@ -155,6 +163,10 @@ export function runAuthCli(
     return 1;
   }
   const orgId = parsed.flags['org']?.trim() ?? '';
+  if (command === 'token' && (parsed.flags['role'] !== undefined || parsed.flags['ttl-hours'] !== undefined)) {
+    console.error('--role and --ttl-hours are valid only with auth invite');
+    return 1;
+  }
   if (command === 'invite' && !orgId) {
     console.error('--org is required with auth invite');
     return 1;
@@ -205,6 +217,51 @@ export function runAuthCli(
         store.close();
       }
       return 0;
+    }
+
+    if (command === 'token') {
+      if (!existsSync(dbPath)) {
+        console.error(`no store at ${dbPath} — the principal must sign in first`);
+        return 1;
+      }
+      const principalRef = parsed.flags['principal'];
+      const orgRef = parsed.flags['org'];
+      if (!principalRef || !orgRef) {
+        console.error('token requires --principal <id-or-email> and --org <slug-or-id>');
+        return 1;
+      }
+      const store = AuthStore.open(dbPath);
+      try {
+        const principal = store.resolvePrincipalRef(principalRef);
+        const organisation = store
+          .listOrganisations()
+          .find((candidate) => candidate.orgId === orgRef || candidate.name === orgRef);
+        if (!organisation) {
+          console.error(`unknown organisation: ${safeTerminal(orgRef)}`);
+          return 1;
+        }
+        const minted = store.createApiToken({
+          principalId: principal.principalId,
+          orgId: organisation.orgId,
+          label: parsed.flags['label'] ?? 'CLI-minted MCP token',
+        });
+        const events = PlatformEventLog.open(dbPath);
+        events.append({
+          kind: 'token.created',
+          actorType: 'cli',
+          actorId: null,
+          orgId: organisation.orgId,
+          summary: `API token created for the MCP by the operator CLI (${eventLabel(parsed.flags['label'] ?? 'CLI-minted MCP token')})`,
+          detail: { tokenId: minted.tokenId, principalId: principal.principalId },
+        });
+        console.log(`API token for ${safeTerminal(principal.displayName)} in ${safeTerminal(organisation.name)} (id ${minted.tokenId}):`);
+        console.log(minted.token);
+        console.log('Shown once. Register it as a bearer on the MCP URL, e.g.');
+        console.log(`  claude mcp add atoma --transport http <origin>/mcp --header "Authorization: Bearer ${minted.token}"`);
+        return 0;
+      } finally {
+        store.close();
+      }
     }
 
     if (adminCommand) {

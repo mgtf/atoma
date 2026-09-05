@@ -157,6 +157,22 @@ import {
   type SentinelHealth,
 } from '../sentinel/resident.js';
 import { peekSentinelWatch } from '../sentinel/lease.js';
+import { analyseTarget, pendingTargets, resolveTarget, type AnalystOptions } from '../supervisor/analyst.js';
+import { anyRunActive } from '../supervisor/activity.js';
+import { dispatchConfigFromEnv } from '../supervisor/dispatch.js';
+import {
+  analystBudgetFromEnv,
+  analystQuietMsFromEnv,
+  startResidentAnalyst,
+  vizAnalystEnabled,
+  type ResidentAnalyst,
+} from '../supervisor/resident.js';
+import { analystProvider } from '../supervisor/session.js';
+import { McpHttpHost } from '../mcp/http.js';
+import type { McpCaller } from '../mcp/identity.js';
+import { buildServer as buildMcpServer } from '../mcp/server.js';
+import { signalActiveRunOnExit } from '../mcp/run.js';
+import type { McpToolDeps } from '../mcp/tools.js';
 import { injectAppShellSeo, robotsTxt, sitemapXml } from './seo.js';
 // The MCP run lease, read for CONTEXT only (which pid holds the run slot) and
 // never as a detector. `src/sentinel/watch.ts` already reaches for it, so this
@@ -1051,6 +1067,97 @@ const SENTINEL: ResidentSentinel | null = (() => {
   });
 })();
 
+/**
+ * THE RESIDENT ANALYST — stage 2 of `docs/supervisor-design.md`, hosted here
+ * for the same reason the sentinel is: the gated server is the one process a
+ * production deployment always runs, and the journal it writes into is the
+ * bus the coordinator already announces finished runs on.
+ *
+ * OPT-IN, unlike the sentinel, because it spends the operator's quota:
+ * `ATOMA_VIZ_ANALYST=1` plus the `ATOMA_ANALYST_*` provider set, and a
+ * `claude` binary on the host's PATH. Quiet period, idle gate and one session
+ * at a time are the resident shell's promises (`src/supervisor/resident.ts`).
+ * With `ATOMA_MENDER_DISPATCH_REPO`/`_TOKEN` set, a verdict's cited defects
+ * are handed to the repository's mender workflow — the mender itself never
+ * runs on this host (`src/supervisor/AGENTS.md`).
+ */
+const ANALYST: ResidentAnalyst | null = (() => {
+  if (!EVENTS || !PROJECTS_RUNTIME) return null;
+  if (!vizAnalystEnabled()) return null;
+  const journal = EVENTS;
+  const log = (line: string): void => console.error(`[analyst] ${line}`);
+  let dispatch = null;
+  try {
+    dispatch = dispatchConfigFromEnv();
+  } catch (error) {
+    console.error(`[analyst] ${error instanceof Error ? error.message : String(error)} — dispatch OFF`);
+  }
+  const options: AnalystOptions = {
+    repoRoot: process.cwd(),
+    runsDir: RUNS_DIR,
+    projectReader: PROJECTS_RUNTIME.store,
+    dispatch,
+    supervisorDir: resolve(process.env['ATOMA_SUPERVISOR_DIR'] ?? './supervisor'),
+    leasePath: mcpRunLockPath(),
+    provider: analystProvider(),
+    claudeCommand: process.env['ATOMA_SUPERVISOR_CMD_CLAUDE'] ?? 'claude',
+    budgetUsd: analystBudgetFromEnv() ?? 2,
+    timeoutMs: 900_000,
+    dryRun: false,
+    force: false,
+    journal: (input) => void journal.append(input),
+    log,
+    warn: log,
+  };
+  const resident = startResidentAnalyst({
+    subscribe: (listener) => journal.subscribe(listener),
+    analyse: (runId) => analyseTarget(resolveTarget(runId, options), options),
+    isActive: () => anyRunActive({ runsDir: RUNS_DIR, leasePath: mcpRunLockPath() }),
+    quietMs: analystQuietMsFromEnv() ?? undefined,
+    logger: log,
+  });
+  // Runs that ended while no analyst was listening: the store remembers them.
+  for (const target of pendingTargets(options)) {
+    resident.enqueue(target.runId, Date.parse(target.endedAt ?? '') || Date.now());
+  }
+  return resident;
+})();
+
+/**
+ * THE MCP — one surface for everyone, on this server's `/mcp` route
+ * (`src/mcp/AGENTS.md`). Gated, a caller is a bearer API token a principal
+ * minted (`/api/tokens`), and the tools it sees are its tier's. Ungated, the
+ * caller is the operator on loopback, as for the CLI. Host is pinned either
+ * way so a page in a browser cannot address this port through DNS rebinding.
+ */
+const MCP_DEPS: McpToolDeps = {
+  projects: PROJECTS_RUNTIME ? { service: PROJECTS_RUNTIME.projects, store: PROJECTS_RUNTIME.store } : null,
+  auth: AUTH?.store ?? null,
+  journal: EVENTS,
+  operatorRuns: true,
+};
+const MCP_HOST = new McpHttpHost({
+  resolveCaller: (req): McpCaller | null => {
+    if (!AUTH_RUNTIME || !AUTH?.store) return { kind: 'operator' };
+    const header = req.headers.authorization;
+    const match = typeof header === 'string' ? /^Bearer\s+(\S+)$/i.exec(header.trim()) : null;
+    if (!match) return null;
+    const resolved = AUTH.store.resolveApiToken(match[1]!);
+    if (!resolved) return null;
+    const { tokenId, ...viewer } = resolved;
+    return { kind: 'principal', viewer, tokenId };
+  },
+  buildServer: (caller) => buildMcpServer(caller, MCP_DEPS),
+  allowedHosts: AUTH_RUNTIME
+    ? [AUTH_RUNTIME.publicOrigin.host]
+    : [`127.0.0.1:${cli.port}`, `localhost:${cli.port}`, `[::1]:${cli.port}`],
+  logger: (line) => console.error(`[mcp] ${line}`),
+});
+// An operator run started through the MCP is a child of THIS process; a
+// generic exit signals it (SIGTERM only, never SIGKILL) so it can close its
+// trace. Same handler the stdio server registered.
+process.once('exit', signalActiveRunOnExit);
+
 /** What this process can honestly say about watching. Never an aggregate. */
 function sentinelHealth(): SentinelHealth {
   if (SENTINEL) return SENTINEL.health();
@@ -1859,6 +1966,11 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
   if (requestWaitsForDeployment(req.method, pathname)) {
     res.setHeader('retry-after', '30');
     sendJson(res, 503, { error: 'deployment in progress; retry this request shortly' });
+    return;
+  }
+
+  if (pathname === '/mcp') {
+    await MCP_HOST.handle(req, res);
     return;
   }
 
@@ -3488,6 +3600,71 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       return;
     }
 
+    // API TOKENS — a principal's bearer for the MCP, self-scoped from the
+    // session, bound to the ACTIVE organisation, revocable, journaled at both
+    // ends. The plaintext is returned once by the POST and never again.
+    if (pathname === '/api/tokens' || pathname.startsWith('/api/tokens/')) {
+      if (!viewer) {
+        sendJson(res, 401, { error: 'authentication required' });
+        return;
+      }
+      const authStore = AUTH.store!;
+      if (pathname === '/api/tokens' && req.method === 'GET') {
+        sendJson(res, 200, { tokens: authStore.listApiTokens(viewer.principalId), mcpUrl: new URL('/mcp', AUTH_RUNTIME!.publicOrigin).href });
+        return;
+      }
+      if (pathname === '/api/tokens' && req.method === 'POST') {
+        if (!sameOrigin(req, res)) return;
+        if (!roleAtLeast(viewer.role, 'org:viewer')) {
+          sendJson(res, 403, { error: 'organisation membership required' });
+          return;
+        }
+        let body: { label?: unknown } = {};
+        try {
+          body = JSON.parse((await readBodyBounded(req, 2_048)).toString('utf8') || '{}') as { label?: unknown };
+        } catch {
+          sendJson(res, 400, { error: 'request body is not valid JSON' });
+          return;
+        }
+        const minted = authStore.createApiToken({
+          principalId: viewer.principalId,
+          orgId: viewer.orgId,
+          label: typeof body.label === 'string' ? body.label : 'MCP token',
+        });
+        emit({
+          kind: 'token.created',
+          actorType: 'principal',
+          actorId: viewer.principalId,
+          orgId: viewer.orgId,
+          summary: `API token created for the MCP (${eventLabel(typeof body.label === 'string' ? body.label : 'MCP token')})`,
+          detail: { tokenId: minted.tokenId },
+        });
+        sendJson(res, 201, { ...minted, mcpUrl: new URL('/mcp', AUTH_RUNTIME!.publicOrigin).href });
+        return;
+      }
+      const revoke = pathname.match(/^\/api\/tokens\/([^/]+)$/);
+      if (revoke && req.method === 'DELETE') {
+        if (!sameOrigin(req, res)) return;
+        const tokenId = decodePathComponent(revoke[1]!);
+        const revoked = tokenId ? authStore.revokeApiToken(viewer.principalId, tokenId) : false;
+        if (revoked) {
+          emit({
+            kind: 'token.revoked',
+            actorType: 'principal',
+            actorId: viewer.principalId,
+            orgId: viewer.orgId,
+            summary: 'API token revoked',
+            detail: { tokenId },
+          });
+        }
+        sendJson(res, revoked ? 200 : 404, { revoked });
+        return;
+      }
+      res.writeHead(405, { allow: 'GET, POST, DELETE', 'content-length': '0', 'cache-control': 'no-store' });
+      res.end();
+      return;
+    }
+
     if (pathname === '/api/projects') {
       if (!viewer) {
         sendJson(res, 401, { error: 'authentication required' });
@@ -3997,6 +4174,20 @@ server.listen(cli.port, cli.host, () => {
   } else {
     console.log(`sentinel: off (${health.reason})`);
   }
+  if (ANALYST) {
+    const analyst = ANALYST.health();
+    console.log(
+      `analyst: on (quiet ${Math.round(analyst.quietMs / 1000)}s, ${analyst.queued} finished run(s) queued; ` +
+        `spends ${analystProvider().model} — see src/supervisor/AGENTS.md)`
+    );
+  } else if (EVENTS && PROJECTS_RUNTIME) {
+    console.log('analyst: off (ATOMA_VIZ_ANALYST=1 to analyse finished runs on this host)');
+  }
+  console.log(
+    AUTH_RUNTIME
+      ? `mcp: ${new URL('/mcp', AUTH_RUNTIME.publicOrigin).href} (bearer API token from /api/tokens or npm run auth -- token)`
+      : `mcp: http://${cli.host}:${cli.port}/mcp (operator, loopback, no token)`
+  );
   if (PROJECTS_RUNTIME?.githubConfig) {
     console.log(`github app: ${PROJECTS_RUNTIME.githubConfig.appSlug}`);
   } else if (PROJECTS_RUNTIME) {

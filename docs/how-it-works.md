@@ -68,7 +68,7 @@ graph TB
     subgraph ENTRY[" 🚪 Entry points "]
         direction LR
         RUN["<b>run:build</b><br/>one goal"]
-        MCP["<b>MCP stdio</b><br/>start · poll · cancel<br/>read learned state"]
+        MCP["<b>MCP over HTTP</b><br/>tiered by role<br/>start · poll · cancel · read"]
         BURN["<b>burnin</b><br/>batch measurement"]
         CURR["<b>curriculum</b><br/>propose next tasks"]
         OPS["<b>registry · skills · ledger</b><br/><b>friction · viz</b><br/>operator tooling"]
@@ -155,7 +155,7 @@ graph TB
 
 | Layer | Component | What it does |
 |---|---|---|
-| **Entry** | MCP over stdio | Thirteen tools: start, poll and cancel one cross-process-serialised run; read registry, skills, ledger, traces and friction |
+| **Entry** | MCP over HTTP (`/mcp`) | One catalogue tiered by role: members drive their organisation's runs; the platform admin also starts operator runs and reads registry, skills, ledger, traces, friction and the journal |
 | **Runtime** | Runner | Everything family-independent: provider choice, sandbox, budget, abort signals, watchdog, trace, post-mortem |
 | | TaskProfile | The *only* per-family part: workspace prep, seed agents, task constraints |
 | | Provider routing | Five provider routes over four transports; a tier can be pinned to a different vendor than its neighbours. Codex is L2/L3 only |
@@ -486,7 +486,7 @@ Recorded so nobody has to discover it in a demo:
 | What was tried and rejected? | `docs/incidents/engineering-record-2026-08-14.md` § *Considered and rejected* |
 | What would multi-tenancy require? | [`saas-architecture.md`](saas-architecture.md) Layer 2 invariants and Layer 3 Track A/Track B roadmap |
 | What does a real run look like? | `npm run viz` — or `npm run viz:demo` for a mocked run with no API key |
-| How does another agent drive atoma? | `npm run build`, then `claude mcp add atoma -s local -- node "$PWD/dist/mcp/stdio.js"` — stdio only, 13 tools plus a goal-template prompt per task family |
+| How does another agent drive atoma? | `claude mcp add atoma --transport http <origin>/mcp --header "Authorization: Bearer <token>"` — one MCP, the tools your role admits, plus a goal-template prompt per task family at the platform tier |
 | Are the economics real? | regenerable with `npm run burnin`; the historical CSV was archived out of the repo at the 2026-08-18 from-scratch reset |
 | …under a control? | `benchmark/PROTOCOL.md` — every round registered before it ran — and `benchmark/ROUND8.md` |
 | Do the deliverables actually work? | `benchmark/results-round8-scores.json` is the committed historical 7-check output; `verify-maint.mjs` now has 10 checks, but the round workspaces needed to regenerate it are not committed. Rounds 4-7 have no committed scorer output |

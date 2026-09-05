@@ -543,6 +543,20 @@ export function runTrace(opts: { file: string; offset?: number; limit?: number }
   if (!pathIsInsideDir(dir, path) || !path.endsWith('.json')) {
     return { note: `refused: "${opts.file}" is not a .json file inside ${dir}` };
   }
+  return runTraceFile(path, opts, opts.file);
+}
+
+/**
+ * The same bounded projection over a trace the CALLER has already resolved
+ * and authorised — a project run's trace under its own directory. The
+ * filename variant above is the operator corpus's door; this is the shared
+ * body, so the two cannot page or truncate differently.
+ */
+export function runTraceFile(
+  path: string,
+  opts: { offset?: number; limit?: number },
+  label: string = path
+): unknown {
   if (!existsSync(path)) return { note: `no trace at ${path}` };
   const run = JSON.parse(readFileSync(path, 'utf8')) as VizRun;
   const allEvents = run.events ?? [];
@@ -557,7 +571,7 @@ export function runTrace(opts: { file: string; offset?: number; limit?: number }
       : TRACE_EVENTS_DEFAULT_LIMIT;
   const page = allEvents.slice(offset, offset + limit);
   return {
-    file: opts.file,
+    file: label,
     id: run.id,
     label: run.label,
     startedAt: run.startedAt,

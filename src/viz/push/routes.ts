@@ -403,6 +403,9 @@ const PUSH_ROUTE_SOURCES: Record<PlatformEventKind, PushRouteSource | null> = {
   },
   'push.subscribed': null,
   'push.unsubscribed': null,
+  // A principal's own bearer lifecycle: audit, never a notification.
+  'token.created': null,
+  'token.revoked': null,
   // A preview is something a member is watching while they watch it. A push
   // would arrive on the device already showing the thing it is about.
   'preview.started': null,

@@ -33,7 +33,7 @@ Use it when a rule's rationale matters, not as default session context.
 | `src/skills/` | [src/skills/AGENTS.md](src/skills/AGENTS.md) | learn, match, credit, compile, trusted dispatch, operator lifecycle |
 | `src/tools/` | [src/tools/AGENTS.md](src/tools/AGENTS.md) | elements, sandbox, worker, container isolation, egress, browser probes |
 | `src/contracts/` | [src/contracts/AGENTS.md](src/contracts/AGENTS.md) | one schema per shape, probe manifest identity and merge semantics |
-| `src/mcp/` | [src/mcp/AGENTS.md](src/mcp/AGENTS.md) | stdio control plane, run lease, bounded readers, the 13-tool surface |
+| `src/mcp/` | [src/mcp/AGENTS.md](src/mcp/AGENTS.md) | the one MCP over HTTP: tiered tool catalogue, API-token identity, run lease, bounded readers |
 | `src/viz/` | [src/viz/AGENTS.md](src/viz/AGENTS.md) | trace projection, GPU client, frozen MUI fallback, gated surfaces, push |
 | `src/auth/` | [src/auth/AGENTS.md](src/auth/AGENTS.md) | OAuth gate, organisations, invitations, the platform-admin flag |
 | `src/projects/` | [src/projects/AGENTS.md](src/projects/AGENTS.md) | org-scoped projects, their run corpus, artifact manifests, publication |
@@ -89,7 +89,8 @@ The public composition model is **Element → Molecule → Cell → Tissue**.
 - Numeric tiers 1/2/3 remain stable in storage, traces, env vars, and class
   names. Implementation names such as `AtomRegistry`, `Tool`, and
   `atom_types` remain stable too.
-- The 13 `atoma_*` MCP tools are host control/read APIs, not L1 elements.
+- The 24 `atoma_*` MCP tools are host control/read APIs, not L1 elements; a
+  caller sees the subset its tier admits (viewer, member, admin, platform).
 - Public taxonomy aliases coexist with legacy exports for compatibility.
 
 Taxonomy migration is a whole-system operation. `registry migrate-taxonomy`
@@ -135,8 +136,6 @@ npm run mender -- --once                 # cited defect verdicts → a PR on mai
 npm run mender:dev -- --dry-run --once
 npm run run:build -- "<goal>"
 npm run run:build:dev -- "<goal>"
-npm run mcp
-npm run mcp:dev
 ```
 
 Visualizer commands and their preconditions: [src/viz/AGENTS.md](src/viz/AGENTS.md).
@@ -193,7 +192,8 @@ separately billed `OPENAI_API_KEY`. The full contract is in
 ### Release contract
 
 - Supported source verification is `npm ci` then `npm run release:check`.
-- Supported compiled MCP entrypoint is `node dist/mcp/stdio.js`.
+- The MCP is served by the compiled viz server on `/mcp` (`npm run viz:serve`);
+  there is no separate MCP entrypoint since 2026-09-05.
 - `npm run auth` is the compiled identity/invitation CLI
   (`node dist/cli/auth.js`); contributors use `npm run auth:dev` for source.
 - `release:check` is the release-readiness definition: full check, audit,
@@ -316,8 +316,7 @@ load-bearing and they are stated once, where the call sites are.
 - Verification is read-only. Supervisors may run fixed probes they own, but
   never replay model-authored shell commands.
 - Tools belong to L1 only, and only [src/tools](src/tools/AGENTS.md) may declare
-  or execute them. The MCP control plane is not an element surface:
-  [src/mcp](src/mcp/AGENTS.md).
+  or execute them. The MCP is not an element surface: [src/mcp](src/mcp/AGENTS.md).
 
 ## Skills lifecycle
 
@@ -334,11 +333,14 @@ the only tier with tools; `ToolSandbox` is the filesystem/process boundary;
 container execution is `network none` unless egress is explicitly selected; and
 cleanup is mandatory on every exit path.
 
-## MCP stdio server
+## MCP server
 
-Orientation only — the contract lives in [src/mcp](src/mcp/AGENTS.md). Stdio is
-the safety boundary, runs are serialised by memory state and a SQLite lease, and
-the exported 13-tool surface is a compatibility contract.
+Orientation only — the contract lives in [src/mcp](src/mcp/AGENTS.md). ONE MCP
+for everyone over HTTP on `/mcp`, a tiered catalogue whose visibility follows
+the caller's role, bearer API tokens for identity, and runs serialised by
+memory state and a SQLite lease. The catalogue is a compatibility contract for
+every registered client. Decision record:
+[docs/mcp-one-surface-2026-09-05.md](docs/mcp-one-surface-2026-09-05.md).
 
 ## Testing and linting
 

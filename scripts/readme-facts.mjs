@@ -83,12 +83,12 @@ export function proseFailures({ readme, agents, facts }) {
   const failures = [];
   const spelled = englishNumber(facts.mcpTools);
 
-  const toolSentence = /\*\*([A-Za-z]+) tools\.\*\*/.exec(readme);
+  const toolSentence = /\*\*([A-Za-z-]+) tools\.\*\*/.exec(readme);
   if (!toolSentence) {
     failures.push('README.md no longer contains the "**<spelled-number> tools.**" sentence that states the MCP surface');
   } else if (toolSentence[1].toLowerCase() !== spelled) {
     failures.push(
-      `README.md says "${toolSentence[1]} tools" but src/mcp/server.ts registers ${facts.mcpTools} (${spelled})`,
+      `README.md says "${toolSentence[1]} tools" but src/mcp/tools.ts catalogues ${facts.mcpTools} (${spelled})`,
     );
   }
 

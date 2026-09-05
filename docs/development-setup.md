@@ -12,7 +12,7 @@ atoma splits into two paths with different platform requirements.
 |---|---|---|
 | **Development** | `docs:check`, `typecheck`, `lint`, `build`, `viz` | Node only. Works on macOS, Linux and Windows. |
 | **Verification** | `npm test`, `npm run check`, `release:check` | A POSIX host. Parts of the suite drive shells, `chmod`, `tar` and process groups on purpose. |
-| **Runs** | `run:build`, `burnin`, `curriculum`, `benchmark`, `mcp` | macOS or Linux — see below. |
+| **Runs** | `run:build`, `burnin`, `curriculum`, `benchmark`, operator runs through the MCP | macOS or Linux — see below. |
 | **Container isolation** | `build:worker`, `doctor --container`, `release:container-smoke` | A real Docker daemon on a Linux/macOS host. |
 
 Runs execute on **macOS or Linux only**, and

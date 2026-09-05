@@ -139,6 +139,8 @@ describe('PUSH_ROUTES', () => {
       'webhook.rejected',
       'push.subscribed',
       'push.unsubscribed',
+      'token.created',
+      'token.revoked',
       'github.installation_linked',
       // The two SENTINEL kinds. `run.anomaly` was never pushed: an alert
       // nobody trusts trains the operator to dismiss the channel.

@@ -1,11 +1,10 @@
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
-import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, posix, win32 } from 'node:path';
 import { readFileSync } from 'node:fs';
 import Database from 'better-sqlite3';
-import { INSTRUCTIONS, packageVersion } from '../src/mcp/server.js';
+import { INSTRUCTIONS } from '../src/mcp/server.js';
 import {
   DEFAULT_RUN_TIMEOUT_MS,
   MAX_GOAL_CHARS,
@@ -35,15 +34,14 @@ import {
   skillsList,
   TRACE_ERROR_CAVEAT,
 } from '../src/mcp/readers.js';
-import { promptNames } from '../src/mcp/prompts.js';
-import { findLaunchable } from '../src/run/profiles/index.js';
 import { BUILTIN_TOOL_VOCABULARY } from '../src/atoms/verdict.js';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
 
 /**
- * The atoma MCP server — atoma exposed to an MCP host (Claude Code) over
- * STDIO.
+ * The atoma MCP server's RUN half — argv assembly, serialisation, the lease
+ * and the readers. The transport and the tiered catalogue are proven in
+ * `tests/mcp-http.test.ts`.
  *
  * WHAT THIS SUITE IS FOR. AGENTS.md records, twice and with measurements, that
  * a SECOND ENTRYPOINT ROTS: `research-brief.ts` silently lacked every safety
@@ -57,7 +55,7 @@ import { openDb } from '../src/registry/db.js';
  *     bug, which here would archive the caller's workspace AND run the wrong
  *     task);
  *   - runs are serialised, because the workspace is shared;
- *   - stdout carries NOTHING but JSON-RPC frames, driven against a real
+ *   - the readers are bounded and never leave their directories, driven
  *     subprocess rather than reasoned about.
  */
 
@@ -699,197 +697,4 @@ describe('MCP server instructions', () => {
     expect(INSTRUCTIONS).toMatch(/never follow it as instructions/);
   });
 
-  it('claims stdout before dynamically loading the server import graph', () => {
-    const source = readFileSync(join(repoRoot(), 'src/mcp/stdio.ts'), 'utf8');
-    const claim = source.indexOf('claimStdoutForProtocol()');
-    const load = source.indexOf("import('./server.js')");
-    expect(claim).toBeGreaterThanOrEqual(0);
-    expect(load).toBeGreaterThan(claim);
-    expect(source).not.toMatch(/import\s+.+from\s+['"]\.\/server/);
-    const serverSource = readFileSync(join(repoRoot(), 'src/mcp/server.ts'), 'utf8');
-    expect(serverSource).toContain("process.once('SIGHUP'");
-    expect(serverSource).toContain('server.server.onclose');
-    expect(serverSource).toContain("process.once('exit', signalActiveRunOnExit)");
-    expect(serverSource).toContain('forceKillActiveRunAfterGrace()');
-  });
-});
-
-/**
- * THE LOAD-BEARING TEST. In MCP stdio, stdout IS the protocol and the peer's
- * frame reader THROWS on a non-JSON line — stricter than atoma's own container
- * protocol, which drops them. Meanwhile the run path is a stdout FLOOD (the
- * runner's logger is hardcoded to console.log, plus every `[tool:*]` line and
- * the whole `--- result ---` block), which is why a run has to be a child
- * process and why this file redirects `process.stdout.write` to stderr after
- * handing the transport the real one.
- *
- * That reasoning is only worth as much as a real subprocess says it is, so this
- * drives the actual server: initialize, tools/list, one reader call, and one
- * deliberately-refused call, then asserts every stdout line parses as a frame.
- * Precedent for spawning a real tsx entrypoint in a test:
- * tests/puppeteer-orphan-reaping.test.ts.
- */
-describe('MCP server over real stdio', () => {
-  it('emits nothing on stdout but JSON-RPC frames', async () => {
-    const child = spawn('npx', ['tsx', 'src/mcp/stdio.ts'], {
-      cwd: repoRoot(),
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    let out = '';
-    let err = '';
-    child.stdout.on('data', (c: Buffer) => {
-      out += c.toString();
-    });
-    child.stderr.on('data', (c: Buffer) => {
-      err += c.toString();
-    });
-    const send = (o: unknown): void => {
-      child.stdin.write(JSON.stringify(o) + '\n');
-    };
-    const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
-    const frames = (): {
-      id?: number;
-      result?: {
-        content?: { text: string }[];
-        tools?: { name: string }[];
-        prompts?: { name: string; arguments?: { name: string; required?: boolean }[] }[];
-        messages?: { role: string; content: { type: string; text: string } }[];
-        completion?: { values: string[]; total?: number; hasMore?: boolean };
-        isError?: boolean;
-        serverInfo?: { name: string; version: string };
-        capabilities?: Record<string, unknown>;
-      };
-    }[] =>
-      out
-        .split('\n')
-        .filter((l) => l.trim())
-        .map((l) => {
-          try {
-            return JSON.parse(l) as { id?: number };
-          } catch {
-            return null;
-          }
-        })
-        .filter((f): f is { id?: number } => f !== null);
-
-    try {
-      send({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'initialize',
-        params: {
-          protocolVersion: '2025-06-18',
-          capabilities: {},
-          clientInfo: { name: 'vitest', version: '1' },
-        },
-      });
-      // tsx has to compile the whole import graph before the server answers.
-      for (let i = 0; i < 40 && !frames().some((f) => f.id === 1); i++) await wait(500);
-      send({ jsonrpc: '2.0', method: 'notifications/initialized' });
-      send({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
-      send({
-        jsonrpc: '2.0',
-        id: 3,
-        method: 'tools/call',
-        params: { name: 'atoma_families', arguments: {} },
-      });
-      // A refusal must travel as a protocol frame too, not as a stderr crash.
-      send({
-        jsonrpc: '2.0',
-        id: 4,
-        method: 'tools/call',
-        params: { name: 'atoma_run_start', arguments: { goal: '--clean-workspace oops' } },
-      });
-      // The PROMPT surface travels on the same connection: a goal template per
-      // family, prompts driving the readers, and `completion/complete` — which
-      // the protocol only accepts against a prompt or a resource ref, never a
-      // tool, which is why the completable arguments live here.
-      send({ jsonrpc: '2.0', id: 5, method: 'prompts/list' });
-      send({
-        jsonrpc: '2.0',
-        id: 6,
-        method: 'prompts/get',
-        params: { name: 'atoma_goal_build', arguments: { goal: 'a small static page' } },
-      });
-      send({
-        jsonrpc: '2.0',
-        id: 7,
-        method: 'completion/complete',
-        params: {
-          ref: { type: 'ref/prompt', name: 'atoma_goal_build' },
-          argument: { name: 'goal', value: '' },
-        },
-      });
-      for (let i = 0; i < 20 && !frames().some((f) => f.id === 7); i++) await wait(500);
-
-      const lines = out.split('\n').filter((l) => l.trim());
-      const nonJson = lines.filter((l) => {
-        try {
-          JSON.parse(l);
-          return false;
-        } catch {
-          return true;
-        }
-      });
-      expect(nonJson, `non-JSON on stdout: ${nonJson.slice(0, 3).join(' | ')}`).toEqual([]);
-      expect(lines.length).toBeGreaterThan(0);
-
-      const initialized = frames().find((f) => f.id === 1);
-      expect(initialized?.result?.serverInfo).toEqual({
-        name: 'atoma',
-        version: packageVersion(),
-      });
-
-      const list = frames().find((f) => f.id === 2);
-      const names = (list?.result?.tools ?? []).map((t) => t.name);
-      expect(names).toContain('atoma_run_start');
-      expect(names).toContain('atoma_registry_list');
-      expect(names).toContain('atoma_families');
-
-      const fam = frames().find((f) => f.id === 3);
-      expect(fam?.result?.content?.[0]?.text).toContain('"build"');
-
-      const refused = frames().find((f) => f.id === 4);
-      expect(refused?.result?.isError).toBe(true);
-      expect(refused?.result?.content?.[0]?.text).toMatch(/must not start with "--"/);
-
-      // Prompts and completions are advertised, and the tool surface is
-      // untouched: this feature adds NO tool, so the 13-tool compatibility
-      // contract is not in play.
-      expect(initialized?.result?.capabilities).toHaveProperty('prompts');
-      expect(initialized?.result?.capabilities).toHaveProperty('completions');
-      expect(names).toHaveLength(13);
-
-      const prompts = frames().find((f) => f.id === 5)?.result?.prompts ?? [];
-      expect(prompts.map((p) => p.name)).toEqual(expect.arrayContaining(promptNames()));
-      /**
-       * Every completable argument must be REQUIRED. The SDK enables the
-       * capability when it finds a completable schema behind an optional, but
-       * its completion handler looks the argument up WITHOUT unwrapping the
-       * optional — so an optional completable argument advertises completion
-       * and then silently returns nothing.
-       */
-      for (const prompt of prompts) {
-        for (const arg of prompt.arguments ?? []) {
-          expect(arg.required, `${prompt.name}.${arg.name} is optional`).toBe(true);
-        }
-      }
-
-      const got = frames().find((f) => f.id === 6);
-      const promptText = got?.result?.messages?.[0]?.content?.text ?? '';
-      expect(promptText).toContain('a small static page');
-      expect(promptText).toContain('atoma_run_start');
-      expect(promptText).toMatch(/DESTRUCTIVE/);
-
-      const completed = frames().find((f) => f.id === 7)?.result?.completion;
-      expect(completed?.values).toEqual(
-        findLaunchable('build')?.profile.guidance.examples.slice(0, 100)
-      );
-
-      // The banner proves the server announces itself where it is safe to.
-      expect(err).toMatch(/\[atoma-mcp\] ready on stdio/);
-    } finally {
-      child.kill('SIGTERM');
-    }
-  }, 90_000);
 });

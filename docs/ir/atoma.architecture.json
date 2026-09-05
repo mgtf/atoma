@@ -31,7 +31,7 @@
       "id": "mcp",
       "type": "messagebus",
       "label": "MCP stdio",
-      "sublabel": "stdio control plane",
+      "sublabel": "the one MCP over HTTP",
       "row": 0,
       "col": 1
     },
@@ -305,7 +305,7 @@
       "dot": "cyan",
       "title": "Read out of this checkout",
       "items": [
-        "13 MCP tools on the stdio control plane",
+        "24 MCP tools on the stdio control plane",
         "118 molecules · 40 cells · 20 tissues",
         "12 controlled benchmark rounds recorded"
       ]

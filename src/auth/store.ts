@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
 import {
   EMPTY_TIER_MODEL_PINS,
@@ -159,6 +159,16 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
   expires_at   TEXT NOT NULL,
   last_seen_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS auth_api_tokens (
+  token_id     TEXT PRIMARY KEY,
+  token_hash   TEXT NOT NULL UNIQUE,
+  principal_id TEXT NOT NULL REFERENCES auth_principals(principal_id),
+  org_id       TEXT NOT NULL REFERENCES auth_organisations(org_id),
+  label        TEXT NOT NULL,
+  created_at   TEXT NOT NULL,
+  last_used_at TEXT,
+  revoked_at   TEXT
+);
 CREATE TABLE IF NOT EXISTS auth_invitations (
   token_hash  TEXT PRIMARY KEY,
   org_id      TEXT NOT NULL REFERENCES auth_organisations(org_id),
@@ -275,6 +285,27 @@ export interface Viewer {
    * as imported, and a user-owned name is never re-synchronised on login.
    */
   displayNameSource: DisplayNameSource;
+}
+
+interface ApiTokenRow {
+  token_id: string;
+  token_hash: string;
+  principal_id: string;
+  org_id: string;
+  label: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+export interface ApiTokenRecord {
+  tokenId: string;
+  orgId: string;
+  orgName: string;
+  label: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
 }
 
 export interface LoginOutcome {
@@ -1029,6 +1060,105 @@ export class AuthStore {
       platformAdmin: this.isPlatformAdmin(principal.principal_id),
       displayNameSource: principal.display_name_source,
     };
+  }
+
+  /* ───────────────────────────── API tokens ───────────────────────────── */
+
+  /**
+   * Mint a bearer for the MCP. The plaintext is returned ONCE and never
+   * stored: the row keeps its hash, the principal, the ONE organisation the
+   * token acts in, a label, and the timestamps a person revokes by. A token
+   * is a session that does not expire on its own — so it is revocable, listed
+   * to its owner, and journaled at both ends by the caller.
+   */
+  createApiToken(input: { principalId: string; orgId: string; label: string }): {
+    tokenId: string;
+    token: string;
+    createdAt: string;
+  } {
+    const membership = this.db
+      .prepare('SELECT role FROM auth_memberships WHERE principal_id = ? AND org_id = ?')
+      .get(input.principalId, input.orgId) as { role: OrgRole } | undefined;
+    if (!membership) throw new Error('the principal is not a member of that organisation');
+    const label = input.label.replace(/\s+/g, ' ').trim().slice(0, 80) || 'MCP token';
+    const token = `atoma_${randomBytes(32).toString('base64url')}`;
+    const tokenId = randomUUID();
+    const createdAt = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO auth_api_tokens (token_id, token_hash, principal_id, org_id, label, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run(tokenId, sha256Hex(token), input.principalId, input.orgId, label, createdAt);
+    return { tokenId, token, createdAt };
+  }
+
+  /**
+   * The viewer a bearer stands for, or null. Same shape and same freshness as
+   * a session: the role and the platform-admin flag are read NOW, so a
+   * demotion or a revoked flag applies on the next call, never on the next
+   * login.
+   */
+  resolveApiToken(token: string): (Viewer & { tokenId: string }) | null {
+    if (typeof token !== 'string' || !token.startsWith('atoma_') || token.length > 200) return null;
+    const row = this.db
+      .prepare('SELECT * FROM auth_api_tokens WHERE token_hash = ? AND revoked_at IS NULL')
+      .get(sha256Hex(token)) as ApiTokenRow | undefined;
+    if (!row) return null;
+    const now = new Date();
+    const lastUsedMs = row.last_used_at ? storedInstantMs(row.last_used_at) : null;
+    if (lastUsedMs === null || now.getTime() - lastUsedMs > 60_000) {
+      this.db.prepare('UPDATE auth_api_tokens SET last_used_at = ? WHERE token_id = ?').run(now.toISOString(), row.token_id);
+    }
+    const principal = this.db
+      .prepare('SELECT * FROM auth_principals WHERE principal_id = ?')
+      .get(row.principal_id) as PrincipalRow | undefined;
+    const membership = this.db
+      .prepare('SELECT * FROM auth_memberships WHERE principal_id = ? AND org_id = ?')
+      .get(row.principal_id, row.org_id) as MembershipRow | undefined;
+    const org = this.db
+      .prepare('SELECT name FROM auth_organisations WHERE org_id = ?')
+      .get(row.org_id) as { name: string } | undefined;
+    if (!principal || !membership || !org) return null;
+    return {
+      tokenId: row.token_id,
+      principalId: principal.principal_id,
+      displayName: principal.display_name,
+      kind: principal.kind,
+      orgId: row.org_id,
+      orgName: org.name,
+      role: membership.role,
+      platformAdmin: this.isPlatformAdmin(principal.principal_id),
+      displayNameSource: principal.display_name_source,
+    };
+  }
+
+  /** A principal's own tokens, secret-free: what Settings and the CLI list. */
+  listApiTokens(principalId: string): ApiTokenRecord[] {
+    const rows = this.db
+      .prepare(
+        `SELECT t.token_id, t.org_id, o.name AS org_name, t.label, t.created_at, t.last_used_at, t.revoked_at
+         FROM auth_api_tokens t JOIN auth_organisations o ON o.org_id = t.org_id
+         WHERE t.principal_id = ? ORDER BY t.created_at DESC`
+      )
+      .all(principalId) as Array<Omit<ApiTokenRow, 'token_hash' | 'principal_id'> & { org_name: string }>;
+    return rows.map((row) => ({
+      tokenId: row.token_id,
+      orgId: row.org_id,
+      orgName: row.org_name,
+      label: row.label,
+      createdAt: row.created_at,
+      lastUsedAt: row.last_used_at,
+      revokedAt: row.revoked_at,
+    }));
+  }
+
+  /** Revoke one of the principal's OWN tokens; a foreign id is a no-op, never a 404 oracle. */
+  revokeApiToken(principalId: string, tokenId: string): boolean {
+    const result = this.db
+      .prepare('UPDATE auth_api_tokens SET revoked_at = ? WHERE token_id = ? AND principal_id = ? AND revoked_at IS NULL')
+      .run(new Date().toISOString(), tokenId, principalId);
+    return result.changes > 0;
   }
 
   /**

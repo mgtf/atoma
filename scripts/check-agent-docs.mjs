@@ -73,7 +73,7 @@ const requiredHeadings = [
   '## Architecture invariants',
   '## Skills lifecycle',
   '## Tools and runtime isolation',
-  '## MCP stdio server',
+  '## MCP server',
   '## Testing and linting',
 ];
 for (const heading of requiredHeadings) {

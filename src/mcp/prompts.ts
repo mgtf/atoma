@@ -73,7 +73,7 @@ export function promptNames(): string[] {
  *
  * The guidance is quoted from the profile verbatim; the only thing this
  * function adds is what the host has to DO with it, and the two properties of
- * `atoma_run_start` a caller must not discover by accident.
+ * `atoma_operator_run_start` a caller must not discover by accident.
  */
 export function goalPromptText({ profile }: LaunchableProfile, goal: string): string {
   const examples = profile.guidance.examples.map((e) => `- ${e}`).join('\n');
@@ -89,8 +89,8 @@ export function goalPromptText({ profile }: LaunchableProfile, goal: string): st
     'The goal to run:',
     goal,
     '',
-    `Call atoma_run_start with family "${profile.id}" and that goal as prose describing the artefact wanted. Do not name tools in the goal: the tiering decides what to invoke, and a goal that prescribes it spends the run's budget on the wrong phase.`,
-    'Starting a run is DESTRUCTIVE (the shared build workspace is archived first unless keepWorkspace is passed, and the run mutates the agent registry, the skill store and the lifecycle ledger) and SERIALISED (one at a time). It returns a runId immediately and takes minutes: poll atoma_run_status until it is finished, and report its economics.',
+    `Call atoma_operator_run_start with family "${profile.id}" and that goal as prose describing the artefact wanted (inside an organisation's project, atoma_run_start with the projectId instead). Do not name tools in the goal: the tiering decides what to invoke, and a goal that prescribes it spends the run's budget on the wrong phase.`,
+    'Starting a run is DESTRUCTIVE (the shared build workspace is archived first unless keepWorkspace is passed, and the run mutates the agent registry, the skill store and the lifecycle ledger) and SERIALISED (one at a time). It returns a runId immediately and takes minutes: poll atoma_operator_run_status until it is finished, and report its economics.',
   ].join('\n');
 }
 
