@@ -157,6 +157,7 @@ describe('McpAccess API lifecycle', () => {
     expect(screen.getByTestId('mcp-claude-command')).toHaveTextContent(minted.mcpUrl);
     await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
     await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    expect(screen.queryByText(/The change was saved, but the token list/)).toBeNull();
     expect(screen.getByTestId('mcp-token')).toHaveTextContent(minted.token);
     await userEvent.click(screen.getByRole('button', { name: 'Done, I copied it' }));
     expect(screen.queryByTestId('mcp-token')).toBeNull();

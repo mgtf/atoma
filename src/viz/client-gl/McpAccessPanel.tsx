@@ -294,7 +294,10 @@ export function McpAccess({ t, locale, onError }: McpAccessProps) {
       locale={locale}
       mcpUrl={data?.mcpUrl ?? null}
       mode={data?.mode ?? 'bearer'}
-      onRetry={async () => { await refresh(); }}
+      onRetry={async () => {
+        setStatus(null);
+        await refresh();
+      }}
       tokens={data?.tokens ?? []}
       loading={loading}
       error={error}
