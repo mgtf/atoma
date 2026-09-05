@@ -65,5 +65,7 @@ Host pinning (DNS-rebinding protection) is kept for the browser case.
   invitation route either; the platform admin invites. Adding it is a product
   decision about who may grow an organisation, not an MCP one.
 - Provider keys through the MCP: secrets do not travel through a tool call.
-- A Settings screen to mint tokens. `/api/tokens` and the CLI exist; the
-  button is the next viz change.
+- ~~A Settings screen to mint tokens.~~ Built the same day: the "Connect your
+  AI agent (MCP)" panel in Settings (`src/viz/client-gl/McpAccessPanel.tsx`)
+  shows the address, the procedure, mints a token shown once with the exact
+  Claude Code line, and lists and revokes the viewer's tokens.

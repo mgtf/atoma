@@ -256,8 +256,9 @@ Do not start the empty service before its first release has created the
 ## Plugging an agent into the instance (MCP)
 
 The instance serves ONE MCP at `https://<host>/mcp`. A signed-in principal
-mints a bearer token for its active organisation (`POST /api/tokens`, or the
-operator on the host: `npm run auth -- token --principal <id-or-email> --org
+mints a bearer token for its active organisation in **Settings → Connect your
+AI agent (MCP)** — the panel shows the address, the procedure and the exact
+line to paste — (`POST /api/tokens` underneath, or the operator on the host: `npm run auth -- token --principal <id-or-email> --org
 <org-id-or-name> --label "<what for>"`), then registers the URL:
 
 ```bash

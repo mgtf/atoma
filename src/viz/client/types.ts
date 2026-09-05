@@ -393,6 +393,23 @@ export interface VizOrgProviderKeyStatus {
 }
 
 /** The organisation-level tier defaults and BYO-key state. */
+/** One of the viewer's own MCP bearer tokens, secret-free. */
+export interface VizApiToken {
+  tokenId: string;
+  orgId: string;
+  orgName: string;
+  label: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+}
+
+export interface VizApiTokens {
+  tokens: VizApiToken[];
+  /** The MCP address to register, on this deployment's public origin. */
+  mcpUrl: string;
+}
+
 export interface VizOrgModels {
   models: { l1: string | null; l2: string | null; l3: string | null };
   keys: VizOrgProviderKeyStatus[];

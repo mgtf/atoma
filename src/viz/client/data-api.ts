@@ -3,6 +3,7 @@ import type {
   LaunchProfile,
   VizAccountModels,
   VizAccountSubscriptions,
+  VizApiTokens,
   VizOrgModels,
   VizOrgProviderKeyStatus,
   VizOrganisation,
@@ -169,6 +170,21 @@ export const api = {
     mutateWithoutResult('/api/account/subscriptions/codex/login', 'DELETE'),
   disconnectCodexSubscription: () =>
     mutateWithoutResult('/api/account/subscriptions/codex', 'DELETE'),
+  // MCP ACCESS. The token plaintext comes back ONCE, from the POST; the list
+  // is labels and dates. Revocation is a DELETE on the viewer's own token.
+  apiTokens: () => fetchJson<VizApiTokens>('/api/tokens'),
+  createApiToken: (label: string) =>
+    mutateJson<{ tokenId: string; token: string; createdAt: string; mcpUrl: string }>('/api/tokens', { label }),
+  revokeApiToken: async (tokenId: string): Promise<{ revoked: boolean }> => {
+    const response = await fetch(`/api/tokens/${encodeURIComponent(tokenId)}`, {
+      method: 'DELETE',
+      credentials: 'same-origin',
+      headers: { accept: 'application/json' },
+    });
+    redirectIfAuthenticationRequired(response.status);
+    if (!response.ok) throw new Error(`HTTP ${response.status} for tokens`);
+    return (await response.json()) as { revoked: boolean };
+  },
   orgModels: () => fetchJson<VizOrgModels>('/api/org/models'),
   // PUT/PATCH rather than POST: these replace one account/org-scoped resource.
   saveAccountModels: (pins: VizAccountModels['pins']) =>
