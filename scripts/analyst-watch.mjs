@@ -29,54 +29,33 @@
 // (mechanism candidates — cooling-off, never same-day), supervisor/ALERTS.jsonl.
 
 import { spawn } from 'node:child_process';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
-  appendFileSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
-import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+  anyRunActive as sharedAnyRunActive,
+  defaultLeaseDbPath,
+  extractStructured,
+  fillEnvFromDotenv,
+  looksPinned,
+  makeLogger,
+  parseLooseJson,
+  providerChildEnv,
+  readRunIndex,
+  repoRoot as root,
+  servedModels,
+  truncate,
+} from './supervisor-common.mjs';
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-
-// Same convention as the repo's operator source launchers (src/cli/loadDotenv):
-// checkout .env FILLS UNSET KEYS ONLY — the shell environment always wins, so
-// an operator export overrides the file and a deployed service that injects
-// real env vars never reads it. This keeps the analyst token out of shell
-// history locally without inventing a second precedence rule.
-function fillEnvFromDotenv() {
-  let text;
-  try {
-    text = readFileSync(join(root, '.env'), 'utf8');
-  } catch {
-    return;
-  }
-  for (const line of text.split('\n')) {
-    const match = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/.exec(line);
-    if (!match || line.trimStart().startsWith('#')) continue;
-    const [, key, rawValue] = match;
-    if (process.env[key] !== undefined) continue;
-    const value = /^(['"]).*\1$/.test(rawValue) ? rawValue.slice(1, -1) : rawValue;
-    process.env[key] = value;
-  }
-}
 fillEnvFromDotenv();
 const runsDir = join(root, 'runs');
-const indexPath = join(runsDir, 'index.json');
 const supervisorDir = join(root, 'supervisor');
 const verdictsDir = join(supervisorDir, 'verdicts');
 const workDir = join(supervisorDir, 'work');
 const promptTemplatePath = join(root, 'scripts', 'analyst-prompt.md');
-const leaseDbPath =
-  process.env['ATOMA_MCP_RUN_LOCK'] ?? join(homedir(), '.atoma', 'mcp-run-lock.db');
+const leaseDbPath = defaultLeaseDbPath();
 const analystBaseUrl = process.env['ATOMA_ANALYST_BASE_URL'] ?? null;
 const analystAuthToken = process.env['ATOMA_ANALYST_AUTH_TOKEN'] ?? null;
 
-const LIVE_WINDOW_MS = 12 * 60 * 1000; // mirrors viz ABANDONED_AFTER_MS
 const PROMPT_VERSION = 'p1-2026-08-22';
 
 const HARDENING = [
@@ -157,20 +136,9 @@ const VERDICT_SCHEMA = {
 const FINDING_SEVERITY = { observation: 0, mechanism_candidate: 1, defect: 2, security_incident: 3 };
 const GRADES = ['sound', 'wasteful', 'deficient'];
 
-const log = (message) =>
-  console.log(`[analyst-watch ${new Date().toISOString()}] ${message}`);
-const warn = (message) =>
-  console.warn(`[analyst-watch ${new Date().toISOString()}] WARN ${message}`);
+const { log, warn } = makeLogger('analyst-watch');
 
 // --- generic bounded digesting ------------------------------------------------
-
-function truncate(text, max) {
-  if (typeof text !== 'string' || text.length <= max) return text;
-  const head = Math.ceil(max * 0.75);
-  const tail = Math.floor(max * 0.25);
-  const dropped = text.length - head - tail;
-  return `${text.slice(0, head)} …[truncated ${dropped} chars]… ${text.slice(text.length - tail)}`;
-}
 
 function pruneDeep(value, depth, stringMax) {
   if (value == null) return value;
@@ -284,69 +252,8 @@ function buildDigest(runId) {
 
 // --- activity detection --------------------------------------------------------
 
-function readIndex() {
-  if (!existsSync(indexPath)) return [];
-  try {
-    const parsed = JSON.parse(readFileSync(indexPath, 'utf8'));
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    // torn mid-write read; the next poll will see a whole file
-    return null;
-  }
-}
-
-function mtimeMs(path) {
-  try {
-    return statSync(path).mtimeMs;
-  } catch {
-    return 0;
-  }
-}
-
-function isEntryLive(entry, now) {
-  if (entry.endedAt) return false;
-  const activity = Math.max(
-    Date.parse(entry.startedAt) || 0,
-    typeof entry.lastEventAt === 'number' ? entry.lastEventAt : 0,
-    mtimeMs(join(runsDir, `${entry.id}.json`))
-  );
-  return now - activity <= LIVE_WINDOW_MS;
-}
-
-function processAlive(pid) {
-  if (!Number.isSafeInteger(pid) || pid <= 1) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return error?.code === 'EPERM';
-  }
-}
-
-async function leaseHeld() {
-  if (!existsSync(leaseDbPath)) return false;
-  try {
-    const { default: Database } = await import('better-sqlite3');
-    const db = new Database(leaseDbPath, { readonly: true, fileMustExist: true });
-    try {
-      const rows = db.prepare('SELECT owner_pid FROM mcp_run_lease').all();
-      return rows.some((row) => processAlive(Number(row.owner_pid)));
-    } finally {
-      db.close();
-    }
-  } catch (error) {
-    warn(`lease read failed (${error?.message ?? error}); treating as unknown`);
-    return null; // unknown — the index check remains the primary signal
-  }
-}
-
-async function anyRunActive() {
-  const entries = readIndex();
-  if (entries === null) return true; // index mid-write means a run is writing
-  const now = Date.now();
-  if (entries.some((entry) => isEntryLive(entry, now))) return true;
-  return (await leaseHeld()) === true;
-}
+const readIndex = () => readRunIndex(runsDir);
+const anyRunActive = () => sharedAnyRunActive({ runsDir, leaseDbPath, warn });
 
 // --- the claude call ------------------------------------------------------------
 
@@ -386,7 +293,7 @@ function runClaude(prompt, options) {
   return new Promise((resolveCall, rejectCall) => {
     const child = spawn('claude', claudeArgs(prompt, options), {
       cwd: root,
-      env: analystChildEnv(),
+      env: providerChildEnv({ baseUrl: analystBaseUrl, authToken: analystAuthToken }),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';
@@ -418,91 +325,6 @@ function runClaude(prompt, options) {
       resolveCall({ stdout, stderr });
     });
   });
-}
-
-/**
- * An explicit model id, as opposed to a moving alias like `sonnet`. Non-Claude
- * ids (glm-5.3, …) reached through ATOMA_ANALYST_BASE_URL are pins too — the
- * alias set is the CLI's own resolution vocabulary, not a vendor test.
- */
-const MODEL_ALIASES = new Set(['sonnet', 'opus', 'haiku', 'fable', 'default']);
-function looksPinned(model) {
-  return !MODEL_ALIASES.has(model);
-}
-
-/**
- * The child claude session's environment. The override is scoped HERE, never
- * exported globally: raw ANTHROPIC_* at platform launch would reroute the
- * runs' claude-cli transport along with the analyst.
- */
-function analystChildEnv() {
-  const env = { ...process.env };
-  if (analystBaseUrl) env['ANTHROPIC_BASE_URL'] = analystBaseUrl;
-  if (analystAuthToken) {
-    env['ANTHROPIC_AUTH_TOKEN'] = analystAuthToken;
-    // This machine exports a dead ANTHROPIC_API_KEY; left in the child env it
-    // can shadow the token at the gateway. Dropped from the child only.
-    delete env['ANTHROPIC_API_KEY'];
-  }
-  return env;
-}
-
-/**
- * What the session actually consumed, per model, in the same shape the run
- * traces already use for `totals.perModel`, so an analysis and the run it
- * examined can be compared field by field.
- *
- * `claude -p` reports a `modelUsage` map, and it is never one model: the main
- * loop's model plus whatever the harness ran auxiliary (Haiku classification
- * work), all of it inside `total_cost_usd`. Recording the requested alias
- * instead would name one model and price another — the exact lie `servedModel`
- * exists to prevent in the product's own traces.
- */
-function servedModels(wrapper) {
-  const usage = wrapper?.modelUsage;
-  if (!usage || typeof usage !== 'object') return null;
-  const entries = Object.entries(usage).map(([model, u]) => ({
-    model,
-    costUsd: typeof u?.costUSD === 'number' ? u.costUSD : null,
-    inputTokens: u?.inputTokens ?? 0,
-    outputTokens: u?.outputTokens ?? 0,
-    cacheReadInputTokens: u?.cacheReadInputTokens ?? 0,
-    cacheCreationInputTokens: u?.cacheCreationInputTokens ?? 0,
-  }));
-  entries.sort((a, b) => (b.costUsd ?? 0) - (a.costUsd ?? 0));
-  return entries.length > 0 ? entries : null;
-}
-
-function parseLooseJson(text) {
-  if (typeof text !== 'string') return null;
-  const attempts = [text.trim()];
-  const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(text);
-  if (fenced) attempts.push(fenced[1].trim());
-  const first = text.indexOf('{');
-  const last = text.lastIndexOf('}');
-  if (first !== -1 && last > first) attempts.push(text.slice(first, last + 1));
-  for (const attempt of attempts) {
-    try {
-      return JSON.parse(attempt);
-    } catch {
-      /* next attempt */
-    }
-  }
-  return null;
-}
-
-function extractVerdict(wrapper) {
-  if (wrapper && typeof wrapper === 'object') {
-    if (wrapper.structured_output && typeof wrapper.structured_output === 'object') {
-      return wrapper.structured_output;
-    }
-    if (wrapper.structuredOutput && typeof wrapper.structuredOutput === 'object') {
-      return wrapper.structuredOutput;
-    }
-    if (typeof wrapper.result === 'string') return parseLooseJson(wrapper.result);
-    if (wrapper.result && typeof wrapper.result === 'object') return wrapper.result;
-  }
-  return null;
 }
 
 function validateVerdict(verdict) {
@@ -638,7 +460,7 @@ async function analyseRun(runId, options) {
   const startedAt = Date.now();
   const { stdout } = await runClaude(prompt, options);
   const wrapper = parseLooseJson(stdout);
-  const verdict = extractVerdict(wrapper);
+  const verdict = extractStructured(wrapper);
   const problems = validateVerdict(verdict);
   if (problems.length > 0) {
     mkdirSync(verdictsDir, { recursive: true });

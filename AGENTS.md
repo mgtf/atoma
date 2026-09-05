@@ -128,6 +128,8 @@ npm run projects -- run --project <slug> --as <id-or-email> "<goal>"
 npm run projects:dev -- list
 npm run sentinel -- --once          # the viz server already hosts this watch
 npm run sentinel:dev -- --cost-alert 2.50
+npm run analyst -- --once --backfill 2   # post-mortem verdicts; never beside a run
+npm run mender -- --once                 # cited defect verdicts → a PR on main; a person merges
 npm run run:build -- "<goal>"
 npm run run:build:dev -- "<goal>"
 npm run mcp

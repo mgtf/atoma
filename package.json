@@ -30,6 +30,8 @@
     "projects": "node dist/cli/projects.js",
     "projects:dev": "tsx src/cli/projects.ts",
     "sentinel": "node dist/cli/sentinel.js",
+    "analyst": "node scripts/analyst-watch.mjs",
+    "mender": "node scripts/mender.mjs",
     "sentinel:dev": "tsx src/cli/sentinel.ts",
     "release:check": "npm run check && npm audit && npm run build && node scripts/release-smoke.mjs && node scripts/auth-release-smoke.mjs && npm run auth -- --help && npm run doctor -- --help",
     "release:container-smoke": "node scripts/release-container-smoke.mjs",
