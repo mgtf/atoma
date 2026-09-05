@@ -12,11 +12,11 @@ describe('Node version contract', () => {
     };
 
     expect(local).toBe('22.13.0');
-    // core, i18n, viz-smoke, preview-runtime and worker: EVERY job pins the
+    // core, i18n, viz-smoke, preview-runtime, worker and mender isolation pin the
     // same Node as the engine floor — the count grows with the workflow on
     // purpose, so a new job cannot quietly run on whatever the runner happens
     // to ship.
-    expect(ci.match(/node-version:\s*22\.13\.0/g)).toHaveLength(5);
+    expect(ci.match(/node-version:\s*22\.13\.0/g)).toHaveLength(6);
     expect(release.match(/node-version:\s*22\.13\.0/g)).toHaveLength(1);
     expect(pkg.engines?.node).toContain('^22.13.0');
     expect(nodeVersionSupported(local)).toBe(true);

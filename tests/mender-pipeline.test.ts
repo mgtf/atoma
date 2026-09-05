@@ -1,6 +1,6 @@
 import { runCommand } from '../src/supervisor/session.js';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -444,5 +444,23 @@ describe('verification cannot change the proposed patch', () => {
     await mendPending(f, f.options());
     expect(record(f)?.outcome).toBe('refused');
     expect(remoteBranches(f)).toEqual([]);
+  }, TIMEOUT_MS);
+});
+
+
+describe('publisher hooks cannot execute proposal code', () => {
+  it('does not run a pre-push hook with publisher authority', async () => {
+    const f = fixture();
+    const hooks = join(f.root, 'publisher-hooks');
+    mkdirSync(hooks);
+    const marker = join(f.root, 'publisher-hook-ran');
+    const hook = join(hooks, 'pre-push');
+    writeFileSync(hook, '#!/bin/sh\ntouch "' + marker + '"\n');
+    chmodSync(hook, 0o755);
+    git(f.repo, ['config', 'core.hooksPath', hooks]);
+    await mendPending(f, f.options());
+    expect(record(f)?.outcome).toBe('pr-opened');
+    expect(existsSync(marker)).toBe(false);
+    expect(remoteBranches(f)).toHaveLength(1);
   }, TIMEOUT_MS);
 });

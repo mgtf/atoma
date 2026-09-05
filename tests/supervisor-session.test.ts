@@ -24,4 +24,15 @@ describe.skipIf(process.platform === 'win32')('supervisor subprocess ownership',
     const pids = JSON.parse(readFileSync(join(root, 'pids.json'), 'utf8')) as number[];
     for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow();
   }, 10_000);
+
+  it('waits for SIGKILL and reap when the command ignores SIGTERM', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'atoma-session-kill-'));
+    roots.push(root);
+    const script = join(root, 'resistant.mjs');
+    writeFileSync(script, `import {writeFileSync} from 'node:fs';
+      writeFileSync('pid', String(process.pid)); process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);`);
+    await expect(runCommand(script, [], { cwd: root, timeoutMs: 1_000 })).rejects.toThrow('timeout');
+    const pid = Number(readFileSync(join(root, 'pid'), 'utf8'));
+    expect(() => process.kill(pid, 0)).toThrow();
+  }, 10_000);
 });

@@ -56,8 +56,8 @@ import { runClaudeSession, runCommand, servedMatchesPin, type SupervisorProvider
  *
  * THE POWER SPLIT IS THE WHOLE DESIGN. The MODEL edits files inside an
  * isolated git worktree at the tip of the base branch and may run the
- * repository's own checks there; it has no network, no MCP servers, no git
- * write, no `gh`, and it never sees trace text. The HARNESS — this module —
+ * repository's own checks inside a disposable container. It has no publisher
+ * credentials, host HOME or engine socket, and it never sees trace text. The HARNESS — this module —
  * verifies on its own: it stashes the source change and runs the new test
  * files expecting a FAILURE, restores them, runs the full check expecting
  * success, and only then commits, pushes and opens the PR. A PERSON merges;
@@ -237,7 +237,9 @@ async function git(
   warn: (line: string) => void,
   options: GitOptions = {}
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
-  const result = await runCommand('git', args, { cwd, timeoutMs: options.timeoutMs ?? 120_000, onLog: warn });
+  // Proposal files include ignored files too: a generated pre-push hook must
+  // never execute with the publisher's credentials.
+  const result = await runCommand('git', ['-c', 'core.hooksPath=/dev/null', ...args], { cwd, timeoutMs: options.timeoutMs ?? 120_000, onLog: warn });
   if (result.code !== 0 && !options.allowFailure) {
     throw new Error(
       `git ${args.slice(0, 2).join(' ')} exited ${result.code}: ${truncate(result.stderr.trim() || result.stdout.trim(), 1500)}`
@@ -607,7 +609,7 @@ export async function mendFinding(input: MendInput, options: MenderOptions): Pro
     mkdirSync(paths.menderDir, { recursive: true });
     const messagePath = join(paths.menderDir, `${runId}.${index}.commit.txt`);
     writeFileSync(messagePath, commitMessage({ report, sourceFiles: policy.sourceFiles, runId, key, verification }));
-    await git(worktree, ['-c', 'core.hooksPath=/dev/null', 'commit', '--author=atoma mender <mender@atoma.invalid>', '-F', messagePath], options.warn, { timeoutMs: options.timeoutMs });
+    await git(worktree, ['commit', '--author=atoma mender <mender@atoma.invalid>', '-F', messagePath], options.warn, { timeoutMs: options.timeoutMs });
     const sha = (await git(worktree, ['rev-parse', 'HEAD'], options.warn)).stdout.trim();
     await git(worktree, ['push', '-u', options.remote, branch], options.warn, { timeoutMs: 300_000 });
 

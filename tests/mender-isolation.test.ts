@@ -37,10 +37,20 @@ describe.skipIf(process.env['ATOMA_MENDER_CONTAINER_TESTS'] !== '1')('mender con
       for (const pid of fs.readdirSync('/proc').filter(x => /^\\d+$/.test(x))) {
         try { if (fs.readFileSync('/proc/' + pid + '/environ').includes('sentinel-publisher')) process.exit(14); } catch {}
       }
+      cp.execFileSync('git', ['diff', '--stat']);
+      cp.execFileSync('git', ['status', '--short']);
       fs.writeFileSync('result.txt', 'isolated');
     `], { cwd: work, timeoutMs: 60_000, env: { ...process.env, GH_TOKEN: 'sentinel-publisher' } });
     expect(result.code, result.stderr).toBe(0);
     expect(readFileSync(join(work, 'result.txt'), 'utf8')).toBe('isolated');
+    expect(readFileSync(join(work, '.git'), 'utf8')).toBe(original);
+    await expect(runIsolatedMenderCommand('node', ['-e', `
+      const {spawn} = require('node:child_process');
+      spawn(process.execPath, ['-e', "setTimeout(() => require('node:fs').writeFileSync('/work/late-write', 'survived'), 3000)"], {stdio:'ignore'});
+      process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);
+    `], { cwd: work, timeoutMs: 500 })).rejects.toThrow('timeout');
+    await new Promise((resolveWait) => setTimeout(resolveWait, 3_100));
+    expect(() => readFileSync(join(work, 'late-write'))).toThrow();
     expect(readFileSync(join(work, '.git'), 'utf8')).toBe(original);
   }, 90_000);
 });

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolveCommand, runCommand } from './session.js';
@@ -33,6 +33,7 @@ export const runIsolatedMenderCommand: typeof runCommand = async (spec, extraArg
     if (cloned.code !== 0) throw new Error('could not prepare isolated mender git metadata');
     const indexed = await runCommand('git', ['--git-dir', metadata, 'read-tree', 'HEAD'], options);
     if (indexed.code !== 0) throw new Error('could not prepare isolated mender index');
+    appendFileSync(join(metadata, 'config'), '\n[core]\n\tbare = false\n\tworktree = /work\n');
     writeFileSync(gitFile, 'gitdir: /atoma-git\n');
     const env = menderContainerEnv(options.env ?? {});
     const command = resolveCommand(spec);

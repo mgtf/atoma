@@ -64,9 +64,16 @@ what it never does:
 
 provider:
   ATOMA_MENDER_MODEL / _BASE_URL / _AUTH_TOKEN as a set, else the ATOMA_ANALYST_*
-  set, else the login subscription with a pinned claude-sonnet-5.
+  set, else pinned claude-sonnet-5 with explicit ANTHROPIC_API_KEY / AUTH_TOKEN.
+  Host login files are not exposed to the execution container.
 
-commands (env, for tests and unusual hosts):
+execution host:
+  Linux / WSL2 with Docker; build the disposable image before the first mend:
+  docker build -f docker/mender.Dockerfile -t atoma-mender:local .
+  ATOMA_MENDER_SANDBOX_IMAGE may select an operator-built image.
+  The model and checks have no host HOME, GitHub credentials or engine socket.
+
+commands (env, resolved inside the execution image):
   ATOMA_MENDER_CMD_CLAUDE (claude)   ATOMA_MENDER_CMD_GH (gh)
   ATOMA_MENDER_CMD_INSTALL (npm ci)  ATOMA_MENDER_CMD_TEST (npx vitest run)
   ATOMA_MENDER_CMD_CHECK (npm run check)
