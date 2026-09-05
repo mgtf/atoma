@@ -259,6 +259,7 @@ export class PreviewManager {
       } catch {
         /* the row moved on; the teardown below is what matters */
       }
+      await this.teardownGeneration(input.orgId, input.projectRunId, generation);
       throw error;
     } finally {
       this.starting.delete(key);
@@ -416,6 +417,7 @@ export class PreviewManager {
       } catch {
         /* the row moved on; the teardown is what matters */
       }
+      await this.teardownGeneration(input.orgId, input.projectRunId, generation);
       throw error;
     } finally {
       this.starting.delete(key);
@@ -525,6 +527,28 @@ export class PreviewManager {
       }
     }
 
+    await this.teardownGeneration(orgId, projectRunId, generation);
+
+    try {
+      this.deps.store.finishStop({
+        orgId,
+        projectRunId,
+        generation,
+        reason,
+        now: new Date(this.now()),
+      });
+    } catch {
+      // A failed row stays failed until the next open, by contract: that is
+      // the state carrying the code a member still needs to read.
+    }
+    return this.status(orgId, projectId, projectRunId);
+  }
+
+  /** Clean only the generation that allocated resources, including failed starts. */
+  private async teardownGeneration(orgId: string, projectRunId: string, generation: number): Promise<void> {
+    const host = `${previewGenerationHost(orgId, projectRunId, generation)}.${this.deps.config.domain}`;
+    this.deps.routes.delete(host);
+    this.deps.claims.revokeRun(orgId, projectRunId, generation);
     const ownerId = this.ownerId(projectRunId, generation);
     await teardownPreview(
       { launcher: this.deps.launcher, ...(this.deps.log ? { log: this.deps.log } : {}) },
@@ -557,20 +581,6 @@ export class PreviewManager {
         relay: { kind: 'preview-ingress', ownerId, name: this.deps.launcher.unitName('preview-ingress', ownerId) },
       }
     );
-
-    try {
-      this.deps.store.finishStop({
-        orgId,
-        projectRunId,
-        generation,
-        reason,
-        now: new Date(this.now()),
-      });
-    } catch {
-      // A failed row stays failed until the next open, by contract: that is
-      // the state carrying the code a member still needs to read.
-    }
-    return this.status(orgId, projectId, projectRunId);
   }
 
   /**

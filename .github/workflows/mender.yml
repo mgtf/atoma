@@ -47,6 +47,7 @@ jobs:
       ATOMA_MENDER_MODEL: ${{ vars.ATOMA_MENDER_MODEL }}
       ATOMA_MENDER_BASE_URL: ${{ vars.ATOMA_MENDER_BASE_URL }}
       ATOMA_MENDER_AUTH_TOKEN: ${{ secrets.ATOMA_MENDER_AUTH_TOKEN }}
+      # Publisher only: the model and tests run in containers without this env.
       # `gh pr create` and the branch push. A fine-grained PAT when the
       # repository forbids Actions from opening pull requests; the workflow
       # token otherwise.
@@ -66,8 +67,8 @@ jobs:
 
       - run: npm ci
 
-      - name: Install the headless model CLI
-        run: npm install -g @anthropic-ai/claude-code
+      - name: Build the credential-isolated execution image
+        run: docker build -f docker/mender.Dockerfile -t atoma-mender:local .
 
       - name: Write the mend request
         shell: bash

@@ -111,7 +111,14 @@ Neighbours:
 
 ## The mender
 
-- THE POWER SPLIT IS BETWEEN THE MODEL AND THE HARNESS. The model edits files
+- THE POWER SPLIT IS BETWEEN THE MODEL AND THE HARNESS.
+  Executable proposals (model, install, tests and checks) run through
+  `menderIsolation.ts` in disposable Linux Docker containers. Build
+  `docker/mender.Dockerfile` as `atoma-mender:local` first. Only the worktree
+  and sanitized read-only git metadata are mounted; no host HOME, GitHub
+  credential or engine socket crosses. Configure an explicit provider token;
+  host login files are intentionally unavailable. Container removal precedes
+  publication, including after a timeout. Tool allowlists alone are not isolation. The model edits files
   inside an isolated worktree cut at the tip of the base branch and may run
   the repository's own checks there (`--restricted`, `--permission-mode
   dontAsk`, `MENDER_ALLOWED_TOOLS`: `npm`/`npx` verification and read-only

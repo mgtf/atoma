@@ -139,6 +139,7 @@ async function grantCookie(port: number, claims: PreviewClaimRegistry): Promise<
   const reply = await call(port, '/.atoma/claim', { method: 'POST', body: claim.secret });
   expect(reply.status).toBe(204);
   const setCookie = header(reply, 'set-cookie') ?? '';
+  expect(setCookie).not.toMatch(/Max-Age=|Expires=/i);
   const value = /__Host-AtomaPreview=([^;]+)/.exec(setCookie)?.[1] ?? '';
   expect(value).not.toBe('');
   return `${PREVIEW_GRANT_COOKIE}=${value}`;
@@ -396,5 +397,22 @@ describe('preview gateway proxying', () => {
     const reply = await call(gatewayPort, '/', { headers: { cookie } });
     expect(reply.status).toBe(502);
     expect(reply.body).toContain('not answering');
+  });
+});
+
+
+
+describe('browser grant retention and server expiry', () => {
+  it('keeps a renewed token usable after five minutes, then refuses it without heartbeat', async () => {
+    let now = Date.now();
+    const claims = new PreviewClaimRegistry(() => now);
+    const { port } = await gateway(staticRoute(), claims);
+    const cookie = await grantCookie(port, claims);
+    now += 240_000;
+    claims.renewRun({ principalId: 'p1', orgId: ORG, projectRunId: RUN, generation: 1 });
+    now += 120_000;
+    expect((await call(port, '/', { headers: { cookie } })).status).toBe(200);
+    now += 300_001;
+    expect((await call(port, '/', { headers: { cookie } })).status).toBe(404);
   });
 });

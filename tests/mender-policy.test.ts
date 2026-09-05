@@ -182,3 +182,20 @@ describe('pullRequestBody', () => {
     expect(body).toContain('if (parsed) return { ok: true }');
   });
 });
+
+describe('review regressions: provider and governing code', () => {
+  it('does not send a new provider key to an inherited gateway', () => {
+    const env = providerChildEnv({ model: 'claude-sonnet-5', baseUrl: null, authToken: 'sk-ant-new', source: 'mender' }, {
+      ANTHROPIC_BASE_URL: 'https://stale.invalid', ANTHROPIC_AUTH_TOKEN: 'old',
+      ANTHROPIC_CUSTOM_HEADERS: 'Authorization: old', CLAUDE_CODE_USE_BEDROCK: '1',
+    });
+    expect(env).toEqual({ ANTHROPIC_API_KEY: 'sk-ant-new' });
+  });
+
+  it.each(['src/supervisor/mender.ts', 'src/supervisor/menderPolicy.ts', 'src/cli/mender.ts', 'src/contracts/supervisorMend.ts', 'src/tools/AGENTS.md'])(
+    'refuses changes to governing code: %s', (file) => {
+      const files = [file, 'src/adder.ts', 'tests/adder.test.ts'];
+      expect(checkDiffPolicy({ files, numstat: files.map((file) => ({ file, added: 1, deleted: 1 })) }).ok).toBe(false);
+    }
+  );
+});

@@ -218,3 +218,26 @@ describe('API tokens in the auth store', () => {
     expect(() => store.createApiToken({ principalId: founder.principalId, orgId: 'other-org', label: 'x' })).toThrow(/not a member/);
   });
 });
+
+
+
+describe('organisation model audit across MCP', () => {
+  it('emits one attributed journal event after a successful update and none for a read', async () => {
+    const events: unknown[] = [];
+    const models = { l1: null, l2: null, l3: null };
+    const { url } = await listen(() => ({ kind: 'principal', viewer: viewer('org:admin'), tokenId: 'a' }), {
+      ...TENANT_HOST,
+      auth: { orgTierModels: () => models, setOrgTierModels: () => models } as never,
+      emit: (event) => { events.push(event); },
+    });
+    const client = await connect(url);
+    await client.callTool({ name: 'atoma_org_models', arguments: {} });
+    expect(events).toEqual([]);
+    const result = await client.callTool({ name: 'atoma_org_models', arguments: { models } });
+    expect(result.isError).not.toBe(true);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ kind: 'org.models_updated', actorType: 'principal',
+      actorId: viewer('org:admin').principalId, orgId: viewer('org:admin').orgId });
+    await client.close();
+  });
+});

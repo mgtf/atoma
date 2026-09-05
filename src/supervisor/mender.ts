@@ -1,3 +1,4 @@
+import { runIsolatedMenderCommand } from './menderIsolation.js';
 import {
   appendFileSync,
   existsSync,
@@ -146,6 +147,8 @@ export interface MenderOptions {
   readonly leasePath: string;
   readonly provider: SupervisorProvider;
   readonly commands: MenderCommands;
+  /** Trusted in-process test seam; production always uses the container executor. */
+  readonly executeUntrusted?: typeof runCommand;
   readonly base: string;
   readonly remote: string;
   readonly minConfidence: FindingConfidence;
@@ -430,6 +433,7 @@ export async function mendFinding(input: MendInput, options: MenderOptions): Pro
   const worktree = join(paths.worktreesDir, `mender-${shortRunId(runId)}-${index}`);
   let keepWorktree = options.keepWorktree;
   const provider = options.provider;
+  const executeUntrusted = options.executeUntrusted ?? runIsolatedMenderCommand;
   const providerFacts = { model: provider.model, source: provider.source, baseUrl: provider.baseUrl };
   try {
     if (!(await requireIdle(options, 'prepare a worktree'))) return null;
@@ -447,7 +451,7 @@ export async function mendFinding(input: MendInput, options: MenderOptions): Pro
     options.log(`worktree ${worktree} on ${branch} at ${baseSha.slice(0, 10)}`);
 
     options.log(`installing (${options.commands.install})`);
-    const install = await runCommand(options.commands.install, [], { cwd: worktree, timeoutMs: options.timeoutMs, onLog: options.warn });
+    const install = await executeUntrusted(options.commands.install, [], { cwd: worktree, timeoutMs: options.timeoutMs, onLog: options.warn });
     if (install.code !== 0) {
       keepWorktree = true;
       return record({ outcome: 'harness-failed', baseSha, worktree, reason: 'install failed', output: truncate(install.stderr || install.stdout, 4000) });
@@ -477,6 +481,7 @@ export async function mendFinding(input: MendInput, options: MenderOptions): Pro
     const startedAt = Date.now();
     const session = await runClaudeSession({
       claudeCommand: options.commands.claude,
+      execute: executeUntrusted,
       args,
       cwd: worktree,
       provider,
@@ -518,6 +523,7 @@ export async function mendFinding(input: MendInput, options: MenderOptions): Pro
       .filter(Boolean);
     const numstat = parseNumstat((await git(worktree, ['diff', '--cached', '--numstat'], options.warn)).stdout);
     const policy = checkDiffPolicy({ files, numstat, maxLines: options.maxDiffLines });
+    const proposedTree = (await git(worktree, ['write-tree'], options.warn)).stdout.trim();
     await git(worktree, ['reset', '-q'], options.warn);
     if (!policy.ok) {
       keepWorktree = true;
@@ -534,7 +540,7 @@ export async function mendFinding(input: MendInput, options: MenderOptions): Pro
     let before: { code: number | null; stdout: string; stderr: string } | null = null;
     let testError: unknown = null;
     try {
-      before = await runCommand(options.commands.test, policy.testFiles, { cwd: worktree, timeoutMs: options.timeoutMs, onLog: options.warn });
+      before = await executeUntrusted(options.commands.test, policy.testFiles, { cwd: worktree, timeoutMs: options.timeoutMs, onLog: options.warn });
     } catch (error) {
       testError = error;
     }
@@ -566,7 +572,7 @@ export async function mendFinding(input: MendInput, options: MenderOptions): Pro
       return null;
     }
     options.log(`verifying (${options.commands.check})`);
-    const check = await runCommand(options.commands.check, [], { cwd: worktree, timeoutMs: options.timeoutMs, onLog: options.warn });
+    const check = await executeUntrusted(options.commands.check, [], { cwd: worktree, timeoutMs: options.timeoutMs, onLog: options.warn });
     const checkPassed = check.code === 0;
     if (!checkPassed) {
       keepWorktree = true;
@@ -585,10 +591,23 @@ export async function mendFinding(input: MendInput, options: MenderOptions): Pro
 
     // ---- commit, push, pull request: the harness's hands, never the model's ----
     await git(worktree, ['add', '-A'], options.warn);
+    const finalFiles = (await git(worktree, ['diff', '--cached', '--name-only'], options.warn)).stdout.trim().split('\n').filter(Boolean);
+    const finalPolicy = checkDiffPolicy({
+      files: finalFiles,
+      numstat: parseNumstat((await git(worktree, ['diff', '--cached', '--numstat'], options.warn)).stdout),
+      maxLines: options.maxDiffLines,
+    });
+    const finalTree = (await git(worktree, ['write-tree'], options.warn)).stdout.trim();
+    const finalHead = (await git(worktree, ['rev-parse', 'HEAD'], options.warn)).stdout.trim();
+    if (!finalPolicy.ok || finalTree !== proposedTree || finalHead !== baseSha) {
+      keepWorktree = true;
+      return record({ ...modelMeta, outcome: 'refused', baseSha, worktree, report, files: finalFiles,
+        problems: [...finalPolicy.problems, 'verification changed the proposed tree or base commit'] });
+    }
     mkdirSync(paths.menderDir, { recursive: true });
     const messagePath = join(paths.menderDir, `${runId}.${index}.commit.txt`);
     writeFileSync(messagePath, commitMessage({ report, sourceFiles: policy.sourceFiles, runId, key, verification }));
-    await git(worktree, ['commit', '--author=atoma mender <mender@atoma.invalid>', '-F', messagePath], options.warn, { timeoutMs: options.timeoutMs });
+    await git(worktree, ['-c', 'core.hooksPath=/dev/null', 'commit', '--author=atoma mender <mender@atoma.invalid>', '-F', messagePath], options.warn, { timeoutMs: options.timeoutMs });
     const sha = (await git(worktree, ['rev-parse', 'HEAD'], options.warn)).stdout.trim();
     await git(worktree, ['push', '-u', options.remote, branch], options.warn, { timeoutMs: 300_000 });
 

@@ -294,16 +294,18 @@ export class PreviewClaimRegistry {
    * six events with one revocation, because six revocations would be five
    * chances to forget one.
    */
-  revokeRun(orgId: string, projectRunId: string): number {
+  revokeRun(orgId: string, projectRunId: string, generation?: number): number {
     let revoked = 0;
     for (const [key, grant] of this.grants) {
-      if (grant.binding.orgId === orgId && grant.binding.projectRunId === projectRunId) {
+      if (grant.binding.orgId === orgId && grant.binding.projectRunId === projectRunId &&
+        (generation === undefined || grant.binding.generation === generation)) {
         this.grants.delete(key);
         revoked += 1;
       }
     }
     for (const [key, claim] of this.claims) {
-      if (claim.binding.orgId === orgId && claim.binding.projectRunId === projectRunId) {
+      if (claim.binding.orgId === orgId && claim.binding.projectRunId === projectRunId &&
+        (generation === undefined || claim.binding.generation === generation)) {
         this.claims.delete(key);
         revoked += 1;
       }

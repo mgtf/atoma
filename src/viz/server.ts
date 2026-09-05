@@ -1,3 +1,4 @@
+import { updateOrgModels } from '../auth/orgModels.js';
 import { createServer, request as httpRequest } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
@@ -1135,6 +1136,7 @@ const MCP_DEPS: McpToolDeps = {
   auth: AUTH?.store ?? null,
   journal: EVENTS,
   operatorRuns: true,
+  emit,
 };
 const MCP_HOST = new McpHttpHost({
   resolveCaller: (req): McpCaller | null => {
@@ -2896,17 +2898,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           return;
         }
         try {
-          const models = authStore.setOrgTierModels(
-            viewer.orgId,
-            (body as { models?: unknown }).models
-          );
-          emit({
-            kind: 'org.models_updated',
-            actorType: 'principal',
-            actorId: viewer.principalId,
-            orgId: viewer.orgId,
-            summary: `Organisation tier defaults updated (${models.l1 ?? '-'} / ${models.l2 ?? '-'} / ${models.l3 ?? '-'})`,
-          });
+          const models = updateOrgModels(authStore, viewer, (body as { models?: unknown }).models, emit);
           sendJson(res, 200, { models });
         } catch (error) {
           sendJson(res, 400, {

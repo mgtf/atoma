@@ -1,3 +1,5 @@
+import { updateOrgModels } from '../auth/orgModels.js';
+import type { PlatformEventSink } from '../contracts/platformEvents.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { AuthStore, Viewer } from '../auth/store.js';
@@ -61,6 +63,7 @@ export interface McpToolDeps {
   readonly projects: { readonly service: ProjectService; readonly store: ProjectStore } | null;
   readonly auth: AuthStore | null;
   readonly journal: Pick<PlatformEventLog, 'list'> | null;
+  readonly emit?: PlatformEventSink;
   /** Whether this host may spawn operator-corpus runs (the machine's own runner). */
   readonly operatorRuns: boolean;
 }
@@ -338,7 +341,8 @@ export const MCP_TOOLS: readonly McpToolSpec[] = [
             const viewer = ctx.viewer();
             const auth = ctx.deps.auth!;
             if (args.models === undefined) return { models: auth.orgTierModels(viewer.orgId) };
-            return { models: auth.setOrgTierModels(viewer.orgId, args.models) };
+            if (!ctx.deps.emit) throw new McpToolRefused('model updates require the audit journal');
+            return { models: updateOrgModels(auth, viewer, args.models, ctx.deps.emit) };
           })
       ),
   },

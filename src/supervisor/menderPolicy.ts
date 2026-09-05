@@ -138,6 +138,7 @@ export function branchName(runId: string, findingIndex: number, finding: Pick<Ve
  * changed lines is the same idea by size.
  */
 export const ALLOWED_PATH = /^(src\/|tests\/|docs\/incidents\/)/;
+export const PROTECTED_PATH = /^(src\/supervisor\/|src\/cli\/|src\/contracts\/supervisor)|(^|\/)AGENTS\.md$|(^|\/)CLAUDE\.md$/;
 export const DEFAULT_MAX_DIFF_LINES = 600;
 
 export interface NumstatRow {
@@ -170,9 +171,9 @@ export function checkDiffPolicy(input: {
       changedLines: 0,
     };
   }
-  const outside = input.files.filter((file) => !ALLOWED_PATH.test(file));
+  const outside = input.files.filter((file) => !ALLOWED_PATH.test(file) || PROTECTED_PATH.test(file));
   if (outside.length > 0) {
-    problems.push(`changes outside src/, tests/, docs/incidents/: ${outside.join(', ')}`);
+    problems.push(`changes outside the permitted source/test scope or inside protected supervisor policy: ${outside.join(', ')}`);
   }
   const testFiles = input.files.filter((file) => /^tests\/.*\.test\.[cm]?[jt]sx?$/.test(file));
   const sourceFiles = input.files.filter((file) => !testFiles.includes(file));

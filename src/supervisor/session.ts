@@ -1,3 +1,4 @@
+import { terminateRunProcessGroup } from '../cli/burnin.js';
 import { spawn } from 'node:child_process';
 import type { ServedModelUsage } from '../contracts/supervisorVerdict.js';
 
@@ -69,6 +70,7 @@ export function runCommand(
   extraArgs: readonly string[],
   options: RunCommandOptions
 ): Promise<CommandResult> {
+  if (process.platform === 'win32') return Promise.reject(new Error('supervisor commands require POSIX process groups; use WSL2'));
   const resolved = resolveCommand(spec);
   const args = [...resolved.args, ...extraArgs];
   return new Promise((resolveRun, rejectRun) => {
@@ -76,18 +78,34 @@ export function runCommand(
       cwd: options.cwd,
       env: options.env ?? process.env,
       shell: resolved.shell,
+      detached: process.platform !== 'win32',
       stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     });
     let stdout = '';
     let stderr = '';
     let settled = false;
+    let timedOut = false;
+    let closed = false;
+    let reaped = false;
+    const finishTimeout = () => {
+      if (!closed || !reaped || settled) return;
+      settled = true;
+      rejectRun(new Error(`timeout after ${options.timeoutMs}ms: ${resolved.command} ${args.slice(0, 3).join(' ')}`));
+    };
     const timer = setTimeout(() => {
       if (settled) return;
-      settled = true;
+      timedOut = true;
       options.onLog?.(`command exceeded ${options.timeoutMs}ms; terminating: ${resolved.command}`);
-      child.kill('SIGTERM');
-      setTimeout(() => child.kill('SIGKILL'), 10_000).unref();
-      rejectRun(new Error(`timeout after ${options.timeoutMs}ms: ${resolved.command} ${args.slice(0, 3).join(' ')}`));
+      // The existing run-group primitive confirms disappearance, including
+      // grandchildren whose parent already exited. A surviving group keeps
+      // the caller (and hence the mender lock/worktree) occupied.
+      void (async () => {
+        while (child.pid && !(await terminateRunProcessGroup(child.pid, 1_000, 1_000))) {
+          options.onLog?.('command process group still exists; retaining ownership');
+        }
+        reaped = true;
+        finishTimeout();
+      })();
     }, options.timeoutMs);
     child.stdout?.on('data', (chunk: Buffer | string) => (stdout += String(chunk)));
     child.stderr?.on('data', (chunk: Buffer | string) => (stderr += String(chunk)));
@@ -98,6 +116,8 @@ export function runCommand(
       rejectRun(error);
     });
     child.on('close', (code) => {
+      closed = true;
+      if (timedOut) { finishTimeout(); return; }
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -170,6 +190,11 @@ export function providerChildEnv(
   env: NodeJS.ProcessEnv = process.env
 ): NodeJS.ProcessEnv {
   const child: NodeJS.ProcessEnv = { ...env };
+  if (provider.source !== 'default') {
+    for (const key of Object.keys(child)) {
+      if (key.startsWith('ANTHROPIC_') || key.startsWith('CLAUDE_CODE_USE_')) delete child[key];
+    }
+  }
   if (provider.baseUrl) child['ANTHROPIC_BASE_URL'] = provider.baseUrl;
   if (provider.authToken) {
     // An Anthropic API key (`sk-ant-…`) travels as the API key the CLI reads
@@ -273,6 +298,8 @@ export function sessionUsage(wrapper: unknown): SessionUsage {
 export interface ClaudeSessionOptions {
   /** Command spec for the claude binary; the test seam. */
   readonly claudeCommand: string;
+  /** A host-owned executor; the mender supplies its container boundary. */
+  readonly execute?: typeof runCommand;
   readonly args: readonly string[];
   readonly cwd: string;
   readonly provider: SupervisorProvider;
@@ -287,7 +314,7 @@ export interface ClaudeSessionResult extends CommandResult {
 }
 
 export async function runClaudeSession(options: ClaudeSessionOptions): Promise<ClaudeSessionResult> {
-  const result = await runCommand(options.claudeCommand, options.args, {
+  const result = await (options.execute ?? runCommand)(options.claudeCommand, options.args, {
     cwd: options.cwd,
     env: providerChildEnv(options.provider),
     timeoutMs: options.timeoutMs,

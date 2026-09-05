@@ -1,3 +1,4 @@
+import { runCommand } from '../src/supervisor/session.js';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -175,6 +176,7 @@ process.exit(2);
     delete process.env['STUB_GH_LIST'];
     Object.assign(process.env, env);
     return {
+      executeUntrusted: runCommand,
       repo,
       runsDir: runs,
       supervisorDir: supervisor,
@@ -423,5 +425,24 @@ describe('the mender, end to end against a real repository', () => {
     expect(existsSync(f.claudeArgs)).toBe(false);
     expect(worktrees(f)).toEqual([]);
     expect(journalKinds(f)).toEqual([]);
+  }, TIMEOUT_MS);
+});
+
+describe('verification cannot change the proposed patch', () => {
+  it('refuses a successful check that writes a forbidden file', async () => {
+    const f = fixture();
+    writeFileSync(join(f.stubs, 'check.mjs'), "import { writeFileSync } from 'node:fs'; writeFileSync('package.json', '{}');\n");
+    await mendPending(f, f.options());
+    expect(record(f)?.outcome).toBe('refused');
+    expect(record(f)?.problems?.join()).toContain('package.json');
+    expect(remoteBranches(f)).toEqual([]);
+  }, TIMEOUT_MS);
+
+  it('refuses a successful check that silently rewrites an allowed source file', async () => {
+    const f = fixture();
+    writeFileSync(join(f.stubs, 'check.mjs'), "import { writeFileSync } from 'node:fs'; writeFileSync('src/adder.mjs', 'export const add = () => 0;');\n");
+    await mendPending(f, f.options());
+    expect(record(f)?.outcome).toBe('refused');
+    expect(remoteBranches(f)).toEqual([]);
   }, TIMEOUT_MS);
 });
