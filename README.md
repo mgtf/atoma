@@ -16,7 +16,7 @@ verification — down to models that cost a fraction as much.*
 ![breakeven](https://img.shields.io/badge/break--even-run_1–2_in_7_of_11_rounds-gold)
 ![providers](https://img.shields.io/badge/LLM_routes-Anthropic_·_Claude_·_Ollama_·_Z.ai_·_Codex-8A2BE2)
 
-**[→ How it works, in detail](docs/how-it-works.md)**
+**[→ How it works, in detail](docs/how-it-works.md)** · **[atoma.run](https://atoma.run)**
 
 </div>
 
@@ -467,28 +467,29 @@ than asserted.
 
 ## Drive it from the agent you already use (MCP)
 
-atoma exposes itself as an [MCP](https://modelcontextprotocol.io) server, so an existing agent can
-hand it a task and read back what the system has learned. One line registers it:
+atoma exposes itself as an [MCP](https://modelcontextprotocol.io) server on the same origin as
+the console, so an existing agent can hand it a task and read back what the system has learned. One
+line registers it — a URL and a bearer:
 
 ```bash
-npm run build
-claude mcp add atoma -s local -- node "$PWD/dist/mcp/stdio.js"   # then start a new session
+claude mcp add atoma --transport http https://<your-instance>/mcp \
+  --header "Authorization: Bearer <token from Settings, or npm run auth -- token>"
+# locally, ungated: npm run viz, then http://127.0.0.1:4110/mcp with no token
 ```
 
-`npm run mcp:dev` keeps the source-level `tsx` entrypoint available to contributors;
-the supported release path uses compiled `dist/`.
+**Twenty-four tools.** ONE MCP for everyone, and what you see depends on who you are. An organisation member
+sees its projects and runs — start one and get an id to poll, cancel, retry a publication, read a
+trace's shape. An organisation admin also sees its members and model defaults. The platform admin
+(or the operator on a local ungated server) sees everything above plus operator runs, the agent
+catalogue with its earned trust, the recipe library and its lifecycle, the audit ledger's integrity
+projection, the operator run corpus, the tool-friction report and the audit journal. The caller pays
+for one tool call and atoma does the tiering.
 
-**Thirteen tools.** One starts a run and returns immediately with an id to poll; one cancels a run;
-the other eleven are read-only — the agent catalogue with its earned trust, the recipe library and
-its lifecycle, the audit ledger's integrity projection, run traces, and the tool-friction report.
-The caller pays for one tool call and atoma does the tiering.
-
-**Its general-purpose control plane speaks over standard input, and refusing a port is the security
-argument rather than a limitation.** A run reaches the shell and the network by design, so a public
-HTTP equivalent of `atoma_start` would have to defend against *the run itself*. The web console's
-project launcher is a separate, narrower product surface: it requires the optional authenticated
-gate, binds writes to the active organisation, checks same-origin mutations and records work under
-that project. The MCP launcher remains stdio-only, so it hands a run no control-plane socket.
+**Identity is the security argument.** A token is minted by a signed-in principal for one
+organisation, stored hashed, revocable, journaled; every call is bound to that organisation and
+re-checks the role, and a run itself holds no token. The earlier stdio-only rule described a
+framework on the operator's machine; the deployed product answered that question with its
+authentication gate ([decision record](docs/mcp-one-surface-2026-09-05.md)).
 
 Two properties are declared to the host rather than left to be discovered: starting a run is
 **destructive** — it archives the shared workspace unless told otherwise, and it mutates the
@@ -500,7 +501,7 @@ process group is confirmed gone and the trace has closed.
 ## Status
 
 **Working research system, honestly labelled.** Strict TypeScript on Node
-22.13+ or 24+, with hermetic and fresh-worker CI.
+22.14+ or 24+, with hermetic and fresh-worker CI.
 
 What exists: the full three-tier loop, the learning and compilation lifecycle, sandboxed
 execution with opt-in container isolation and proxied egress, an append-only audit ledger with
@@ -510,11 +511,14 @@ watch, platform notifications, and a measurement harness. A first login creates 
 organisation unless it redeems an invitation to an existing one.
 
 What does not: full tenant isolation or a hosted service. Authenticated projects, their run
-workspaces, traces and project skills are scoped to the viewer's active organisation; the
-platform admin can read across organisations. The atom catalogue, atom trust and lifecycle
-ledger remain instance-global, however, so the control plane is not yet safe for mutually
-untrusted organisations. The repository is public and source-available so that the sandbox,
-the egress path and the cost accounting can be audited; the hosted service does not exist yet.
+workspaces, traces and project skills are scoped to the viewer's active organisation for now;
+skills are meant to become a commons shared across organisations, with trust earned per
+organisation. The platform admin can read across organisations. The atom catalogue, atom
+trust and lifecycle ledger remain instance-global, however, so the control plane is not yet
+safe for mutually
+untrusted organisations. The repository is public and open source so that the sandbox, the
+egress path and the cost accounting can be audited and built upon; the hosted service does
+not exist yet.
 The dated current state, invariants and Track A/Track B roadmap are reconciled in
 [`docs/saas-architecture.md`](docs/saas-architecture.md).
 
@@ -528,9 +532,9 @@ that exists in `src/` and not in this picture fails <code>npm run docs:check</co
 | Read out of this checkout | |
 | --- | --- |
 | Version | `0.1.4` |
-| Node | 22.13+ / 24+ (`.nvmrc` 22.13.0, `engines` ^22.13.0 \|\| >=24) |
-| Subsystems under their own contract | 17 |
-| MCP tools | 13 |
+| Node | 22.14+ / 24+ (`.nvmrc` 22.14.0, `engines` ^22.14.0 \|\| >=24) |
+| Subsystems under their own contract | 18 |
+| MCP tools | 24 |
 | Curated agent names | 118 molecules · 40 cells · 20 tissues |
 | Controlled benchmark rounds | 12 (`benchmark/RESULT.md` + `ROUND<n>.md`) |
 | Interface locales | 13 catalogs — 1 source, 12 translated |
@@ -541,19 +545,23 @@ that exists in `src/` and not in this picture fails <code>npm run docs:check</co
 
 ## License
 
-atoma is **source-available** under the
-[Functional Source License, FSL-1.1-ALv2](LICENSE.md). You may use, modify and
-redistribute it for any purpose except a *Competing Use*: offering it, or a
-product built on it, as a commercial product or service that competes with
-atoma or with a service its author offers on top of it. Internal production use,
-non-commercial education and research, and professional services around it are
-expressly permitted. Each release becomes available under the Apache License 2.0
-two years after it is published. This is not an OSI-approved open-source licence;
-see [fsl.software](https://fsl.software) for the rationale behind that choice.
+atoma is **free and open-source software** under the
+[GNU Affero General Public License, version 3](LICENSE) (`AGPL-3.0-only`).
+You may use, study, modify and redistribute it, and build products and services
+on it. If you distribute a modified version, or run one that users interact with
+over a network, you must offer those users its source under the same licence.
+Unmodified use, including internal production use and hosting, carries no
+obligation beyond keeping the notices. The licence is approved by the OSI and
+the FSF; its terms are the ones Grafana, MinIO, Mattermost and Nextcloud publish
+under.
 
-Contributions are welcome under the [CLA](CLA.md); start with
-[`CONTRIBUTING.md`](CONTRIBUTING.md). Vulnerabilities go through
-[`SECURITY.md`](SECURITY.md), not the issue tracker.
+Organisations that cannot accept the AGPL, for example to embed atoma in a
+closed product, can obtain a commercial licence from the author; contributors
+grant the rights that make this possible through the [CLA](CLA.md), which
+also commits the project to remaining under an OSI-approved licence.
+
+Contributions start with [`CONTRIBUTING.md`](CONTRIBUTING.md). Vulnerabilities
+go through [`SECURITY.md`](SECURITY.md), not the issue tracker.
 
 The model transports are your own accounts under each provider's terms: the
 Anthropic API and Claude Code, OpenAI Codex, Z.ai and Ollama are called with the
@@ -561,9 +569,11 @@ credentials you supply, and the `@anthropic-ai/claude-agent-sdk` dependency is
 distributed by Anthropic under its own licence, not under this one. The 3D assets
 under `src/viz/public/` carry their CC0 and CC-BY-4.0 notices beside the files.
 
+Copyright 2026 Matthieu Foillard.
+
 ---
 
 <div align="center">
-<sub>TypeScript · SQLite · Node 22.13+ / 24+ · the corpus table regenerates with <code>npm run burnin</code>;
+<sub>TypeScript · SQLite · Node 22.14+ / 24+ · the corpus table regenerates with <code>npm run burnin</code>;
 the controlled rounds are in <code>benchmark/</code></sub>
 </div>

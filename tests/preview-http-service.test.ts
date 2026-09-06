@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AUTH_TABLES_DDL } from '../src/auth/store.js';
@@ -529,5 +529,27 @@ describe('a run still in flight', () => {
     // about the run; taking its word would remove the control mid-run.
     expect(stopped.state).toBe('stopped');
     expect(stopped.availability).toBe('available');
+  });
+});
+
+
+
+describe('failed preview startup cleans its generation', () => {
+  it.each(['delivered', 'in-flight'] as const)('removes a partially materialized %s workspace on every retry', async (mode) => {
+    const a = actor('cleanup');
+    const projectId = seedProject(a, 'cleanup');
+    const runId = mode === 'delivered' ? seedDeliveredRun(a, projectId, 'cleanup') : seedRunningRun(a, projectId, 'cleanup');
+    const limited = new PreviewManager({
+      store: previews, launcher: new WorkspaceOnlyLauncher(join(root, 'copies')),
+      routes: new PreviewRouteTable(), claims, config: { ...config, copyMaxBytes: 1 },
+      workspaceOf: () => workspaces.get(runId)!, probe: async () => true,
+    });
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const input = { orgId: a.orgId, projectId, projectRunId: runId,
+        opener: { principalId: a.principalId, sessionId: 's' } };
+      await expect(mode === 'delivered' ? limited.open(input) : limited.openInFlight(input)).rejects.toThrow();
+      expect(previews.getInstance(a.orgId, runId)?.state).toBe('failed');
+      expect(existsSync(join(root, 'copies')) ? readdirSync(join(root, 'copies')) : []).toEqual([]);
+    }
   });
 });

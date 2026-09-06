@@ -11,14 +11,19 @@ describe('Node version contract', () => {
       engines?: { node?: string };
     };
 
-    expect(local).toBe('22.13.0');
-    // core, i18n, viz-smoke, preview-runtime and worker: EVERY job pins the
-    // same Node as the engine floor — the count grows with the workflow on
-    // purpose, so a new job cannot quietly run on whatever the runner happens
-    // to ship.
-    expect(ci.match(/node-version:\s*22\.13\.0/g)).toHaveLength(5);
-    expect(release.match(/node-version:\s*22\.13\.0/g)).toHaveLength(1);
-    expect(pkg.engines?.node).toContain('^22.13.0');
+    expect(local).toBe('22.14.0');
+    // Core verifies both the engine floor and the observed production runtime.
+    // The remaining jobs pin the floor, including the mender command image. The
+    // matrix carries a Node LINE label because the protect-main ruleset requires
+    // the hermetic checks by name; a patch bump must not orphan a required check.
+    expect(ci).toContain("- node: '22.14.0'\n            line: '22'");
+    expect(ci).toContain("- node: '24.20.0'\n            line: '24'");
+    expect(ci).toContain('name: Hermetic checks (Node ${{ matrix.line }})');
+    expect(ci.match(/node-version:\s*\$\{\{ matrix.node \}\}/g)).toHaveLength(1);
+    expect(ci.match(/node-version:\s*22\.14\.0/g)).toHaveLength(5);
+    expect(readFileSync('docker/mender.Dockerfile', 'utf8')).toContain('FROM node:22.14.0-bookworm');
+    expect(release.match(/node-version:\s*22\.14\.0/g)).toHaveLength(1);
+    expect(pkg.engines?.node).toContain('^22.14.0');
     expect(nodeVersionSupported(local)).toBe(true);
   });
 });

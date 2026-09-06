@@ -77,7 +77,9 @@ npm run viz:mark-turn:analyze
   a second context for a tiny widget. Smoke tests assert exactly one canvas and
   both backends.
 - Keep GPU animation state out of React/Zustand hot paths. Use mutable samples
-  read once per frame; do not rebuild the scene for pointer motion.
+  read once per frame; do not rebuild the scene for pointer motion. A subtree
+  that MUTATES EVERY FRAME draws into its own render group (`ctx.animatedLayer`,
+  ONE per band): Pixi re-uploads a group's whole batch when anything in it moves. Frame cost is measured, never guessed: `npm run viz:frame-probe` ([record](../../docs/incidents/gpu-frame-cost-2026-09-06.md)).
 - The hover bubble is ONE bubble, on its own sibling layer above the crystal,
   and it obeys the rule above: views declare RECTANGLES per render through
   `ctx.tooltip` (local coordinates, projected while the parent transform is
@@ -513,6 +515,17 @@ npm run viz:mark-turn:analyze
   gated members get org surfaces only; the ungated developer path is unchanged.
   True per-org registry scoping would need org-attributed registry rows — a
   schema project, not a route guard.
+- `/mcp` is the ONE MCP (contract in [src/mcp](../mcp/AGENTS.md)): bearer
+  API token behind the gate, the operator on the ungated loopback, Host
+  pinned either way. `/api/tokens` mints (POST, same-origin, journaled
+  `token.created`), lists (GET, secret-free) and revokes (DELETE, journaled
+  `token.revoked`) the SESSION's principal's tokens for its ACTIVE
+  organisation; the plaintext leaves the server once, in the POST response.
+  The Settings panel `McpAccessPanel` is that route's client: address,
+  procedure, token shown once with the Claude Code line, list and revoke.
+  It never re-reads a secret and resets when the active identity/org changes.
+  GET also describes ungated operator access (no token); token mutations there
+  return 409. A failed refresh preserves a newly minted secret for copying.
 - `/api/account/subscriptions*` is self-scoped from the resolved session and
   never accepts a principal id. Status is secret-free; device login material
   is memory-only; connect/cancel/disconnect are same-origin and require

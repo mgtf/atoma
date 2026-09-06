@@ -139,6 +139,8 @@ describe('PUSH_ROUTES', () => {
       'webhook.rejected',
       'push.subscribed',
       'push.unsubscribed',
+      'token.created',
+      'token.revoked',
       'github.installation_linked',
       // The two SENTINEL kinds. `run.anomaly` was never pushed: an alert
       // nobody trusts trains the operator to dismiss the channel.
@@ -149,6 +151,13 @@ describe('PUSH_ROUTES', () => {
       // has a measured noise floor. See src/viz/push/routes.ts.
       'run.anomaly',
       'security.flagged',
+      // The supervisor's bookkeeping: only the PR waiting for review and a
+      // failure that left a worktree behind reach a person.
+      'supervisor.verdict',
+      'mender.dispatched',
+      'mender.started',
+      'mender.declined',
+      'mender.refused',
     ] as const) {
       expect(PUSH_ROUTES[kind], kind).toBeNull();
     }

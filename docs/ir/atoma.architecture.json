@@ -3,7 +3,7 @@
   "diagram_type": "architecture",
   "meta": {
     "title": "atoma",
-    "subtitle": "17 subsystems, each under its own AGENTS.md contract",
+    "subtitle": "18 subsystems, each under its own AGENTS.md contract",
     "output": "docs/architecture.html"
   },
   "layout": {
@@ -31,7 +31,7 @@
       "id": "mcp",
       "type": "messagebus",
       "label": "MCP stdio",
-      "sublabel": "stdio control plane",
+      "sublabel": "the one MCP over HTTP",
       "row": 0,
       "col": 1
     },
@@ -154,6 +154,14 @@
       "sublabel": "mechanical live watch over ru…",
       "row": 5,
       "col": 1
+    },
+    {
+      "id": "supervisor",
+      "type": "backend",
+      "label": "Supervisor",
+      "sublabel": "post-mortem analyst and the m…",
+      "row": 5,
+      "col": 2
     }
   ],
   "boundaries": [
@@ -204,10 +212,11 @@
     },
     {
       "kind": "region",
-      "label": "Audit and live watch",
+      "label": "Audit, live watch and self-repair",
       "wraps": [
         "platform",
-        "sentinel"
+        "sentinel",
+        "supervisor"
       ]
     }
   ],
@@ -281,6 +290,14 @@
     {
       "from": "sentinel",
       "to": "platform"
+    },
+    {
+      "from": "supervisor",
+      "to": "platform"
+    },
+    {
+      "from": "supervisor",
+      "to": "sentinel"
     }
   ],
   "cards": [
@@ -288,7 +305,7 @@
       "dot": "cyan",
       "title": "Read out of this checkout",
       "items": [
-        "13 MCP tools on the stdio control plane",
+        "24 MCP tools on the stdio control plane",
         "118 molecules · 40 cells · 20 tissues",
         "12 controlled benchmark rounds recorded"
       ]

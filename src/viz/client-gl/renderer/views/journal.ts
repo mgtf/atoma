@@ -75,7 +75,10 @@ export function drawJournal(
 
   // Two filter rows, each a closed vocabulary. They scroll WITH the list
   // rather than floating above it: this pane has one scroll position, and a
-  // sticky header inside a masked GL pane would need a second.
+  // sticky header inside a masked GL pane would need a second. Both rows'
+  // chips share one render group so their per-frame animation never
+  // re-uploads the rows below (`animatedLayer`).
+  const chips = ctx.animatedLayer(pane.content, 'journal-filter-chips');
   const chipRow = (
     label: string,
     values: readonly string[],
@@ -98,7 +101,7 @@ export function drawJournal(
         rowY += FILTER_ROW_HEIGHT;
       }
       ctx.filterButton(
-        pane.content,
+        chips,
         idFor(value),
         text,
         chipX,

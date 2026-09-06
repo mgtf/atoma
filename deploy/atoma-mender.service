@@ -1,0 +1,27 @@
+[Unit]
+Description=Atoma mender - isolated corrections for human review
+After=network-online.target docker.service atoma.service
+Wants=network-online.target
+Requires=docker.service
+RequiresMountsFor=/home/atoma
+
+[Service]
+Type=simple
+User=atoma
+Group=atoma
+WorkingDirectory=/home/atoma/mender
+EnvironmentFile=/home/atoma/config/mender.env
+ExecStart=/usr/bin/node /home/atoma/mender/dist/cli/mender.js
+# Let the current bounded attempt reap its containers before exiting.
+KillMode=mixed
+TimeoutStopSec=3h
+ExecStopPost=/bin/bash /home/atoma/mender/deploy/mender-reap.sh
+Restart=on-failure
+RestartSec=30
+Nice=10
+CPUQuota=100%
+MemoryMax=1G
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

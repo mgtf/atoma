@@ -48,6 +48,7 @@ export function OrgModelsForm({
   organisation,
   overlaysInert,
   onError,
+  children,
 }: {
   t: (key: string, vars?: Record<string, unknown>) => string;
   locale: string;
@@ -57,6 +58,12 @@ export function OrgModelsForm({
   organisation: VizOrganisation | null;
   overlaysInert: boolean;
   onError: (message: string | null) => void;
+  /**
+   * Settings-body content placed ABOVE the subscriptions, inside this frame.
+   * The frame is `position: fixed` and is the ONE scroll container of the
+   * Settings body; a sibling rendered beside it lands under the rename form.
+   */
+  children?: ReactNode;
 }) {
   const [account, setAccount] = useState<VizAccountModels | null>(null);
   const [org, setOrg] = useState<VizOrgModels | null>(null);
@@ -187,6 +194,7 @@ export function OrgModelsForm({
       className={`gpu-panel-skin gpu-org-models-form${overlaysInert ? ' gpu-overlays-veiled' : ''}`}
       inert={overlaysInert}
     >
+      {children}
       <PersonalSubscriptionsPanel
         t={t}
         subscriptions={subscriptions.data ?? null}

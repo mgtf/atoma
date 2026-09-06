@@ -193,6 +193,30 @@ const PUSH_ROUTE_SOURCES: Record<PlatformEventKind, PushRouteSource | null> = {
   // trains the operator to dismiss the channel. Revisit once the rules have
   // run against real batches.
   'run.anomaly': null,
+  // The supervisor's bookkeeping rows are audit-only; the two that need a
+  // person are the pull request waiting for a review and a failure that left
+  // a worktree behind. Bodies name refs and URLs, never model-authored text.
+  'supervisor.verdict': null,
+  'mender.dispatched': null,
+  'mender.started': null,
+  'mender.declined': null,
+  'mender.refused': null,
+  'mender.pr_opened': {
+    audience: { platformAdmins: true },
+    vars: (event) => ({ branch: text(event, 'branch'), prUrl: text(event, 'prUrl') }),
+    copy: {
+      en: { title: 'A fix is waiting for review', body: '{{branch}} → {{prUrl}}' },
+      fr: { title: 'Un correctif attend une relecture', body: '{{branch}} → {{prUrl}}' },
+    },
+  },
+  'mender.failed': {
+    audience: { platformAdmins: true },
+    vars: (event) => ({ outcome: text(event, 'outcome'), runId: event.runId ?? '' }),
+    copy: {
+      en: { title: 'The mender failed', body: '{{outcome}} on run {{runId}}' },
+      fr: { title: 'Le mender a échoué', body: '{{outcome}} sur le run {{runId}}' },
+    },
+  },
   'run.finished': {
     audience: { requester: true },
     vars: (event, locale) => ({
@@ -379,6 +403,9 @@ const PUSH_ROUTE_SOURCES: Record<PlatformEventKind, PushRouteSource | null> = {
   },
   'push.subscribed': null,
   'push.unsubscribed': null,
+  // A principal's own bearer lifecycle: audit, never a notification.
+  'token.created': null,
+  'token.revoked': null,
   // A preview is something a member is watching while they watch it. A push
   // would arrive on the device already showing the thing it is about.
   'preview.started': null,

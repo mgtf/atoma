@@ -11,7 +11,7 @@ import {
   assertPreviewServablePath,
   readPreviewServableFile,
 } from './policy.js';
-import { PREVIEW_GRANT_TTL_MS, type PreviewClaimRegistry } from './claims.js';
+import { type PreviewClaimRegistry } from './claims.js';
 import {
   isReservedPreviewPath,
   PREVIEW_GRANT_COOKIE,
@@ -245,7 +245,7 @@ export function startPreviewGateway(
         res.writeHead(204, {
           // The cookie carries the GRANT token the registry just issued — never
           // the claim secret, which is spent, and never a bare flag.
-          'set-cookie': previewGrantCookie(redeemed.token, PREVIEW_GRANT_TTL_MS / 1000),
+          'set-cookie': previewGrantCookie(redeemed.token),
           'cache-control': 'no-store',
           'referrer-policy': 'no-referrer',
         });

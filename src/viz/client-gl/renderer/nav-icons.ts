@@ -205,11 +205,33 @@ export function navIconOpticalScale(
   return Math.min(1.25, Math.max(0.47, Math.min(spanScale, areaScale)));
 }
 
-function measureSilhouette(context: CanvasRenderingContext2D): {
+/**
+ * The ONE canvas that is read back, kept CPU-side for exactly that purpose.
+ *
+ * The live face canvases must stay GPU-backed: `willReadFrequently: true` on
+ * them made every pointer-light relight a GPU readback (`drawImage` from the
+ * WebGL renderer into software memory) followed by a CPU upload into the Pixi
+ * texture — 39% of main-thread time in `copyExternalImageToTexture` while
+ * the pointer swept the rail (measured 2026-09-06). Silhouettes are measured
+ * three times per icon, at load, so the readback lives here alone.
+ */
+let measureContext: CanvasRenderingContext2D | null = null;
+
+function measureSilhouette(source: HTMLCanvasElement): {
   opaquePixels: number;
   width: number;
   height: number;
 } {
+  if (!measureContext) {
+    const canvas = document.createElement('canvas');
+    canvas.width = NAV_ICON_SOURCE_SIZE;
+    canvas.height = NAV_ICON_SOURCE_SIZE;
+    measureContext = canvas.getContext('2d', { alpha: true, willReadFrequently: true });
+    if (!measureContext) throw new Error('Could not create the navigation silhouette measurement canvas');
+  }
+  const context = measureContext;
+  context.clearRect(0, 0, NAV_ICON_SOURCE_SIZE, NAV_ICON_SOURCE_SIZE);
+  context.drawImage(source, 0, 0);
   const { data } = context.getImageData(0, 0, NAV_ICON_SOURCE_SIZE, NAV_ICON_SOURCE_SIZE);
   let minX = NAV_ICON_SOURCE_SIZE;
   let minY = NAV_ICON_SOURCE_SIZE;
@@ -281,7 +303,10 @@ function createMeshTexture(
   const output = document.createElement('canvas');
   output.width = NAV_ICON_SOURCE_SIZE;
   output.height = NAV_ICON_SOURCE_SIZE;
-  const context = output.getContext('2d', { alpha: true, willReadFrequently: true });
+  // GPU-backed on purpose (no `willReadFrequently`): both the copy from the
+  // WebGL renderer and Pixi's texture upload then stay on the GPU. Pixel
+  // reads go through `measureSilhouette`'s own canvas.
+  const context = output.getContext('2d', { alpha: true });
   if (!context) throw new Error(`Could not create the ${kind} navigation mesh canvas`);
   const texture = new Texture({
     source: new CanvasSource({ resource: output, autoGenerateMipmaps: true }),
@@ -343,14 +368,14 @@ function createMeshTexture(
 
   // The first frame exists before Pixi builds any sprites or silhouettes.
   render(0, { keyX: -0.35, keyY: 0.8, light: 0 }, 0, true);
-  const silhouette = measureSilhouette(context);
+  const silhouette = measureSilhouette(output);
   opticalSize.scale.setScalar(
     navIconOpticalScale(silhouette.opaquePixels, silhouette.width, silhouette.height)
   );
   lastAt = Number.NEGATIVE_INFINITY;
   lastRotation = Number.NaN;
   render(0, { keyX: -0.35, keyY: 0.8, light: 0 }, 1, true);
-  const normalised = measureSilhouette(context);
+  const normalised = measureSilhouette(output);
   const correction = Math.sqrt(
     NAV_ICON_TARGET_OPAQUE_PIXELS / Math.max(1, normalised.opaquePixels)
   );

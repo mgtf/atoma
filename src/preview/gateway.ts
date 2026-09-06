@@ -233,14 +233,15 @@ export function isSamePreviewRedirect(location: string, previewOriginUrl: string
 }
 
 /**
- * The cookie that carries a grant on the preview origin.
+ * The session cookie carries an opaque token, not an authorization lifetime.
+ * The registry enforces expiry and heartbeat renewal independently.
  *
  * `__Host-` forces Secure, Path=/ and no Domain — so it cannot be widened to a
  * parent domain. `SameSite=None` because the preview is framed cross-site by
  * the visualizer, and `Partitioned` so the browser keys it to that embedding
  * rather than leaving a third-party cookie the rest of the web can rely on.
  */
-export function previewGrantCookie(value: string, maxAgeSeconds: number): string {
+export function previewGrantCookie(value: string, maxAgeSeconds?: number): string {
   return [
     `${PREVIEW_GRANT_COOKIE}=${value}`,
     'Path=/',
@@ -248,7 +249,7 @@ export function previewGrantCookie(value: string, maxAgeSeconds: number): string
     'Secure',
     'SameSite=None',
     'Partitioned',
-    `Max-Age=${Math.max(0, Math.floor(maxAgeSeconds))}`,
+    ...(maxAgeSeconds === undefined ? [] : [`Max-Age=${Math.max(0, Math.floor(maxAgeSeconds))}`]),
   ].join('; ');
 }
 

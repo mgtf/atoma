@@ -468,6 +468,12 @@ describe('viz auth gate (process level)', () => {
     const who = await fetch(`${base}/auth/whoami`);
     expect(who.status).toBe(200);
     expect(await who.json()).toEqual({ enabled: false, authenticated: false });
+    const access = await fetch(`${base}/api/tokens`);
+    expect(access.status).toBe(200);
+    expect(await access.json()).toEqual({ mode: 'operator', tokens: [], mcpUrl: `${base}/mcp` });
+    expect((await fetch(`${base}/api/tokens`, {
+      method: 'POST', headers: { origin: base, 'content-type': 'application/json' }, body: '{}',
+    })).status).toBe(409);
   });
 
   it('fails closed with an ambiguous switch, no provider, or no canonical public origin', async () => {
@@ -734,6 +740,53 @@ describe('viz auth gate (process level)', () => {
     expect((await fetch(`${base}/api/admin/organisations`, { headers: cookie })).status).toBe(403);
   });
 
+
+  it('connects Settings token creation to the real MCP and applies revocation on the next call', async () => {
+    const instance = tempInstance();
+    const provider = await startFakeProvider({ port: await freePort(), subject: 910 });
+    const port = await freePort();
+    const base = `http://127.0.0.1:${port}`;
+    const running = startViz([...instance.args, '--port', String(port)], providerEnv(provider, base));
+    await waitReady(running, `${base}/auth/whoami`);
+    expect((await fetch(`${base}/api/tokens`)).status).toBe(401);
+    const jar = new CookieJar();
+    expect((await fetchWithJar(jar, `${base}/auth/login?provider=github`)).status).toBe(200);
+    const cookie = { cookie: jar.header(base)! };
+    const list = await fetch(`${base}/api/tokens`, { headers: cookie });
+    expect(list.status).toBe(200);
+    expect(await list.json()).toMatchObject({ mode: 'bearer', tokens: [], mcpUrl: `${base}/mcp` });
+    expect((await fetch(`${base}/api/tokens`, {
+      method: 'POST', headers: { ...cookie, origin: 'https://foreign.example', 'content-type': 'application/json' }, body: '{}',
+    })).status).toBe(403);
+    const created = await fetch(`${base}/api/tokens`, {
+      method: 'POST', headers: { ...cookie, origin: base, 'content-type': 'application/json' }, body: JSON.stringify({ label: 'MCP test client' }),
+    });
+    expect(created.status).toBe(201);
+    const token = await created.json() as { tokenId: string; token: string; mcpUrl: string };
+    expect(token.mcpUrl).toBe(`${base}/mcp`);
+    const headers = { authorization: `Bearer ${token.token}`, 'content-type': 'application/json', accept: 'application/json, text/event-stream' };
+    const initialized = await fetch(token.mcpUrl, {
+      method: 'POST', headers,
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {
+        protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'settings-test', version: '1' },
+      } }),
+    });
+    expect(initialized.status).toBe(200);
+    await initialized.json();
+    const sessionId = initialized.headers.get('mcp-session-id')!;
+    expect(sessionId).toBeTruthy();
+    const sessionHeaders = { ...headers, 'mcp-session-id': sessionId };
+    await fetch(token.mcpUrl, { method: 'POST', headers: sessionHeaders, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) });
+    const tools = await fetch(token.mcpUrl, { method: 'POST', headers: sessionHeaders, body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) });
+    expect(tools.status).toBe(200);
+    expect((await tools.json() as { result: { tools: unknown[] } }).result.tools.length).toBeGreaterThan(0);
+    const listed = await (await fetch(`${base}/api/tokens`, { headers: cookie })).json() as { tokens: Array<{ tokenId: string; lastUsedAt: string | null }> };
+    expect(JSON.stringify(listed)).not.toContain(token.token);
+    expect(listed.tokens.find((row) => row.tokenId === token.tokenId)?.lastUsedAt).toBeTruthy();
+    const revoked = await fetch(`${base}/api/tokens/${token.tokenId}`, { method: 'DELETE', headers: { ...cookie, origin: base } });
+    expect(revoked.status).toBe(200);
+    expect((await fetch(token.mcpUrl, { method: 'POST', headers: sessionHeaders, body: JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/list' }) })).status).toBe(401);
+  });
 
   it('serves the account surfaces: name, avatar bytes, tier pins and the org card', async () => {
     const instance = tempInstance();

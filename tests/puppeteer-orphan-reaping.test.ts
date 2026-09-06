@@ -93,7 +93,7 @@ import { ToolSandbox } from '${repo}/src/tools/sandbox.ts';
 import { validateHtmlTool } from '${repo}/src/tools/builtin.ts';
 const sandbox = new ToolSandbox(${JSON.stringify(dir)});
 await validateHtmlTool({ sandbox }).execute({ url: 'about:blank', waitMs: 10 }).catch(() => {});
-console.log('READY');
+console.log('READY:' + JSON.stringify([...sandbox.trackedChildPids()]));
 setInterval(() => {}, 1000);   // idle like a delivered run that started a server
 `,
       'utf8'
@@ -104,8 +104,8 @@ setInterval(() => {}, 1000);   // idle like a delivered run that started a serve
       detached: true, // exactly how burnin.ts spawns a run
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    // The puppeteer processes THIS child owns, found by walking the live
-    // process tree from its pid. Not a machine-wide pgrep: under a fully
+    // The browser processes THIS child owns, found by walking the live
+    // process tree from its tracked browser PIDs. Not a machine-wide pgrep: under a fully
     // parallel suite the other browser-driving test files inflate and
     // deflate a global count between any two samples (measured 2026-08-31:
     // "leaked" came out at -6 because six unrelated Chromes had exited
@@ -113,14 +113,14 @@ setInterval(() => {}, 1000);   // idle like a delivered run that started a serve
     // launches Chrome detached into a group of its own, so the reap this
     // test proves travels through the child's exit handler, not through
     // group membership.
-    const puppeteerDescendants = (): number[] => {
+    const puppeteerDescendants = (browserRoots: number[]): number[] => {
       const rows = execSync('ps -eo pid=,ppid=,args=', { encoding: 'utf8' })
         .trim()
         .split('\n')
         .map((row) => /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(row))
         .filter((m): m is RegExpExecArray => m !== null)
         .map((m) => ({ pid: Number(m[1]), ppid: Number(m[2]), args: m[3] ?? '' }));
-      const owned = new Set([child.pid!]);
+      const owned = new Set(browserRoots);
       let grew = true;
       while (grew) {
         grew = false;
@@ -132,7 +132,7 @@ setInterval(() => {}, 1000);   // idle like a delivered run that started a serve
         }
       }
       return rows
-        .filter((row) => owned.has(row.pid) && row.args.includes('.cache/puppeteer'))
+        .filter((row) => owned.has(row.pid))
         .map((row) => row.pid);
     };
     const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -141,7 +141,11 @@ setInterval(() => {}, 1000);   // idle like a delivered run that started a serve
     const upBy = Date.now() + 90_000;
     while (!/READY/.test(out) && Date.now() < upBy) await sleep(200);
     expect(/READY/.test(out), `child never booted a browser. out=${out}`).toBe(true);
-    const browserPids = puppeteerDescendants();
+    const reported = /READY:(\[.*\])/.exec(out);
+    expect(reported, `child did not report browser PIDs: ${out}`).toBeTruthy();
+    const browserRoots = JSON.parse(reported![1]!) as number[];
+    expect(browserRoots.length).toBeGreaterThan(0);
+    const browserPids = puppeteerDescendants(browserRoots);
     expect(browserPids.length).toBeGreaterThan(0); // the browser really is up
 
     process.kill(-child.pid!, 'SIGTERM'); // the harness's first signal

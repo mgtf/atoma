@@ -293,9 +293,14 @@ export function drawRuns(
       : null,
   });
   ctx.filterBlockFrame(ctx.root, filterLayout.kinds);
+  if (filterLayout.roles) ctx.filterBlockFrame(ctx.root, filterLayout.roles);
+  // Both chip rows share ONE render group: an active chip pulses every frame,
+  // and that must not re-upload the timeline behind it (`animatedLayer`).
+  // The frames stay in root, drawn first, so they remain behind the chips.
+  const filterChips = ctx.animatedLayer(ctx.root, 'run-filter-chips');
   for (const chip of filterLayout.kinds.chips) {
     ctx.filterButton(
-      ctx.root,
+      filterChips,
       chip.id,
       chip.label,
       chip.x,
@@ -310,11 +315,10 @@ export function drawRuns(
     );
   }
   if (filterLayout.roles) {
-    ctx.filterBlockFrame(ctx.root, filterLayout.roles);
     for (const chip of filterLayout.roles.chips) {
       const role = chip.id.slice('run.filter.role.'.length);
       ctx.filterButton(
-        ctx.root,
+        filterChips,
         chip.id,
         chip.label,
         chip.x,
@@ -424,9 +428,10 @@ export function drawRuns(
       }
     );
     ctx.filterBlockFrame(lowerControlsLayer, branchBlock);
+    const branchChips = ctx.animatedLayer(lowerControlsLayer, 'run-branch-chips');
     for (const chip of branchBlock.chips) {
       ctx.filterButton(
-        lowerControlsLayer,
+        branchChips,
         chip.id,
         chip.label,
         chip.x,
@@ -961,6 +966,8 @@ function drawAtomLanes(
       }];
     }),
   });
+  // Lane frames and labels first, then every agent chip in ONE render group:
+  // an active chip's orbiting electrons move every frame (`animatedLayer`).
   for (const lane of atomLayout.lanes) {
     ctx.filterBlockFrame(parent, lane);
     ctx.text(parent, lane.label, lane.labelX, lane.labelY, {
@@ -968,9 +975,12 @@ function drawAtomLanes(
       color: GPU_COLORS.tiers[lane.tier],
       weight: '700',
     });
+  }
+  const laneChips = ctx.animatedLayer(parent, 'run-atom-lanes');
+  for (const lane of atomLayout.lanes) {
     for (const chip of lane.chips) {
       ctx.atomButton(
-        parent,
+        laneChips,
         chip.id,
         chip.label,
         lane.tier,
@@ -1019,11 +1029,13 @@ function drawRunStatGrid(
   ];
   const accents = [GPU_COLORS.cyan, GPU_COLORS.tiers[3], GPU_COLORS.primary, GPU_COLORS.success];
   const statWidth = (width - RUN_STAT_GAP) / 2;
+  // Tiles pulse and scan every frame: one render group for the grid.
+  const tiles = ctx.animatedLayer(parent, `${idPrefix}.tiles`);
   stats.forEach(([label, value], index) => {
     const column = index % 2;
     const row = Math.floor(index / 2);
     ctx.statCard(
-      parent,
+      tiles,
       `${idPrefix}.${index}`,
       label,
       value,

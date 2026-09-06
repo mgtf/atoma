@@ -18,7 +18,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
-          node-version: 22.13.0
+          node-version: 22.14.0
           cache: npm
       - name: Verify release tag matches package version
         run: |
@@ -35,8 +35,8 @@ jobs:
           set -euo pipefail
           root="atoma-${GITHUB_REF_NAME}"
           mkdir -p "release/${root}"
-          cp -R dist docker scripts docs deploy "release/${root}/"
-          cp package.json package-lock.json LICENSE.md README.md AGENTS.md CLAUDE.md CHANGELOG.md SECURITY.md .env.example "release/${root}/"
+          cp -R dist docker scripts docs deploy src "release/${root}/"
+          cp package.json package-lock.json LICENSE README.md AGENTS.md CLAUDE.md CHANGELOG.md SECURITY.md .env.example "release/${root}/"
           tar -C release -czf "release/${root}.tar.gz" "${root}"
           (cd release && sha256sum "${root}.tar.gz" > "${root}.tar.gz.sha256")
 
@@ -49,6 +49,7 @@ jobs:
           tar -C /tmp/atoma-release -xzf "release/${root}.tar.gz"
           cd "/tmp/atoma-release/${root}"
           npm run docs:check
+          node scripts/supervisor-release-smoke.mjs .
           npm ci --omit=dev
           node scripts/release-smoke.mjs
           node scripts/auth-release-smoke.mjs

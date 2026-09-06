@@ -311,7 +311,7 @@ function isRetryableCodexFailure(code: CodexFailureCode): boolean {
  * decide retry/auth/status semantics and is never attached as an Error cause,
  * returned from the fold, logged, or persisted by an outer layer.
  */
-function classifyCodexDiagnostic(
+export function classifyCodexDiagnostic(
   diagnostic: string,
   fallback: CodexFailureCode = 'provider-error'
 ): CodexFailureCode {

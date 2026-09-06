@@ -78,6 +78,23 @@ export const platformEventKindSchema = z.enum([
    * nothing downstream may act on it automatically.
    */
   'security.flagged',
+  /**
+   * THE SUPERVISOR'S OWN ACTIONS (`src/supervisor`). The analyst recorded a
+   * verdict on a finished run; the mender started on a cited defect, declined
+   * it, was refused by its own harness, opened a pull request, or failed.
+   * Every row names the run and the stage and carries only machine facts —
+   * grade, finding kinds, defect key, branch, PR URL, cost, model served.
+   * Never the finding's title or the model's summary: those are model-authored
+   * prose and stay in the git-ignored `supervisor/` records, where a reader
+   * opens them knowing what they are.
+   */
+  'supervisor.verdict',
+  'mender.dispatched',
+  'mender.started',
+  'mender.declined',
+  'mender.refused',
+  'mender.pr_opened',
+  'mender.failed',
   // --- Platform and security.
   /**
    * A project run was allowed to spend the HOST's subscription instead of a
@@ -111,6 +128,12 @@ export const platformEventKindSchema = z.enum([
   'admin.granted',
   'admin.revoked',
   'invitation.created',
+  /**
+   * An API token — a principal's bearer for the MCP — was minted or revoked.
+   * Rows carry the token id and its label, never the secret or its hash.
+   */
+  'token.created',
+  'token.revoked',
   /**
    * An organisation admin changed the org's per-tier model defaults or its
    * provider credentials. Journaled, never pushed: routine self-service on
@@ -297,6 +320,18 @@ export const PLATFORM_EVENT_SEVERITY: Record<PlatformEventKind, PlatformEventSev
   'github.installation_status': 'warning',
   'run.anomaly': 'warning',
   'security.flagged': 'security',
+  // A verdict is a fact about a finished run; what it FOUND is in detail.
+  'supervisor.verdict': 'info',
+  // The analyst handed a cited defect to a mender elsewhere (the CI workflow).
+  'mender.dispatched': 'info',
+  'mender.started': 'info',
+  'mender.declined': 'info',
+  // The harness stopped the model's own work: worth a look, not an alarm.
+  'mender.refused': 'warning',
+  'mender.pr_opened': 'info',
+  // A harness or session failure with a worktree left behind is an error the
+  // operator has to clean up after.
+  'mender.failed': 'error',
   'run.host_subscription': 'security',
   'run.principal_subscription': 'security',
   'principal.subscription_pin': 'security',
@@ -305,6 +340,8 @@ export const PLATFORM_EVENT_SEVERITY: Record<PlatformEventKind, PlatformEventSev
   'admin.granted': 'security',
   'admin.revoked': 'security',
   'invitation.created': 'security',
+  'token.created': 'security',
+  'token.revoked': 'security',
   // Self-service preference changes: worth the audit trail, not an alert.
   'org.models_updated': 'info',
   'org.provider_key_set': 'info',

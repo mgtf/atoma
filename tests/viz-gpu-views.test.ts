@@ -213,7 +213,7 @@ interface RecordingCtx extends RendererCtx {
   repositoryIcons: { parent: Container; x: number; y: number; size: number }[];
   privateRepositoryIcons: { parent: Container; x: number; y: number; size: number }[];
   links: RecordedLink[];
-  statCards: { id: string; label: string; value: string }[];
+  statCards: { parent: Container; id: string; label: string; value: string }[];
   atomButtons: RecordedButton[];
   eventCards: RecordedEventCard[];
   tickers: ((ticker: Ticker) => void)[];
@@ -426,6 +426,14 @@ function createRecordingCtx(): RecordingCtx {
       parent.addChild(graphics);
       return graphics;
     },
+    // Mirrors the renderer: a labelled render group at the parent's origin,
+    // so the tests below can assert which band each animated control joined.
+    animatedLayer(parent, label) {
+      const layer = new Container({ isRenderGroup: true });
+      layer.label = label;
+      parent.addChild(layer);
+      return layer;
+    },
     collapseCaret(parent) {
       const graphics = new Graphics();
       parent.addChild(graphics);
@@ -516,7 +524,7 @@ function createRecordingCtx(): RecordingCtx {
       return container;
     },
     statCard(parent, id, label, value) {
-      ctx.statCards.push({ id, label, value });
+      ctx.statCards.push({ parent, id, label, value });
       const container = new Container();
       parent.addChild(container);
       return container;
@@ -4005,7 +4013,11 @@ describe('drawBurnin scroll, pagination and lifecycle columns', () => {
     setReducedMotionOverrideForTests(true);
     const reduced = createRecordingCtx();
     drawBurnin(reduced, makeSnapshot({ view: 'burnin' }, data), WIDTH, 1400);
-    expect(reduced.statCards).toEqual(animated.statCards);
+    // Tiles record the band they were drawn into; two contexts build two
+    // bands, so compare what the tiles SAY, not where they hang.
+    const tileCopy = (tiles: typeof reduced.statCards) =>
+      tiles.map((tile) => ({ id: tile.id, label: tile.label, value: tile.value }));
+    expect(tileCopy(reduced.statCards)).toEqual(tileCopy(animated.statCards));
     expect(reduced.metrics.hitTargets.map((target) => target.id)).toEqual(
       animated.metrics.hitTargets.map((target) => target.id)
     );
@@ -5306,5 +5318,171 @@ describe('timelineConnectorGeometry — which rail carries the anchor', () => {
     });
     expect(geometry.parentY).toBe(300);
     expect(geometry.branchY).toBe(300);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Render groups — per-frame animation stays off the root batch
+// ---------------------------------------------------------------------------
+
+describe('render groups — per-frame animation stays off the root batch', () => {
+  /**
+   * Pixi 8 keeps ONE batch geometry per render group and re-uploads the whole
+   * buffer whenever any element in it moves, and a redrawn batchable Graphics
+   * rebuilds the whole group's instruction set. A control whose ticker mutates
+   * it every frame therefore draws into `ctx.animatedLayer` — one per band —
+   * never straight into the view root, or one pulsing chip re-uploads every
+   * card and label around it on every frame (287KB/frame on an 80-event
+   * trace, measured 2026-09-06). The contract lives in src/viz/AGENTS.md.
+   */
+  function expectBand(parent: Container, label: string, root: Container): void {
+    expect(parent.label).toBe(label);
+    expect(parent.isRenderGroup).toBe(true);
+    // At its parent's origin, so projections through it are unchanged.
+    expect(parent.position.x).toBe(0);
+    expect(parent.position.y).toBe(0);
+    let cursor: Container | null = parent;
+    while (cursor && cursor !== root) cursor = cursor.parent;
+    expect(cursor).toBe(root);
+  }
+
+  it("gives the renderer's ambient, mark and tooltip layers their own render groups", () => {
+    const renderer = new GpuRenderer();
+    expect(renderer.ambientRoot.isRenderGroup).toBe(true);
+    expect(renderer.markRoot.isRenderGroup).toBe(true);
+    const internals = renderer as unknown as { tooltipRoot: Container };
+    expect(internals.tooltipRoot.isRenderGroup).toBe(true);
+
+    const parent = new Container();
+    parent.position.set(40, 60);
+    const layer = renderer.animatedLayer(parent, 'band');
+    expect(layer.isRenderGroup).toBe(true);
+    expect(layer.parent).toBe(parent);
+    expect(layer.label).toBe('band');
+    expect(layer.toGlobal({ x: 1, y: 2 })).toEqual(parent.toGlobal({ x: 1, y: 2 }));
+  });
+
+  it('retains each band across rebuilds and destroys only what it drew', () => {
+    // A render group owns GPU buffers Pixi keys on its instruction set; a band
+    // destroyed with the scene left those buffers behind on every wheel tick
+    // (viz:smoke, 2026-09-06: 603 → 923 buffers over one scroll cycle). The
+    // band therefore outlives the scene, like the labels do.
+    const renderer = new GpuRenderer();
+    const internals = renderer as unknown as { releaseAnimatedLayers(): void };
+    const parent = new Container();
+    const band = renderer.animatedLayer(parent, 'band');
+    const drawn = new Graphics();
+    band.addChild(drawn);
+    // The same label twice in ONE render is two bands, never one re-parented.
+    const twin = renderer.animatedLayer(parent, 'band');
+    expect(twin).not.toBe(band);
+    expect(twin.label).toBe('band');
+
+    internals.releaseAnimatedLayers();
+    expect(band.parent).toBeNull();
+    expect(band.children).toHaveLength(0);
+    expect(drawn.destroyed).toBe(true);
+    expect(band.destroyed).toBe(false);
+
+    const nextParent = new Container();
+    const reused = renderer.animatedLayer(nextParent, 'band');
+    expect(reused).toBe(band);
+    expect(reused.parent).toBe(nextParent);
+    expect(reused.isRenderGroup).toBe(true);
+  });
+
+  it('draws the whole nav rail into one band while its headings stay in root', () => {
+    for (const sceneCameraMode of ['overview', 'focus'] as const) {
+      const ctx = createRecordingCtx();
+      drawSidebar(ctx, makeSnapshot({ view: 'skills', sceneCameraMode }), 720);
+      const nav = ctx.buttons.filter((button) => button.id.startsWith('nav.'));
+      expect(nav.length).toBeGreaterThan(0);
+      const rail = nav[0]!.parent;
+      expectBand(rail, 'sidebar-rail', ctx.root);
+      for (const button of nav) expect(button.parent).toBe(rail);
+      expect(ctx.root.children.filter((child) => child.label === 'sidebar-rail')).toHaveLength(1);
+      for (const heading of ctx.texts.filter((text) => ['WORKSPACE', 'OPERATE'].includes(text.value))) {
+        expect(heading.parent).toBe(ctx.root);
+      }
+      // The band changed nothing about where a button is hit.
+      const runs = nav.find((button) => button.id === 'nav.runs')!;
+      const target = ctx.metrics.hitTargets.find((entry) => entry.id === 'nav.runs')!;
+      expect(target.x).toBe(runs.x);
+      expect(target.y).toBe(runs.y);
+    }
+  });
+
+  it('groups the runs view chips, agent lanes and stat tiles by band', () => {
+    const ctx = createRecordingCtx();
+    const events: VizEvent[] = [
+      makeLlmEvent('e1', { role: 'plan' }),
+      makeLlmEvent('e2', { role: 'execute', actor: { tier: 1, name: 'Ammonia' } }),
+      {
+        id: 'e3',
+        ts: Date.parse('2026-08-14T10:01:00.000Z'),
+        kind: 'tool',
+        name: 'read_file',
+        actor: { tier: 1, name: 'Ammonia' },
+        args: { path: 'src/index.ts' },
+        result: { ok: true },
+      },
+    ];
+    drawRuns(ctx, makeSnapshot({}, { run: makeRun(events) }), 1280, 800);
+
+    const kinds = ctx.filterButtons.filter((button) => button.id.startsWith('run.filter.kind.'));
+    const roles = ctx.filterButtons.filter((button) => button.id.startsWith('run.filter.role.'));
+    expect(kinds.length).toBeGreaterThan(0);
+    expect(roles.length).toBeGreaterThan(0);
+    const chips = kinds[0]!.parent;
+    expectBand(chips, 'run-filter-chips', ctx.root);
+    for (const chip of [...kinds, ...roles]) expect(chip.parent).toBe(chips);
+    // The chip frames are static: drawn into root BEFORE the band, so they
+    // stay behind the chips they frame.
+    const bandIndex = ctx.root.getChildIndex(chips);
+    expect(ctx.root.children.slice(0, bandIndex).some((child) => child instanceof Graphics)).toBe(true);
+
+    expect(ctx.atomButtons.length).toBeGreaterThan(0);
+    const lanes = ctx.atomButtons[0]!.parent;
+    expectBand(lanes, 'run-atom-lanes', ctx.root);
+    for (const chip of ctx.atomButtons) expect(chip.parent).toBe(lanes);
+
+    expect(ctx.statCards.length).toBeGreaterThan(0);
+    const tiles = ctx.statCards[0]!.parent;
+    expect(tiles.isRenderGroup).toBe(true);
+    expect(tiles.label).toMatch(/\.tiles$/);
+    for (const tile of ctx.statCards) expect(tile.parent).toBe(tiles);
+  });
+
+  it('keeps burn-in and journal chips in bands inside their scroll panes', () => {
+    setReducedMotionOverrideForTests(true);
+    try {
+      const burnin = createRecordingCtx();
+      const rows = Array.from({ length: 12 }, (_, index) => makeBurninRow(index));
+      drawBurnin(
+        burnin,
+        makeSnapshot({ view: 'burnin' }, { burnin: { rows, csvPath: 'burnin.csv' } }),
+        1400,
+        1400
+      );
+      expect(burnin.filterButtons.length).toBeGreaterThan(0);
+      for (const chip of burnin.filterButtons) expectBand(chip.parent, 'burnin-filter-chips', burnin.root);
+      expect(burnin.statCards.length).toBeGreaterThan(0);
+      for (const tile of burnin.statCards) expectBand(tile.parent, 'burnin-stat-tiles', burnin.root);
+
+      const journal = createRecordingCtx();
+      drawJournal(
+        journal,
+        makeSnapshot(
+          { view: 'journal' },
+          { auth: makeAuth({ platformAdmin: true }), adminEvents: [journalEvent(9)] }
+        ),
+        1280,
+        720
+      );
+      expect(journal.filterButtons.length).toBeGreaterThan(0);
+      for (const chip of journal.filterButtons) expectBand(chip.parent, 'journal-filter-chips', journal.root);
+    } finally {
+      setReducedMotionOverrideForTests(null);
+    }
   });
 });

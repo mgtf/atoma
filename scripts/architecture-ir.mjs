@@ -83,6 +83,7 @@ const LAYOUT = Object.freeze({
 
   platform: { band: 'journal', col: 0, type: 'database', label: 'Platform' },
   sentinel: { band: 'journal', col: 1, type: 'backend', label: 'Sentinel' },
+  supervisor: { band: 'journal', col: 2, type: 'backend', label: 'Supervisor' },
 });
 
 const BANDS = Object.freeze([
@@ -91,7 +92,7 @@ const BANDS = Object.freeze([
   { id: 'state', row: 2, label: 'Elements and persisted identity' },
   { id: 'isolation', row: 3, label: 'Container isolation' },
   { id: 'control', row: 4, label: 'Gated control plane' },
-  { id: 'journal', row: 5, label: 'Audit and live watch' },
+  { id: 'journal', row: 5, label: 'Audit, live watch and self-repair' },
 ]);
 
 /**
@@ -117,6 +118,8 @@ const EDGES = Object.freeze([
   { from: 'github', to: 'projects' },
   { from: 'projects', to: 'platform' },
   { from: 'sentinel', to: 'platform' },
+  { from: 'supervisor', to: 'platform' },
+  { from: 'supervisor', to: 'sentinel' },
 ]);
 
 const CELL_WIDTH = 172;

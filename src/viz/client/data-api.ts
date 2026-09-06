@@ -3,6 +3,7 @@ import type {
   LaunchProfile,
   VizAccountModels,
   VizAccountSubscriptions,
+  VizApiTokens,
   VizOrgModels,
   VizOrgProviderKeyStatus,
   VizOrganisation,
@@ -27,10 +28,17 @@ import type {
 } from './types.js';
 import { redirectIfAuthenticationRequired } from './session-guard.js';
 
+export class ApiHttpError extends Error {
+  constructor(readonly status: number, path: string, detail?: string) {
+    super(detail ?? `HTTP ${status} for ${path}`);
+    this.name = 'ApiHttpError';
+  }
+}
+
 export async function fetchJson<T>(path: string): Promise<T> {
   const response = await fetch(path);
   redirectIfAuthenticationRequired(response.status);
-  if (!response.ok) throw new Error(`HTTP ${response.status} for ${path}`);
+  if (!response.ok) throw new ApiHttpError(response.status, path);
   return (await response.json()) as T;
 }
 
@@ -169,6 +177,21 @@ export const api = {
     mutateWithoutResult('/api/account/subscriptions/codex/login', 'DELETE'),
   disconnectCodexSubscription: () =>
     mutateWithoutResult('/api/account/subscriptions/codex', 'DELETE'),
+  // MCP ACCESS. The token plaintext comes back ONCE, from the POST; the list
+  // is labels and dates. Revocation is a DELETE on the viewer's own token.
+  apiTokens: () => fetchJson<VizApiTokens>('/api/tokens'),
+  createApiToken: (label: string) =>
+    mutateJson<{ tokenId: string; token: string; createdAt: string; mcpUrl: string }>('/api/tokens', { label }),
+  revokeApiToken: async (tokenId: string): Promise<{ revoked: boolean }> => {
+    const response = await fetch(`/api/tokens/${encodeURIComponent(tokenId)}`, {
+      method: 'DELETE',
+      credentials: 'same-origin',
+      headers: { accept: 'application/json' },
+    });
+    redirectIfAuthenticationRequired(response.status);
+    if (!response.ok) throw new ApiHttpError(response.status, '/api/tokens');
+    return (await response.json()) as { revoked: boolean };
+  },
   orgModels: () => fetchJson<VizOrgModels>('/api/org/models'),
   // PUT/PATCH rather than POST: these replace one account/org-scoped resource.
   saveAccountModels: (pins: VizAccountModels['pins']) =>
@@ -244,6 +267,6 @@ async function assertMutationSucceeded(response: Response, path: string): Promis
     } catch {
       // Keep the status line when the body is not JSON.
     }
-    throw new Error(detail);
+    throw new ApiHttpError(response.status, path, detail);
   }
 }

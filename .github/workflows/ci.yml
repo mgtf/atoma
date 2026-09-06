@@ -15,8 +15,35 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  mender-isolation:
+    name: Mender credential isolation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.14.0
+          cache: npm
+      - run: npm ci
+      - run: docker build -f docker/mender.Dockerfile -t atoma-mender:local .
+      - run: npx vitest run tests/mender-isolation.test.ts
+        env:
+          ATOMA_MENDER_CONTAINER_TESTS: '1'
+
   core:
-    name: Hermetic checks (Docker integration skipped)
+    # The check name carries the Node LINE, not the pinned patch version: the
+    # `protect-main` ruleset requires these checks by name, and a version bump
+    # must not silently orphan a required check.
+    name: Hermetic checks (Node ${{ matrix.line }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - node: '22.14.0'
+            line: '22'
+          - node: '24.20.0'
+            line: '24'
     runs-on: ubuntu-latest
     # `viz:smoke` no longer runs here (see release:check), so this step is back
     # to hermetic work: tests, audit, build, and the node-only release smokes.
@@ -27,26 +54,27 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 22.13.0
+          node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
       - run: npm run release:check
 
       - name: Package the exact main revision for deployment
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.node == '22.14.0'
         shell: bash
         run: |
           set -euo pipefail
           root="atoma-${GITHUB_SHA}"
           mkdir -p "deployment/${root}"
-          cp -R dist docker scripts deploy "deployment/${root}/"
-          cp package.json package-lock.json .env.example "deployment/${root}/"
+          cp -R dist docker scripts deploy src docs "deployment/${root}/"
+          cp package.json package-lock.json .env.example AGENTS.md CLAUDE.md "deployment/${root}/"
+          node scripts/supervisor-release-smoke.mjs "deployment/${root}"
           printf '%s\n' "${GITHUB_SHA}" > "deployment/${root}/REVISION"
           tar -C deployment -czf "deployment/${root}.tar.gz" "${root}"
           (cd deployment && sha256sum "${root}.tar.gz" > "${root}.tar.gz.sha256")
 
       - name: Upload immutable deployment artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.node == '22.14.0'
         uses: actions/upload-artifact@v4
         with:
           name: atoma-deploy-${{ github.sha }}
@@ -108,10 +136,20 @@ jobs:
           # every batched push silently skip the invalidation for all but its
           # last commit, which is the failure this step exists to prevent.
           fetch-depth: 0
+          # The translation commit is pushed straight to main, and the
+          # `protect-main` ruleset (.github/rulesets/) only lets the repository
+          # admin bypass its pull-request rule: GitHub Actions cannot be a
+          # bypass actor on a user-owned repository. So the push authenticates
+          # with the admin's fine-grained token (Contents: read/write on this
+          # repository) rather than the workflow token. The `[skip ci]` in the
+          # commit message is what keeps that push from re-triggering CI, which
+          # a token push would otherwise do. Without the secret the workflow
+          # token is used and the push is refused by the ruleset.
+          token: ${{ secrets.ATOMA_I18N_PUSH_TOKEN || github.token }}
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 22.13.0
+          node-version: 22.14.0
           cache: npm
 
       # No npm ci: the i18n script is dependency-free (node:fs, node:child_process).
@@ -206,7 +244,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 22.13.0
+          node-version: 22.14.0
           cache: npm
       - run: npm ci
       - run: npm run viz:smoke
@@ -240,7 +278,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 22.13.0
+          node-version: 22.14.0
           cache: npm
       - run: npm ci
       - name: Install gVisor
@@ -277,7 +315,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 22.13.0
+          node-version: 22.14.0
           cache: npm
       - run: npm ci
       - run: npm run build:worker:dev

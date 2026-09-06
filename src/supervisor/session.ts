@@ -1,0 +1,364 @@
+import { terminateRunProcessGroup } from '../cli/burnin.js';
+import { spawn } from 'node:child_process';
+import type { ServedModelUsage } from '../contracts/supervisorVerdict.js';
+
+/**
+ * ONE HEADLESS SESSION, AND THE PROCESSES AROUND IT.
+ *
+ * Both supervisor stages drive `claude -p` with a JSON Schema enforced on the
+ * output, a spend ceiling and a wall clock, and both read the same wrapper
+ * back: the structured object, what the session actually consumed per model,
+ * and its cost. This module is that shared shape, plus the two things it
+ * needs from the host: a way to run an external command to completion, and
+ * a way to name which provider the child session talks to.
+ *
+ * COMMAND SPECS ARE THE TEST SEAM. `claude`, `gh`, `npm ci`, `npx vitest run`
+ * and `npm run check` are resolved from a whitespace-separated string whose
+ * first token may be a `.mjs`/`.js` file — then it runs under the current
+ * Node. That is how the pipeline tests substitute every external program on
+ * every platform without a shell shim. `npm`/`npx` are `.cmd` shims on
+ * Windows, which Node refuses to spawn without a shell; only those two
+ * constant defaults ever get one, never a user-supplied spec.
+ *
+ * PROVIDERS ARE READ AS SETS. A model id paired with another stage's base
+ * URL would send a Claude id to a GLM endpoint, so the three variables of one
+ * stage are read together, the analyst's set is the mender's fallback (same
+ * operator-owned subscription, same quota rationale), and the default is the
+ * login subscription with a PINNED id — an alias resolves to a different
+ * model next month and the recorded cost silently stops meaning what it said.
+ */
+
+export interface CommandSpec {
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly shell: boolean;
+}
+
+export function resolveCommand(spec: string): CommandSpec {
+  const tokens = spec.trim().split(/\s+/).filter(Boolean);
+  const head = tokens[0];
+  if (!head) throw new Error('empty command spec');
+  const rest = tokens.slice(1);
+  if (/\.(mjs|cjs|js)$/.test(head)) {
+    return { command: process.execPath, args: [head, ...rest], shell: false };
+  }
+  const needsShell = process.platform === 'win32' && /^(npm|npx)$/.test(head);
+  return { command: head, args: rest, shell: needsShell };
+}
+
+export interface CommandResult {
+  readonly code: number | null;
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
+export interface RunCommandOptions {
+  readonly cwd: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly timeoutMs: number;
+  readonly input?: string;
+  readonly onLog?: (line: string) => void;
+  /** JSONL duplex protocol; callbacks run in the trusted harness. */
+  readonly onLine?: (line: string, send: (message: unknown) => void, end: () => void) => void;
+  /** Model-authored mender commands run without networking. */
+  readonly network?: 'none';
+}
+
+/**
+ * Run to completion with a wall clock, capturing both streams. A non-zero
+ * exit is a RESULT the caller reads, not a throw; the promise rejects only
+ * when the process cannot start or the timeout fires.
+ */
+export function runCommand(
+  spec: string,
+  extraArgs: readonly string[],
+  options: RunCommandOptions
+): Promise<CommandResult> {
+  if (process.platform === 'win32') return Promise.reject(new Error('supervisor commands require POSIX process groups; use WSL2'));
+  const resolved = resolveCommand(spec);
+  const args = [...resolved.args, ...extraArgs];
+  return new Promise((resolveRun, rejectRun) => {
+    const child = spawn(resolved.command, args, {
+      cwd: options.cwd,
+      env: options.env ?? process.env,
+      shell: resolved.shell,
+      detached: process.platform !== 'win32',
+      stdio: [options.input === undefined && !options.onLine ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    let timedOut = false;
+    let closed = false;
+    let reaped = false;
+    const finishTimeout = () => {
+      if (!closed || !reaped || settled) return;
+      settled = true;
+      rejectRun(new Error(`timeout after ${options.timeoutMs}ms: ${resolved.command} ${args.slice(0, 3).join(' ')}`));
+    };
+    const timer = setTimeout(() => {
+      if (settled) return;
+      timedOut = true;
+      options.onLog?.(`command exceeded ${options.timeoutMs}ms; terminating: ${resolved.command}`);
+      // The existing run-group primitive confirms disappearance, including
+      // grandchildren whose parent already exited. A surviving group keeps
+      // the caller (and hence the mender lock/worktree) occupied.
+      void (async () => {
+        while (child.pid && !(await terminateRunProcessGroup(child.pid, 1_000, 1_000))) {
+          options.onLog?.('command process group still exists; retaining ownership');
+        }
+        reaped = true;
+        finishTimeout();
+      })();
+    }, options.timeoutMs);
+    let lines = '';
+    child.stdout?.setEncoding('utf8');
+    child.stdout?.on('data', (chunk: string) => {
+      stdout += chunk;
+      if (!options.onLine) return;
+      lines += chunk;
+      let newline: number;
+      while ((newline = lines.indexOf('\n')) !== -1) {
+        const line = lines.slice(0, newline);
+        lines = lines.slice(newline + 1);
+        options.onLine(line, (message) => { child.stdin?.write(`${JSON.stringify(message)}\n`); }, () => { child.stdin?.end(); });
+      }
+    });
+    child.stderr?.on('data', (chunk: Buffer | string) => (stderr += String(chunk)));
+    child.on('error', (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      rejectRun(error);
+    });
+    child.on('close', (code) => {
+      closed = true;
+      if (timedOut) { finishTimeout(); return; }
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolveRun({ code, stdout, stderr });
+    });
+    child.stdin?.on('error', () => { /* close/error owns the result */ });
+    if (options.input !== undefined) {
+      if (options.onLine) child.stdin?.write(options.input);
+      else child.stdin?.end(options.input);
+    }
+  });
+}
+
+/* ────────────────────────────── providers ────────────────────────────── */
+
+export type ProviderSource = 'mender' | 'analyst' | 'default';
+
+export interface SupervisorProvider {
+  readonly transport?: 'claude' | 'codex';
+  readonly codexHome?: string;
+  readonly model: string;
+  readonly baseUrl: string | null;
+  readonly authToken: string | null;
+  readonly source: ProviderSource;
+}
+
+/** Pinned because an alias drifts under the measurement (see module doc). */
+export const DEFAULT_SUPERVISOR_MODEL = 'claude-sonnet-5';
+
+const ANALYST_VARS = ['ATOMA_ANALYST_MODEL', 'ATOMA_ANALYST_BASE_URL', 'ATOMA_ANALYST_AUTH_TOKEN'] as const;
+const MENDER_VARS = ['ATOMA_MENDER_MODEL', 'ATOMA_MENDER_BASE_URL', 'ATOMA_MENDER_AUTH_TOKEN'] as const;
+
+/** A CI runner hands an unset repository variable over as an EMPTY string; that is "unset". */
+function present(value: string | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+function providerSet(
+  env: NodeJS.ProcessEnv,
+  names: readonly [string, string, string],
+  source: ProviderSource
+): SupervisorProvider | null {
+  const prefix = source === 'mender' ? 'ATOMA_MENDER' : 'ATOMA_ANALYST';
+  const transport = present(env[`${prefix}_TRANSPORT`]);
+  if (transport && transport !== 'claude' && transport !== 'codex') throw new Error(`${prefix}_TRANSPORT must be claude or codex`);
+  if (!transport && !names.some((name) => present(env[name]) !== null)) return null;
+  if (transport === 'codex') {
+    if (present(env[names[1]]) || present(env[names[2]])) throw new Error(`${prefix}: Codex uses ChatGPT login; remove BASE_URL and AUTH_TOKEN`);
+    return { transport, model: present(env[names[0]]) ?? 'gpt-5.6-sol', baseUrl: null, authToken: null, source,
+      ...(present(env[`${prefix}_CODEX_HOME`]) ? { codexHome: present(env[`${prefix}_CODEX_HOME`])! } : {}) };
+  }
+  return {
+    model: present(env[names[0]]) ?? DEFAULT_SUPERVISOR_MODEL,
+    baseUrl: present(env[names[1]]),
+    authToken: present(env[names[2]]),
+    source,
+  };
+}
+
+const DEFAULT_PROVIDER: SupervisorProvider = {
+  model: DEFAULT_SUPERVISOR_MODEL,
+  baseUrl: null,
+  authToken: null,
+  source: 'default',
+};
+
+export function analystProvider(env: NodeJS.ProcessEnv = process.env): SupervisorProvider {
+  return providerSet(env, ANALYST_VARS, 'analyst') ?? DEFAULT_PROVIDER;
+}
+
+/** The mender's own set, else the analyst's set, else the default — never a mix. */
+export function menderProvider(env: NodeJS.ProcessEnv = process.env): SupervisorProvider {
+  return providerSet(env, MENDER_VARS, 'mender') ?? providerSet(env, ANALYST_VARS, 'analyst') ?? DEFAULT_PROVIDER;
+}
+
+/**
+ * The child session's environment. A provider override is scoped HERE and
+ * never exported at platform launch: raw `ANTHROPIC_*` in the process env
+ * would reroute the runs' claude-cli transport along with the supervisor.
+ */
+export function providerChildEnv(
+  provider: SupervisorProvider,
+  env: NodeJS.ProcessEnv = process.env
+): NodeJS.ProcessEnv {
+  const child: NodeJS.ProcessEnv = { ...env };
+  if (provider.source !== 'default') {
+    for (const key of Object.keys(child)) {
+      if (key.startsWith('ANTHROPIC_') || key.startsWith('CLAUDE_CODE_USE_')) delete child[key];
+    }
+  }
+  if (provider.baseUrl) child['ANTHROPIC_BASE_URL'] = provider.baseUrl;
+  if (provider.authToken) {
+    // An Anthropic API key (`sk-ant-…`) travels as the API key the CLI reads
+    // natively; anything else is a gateway bearer (Z.ai, a proxy). Either way
+    // the OTHER variable is dropped so a stale one cannot shadow this one.
+    if (/^sk-ant-/.test(provider.authToken)) {
+      child['ANTHROPIC_API_KEY'] = provider.authToken;
+      delete child['ANTHROPIC_AUTH_TOKEN'];
+    } else {
+      child['ANTHROPIC_AUTH_TOKEN'] = provider.authToken;
+      delete child['ANTHROPIC_API_KEY'];
+    }
+  }
+  return child;
+}
+
+/** The CLI's own alias vocabulary; a non-Claude id behind a base URL is a pin too. */
+export const MODEL_ALIASES: ReadonlySet<string> = new Set(['sonnet', 'opus', 'haiku', 'fable', 'default']);
+
+export function looksPinned(model: string): boolean {
+  return !MODEL_ALIASES.has(model);
+}
+
+/* ─────────────────────────── the session wrapper ─────────────────────────── */
+
+export function parseLooseJson(text: string): unknown {
+  const attempts = [text.trim()];
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(text);
+  if (fenced?.[1]) attempts.push(fenced[1].trim());
+  const first = text.indexOf('{');
+  const last = text.lastIndexOf('}');
+  if (first !== -1 && last > first) attempts.push(text.slice(first, last + 1));
+  for (const attempt of attempts) {
+    try {
+      return JSON.parse(attempt);
+    } catch {
+      /* next attempt */
+    }
+  }
+  return null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+/** The structured object out of a `claude -p --output-format json` wrapper. */
+export function extractStructured(wrapper: unknown): unknown {
+  const row = asRecord(wrapper);
+  if (!row) return null;
+  if (asRecord(row['structured_output'])) return row['structured_output'];
+  if (asRecord(row['structuredOutput'])) return row['structuredOutput'];
+  if (typeof row['result'] === 'string') return parseLooseJson(row['result']);
+  if (asRecord(row['result'])) return row['result'];
+  return null;
+}
+
+/**
+ * What the session ACTUALLY consumed, per model. `claude -p` reports a
+ * `modelUsage` map and it is never one model: the main loop's model plus the
+ * harness's auxiliary calls, all inside `total_cost_usd`.
+ */
+export function servedModels(wrapper: unknown): ServedModelUsage[] | null {
+  const usage = asRecord(asRecord(wrapper)?.['modelUsage']);
+  if (!usage) return null;
+  const entries = Object.entries(usage).map(([model, raw]) => {
+    const u = asRecord(raw) ?? {};
+    const num = (key: string): number => (typeof u[key] === 'number' ? (u[key]) : 0);
+    return {
+      model,
+      costUsd: typeof u['costUSD'] === 'number' ? (u['costUSD']) : null,
+      inputTokens: num('inputTokens'),
+      outputTokens: num('outputTokens'),
+      cacheReadInputTokens: num('cacheReadInputTokens'),
+      cacheCreationInputTokens: num('cacheCreationInputTokens'),
+    };
+  });
+  entries.sort((a, b) => (b.costUsd ?? 0) - (a.costUsd ?? 0));
+  return entries.length > 0 ? entries : null;
+}
+
+export interface SessionUsage {
+  readonly served: ServedModelUsage[] | null;
+  readonly costUsd: number | null;
+  readonly durationMs: number | null;
+  readonly turns: number | null;
+  readonly sessionId: string | null;
+}
+
+export function sessionUsage(wrapper: unknown): SessionUsage {
+  const row = asRecord(wrapper) ?? {};
+  return {
+    served: servedModels(wrapper),
+    costUsd: typeof row['total_cost_usd'] === 'number' ? (row['total_cost_usd']) : null,
+    durationMs: typeof row['duration_ms'] === 'number' ? (row['duration_ms']) : null,
+    turns: typeof row['num_turns'] === 'number' ? (row['num_turns']) : null,
+    sessionId: typeof row['session_id'] === 'string' ? (row['session_id']) : null,
+  };
+}
+
+export interface ClaudeSessionOptions {
+  /** Command spec for the claude binary; the test seam. */
+  readonly claudeCommand: string;
+  /** A host-owned executor; the mender supplies its container boundary. */
+  readonly execute?: typeof runCommand;
+  readonly args: readonly string[];
+  readonly cwd: string;
+  readonly provider: SupervisorProvider;
+  readonly timeoutMs: number;
+  readonly onLog?: (line: string) => void;
+}
+
+export interface ClaudeSessionResult extends CommandResult {
+  readonly wrapper: unknown;
+  readonly structured: unknown;
+  readonly usage: SessionUsage;
+}
+
+export async function runClaudeSession(options: ClaudeSessionOptions): Promise<ClaudeSessionResult> {
+  const result = await (options.execute ?? runCommand)(options.claudeCommand, options.args, {
+    cwd: options.cwd,
+    env: providerChildEnv(options.provider),
+    timeoutMs: options.timeoutMs,
+    ...(options.onLog ? { onLog: options.onLog } : {}),
+  });
+  const wrapper = result.code === 0 ? parseLooseJson(result.stdout) : null;
+  return { ...result, wrapper, structured: extractStructured(wrapper), usage: sessionUsage(wrapper) };
+}
+
+/**
+ * A pin that does not appear in what was served means the request was
+ * reinterpreted, and two measurements under that pin are not one experiment.
+ */
+export function servedMatchesPin(provider: SupervisorProvider, usage: SessionUsage): boolean {
+  if (!looksPinned(provider.model) || !usage.served) return true;
+  return usage.served.some((entry) => entry.model === provider.model);
+}

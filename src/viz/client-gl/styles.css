@@ -936,6 +936,59 @@ html.atoma-cursor-active * {
   color: #8a96ae;
 }
 
+.gpu-mcp-access {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 12px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid rgba(110, 168, 255, .22);
+}
+
+.gpu-mcp-steps {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: #9fb0c7;
+  font: 11px/1.5 ui-sans-serif, system-ui, sans-serif;
+}
+
+/* A one-line shell command must stay selectable and wrap, never clip. */
+.gpu-mcp-command {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The token form is an ordinary column INSIDE the Settings frame. It must not
+   borrow `.gpu-settings-form`, which is the fixed-position rename form. */
+.gpu-mcp-create {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+
+.gpu-mcp-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  font: 11px/1.3 ui-sans-serif, system-ui, sans-serif;
+  color: #9fb0c7;
+}
+
+.gpu-mcp-tokens {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gpu-mcp-minted {
+  border-color: rgba(120, 220, 160, .45);
+}
+
 .gpu-personal-subscriptions {
   display: flex;
   flex-direction: column;

@@ -25,6 +25,7 @@ import { AtomaCursor } from './AtomaCursor.js';
 import { AuthControls } from './AuthControls.js';
 import { useAuthController } from './session-controller.js';
 import { GpuDomBridge } from './DomBridge.js';
+import { McpAccess } from './McpAccessPanel.js';
 import { OrgModelsForm } from './OrgModelsForm.js';
 import { EntryVeilLayer } from './EntryVeilLayer.js';
 import { PreviewPlane, type PreviewPlaneStatus } from './PreviewPlane.js';
@@ -1200,7 +1201,14 @@ function GpuAppContent({
                   state.accountMenuOpen || state.localeMenuOpen || state.notificationsMenuOpen
                 }
                 onError={setAccountError}
-              />
+              >
+                <McpAccess
+                  key={`${authSnapshot.viewer.principalId}:${authSnapshot.viewer.activeOrganisation.id}`}
+                  t={t}
+                  locale={state.locale}
+                  onError={setAccountError}
+                />
+              </OrgModelsForm>
             ) : null
           }
         />

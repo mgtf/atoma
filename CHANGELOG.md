@@ -4,11 +4,19 @@
 
 ### Added
 
-- The repository is public under the Functional Source License (FSL-1.1-ALv2):
-  `LICENSE.md`, a `license` field in `package.json`, a README licence section,
-  `CONTRIBUTING.md`, a contributor licence agreement (`CLA.md`) and
-  `SECURITY.md`. Release archives now carry the licence and the security
-  policy.
+- `atoma.run` is the public name of the product: `package.json` declares it as
+  the homepage, the README links it, and the deployment, preview and MCP
+  documentation use it in place of `atoma.example.com`. Previews still need a
+  second registrable domain.
+- The repository is public under the GNU Affero General Public License v3.0
+  (`AGPL-3.0-only`): `LICENSE`, a `license` field in `package.json`, a README
+  licence section, `CONTRIBUTING.md`, a contributor licence agreement
+  (`CLA.md`) and `SECURITY.md`. Release archives now carry the licence and
+  the security policy.
+- A `CLA` workflow (CLA Assistant Lite, pinned by commit) asks the author of
+  an external pull request to sign `CLA.md` and records signatures on the
+  unprotected `cla-signatures` branch; the repository owner and bots are
+  allowlisted.
 - The GPU visualizer now includes an in-product Docs surface, a grouped left
   navigation rail, and account Settings reached only from the account menu.
   Platform admins are offered the curated platform-alert subscription at
@@ -53,6 +61,16 @@
 
 ### Changed
 
+- Documentation premise: skills are a platform commons shared across
+  organisations, and the organisation bounds trust and execution rights, not
+  knowledge. Project-local partitioning is described as containment on the
+  way there; Track B is named the product target. The body/trust split and
+  the human gate on catalogue entry are unchanged (`docs/saas-architecture.md`
+  §2, root and projects contracts, README, how-it-works).
+- The hermetic CI jobs are named by Node line (`Hermetic checks (Node 22)`,
+  `Hermetic checks (Node 24)`) instead of the pinned patch version, so the
+  `protect-main` ruleset can require them by name. The ruleset itself is
+  versioned in `.github/rulesets/protect-main.json` with import instructions.
 - The visualizer opens on Projects. Its create-project and start-run forms are
   mutually exclusive, re-clicking the selected project returns to creation,
   and single-column views share one framed layout across their GL and DOM

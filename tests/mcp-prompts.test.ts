@@ -90,7 +90,7 @@ describe('MCP prompts — one per family, plus the reader drivers', () => {
   });
 
   /**
-   * A prompt that starts a run must carry the two properties `atoma_run_start`
+   * A prompt that starts a run must carry the two properties `atoma_operator_run_start`
    * carries, in the same words. A host that reached the run through the prompt
    * would otherwise never have read the tool description.
    */
@@ -99,8 +99,8 @@ describe('MCP prompts — one per family, plus the reader drivers', () => {
       const text = goalPromptText(launchable, 'x');
       expect(text).toMatch(/DESTRUCTIVE/);
       expect(text).toMatch(/SERIALISED/);
-      expect(text).toContain('atoma_run_start');
-      expect(text).toContain('atoma_run_status');
+      expect(text).toContain('atoma_operator_run_start');
+      expect(text).toContain('atoma_operator_run_status');
     }
   });
 

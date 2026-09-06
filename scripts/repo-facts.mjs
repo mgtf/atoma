@@ -36,7 +36,9 @@ export const KNOWN_NARRATIVE = Object.freeze([
 const ENGLISH_NUMBERS = Object.freeze([
   'zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
   'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen',
-  'seventeen', 'eighteen', 'nineteen', 'twenty',
+  'seventeen', 'eighteen', 'nineteen', 'twenty', 'twenty-one', 'twenty-two',
+  'twenty-three', 'twenty-four', 'twenty-five', 'twenty-six', 'twenty-seven',
+  'twenty-eight', 'twenty-nine', 'thirty',
 ]);
 
 /** `13` -> `thirteen`; past the table, the digits. README prose spells these out. */
@@ -87,16 +89,16 @@ export function readSubsystems(repoRoot) {
 }
 
 /**
- * The exported MCP tool surface. `src/mcp/AGENTS.md` calls the count a
- * compatibility contract and `tests/mcp-server.test.ts` asserts it
- * behaviourally; this reads the registration list, so the README sentence and
- * the server cannot disagree without the gate saying so.
+ * The MCP catalogue (`src/mcp/tools.ts`): every tool the server can expose,
+ * across all tiers. `tests/mcp-http.test.ts` asserts it behaviourally; this
+ * reads the table, so the README sentence and the server cannot disagree
+ * without the gate saying so.
  */
 export function countMcpTools(repoRoot) {
-  const server = read(repoRoot, 'src/mcp/server.ts');
+  const catalogue = read(repoRoot, 'src/mcp/tools.ts');
   const names = new Set();
-  for (const match of server.matchAll(/^\s+'(atoma_[a-z_]+)',$/gm)) names.add(match[1]);
-  return requirePositive(names.size, 'atoma_* tool registrations', 'src/mcp/server.ts');
+  for (const match of catalogue.matchAll(/^\s+name: '(atoma_[a-z_]+)',$/gm)) names.add(match[1]);
+  return requirePositive(names.size, 'atoma_* catalogue rows', 'src/mcp/tools.ts');
 }
 
 /** The curated agent-name pools AGENTS.md quotes as 118 / 40 / 20. */
@@ -116,7 +118,7 @@ export function readAgentPools(repoRoot) {
 /**
  * Supported Node, from the two files that actually decide it: `.nvmrc` pins the
  * development version and `engines` states the supported range. The README
- * prints a third, prose form ("22.13+ / 24+"), and that is what drifts.
+ * prints a third, prose form ("22.14+ / 24+"), and that is what drifts.
  */
 export function readNodeSupport(repoRoot) {
   const nvmrc = read(repoRoot, '.nvmrc').trim();
@@ -129,7 +131,7 @@ export function readNodeSupport(repoRoot) {
   return {
     nvmrc,
     engines,
-    /** "22.13+ / 24+" — the shape the README body and its footer print. */
+    /** "22.14+ / 24+" — the shape the README body and its footer print. */
     display: supported.map((m) => (m === pinnedMajor ? `${pinned[1]}.${pinned[2]}+` : `${m}+`)).join(' / '),
   };
 }

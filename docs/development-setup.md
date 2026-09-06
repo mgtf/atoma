@@ -12,7 +12,7 @@ atoma splits into two paths with different platform requirements.
 |---|---|---|
 | **Development** | `docs:check`, `typecheck`, `lint`, `build`, `viz` | Node only. Works on macOS, Linux and Windows. |
 | **Verification** | `npm test`, `npm run check`, `release:check` | A POSIX host. Parts of the suite drive shells, `chmod`, `tar` and process groups on purpose. |
-| **Runs** | `run:build`, `burnin`, `curriculum`, `benchmark`, `mcp` | macOS or Linux — see below. |
+| **Runs** | `run:build`, `burnin`, `curriculum`, `benchmark`, operator runs through the MCP | macOS or Linux — see below. |
 | **Container isolation** | `build:worker`, `doctor --container`, `release:container-smoke` | A real Docker daemon on a Linux/macOS host. |
 
 Runs execute on **macOS or Linux only**, and
@@ -29,9 +29,12 @@ several processes deep. There is deliberately no override flag.
 
 ## Every platform
 
-Node is pinned to **22.13.0** (`.nvmrc`); `engines` accepts `^22.13.0 || >=24`,
-and CI runs every job on `ubuntu-latest` at exactly 22.13.0. Use the pin unless
-you have a reason not to.
+Node is pinned to **22.14.0** (`.nvmrc`); `engines` accepts `^22.14.0 || >=24`.
+The SQLite driver requires Node-API 10, introduced in Node 22.14.0. Core CI
+verifies both 22.14.0 and the production runtime 24.20.0; the other jobs use
+the pin. Use the pin unless you have a reason not to.
+The [native SQLite incident](incidents/sqlite-node24-2026-09-06.md) records the
+runtime evidence and the compatibility boundary behind this minimum.
 
 ```bash
 git clone git@github.com:mgtf/atoma.git

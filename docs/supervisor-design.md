@@ -1,9 +1,11 @@
+> Deployment update, 2026-09-06: the operator selected a separate mender service on the VPS, with a dedicated clone and the shared run lease held throughout maintenance. The earlier CI and phase-boundary-only design below is historical. Current setup: [production guide](supervisor-codex-production.md).
+
 # Run supervision and the self-improvement loop — design
 
-Status: **draft accepted in discussion, P0 in progress (2026-08-21)**. The
+Status: **accepted; P0, P1 and P2 landed (last update 2026-09-05)**. The
 three-stage shape and the phasing were agreed with the operator on
-2026-08-21; the [open decisions](#open-decisions) at the end are not settled
-yet. As stages land, their normative rules move into the owning `AGENTS.md`
+2026-08-21; of the [open decisions](#open-decisions) at the end only the
+sentinel kill switch remains. As stages land, their normative rules move into the owning `AGENTS.md`
 files; this document stays the reasoning behind them, like
 [platform-events-design.md](platform-events-design.md).
 
@@ -37,7 +39,7 @@ One resident process cannot do all three jobs, because "watch live",
 |---|---|---|---|---|
 | 1. sentinel | mechanical live watch | always, INSIDE the gated viz server (or the CLI) | never | journal rows only (+ optional run cancel) |
 | 2. analyst | post-mortem judgment | after a run ends, never beside one | Claude Code headless, read-only | verdict files only |
-| 3. mender | fix + green/blue redeploy | on a `defect` verdict, gated | Claude Code in an isolated worktree | a branch, then a deploy slot |
+| 3. mender | fix → pull request; the merge rides the existing deploy | on a cited `defect` verdict, gated | Claude Code in an isolated worktree | a branch and a PR; a person merges |
 
 ### Why not a resident LLM watcher
 
@@ -233,6 +235,72 @@ real usage, grades split cleanly from findings.
 
 ## Stage 3 — the mender and green/blue (P2/P3)
 
+LANDED 2026-09-05 as P2, and MOVED IN-PRODUCT the same day together with
+the analyst: `src/supervisor/` (`analyst.ts`, `mender.ts`, `menderPolicy.ts`
+for the pure half, `activity.ts` for the ONE idle predicate both stages gate
+on, `journal.ts`, `session.ts`), the contracts `src/contracts/supervisorVerdict.ts`
+and `supervisorMend.ts` with the session JSON Schema DERIVED from them, the
+journal kinds `supervisor.verdict` and `mender.*`, and the compiled CLIs
+`npm run analyst` / `npm run mender`. The out-of-product scripts are gone:
+a stage with write power needs the contracts, the journal and the typed tests
+a script could not have. The normative rules live in
+[src/supervisor/AGENTS.md](../src/supervisor/AGENTS.md). Two corrections to
+the design below, both settling an open decision:
+
+- **The pull request IS the human gate, and the existing deploy path IS the
+  green/blue.** A merge on `main` already runs CI, packages the exact
+  revision and activates it on the host (`.github/workflows/deploy.yml`,
+  `deploy/host-deploy.sh`, with the lease-gated preflight). Building a
+  second slot-and-symlink switch beside it would be two deploy paths for one
+  product, so P3 as described below is superseded: "fixed for the following
+  runs" means the PR was merged, nothing more. Decision 3 closes with it.
+- **The power split is between the MODEL and the HARNESS, not between
+  stages.** The model edits files in an isolated worktree at the tip of
+  `main` and may run the repository's own checks there (`--restricted`,
+  `--permission-mode dontAsk`, an allowlist of `npm`/`npx`/read-only
+  `git` commands, no MCP, no network). It never runs `git commit`,
+  `git push` or `gh`; the harness does, AFTER verifying on its own: it
+  stashes the source change and runs the new test files expecting a failure,
+  restores them, runs the full `npm run check`, and only then commits,
+  pushes and opens the PR. The model's word is recorded, never trusted.
+- **What may be mended**: a `defect` finding at or above the confidence
+  floor (`high` by default) whose `proposedFix` cites the intentional
+  choices it checked. A `mechanism_candidate` is never eligible and there is
+  deliberately no flag to make it one — a mender that took candidates would be
+  a same-day gate with a commit button, the exact thing COOLING-OFF forbids.
+  `security_incident` stays an alert.
+- **What may be shipped**: changes under `src/`, `tests/` and
+  `docs/incidents/` only, at least one test file, at least one source file,
+  at most 600 changed lines. Workflows, deploy scripts, hooks, dependencies
+  and the supervisor's own scripts are a person's decision. Anything else is
+  `refused` with the worktree kept for inspection and no push.
+- **Trace text never reaches the model.** `sanitiseFinding` keeps evidence
+  quotes only for refs into the repository source; every other quote is
+  replaced by a withheld marker, and the worktree has no `runs/` or
+  `supervisor/` to open. The PR body is built from the same sanitised view.
+- **One defect, one PR.** `Defect-Key` (a normalised hash of where and
+  title) rides the commit and the PR body; a finding whose key already has an
+  open PR or a local `pr-opened` record is `skipped-duplicate`. It is an
+  approximation and is documented as one.
+- **Never beside a run.** Same idle predicate as the analyst, asserted before
+  each heavy phase (install, model, full check); a machine-wide
+  `supervisor/mender.lock` keeps mends serial. Records land in
+  `supervisor/mender/<runId>.<finding>.json` and `supervisor/mender.jsonl`.
+- **Journaled**: every verdict is a `supervisor.verdict` row; every mend
+  that touched the deployment is a `mender.started` row followed by one of
+  `mender.declined`, `mender.refused`, `mender.pr_opened`, `mender.failed`.
+  Rows carry facts only. `mender.pr_opened` and `mender.failed` push to
+  platform admins; the rest are audit-only. Not yet: any autonomy widening
+  (P4). Decision 2 closes as proposal-only.
+- **Proof**: `tests/mender-pipeline.test.ts` drives the real harness against
+  a real repository with a bare remote and a real SQLite journal, substituting
+  the three external programs through the `ATOMA_MENDER_CMD_*` seams;
+  `tests/mender-policy.test.ts` holds the pure half, `tests/analyst.test.ts`
+  the analyst with a stub model, `tests/supervisor-contracts.test.ts` the
+  schemas and their derived JSON Schema.
+
+The original design text, kept for the reasoning:
+
 - On an approved `defect` verdict, the mender (Claude Code) works in an
   **isolated git worktree** — never in the checkout serving runs, which makes
   "never edit `src/` while a batch is running" true by construction.
@@ -277,7 +345,8 @@ inhibitor (`caffeinate`) because the machine sleeps on battery.
 
 ## Phasing
 
-- **P0 (this commit)** — out-of-product validation of the analyst loop:
+- **P0** — out-of-product validation of the analyst loop (since moved to
+  `src/supervisor/analyst.ts`, 2026-09-05):
   `scripts/analyst-watch.mjs` (watcher: detects terminal runs from
   `runs/index.json`, checks the lease and live-run activity, digests the
   trace, drives `claude -p`, validates and routes the verdict) and
@@ -288,8 +357,11 @@ inhibitor (`caffeinate`) because the machine sleeps on battery.
   the verdict format is right, the classification is calibrated on real
   runs, and the quota sequencing holds.
 - **P1** — the in-product sentinel: rule table, new journal kinds, push.
-- **P2** — the gated mender: worktree, branch, notification, approval.
-- **P3** — green/blue slots, lease-gated switch, rollback, deploy journal.
+- **P2** — the gated mender: worktree, branch, PR, approval. LANDED
+  2026-09-05 (`src/supervisor/mender.ts`), journaled and pushed to admins.
+- **P3** — ~~green/blue slots, lease-gated switch, rollback, deploy journal~~
+  SUPERSEDED: the merge on `main` already runs the packaged deployment
+  (`.github/workflows/deploy.yml`), which is the green/blue this stage needed.
 - **P4** — measured autonomy widening for the mender.
 
 ## P0 results, measured 2026-08-22
@@ -378,6 +450,57 @@ v1 must split them — `runAssessment` (how did this run go) separate from
 `findings` (what should change), with routing driven by findings only. The
 conflated global verdict is the wrong shape.
 
+## Open work after P2 — where to pick up (2026-09-05)
+
+Ordered by what the next session should do first. Each item names the file
+it lands in, so none of them needs re-designing.
+
+1. **First real mend.** The model's leash — `--restricted`,
+   `--permission-mode dontAsk`, `MENDER_ALLOWED_TOOLS` in
+   `src/supervisor/mender.ts` — has only been DRY-RUN against this repository,
+   never exercised against the real `claude` binary. Procedure: analyse a
+   failed run (`npm run analyst -- --run <id>`), confirm the verdict carries
+   a cited high-confidence `defect`, run `npm run mender -- --once --dry-run`,
+   then without `--dry-run`. Read `supervisor/mender/<runId>.<n>.json` and
+   the `mender.*` journal rows: `model-failed` or `invalid-report` with a
+   kept worktree means a flag the CLI version rejects, and the fix is in
+   `menderSessionArgs`. Record the outcome, cost and turns here as the first
+   P2 measurement.
+2. ~~**Journal row per mend.**~~ DONE 2026-09-05 with the move in-product:
+   `supervisor.verdict` and the five `mender.*` kinds, rows carrying facts
+   only (`src/supervisor/journal.ts`).
+3. ~~**Push notification when a PR opens.**~~ DONE 2026-09-05:
+   `mender.pr_opened` and `mender.failed` route to platform admins with a
+   body naming the branch and the PR URL, never the finding text. Not yet
+   fired for real — see item 1.
+4. ~~**Analyst → mender coupling.**~~ SETTLED 2026-09-05, as three hosts:
+   the production viz server hosts the ANALYST as an opt-in resident
+   (`ATOMA_VIZ_ANALYST=1`, triggered by the journal's own `run.finished`
+   rows, quiet period and idle gate kept); a cited defect is DISPATCHED to
+   the repository's `Mender` workflow as a `MendRequest`; the CI runner
+   hosts the MENDER with the idle gate off, and opens the pull request. The
+   serving host never runs the mender. Contract and reasoning in
+   [src/supervisor/AGENTS.md](../src/supervisor/AGENTS.md); operator
+   procedure in [automatic-deployment.md](automatic-deployment.md). What
+   remains is item 1: the first real mend, now driven from production.
+5. **Defect-Key calibration.** The key is a normalised hash of
+   `proposedFix.where` + title. Measure on real verdicts whether two runs
+   surfacing one defect collide (wanted) and whether two defects in one file
+   collide (unwanted). If the second happens, add the first `src/` evidence
+   ref to the material.
+6. **Mid-phase run start.** The idle predicate is asserted before install,
+   model and full check, not during them. A run that starts while
+   `npm run check` runs competes for the machine. The alternative — holding
+   the MCP run lease during a mend, as `deploy:preflight --hold` does — was
+   deliberately not taken because it would refuse product runs for a
+   background improver. Revisit with data from item 1.
+7. **P4, autonomy widening.** Proposal-only until a measured count of mends
+   merged without retouch exists per defect class. Count from the journal
+   (`mender.pr_opened` rows) against merged PRs carrying
+   `Authored-By: atoma mender`. Nothing to build before the count exists.
+8. **Sentinel kill switch** — open decision 4 below, unchanged. Independent
+   of the mender.
+
 ## Open decisions
 
 1. ~~**Analyst trigger granularity**~~ — SETTLED by the P0 measurement above:
@@ -387,8 +510,11 @@ conflated global verdict is the wrong shape.
    while the operator-owned GLM-5.3 pin passed the same protocol 5/5. GLM-5.3
    is the configured analyst; pinned Sonnet 5 is only the no-override fallback,
    and the economics remain managed by the trigger.
-2. **Mender initial autonomy** — proposal-only with operator approval
-   (proposed default), or immediate auto-merge for trivial defect classes?
-3. **Green/blue scope** — compiled path only (proposed default: it is the
-   release contract), or also source-level `mcp:dev` launches?
+2. ~~**Mender initial autonomy**~~ — SETTLED 2026-09-05: proposal-only. The
+   mender opens a pull request and a person merges; there is no auto-merge
+   path in the code. Widening (P4) waits for a measured count of merged-
+   without-retouch mends per defect class.
+3. ~~**Green/blue scope**~~ — SETTLED 2026-09-05 by not building it: the
+   post-CI production deployment already activates every merged `main`
+   revision, so the mender's PR rides that path and no second switch exists.
 4. **Sentinel kill switch** — active from P1, or journal-only first?

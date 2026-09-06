@@ -179,10 +179,17 @@ export class ProjectService {
 
   /** POST /api/projects — org:member or above. */
   async createProject(req: IncomingMessage, viewer: Viewer): Promise<unknown> {
+    return this.createProjectFromInput(viewer, await readJsonBody(req));
+  }
+
+  /**
+   * The same creation from an already-parsed payload: the MCP's door. The
+   * HTTP route is a body reader in front of this; the checks live once.
+   */
+  createProjectFromInput(viewer: Viewer, body: unknown): unknown {
     if (!roleAtLeast(viewer.role, 'org:member')) {
       throw new ProjectHttpError(403, 'org:member role or above is required to create projects');
     }
-    const body = await readJsonBody(req);
     const input = createProjectInputSchema.safeParse(body);
     if (!input.success) throw new ProjectHttpError(400, 'invalid project payload');
     if (this.github) {
@@ -239,10 +246,22 @@ export class ProjectService {
 
   /** POST /api/projects/:id/runs — org:member or above; idempotent by key. */
   async startProjectRun(req: IncomingMessage, viewer: Viewer, projectId: string): Promise<unknown> {
+    return this.startProjectRunFromInput(viewer, projectId, await readJsonBody(req));
+  }
+
+  /** One project run, for a poller: the MCP's `atoma_run_status`. */
+  projectRunStatus(viewer: Viewer, projectId: string, projectRunId: string): unknown {
+    const orgId = this.readOrgFor(viewer, projectId);
+    const run = this.store.getProjectRun(orgId, projectRunId);
+    if (!run || run.projectId !== projectId) throw new ProjectHttpError(404, 'project run not found');
+    return publicRun(run, this.store.getPublicationForRun(orgId, run.projectRunId));
+  }
+
+  /** The same start from an already-parsed payload: the MCP's door. */
+  async startProjectRunFromInput(viewer: Viewer, projectId: string, body: unknown): Promise<unknown> {
     if (!roleAtLeast(viewer.role, 'org:member')) {
       throw new ProjectHttpError(403, 'org:member role or above is required to start runs');
     }
-    const body = await readJsonBody(req);
     const input = createProjectRunInputSchema.safeParse(body);
     if (!input.success) throw new ProjectHttpError(400, 'invalid run payload');
     try {

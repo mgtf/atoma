@@ -35,7 +35,7 @@ non-exclusive, no-charge, royalty-free, irrevocable copyright licence to
 reproduce, prepare derivative works of, publicly display, publicly perform,
 sublicense, and distribute Your Contributions and such derivative works, under
 any licence terms the Licensor chooses, including the Project's current
-licence, any licence it converts to, and commercial or proprietary licences.
+licence and commercial licences, within the commitment made in section 5.
 
 ## 3. Grant of patent licence
 
@@ -66,20 +66,28 @@ You represent that:
 - You will notify the Project of any facts or circumstances of which You become
   aware that would make these representations inaccurate in any respect.
 
-## 5. No obligation, no warranty
+## 5. Commitment to open source
+
+The Licensor commits that the Project's publicly released source code will
+remain available under a licence approved by the Open Source Initiative. The
+rights granted in sections 2 and 3 may additionally be exercised to offer the
+Project under commercial terms to parties that cannot accept that licence, but
+not to withdraw the Project from open source.
+
+## 6. No obligation, no warranty
 
 The Licensor is under no obligation to accept or include any Contribution.
 Except for the representations in section 4, You provide Your Contributions
 "AS IS", without warranties or conditions of any kind.
 
-## 6. Moral rights
+## 7. Moral rights
 
 To the extent permitted by applicable law, You agree not to assert moral rights
 in Your Contributions against the Licensor or recipients of the Project in a
 way that would prevent the exercise of the licences granted above. Attribution
 of Your Contributions remains in the Project's version history.
 
-## 7. Miscellaneous
+## 8. Miscellaneous
 
 This Agreement is governed by the laws of Greece, and the courts of Athens
 have exclusive jurisdiction over any dispute arising from it. It is the entire agreement

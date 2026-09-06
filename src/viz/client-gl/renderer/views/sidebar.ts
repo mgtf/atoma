@@ -323,6 +323,9 @@ export function drawSidebar(
   const itemWidth = iconOnly
     ? Math.min(width, FOCUS_SIDEBAR_BUTTON_WIDTH)
     : Math.max(0, width - buttonX - SIDEBAR_PAD);
+  // Every nav button animates every frame (scanline, sparks, spin, pulse), so
+  // the whole rail draws into ONE render group while headings stay in root.
+  const rail = ctx.animatedLayer(ctx.root, 'sidebar-rail');
   for (const row of sidebarLayout(
     visibleViews(snapshot.data.auth),
     layoutHeight,
@@ -378,7 +381,7 @@ export function drawSidebar(
     if (row.kind === 'action') {
       const label = snapshot.t('nav.sceneTuning');
       ctx.navButton(
-        ctx.root,
+        rail,
         'tuning.toggle',
         label.toUpperCase(),
         buttonX,
@@ -393,7 +396,7 @@ export function drawSidebar(
     }
     const label = snapshot.t(`nav.${row.view}`);
     ctx.navButton(
-      ctx.root,
+      rail,
       `nav.${row.view}`,
       label.toUpperCase(),
       buttonX,

@@ -798,6 +798,59 @@ export class ProjectStore {
     }));
   }
 
+  /**
+   * Runs the control plane says have ENDED, with the trace to analyse and the
+   * scope a verdict about them belongs to — the analyst's corpus, symmetric to
+   * `listLiveRunTraces` for the sentinel. `ended_at` is the transactional
+   * terminal fact, so no quiet-period inference is needed here; the caller
+   * still waits for the machine to be idle before spending on one.
+   *
+   * Cross-org by construction, for the same reason as the two listings above:
+   * the caller is the platform-wide supervisor, never a tenant surface.
+   */
+  listFinishedRunTraces(): Array<{
+    projectRunId: string;
+    orgId: string;
+    projectId: string;
+    projectSlug: string;
+    status: 'delivered' | 'failed' | 'cancelled';
+    endedAt: string;
+    file: string | null;
+  }> {
+    const rows = this.db
+      .prepare(
+        `SELECT r.project_run_id, r.trace_id, r.runs_path, r.org_id, r.project_id, r.status, r.ended_at,
+                p.slug AS project_slug
+         FROM project_runs r
+         JOIN projects p ON p.project_id = r.project_id AND p.org_id = r.org_id
+         WHERE r.status IN ('delivered', 'failed', 'cancelled') AND r.ended_at IS NOT NULL
+         ORDER BY r.ended_at ASC, r.project_run_id ASC`
+      )
+      .all() as Array<{
+      project_run_id: string;
+      trace_id: string | null;
+      runs_path: string;
+      org_id: string;
+      project_id: string;
+      status: 'delivered' | 'failed' | 'cancelled';
+      ended_at: string;
+      project_slug: string;
+    }>;
+    return rows.map((row) => ({
+      projectRunId: row.project_run_id,
+      orgId: row.org_id,
+      projectId: row.project_id,
+      projectSlug: row.project_slug,
+      status: row.status,
+      endedAt: row.ended_at,
+      file: resolveProjectRunTraceFile({
+        projectRunId: row.project_run_id,
+        runsPath: row.runs_path,
+        traceId: row.trace_id,
+      }),
+    }));
+  }
+
   findAnyRunTraceFile(idInput: string): string | null {
     if (!isRunLookupId(idInput)) return null;
     const asUuid = projectRunIdSchema.safeParse(idInput);
@@ -952,6 +1005,15 @@ export class ProjectStore {
     const row = this.db
       .prepare('SELECT * FROM project_runs WHERE project_run_id = ? AND org_id = ?')
       .get(projectRunId, orgId) as ProjectRunRow | undefined;
+    return row ? runFromRow(row) : null;
+  }
+
+  /** A platform admin's READ across organisations; never a write path. */
+  getProjectRunAnyOrg(projectRunIdInput: string): ProjectRun | null {
+    const projectRunId = projectRunIdSchema.parse(projectRunIdInput);
+    const row = this.db
+      .prepare('SELECT * FROM project_runs WHERE project_run_id = ?')
+      .get(projectRunId) as ProjectRunRow | undefined;
     return row ? runFromRow(row) : null;
   }
 
