@@ -104,9 +104,13 @@ relies on. The check is conservative on purpose (it compares the lowest two
 labels), so it refuses more configurations than strictly necessary.
 
 ```
-visualizer   atoma.example.com
+visualizer   atoma.run
 previews    *.previews.example.net      A/AAAA -> the same host
 ```
+
+`atoma.run` is the one public name of the product. Previews cannot live under
+it: a subdomain such as `previews.atoma.run` shares its registrable domain and
+is refused at boot, so the preview domain is a second, purpose-bought name.
 
 One host per preview GENERATION, derived from `(orgId, runId, generation)`. A
 restart mints a new generation and therefore a new origin, which is what makes
@@ -121,7 +125,7 @@ from the `Host` header alone. Send the header through unchanged — it IS the
 routing key.
 
 ```caddyfile
-atoma.example.com {
+atoma.run {
     reverse_proxy 127.0.0.1:5173
 }
 
@@ -156,7 +160,7 @@ Every variable, with the reasoning, is in
 
 ```bash
 ATOMA_VIZ_AUTH=1
-ATOMA_VIZ_PUBLIC_ORIGIN=https://atoma.example.com
+ATOMA_VIZ_PUBLIC_ORIGIN=https://atoma.run
 ATOMA_PREVIEW=1
 ATOMA_PREVIEW_DOMAIN=previews.example.net
 ATOMA_PREVIEW_IMAGE=<registry>/atoma-preview@sha256:...

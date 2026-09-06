@@ -16,7 +16,7 @@ verification — down to models that cost a fraction as much.*
 ![breakeven](https://img.shields.io/badge/break--even-run_1–2_in_7_of_11_rounds-gold)
 ![providers](https://img.shields.io/badge/LLM_routes-Anthropic_·_Claude_·_Ollama_·_Z.ai_·_Codex-8A2BE2)
 
-**[→ How it works, in detail](docs/how-it-works.md)**
+**[→ How it works, in detail](docs/how-it-works.md)** · **[atoma.run](https://atoma.run)**
 
 </div>
 

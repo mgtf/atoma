@@ -133,7 +133,7 @@ describe('mendInputFromRequest', () => {
       runId: EXAMPLE_MEND_REQUEST.runId,
       index: 0,
       run: { runStatus: 'failed', grade: 'deficient' },
-      instance: 'atoma.example.com',
+      instance: 'atoma.run',
     });
     expect(input.finding.title).toBe(EXAMPLE_MEND_REQUEST.finding.title);
     expect(() => mendInputFromRequest({ ...EXAMPLE_MEND_REQUEST, schema: 'other' })).toThrow();

@@ -157,7 +157,7 @@ export const EXAMPLE_MEND_REQUEST: MendRequest = mendRequestSchema.parse({
       { ref: 'supervisor/work/x/events.ndjson:9', quote: WITHHELD_QUOTE },
     ],
   },
-  instance: 'atoma.example.com',
+  instance: 'atoma.run',
 });
 
 /** Schema-validated example, parsed at module load (contracts convention). */

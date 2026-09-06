@@ -4,6 +4,10 @@
 
 ### Added
 
+- `atoma.run` is the public name of the product: `package.json` declares it as
+  the homepage, the README links it, and the deployment, preview and MCP
+  documentation use it in place of `atoma.example.com`. Previews still need a
+  second registrable domain.
 - The repository is public under the GNU Affero General Public License v3.0
   (`AGPL-3.0-only`): `LICENSE`, a `license` field in `package.json`, a README
   licence section, `CONTRIBUTING.md`, a contributor licence agreement

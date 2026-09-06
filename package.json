@@ -3,6 +3,7 @@
   "version": "0.1.4",
   "private": true,
   "license": "AGPL-3.0-only",
+  "homepage": "https://atoma.run",
   "type": "module",
   "description": "Three-tier LLM agent orchestration with persisted types, earned trust, and symmetric supervision",
   "scripts": {

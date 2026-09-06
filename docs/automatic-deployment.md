@@ -255,14 +255,14 @@ Do not start the empty service before its first release has created the
 
 ## Plugging an agent into the instance (MCP)
 
-The instance serves ONE MCP at `https://<host>/mcp`. A signed-in principal
+The instance serves ONE MCP at `https://atoma.run/mcp`. A signed-in principal
 mints a bearer token for its active organisation in **Settings → Connect your
 AI agent (MCP)** — the panel shows the address, the procedure and the exact
 line to paste — (`POST /api/tokens` underneath, or the operator on the host: `npm run auth -- token --principal <id-or-email> --org
 <org-id-or-name> --label "<what for>"`), then registers the URL:
 
 ```bash
-claude mcp add atoma --transport http https://<host>/mcp --header "Authorization: Bearer <token>"
+claude mcp add atoma --transport http https://atoma.run/mcp --header "Authorization: Bearer <token>"
 ```
 
 The tools the agent sees follow the principal's role; a platform admin's token
@@ -287,10 +287,10 @@ branch. Add these environment variables:
 
 | Variable | Example |
 |---|---|
-| `ATOMA_DEPLOY_HOST` | `atoma.example.com` |
+| `ATOMA_DEPLOY_HOST` | `atoma.run` |
 | `ATOMA_DEPLOY_PORT` | `22` |
 | `ATOMA_DEPLOY_USER` | `atoma-deploy` |
-| `ATOMA_DEPLOY_URL` | `https://atoma.example.com/` |
+| `ATOMA_DEPLOY_URL` | `https://atoma.run/` |
 
 Add two environment secrets:
 
