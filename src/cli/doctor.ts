@@ -42,7 +42,7 @@ import { GITHUB_APP_ENV, snapshotGitHubAppConfig } from '../github/config.js';
 import { applyCheckoutDotenvForSourceEntry } from './loadDotenv.js';
 
 const runFile = promisify(execFile);
-export const NODE_ENGINE_RANGE = '^22.13.0 || >=24';
+export const NODE_ENGINE_RANGE = '^22.14.0 || >=24';
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail';
 
@@ -137,7 +137,7 @@ export function nodeVersionSupported(version: string): boolean {
   if (!match) return false;
   const major = Number(match[1]);
   const minor = Number(match[2]);
-  if (major === 22) return minor >= 13;
+  if (major === 22) return minor >= 14;
   return major >= 24;
 }
 
@@ -608,7 +608,7 @@ export async function diagnoseDoctor(args: {
           label: 'Node.js',
           status: 'fail',
           detail: `${deps.nodeVersion} does not satisfy ${NODE_ENGINE_RANGE}`,
-          remedy: 'Install Node 22.13+ or 24+.',
+          remedy: 'Install Node 22.14+ or 24+.',
         }
   );
 

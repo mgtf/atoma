@@ -18,6 +18,8 @@ if (!existsSync(vizEntry) || !existsSync(vizIndex)) {
 if (!existsSync(mcpTools)) {
   throw new Error(`compiled MCP catalogue missing: ${mcpTools} (run npm run build first)`);
 }
+// Also runs on the production host after npm ci --omit=dev, before activation.
+await import('./sqlite-release-smoke.mjs');
 const smokeRoot = mkdtempSync(join(tmpdir(), 'atoma-release-smoke-'));
 
 const freePort = async () =>

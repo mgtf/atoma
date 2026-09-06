@@ -11,14 +11,16 @@ describe('Node version contract', () => {
       engines?: { node?: string };
     };
 
-    expect(local).toBe('22.13.0');
-    // core, i18n, viz-smoke, preview-runtime, worker and mender isolation pin the
-    // same Node as the engine floor — the count grows with the workflow on
-    // purpose, so a new job cannot quietly run on whatever the runner happens
-    // to ship.
-    expect(ci.match(/node-version:\s*22\.13\.0/g)).toHaveLength(6);
-    expect(release.match(/node-version:\s*22\.13\.0/g)).toHaveLength(1);
-    expect(pkg.engines?.node).toContain('^22.13.0');
+    expect(local).toBe('22.14.0');
+    // Core verifies both the engine floor and the observed production runtime.
+    // The remaining jobs pin the floor, including the mender command image.
+    expect(ci).toContain("node: ['22.14.0', '24.20.0']");
+    expect(ci.match(/node-version:\s*\$\{\{ matrix.node \}\}/g)).toHaveLength(1);
+    expect(ci.match(/node-version:\s*22\.14\.0/g)).toHaveLength(5);
+    expect(readFileSync('.github/workflows/mender.yml', 'utf8')).toContain('node-version: 22.14.0');
+    expect(readFileSync('docker/mender.Dockerfile', 'utf8')).toContain('FROM node:22.14.0-bookworm');
+    expect(release.match(/node-version:\s*22\.14\.0/g)).toHaveLength(1);
+    expect(pkg.engines?.node).toContain('^22.14.0');
     expect(nodeVersionSupported(local)).toBe(true);
   });
 });

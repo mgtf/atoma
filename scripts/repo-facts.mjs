@@ -118,7 +118,7 @@ export function readAgentPools(repoRoot) {
 /**
  * Supported Node, from the two files that actually decide it: `.nvmrc` pins the
  * development version and `engines` states the supported range. The README
- * prints a third, prose form ("22.13+ / 24+"), and that is what drifts.
+ * prints a third, prose form ("22.14+ / 24+"), and that is what drifts.
  */
 export function readNodeSupport(repoRoot) {
   const nvmrc = read(repoRoot, '.nvmrc').trim();
@@ -131,7 +131,7 @@ export function readNodeSupport(repoRoot) {
   return {
     nvmrc,
     engines,
-    /** "22.13+ / 24+" — the shape the README body and its footer print. */
+    /** "22.14+ / 24+" — the shape the README body and its footer print. */
     display: supported.map((m) => (m === pinnedMajor ? `${pinned[1]}.${pinned[2]}+` : `${m}+`)).join(' / '),
   };
 }

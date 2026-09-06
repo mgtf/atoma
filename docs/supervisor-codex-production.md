@@ -7,13 +7,14 @@ credentials in auth.json, and keeps the existing Claude path available.
 ## Debian analyst
 
 Install Codex CLI 0.152.0 or a compatible version under the service account.
-A nologin account can run an explicitly selected shell:
+A nologin account can run an explicitly selected shell. Create a dedicated
+analyst profile under the writable service state directory:
 
 ```sh
-sudo -H -u atoma /bin/bash
-codex login --device-auth
-codex login status
-exit
+sudo install -d -o atoma -g atoma -m 700 /home/atoma/state/codex /home/atoma/state/codex/analyst
+sudo -H -u atoma env CODEX_HOME=/home/atoma/state/codex/analyst /bin/bash -lc 'codex login --device-auth'
+sudo -H -u atoma env CODEX_HOME=/home/atoma/state/codex/analyst /bin/bash -lc 'codex login status'
+sudo -H -u atoma /bin/bash -lc 'command -v codex'
 ```
 
 Add these to the service's EnvironmentFile, normally
@@ -22,8 +23,8 @@ Add these to the service's EnvironmentFile, normally
 ```dotenv
 ATOMA_ANALYST_TRANSPORT=codex
 ATOMA_ANALYST_MODEL=gpt-5.6-sol
-ATOMA_ANALYST_CODEX_HOME=/home/atoma/.codex
-ATOMA_SUPERVISOR_CMD_CODEX=/home/atoma/.local/bin/codex
+ATOMA_ANALYST_CODEX_HOME=/home/atoma/state/codex/analyst
+ATOMA_SUPERVISOR_CMD_CODEX=/home/atoma/state/.local/bin/codex
 ATOMA_SUPERVISOR_DIR=/home/atoma/supervisor
 ATOMA_VIZ_ANALYST=1
 ATOMA_ANALYST_QUIET_MS=120000
@@ -32,7 +33,10 @@ ATOMA_MENDER_DISPATCH_TOKEN=<repository-dispatch token>
 ATOMA_MENDER_DISPATCH_MIN_CONFIDENCE=high
 ```
 
-Use the actual installed binary path. Remove `ATOMA_ANALYST_BASE_URL` and
+Use the actual installed binary path printed above. The profile's parent must
+also be writable by atoma: its SQLite lease is a sibling of CODEX_HOME. A
+root-owned `/home/atoma` does not meet that requirement for `/home/atoma/.codex`.
+Remove `ATOMA_ANALYST_BASE_URL` and
 `ATOMA_ANALYST_AUTH_TOKEN` when selecting Codex. Create the supervisor directory
 owned by atoma. Restart the service when no run/preview is active. The sentinel
 is on by default behind the auth gate; `ATOMA_VIZ_SENTINEL=0` disables it.

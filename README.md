@@ -501,7 +501,7 @@ process group is confirmed gone and the trace has closed.
 ## Status
 
 **Working research system, honestly labelled.** Strict TypeScript on Node
-22.13+ or 24+, with hermetic and fresh-worker CI.
+22.14+ or 24+, with hermetic and fresh-worker CI.
 
 What exists: the full three-tier loop, the learning and compilation lifecycle, sandboxed
 execution with opt-in container isolation and proxied egress, an append-only audit ledger with
@@ -529,7 +529,7 @@ that exists in `src/` and not in this picture fails <code>npm run docs:check</co
 | Read out of this checkout | |
 | --- | --- |
 | Version | `0.1.4` |
-| Node | 22.13+ / 24+ (`.nvmrc` 22.13.0, `engines` ^22.13.0 \|\| >=24) |
+| Node | 22.14+ / 24+ (`.nvmrc` 22.14.0, `engines` ^22.14.0 \|\| >=24) |
 | Subsystems under their own contract | 18 |
 | MCP tools | 24 |
 | Curated agent names | 118 molecules · 40 cells · 20 tissues |
@@ -565,6 +565,6 @@ under `src/viz/public/` carry their CC0 and CC-BY-4.0 notices beside the files.
 ---
 
 <div align="center">
-<sub>TypeScript · SQLite · Node 22.13+ / 24+ · the corpus table regenerates with <code>npm run burnin</code>;
+<sub>TypeScript · SQLite · Node 22.14+ / 24+ · the corpus table regenerates with <code>npm run burnin</code>;
 the controlled rounds are in <code>benchmark/</code></sub>
 </div>
