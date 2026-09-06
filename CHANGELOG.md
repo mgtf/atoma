@@ -2,6 +2,52 @@
 
 ## Unreleased
 
+## v0.2.0 — 2026-09-07
+
+The first public release: the repository is open on GitHub under the AGPL.
+This version gathers everything landed since v0.1.4.
+
+### Added
+
+- Result previews: a delivered run's deliverable is classified and served in
+  its own isolated instance (static or runtime), reachable from the Runs view
+  and from a project; `npm run doctor -- --preview` checks the host and
+  `npm run preview:demo` makes the surface clickable on a machine that cannot
+  execute a run.
+- The supervisor: a resident post-mortem analyst (`npm run analyst`, opt-in
+  with `ATOMA_VIZ_ANALYST=1`) grades ended runs behind the shared idle gate,
+  and the mender (`npm run mender`) turns a cited high-confidence defect into
+  one pull request on `main` from an isolated worktree; a person merges. Both
+  stages are journaled and typed by one contract per shape.
+- The sentinel: a mechanical live watch over runs in flight (rules, sources,
+  hosts) hosted by the viz server, with `npm run sentinel -- --once`.
+- Personal host subscriptions: a run can route a tier through the caller's own
+  Claude Code or ChatGPT subscription instead of an API key, configured per
+  tier from Settings.
+- Settings is split into tabs: general, LLM models, personal subscriptions,
+  provider API keys and the Atoma MCP panel, which mints a bearer token shown
+  once, lists and revokes them, and gives the exact client registration line.
+- Bearer API tokens (`/api/tokens`, `npm run auth -- token`), hashed at rest,
+  organisation-bound and journaled.
+- Production deployment is automated after CI, keeps state on a dedicated
+  disk, and `npm run deploy:preflight` refuses to deploy over a live run.
+- `npm run docs:facts` and `npm run docs:architecture` generate the README's
+  derived facts and the architecture diagram; `docs:check` asserts the prose.
+
+### Changed
+
+- ONE MCP for everyone, over HTTP: the compiled viz server serves the
+  Streamable HTTP endpoint on `/mcp`, a catalogue of 24 tools whose visibility
+  follows the caller's role (viewer, member, admin, platform), sessions bound
+  to one bearer token. The stdio server and `npm run mcp` are removed.
+  Operator run tools are `atoma_operator_run_*`; `atoma_run_*` are project
+  runs. Decision record: `docs/mcp-one-surface-2026-09-05.md`.
+- The GPU visualizer isolates every per-frame animation in its own retained
+  render group, so a pulsing chip no longer re-uploads the whole view each
+  frame; the frame is measured by `viz:smoke`.
+- Node 24 is supported: the legacy SQLite bindings are replaced.
+- ESLint 10.
+
 ### Added
 
 - `atoma.run` is the public name of the product: `package.json` declares it as

@@ -531,7 +531,7 @@ that exists in `src/` and not in this picture fails <code>npm run docs:check</co
 
 | Read out of this checkout | |
 | --- | --- |
-| Version | `0.1.4` |
+| Version | `0.2.0` |
 | Node | 22.14+ / 24+ (`.nvmrc` 22.14.0, `engines` ^22.14.0 \|\| >=24) |
 | Subsystems under their own contract | 18 |
 | MCP tools | 24 |
