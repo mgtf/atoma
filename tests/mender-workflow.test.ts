@@ -45,5 +45,7 @@ describe('the dedicated mender host', () => {
     ` });
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout.trim()).toBe('rm --force container-one container-two');
+    const unavailable = spawnSync('bash', [], { encoding: 'utf8', input: `docker() { return 7; }\n${script}` });
+    expect(unavailable.status).toBe(7);
   });
 });
