@@ -1,6 +1,6 @@
 # Contributing to atoma
 
-Thank you for looking under the hood. This page is the short version; the
+Thank you for looking under the hood. This page is the short version hohoho; the
 engineering contract itself lives in [`AGENTS.md`](AGENTS.md) and the
 per-subsystem `AGENTS.md` files it maps, and it applies to humans and coding
 agents alike.
