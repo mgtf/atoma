@@ -424,7 +424,6 @@ describe('full-GL minimal DOM bridge', () => {
       ['runs', '.gpu-run-input'],
       ['registry', '.gpu-view-search'],
       ['skills', '.gpu-view-search'],
-      ['settings', '.gpu-settings-form'],
     ] as const;
     for (const [view, selector] of cases) {
       cleanup();
@@ -460,7 +459,10 @@ describe('full-GL minimal DOM bridge', () => {
   });
 
   it('restores interactive view overlays once both overlay menus are closed', () => {
-    for (const view of ['runs', 'projects', 'settings'] as const) {
+    // Settings is absent here on purpose: its only DOM overlay is the tabbed
+    // body GpuApp injects (`orgModelsForm`), which takes the veil from its
+    // own `overlaysInert` prop rather than from the bridge.
+    for (const view of ['runs', 'projects'] as const) {
       cleanup();
       useGpuStore.setState({
         view,

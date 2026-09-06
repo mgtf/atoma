@@ -44,8 +44,8 @@ const GRANDFATHERED_SKIN_TOKENS = new Set([
   // background, no border) and the view draws the real frame with panel().
   'gpu-project-form',
   'gpu-project-form--run',
-  // The debts.
-  'gpu-settings-form',
+  // The debts. (`gpu-settings-form`, the fixed rename form, was retired when
+  // Settings became one tabbed body — the display name is in-flow now.)
   'gpu-org-models-form',
   'gpu-announce-form',
   // A floating dragged window by explicit contract (src/viz/AGENTS.md).

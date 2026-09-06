@@ -83,10 +83,7 @@ import {
   drawSettings,
   MEMBER_ROW_HEIGHT,
   organisationPanelLayout,
-  SETTINGS_DOM_FORM_HEIGHT,
-  SETTINGS_DOM_FORM_TOP,
-  SETTINGS_LLM_FORM_TOP,
-  settingsGpuContentTop,
+  SETTINGS_BODY_TOP,
 } from '../src/viz/client-gl/renderer/views/settings.js';
 import {
   attachAtomaMark,
@@ -1375,7 +1372,7 @@ describe('the nav rail', () => {
       `[\\s\\S]*?100vw - ${GPU_LAYOUT.contentMinWidth}px[\\s\\S]*?${GPU_LAYOUT.sidebarWidth}px`
     ));
     for (const selector of [
-      'gpu-run-input', 'gpu-project-form', 'gpu-view-search', 'gpu-settings-form',
+      'gpu-run-input', 'gpu-project-form', 'gpu-view-search',
       'gpu-announce-form', 'gpu-org-models-form',
     ]) {
       expect(css).toMatch(
@@ -1390,7 +1387,7 @@ describe('the nav rail', () => {
       ['gpu-run-input', RUN_PICKER_CONTROL_TOP],
       ['gpu-view-search', 102],
       ['gpu-project-form', 104],
-      ['gpu-settings-form', 172],
+      ['gpu-org-models-form', 172],
       ['gpu-announce-form', 104],
     ] as const) {
       expect(css).toMatch(
@@ -3450,19 +3447,19 @@ describe('drawSettings', () => {
     expect(ctx.panels.some((panel) => panel.parent === ctx.root)).toBe(true);
   });
 
-  it('keeps the GPU content clear of the DOM name form', () => {
-    // The form is `position: fixed` DOM over the canvas; content that started
-    // above its bottom edge would render underneath it.
-    expect(settingsGpuContentTop()).toBeGreaterThan(
-      SETTINGS_DOM_FORM_TOP + SETTINGS_DOM_FORM_HEIGHT
-    );
+  it('lays the tabbed Settings body under the account orb', () => {
+    // The body is `position: fixed` DOM over the canvas, starting where the
+    // orb ends; the former fixed rename form is gone — the display name is an
+    // in-flow block inside the General tab.
     const css = readFileSync('src/viz/client-gl/styles.css', 'utf8');
-    const form = css.slice(css.indexOf('.gpu-settings-form {'));
-    expect(form).toContain(`top: ${SETTINGS_DOM_FORM_TOP}px`);
-    expect(form).toContain(`height: ${SETTINGS_DOM_FORM_HEIGHT}px`);
+    expect(css).not.toContain('.gpu-settings-form');
+    expect(css).toContain('.gpu-settings-rename {');
     expect(css).toContain('.gpu-settings-username');
+    expect(css).toContain('.gpu-settings-tabs {');
+    expect(css).toContain(".gpu-settings-tab[aria-selected='true']");
+    expect(css).toContain('.gpu-settings-panel[hidden]');
     const llmForm = css.slice(css.indexOf('.gpu-org-models-form {'));
-    expect(llmForm).toContain(`top: ${SETTINGS_LLM_FORM_TOP}px`);
+    expect(llmForm).toContain(`top: ${SETTINGS_BODY_TOP}px`);
     expect(llmForm).toContain('bottom: 26px');
     expect(llmForm).toContain('border-radius: 8px');
     expect(css).toContain('.gpu-org-models-form::after');
@@ -3486,7 +3483,7 @@ describe('drawSettings', () => {
   it('no longer offers Pixi cells for the tier pickers — they are DOM now', () => {
     // The per-tier pickers moved out of the GL scene when BYO provider keys and
     // org defaults landed (e05c7b8): they are real DOM in `OrgModelsForm`, laid
-    // out under `SETTINGS_LLM_FORM_TOP`. `settingsModelId`, its parser and
+    // out under `SETTINGS_BODY_TOP`. `settingsModelId`, its parser and
     // `modelChipLabel` outlived their last caller and were kept alive by this
     // test alone — an id vocabulary the renderer had stopped publishing, which
     // is exactly what left the browser smoke waiting on
@@ -3501,7 +3498,7 @@ describe('drawSettings', () => {
     expect(view).not.toContain('settings.model.');
     expect(view).not.toContain('modelChipLabel');
     // The DOM form is where that vocabulary lives now.
-    expect(view).toContain('SETTINGS_LLM_FORM_TOP');
+    expect(view).toContain('SETTINGS_BODY_TOP');
   });
 });
 

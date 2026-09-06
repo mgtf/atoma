@@ -70,9 +70,17 @@ const ACCOUNT_MODELS: VizAccountModels = {
 
 const ORG_MODELS: VizOrgModels = {
   models: { l1: null, l2: null, l3: null },
-  keys: [],
+  keys: [{ provider: 'openai', configuredAt: '2026-09-02T08:00:00.000Z' }],
   encryptionReady: false,
-  catalog: [],
+  catalog: [
+    {
+      id: 'openai',
+      label: 'OpenAI',
+      credentialEnvVar: 'OPENAI_API_KEY',
+      suggestive: false,
+      models: [{ id: 'gpt-test', label: 'GPT test' }],
+    },
+  ],
   operatorDefaults: { l1: 'ollama:test', l2: 'ollama:test', l3: 'ollama:test' },
 };
 
@@ -82,7 +90,9 @@ function organisation(viewerRole: string): VizOrganisation {
     name: 'Example organisation',
     createdAt: '2026-09-04T10:00:00.000Z',
     viewerRole,
-    members: [],
+    members: [
+      { principalId: 'p-1', displayName: 'Ada', role: 'org:owner', joinedAt: '2026-09-01T09:30:00.000Z' },
+    ],
     projectCount: 0,
     pendingInvitations: null,
   };
@@ -108,7 +118,12 @@ function panel(overrides: Partial<PersonalSubscriptionsPanelProps> = {}) {
   return render(createElement(PersonalSubscriptionsPanel, props));
 }
 
-function orgModelsForm(viewerRole: string, enabled = true, children?: ReactNode) {
+function orgModelsForm(
+  viewerRole: string,
+  enabled = true,
+  children?: ReactNode,
+  profile?: ReactNode
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     createElement(
@@ -125,6 +140,7 @@ function orgModelsForm(viewerRole: string, enabled = true, children?: ReactNode)
           organisation: organisation(viewerRole),
           overlaysInert: false,
           onError: vi.fn(),
+          profile,
         },
         children
       )
@@ -193,17 +209,87 @@ describe('personal subscription settings', () => {
     }
   );
 
-  it('renders its children inside the Settings frame, above the subscriptions', async () => {
+  it('splits the body into five tabs and keeps every panel mounted, hidden', async () => {
     vi.spyOn(api, 'accountModels').mockResolvedValue(ACCOUNT_MODELS);
     vi.spyOn(api, 'orgModels').mockResolvedValue(ORG_MODELS);
     vi.spyOn(api, 'accountSubscriptions').mockResolvedValue(DISCONNECTED);
-    const { container } = orgModelsForm('org:member', true, createElement('p', { 'data-testid': 'settings-child' }, 'child'));
+    const user = userEvent.setup();
+    const { container } = orgModelsForm(
+      'org:member',
+      true,
+      createElement('p', { 'data-testid': 'settings-child' }, 'child')
+    );
 
-    const child = await screen.findByTestId('settings-child');
-    const frame = container.querySelector('.gpu-org-models-form');
-    expect(frame).not.toBeNull();
-    expect(frame!.contains(child)).toBe(true);
-    expect(frame!.firstElementChild).toBe(child);
+    const tabs = await screen.findAllByRole('tab');
+    expect(tabs.map((tab) => tab.textContent)).toEqual([
+      'General',
+      'LLM models',
+      'Your AI subscriptions',
+      'Your AI API keys',
+      'Atoma MCP',
+    ]);
+    expect(tabs[0]).toHaveAttribute('aria-selected', 'true');
+    // Every panel is in the DOM (a minted MCP token must survive a tab
+    // switch); only the active one is visible.
+    const panels = container.querySelectorAll('[role="tabpanel"]');
+    expect(panels).toHaveLength(5);
+    expect(Array.from(panels).filter((panel) => !panel.hasAttribute('hidden'))).toHaveLength(1);
+    // Children land in the MCP tab, hidden until it is selected.
+    const child = screen.getByTestId('settings-child');
+    expect(child.closest('#settings-panel-mcp')).not.toBeNull();
+    expect(child).not.toBeVisible();
+    await user.click(screen.getByRole('tab', { name: 'Atoma MCP' }));
+    expect(child).toBeVisible();
+    expect(screen.getByRole('tab', { name: 'Atoma MCP' })).toHaveAttribute('aria-selected', 'true');
+    // Arrow keys move the selection and wrap.
+    await user.keyboard('{ArrowRight}');
+    expect(screen.getByRole('tab', { name: 'General' })).toHaveAttribute('aria-selected', 'true');
+    await user.keyboard('{ArrowLeft}');
+    expect(screen.getByRole('tab', { name: 'Atoma MCP' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('shows the profile and the organisation in General, with a formatted join date', async () => {
+    vi.spyOn(api, 'accountModels').mockResolvedValue(ACCOUNT_MODELS);
+    vi.spyOn(api, 'orgModels').mockResolvedValue(ORG_MODELS);
+    vi.spyOn(api, 'accountSubscriptions').mockResolvedValue(DISCONNECTED);
+    orgModelsForm(
+      'org:member',
+      true,
+      undefined,
+      createElement('p', { 'data-testid': 'settings-profile' }, 'profile')
+    );
+
+    const profile = await screen.findByTestId('settings-profile');
+    expect(profile.closest('#settings-panel-general')).not.toBeNull();
+    expect(profile).toBeVisible();
+    // The raw ISO slice ("2026-09-01") is what shipped; a date is expected.
+    expect(screen.getByText(/joined September 1, 2026/)).toBeInTheDocument();
+    expect(screen.queryByText(/2026-09-01/)).not.toBeInTheDocument();
+  });
+
+  it('orders personal pins before the organisation defaults, greyed for a plain member', async () => {
+    vi.spyOn(api, 'accountModels').mockResolvedValue(ACCOUNT_MODELS);
+    vi.spyOn(api, 'orgModels').mockResolvedValue(ORG_MODELS);
+    vi.spyOn(api, 'accountSubscriptions').mockResolvedValue(DISCONNECTED);
+    const user = userEvent.setup();
+    orgModelsForm('org:member');
+
+    await user.click(await screen.findByRole('tab', { name: 'LLM models' }));
+    const selects = screen.getAllByRole('combobox');
+    expect(selects.map((select) => select.id)).toEqual([
+      'accountmodel-l1', 'accountmodel-l2', 'accountmodel-l3',
+      'orgmodel-l1', 'orgmodel-l2', 'orgmodel-l3',
+    ]);
+    for (const select of selects.slice(0, 3)) expect(select).toBeEnabled();
+    for (const select of selects.slice(3)) expect(select).toBeDisabled();
+    expect(screen.getByText(/Only organisation owners and admins can change these defaults/))
+      .toBeInTheDocument();
+
+    await user.click(screen.getByRole('tab', { name: 'Your AI API keys' }));
+    expect(screen.getByText(/Provider keys are managed by organisation owners and admins/))
+      .toBeInTheDocument();
+    for (const input of screen.getAllByRole('textbox')) expect(input).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /Save key|Replace key/ })).not.toBeInTheDocument();
   });
 
   it('requests the self-care subscription endpoint for an organisation member', async () => {
