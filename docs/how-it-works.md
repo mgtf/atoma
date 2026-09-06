@@ -461,7 +461,9 @@ Recorded so nobody has to discover it in a demo:
   multi-organisation login gate. A first login creates a personal organisation unless it redeems
   an invitation; a principal may join several organisations and choose an active one.
   Authenticated projects, their run workspaces, traces and project skills are scoped to that
-  organisation, while a platform admin can read across organisations. The atom catalogue, atom
+  organisation for now, while a platform admin can read across organisations. Skills are
+  meant to become a commons shared across organisations, with trust earned per organisation;
+  the partitioning is containment, not the premise. The atom catalogue, atom
   trust and lifecycle ledger remain instance-global, so this is not yet safe for mutually
   untrusted organisations; see the dated boundary in
   [`saas-architecture.md`](saas-architecture.md).

@@ -511,9 +511,11 @@ watch, platform notifications, and a measurement harness. A first login creates 
 organisation unless it redeems an invitation to an existing one.
 
 What does not: full tenant isolation or a hosted service. Authenticated projects, their run
-workspaces, traces and project skills are scoped to the viewer's active organisation; the
-platform admin can read across organisations. The atom catalogue, atom trust and lifecycle
-ledger remain instance-global, however, so the control plane is not yet safe for mutually
+workspaces, traces and project skills are scoped to the viewer's active organisation for now;
+skills are meant to become a commons shared across organisations, with trust earned per
+organisation. The platform admin can read across organisations. The atom catalogue, atom
+trust and lifecycle ledger remain instance-global, however, so the control plane is not yet
+safe for mutually
 untrusted organisations. The repository is public and open source so that the sandbox, the
 egress path and the cost accounting can be audited and built upon; the hosted service does
 not exist yet.

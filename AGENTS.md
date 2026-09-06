@@ -326,6 +326,13 @@ under owner namespaces keyed by atom id (`skills/<atom-id>/`). Compilation's
 measured value is maintenance verification, not from-scratch builds, and every
 operator lifecycle action is attributable.
 
+Skills are a platform commons by design: what one organisation's runs learn is
+meant to make every other organisation's runs cheaper. The organisation bounds
+TRUST and EXECUTION RIGHTS, never knowledge. Today's project-local partitioning
+is containment until the body/trust split lands, not the product premise; the
+premise and its threat model are in
+[docs/saas-architecture.md](docs/saas-architecture.md#skills-are-a-commons).
+
 ## Tools and runtime isolation
 
 Orientation only — the contract lives in [src/tools](src/tools/AGENTS.md). L1 is

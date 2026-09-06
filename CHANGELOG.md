@@ -9,6 +9,10 @@
   licence section, `CONTRIBUTING.md`, a contributor licence agreement
   (`CLA.md`) and `SECURITY.md`. Release archives now carry the licence and
   the security policy.
+- A `CLA` workflow (CLA Assistant Lite, pinned by commit) asks the author of
+  an external pull request to sign `CLA.md` and records signatures on the
+  unprotected `cla-signatures` branch; the repository owner and bots are
+  allowlisted.
 - The GPU visualizer now includes an in-product Docs surface, a grouped left
   navigation rail, and account Settings reached only from the account menu.
   Platform admins are offered the curated platform-alert subscription at
@@ -53,6 +57,12 @@
 
 ### Changed
 
+- Documentation premise: skills are a platform commons shared across
+  organisations, and the organisation bounds trust and execution rights, not
+  knowledge. Project-local partitioning is described as containment on the
+  way there; Track B is named the product target. The body/trust split and
+  the human gate on catalogue entry are unchanged (`docs/saas-architecture.md`
+  §2, root and projects contracts, README, how-it-works).
 - The visualizer opens on Projects. Its create-project and start-run forms are
   mutually exclusive, re-clicking the selected project returns to creation,
   and single-column views share one framed layout across their GL and DOM

@@ -13,8 +13,10 @@ agents alike.
 2. **Open an issue first for anything beyond a bug fix.** New gates, heuristics
    or validators are designed against collected incidents, not during the
    session that surfaced one; see the cooling-off rule in `AGENTS.md`.
-3. **Sign the CLA** ([`CLA.md`](CLA.md)) on your first pull request. The bot
-   asks for it; we cannot merge without it.
+3. **Sign the CLA** ([`CLA.md`](CLA.md)) on your first pull request. The `CLA`
+   workflow comments on the pull request; you sign by replying with the exact
+   sentence it quotes. One signature covers your future contributions, and we
+   cannot merge without it.
 
 ## Working on a change
 
