@@ -514,8 +514,9 @@ What does not: full tenant isolation or a hosted service. Authenticated projects
 workspaces, traces and project skills are scoped to the viewer's active organisation; the
 platform admin can read across organisations. The atom catalogue, atom trust and lifecycle
 ledger remain instance-global, however, so the control plane is not yet safe for mutually
-untrusted organisations. The repository is public and source-available so that the sandbox,
-the egress path and the cost accounting can be audited; the hosted service does not exist yet.
+untrusted organisations. The repository is public and open source so that the sandbox, the
+egress path and the cost accounting can be audited and built upon; the hosted service does
+not exist yet.
 The dated current state, invariants and Track A/Track B roadmap are reconciled in
 [`docs/saas-architecture.md`](docs/saas-architecture.md).
 
@@ -542,25 +543,31 @@ that exists in `src/` and not in this picture fails <code>npm run docs:check</co
 
 ## License
 
-atoma is **source-available** under the
-[Functional Source License, FSL-1.1-ALv2](LICENSE.md). You may use, modify and
-redistribute it for any purpose except a *Competing Use*: offering it, or a
-product built on it, as a commercial product or service that competes with
-atoma or with a service its author offers on top of it. Internal production use,
-non-commercial education and research, and professional services around it are
-expressly permitted. Each release becomes available under the Apache License 2.0
-two years after it is published. This is not an OSI-approved open-source licence;
-see [fsl.software](https://fsl.software) for the rationale behind that choice.
+atoma is **free and open-source software** under the
+[GNU Affero General Public License, version 3](LICENSE) (`AGPL-3.0-only`).
+You may use, study, modify and redistribute it, and build products and services
+on it. If you distribute a modified version, or run one that users interact with
+over a network, you must offer those users its source under the same licence.
+Unmodified use, including internal production use and hosting, carries no
+obligation beyond keeping the notices. The licence is approved by the OSI and
+the FSF; its terms are the ones Grafana, MinIO, Mattermost and Nextcloud publish
+under.
 
-Contributions are welcome under the [CLA](CLA.md); start with
-[`CONTRIBUTING.md`](CONTRIBUTING.md). Vulnerabilities go through
-[`SECURITY.md`](SECURITY.md), not the issue tracker.
+Organisations that cannot accept the AGPL, for example to embed atoma in a
+closed product, can obtain a commercial licence from the author; contributors
+grant the rights that make this possible through the [CLA](CLA.md), which
+also commits the project to remaining under an OSI-approved licence.
+
+Contributions start with [`CONTRIBUTING.md`](CONTRIBUTING.md). Vulnerabilities
+go through [`SECURITY.md`](SECURITY.md), not the issue tracker.
 
 The model transports are your own accounts under each provider's terms: the
 Anthropic API and Claude Code, OpenAI Codex, Z.ai and Ollama are called with the
 credentials you supply, and the `@anthropic-ai/claude-agent-sdk` dependency is
 distributed by Anthropic under its own licence, not under this one. The 3D assets
 under `src/viz/public/` carry their CC0 and CC-BY-4.0 notices beside the files.
+
+Copyright 2026 Matthieu Foillard.
 
 ---
 

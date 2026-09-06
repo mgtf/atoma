@@ -52,7 +52,9 @@ Do not open a public issue. Follow [`SECURITY.md`](SECURITY.md).
 
 ## Licence
 
-atoma is source-available under the Functional Source License, FSL-1.1-ALv2
-([`LICENSE.md`](LICENSE.md)). Your contribution is licensed to the project
-under the terms of the CLA so that it can be released under that licence, under
-the Apache-2.0 licence it converts to, and under commercial terms.
+atoma is free software under the GNU Affero General Public License v3.0
+([`LICENSE`](LICENSE)). Your contribution is licensed to the project under the
+terms of the CLA so that it can be released under the AGPL and, for organisations
+that cannot accept the AGPL, under commercial terms. The CLA commits the project
+to staying under an OSI-approved licence: the rights you grant will never be used
+to take the code closed.
