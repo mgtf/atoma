@@ -447,7 +447,13 @@ import {
 
 export class GpuRenderer {
   app = new Application();
-  readonly ambientRoot = new Container();
+  /**
+   * Hero scenery. ITS OWN RENDER GROUP, like `markRoot` and `tooltipRoot`
+   * below and every `animatedLayer()`: a subtree that changes every frame
+   * must not share a Pixi render group with the product surfaces, or it drags
+   * them through a full re-batch and re-upload each frame (see `animatedLayer`).
+   */
+  readonly ambientRoot = new Container({ isRenderGroup: true });
   /**
    * The persistent scene root: filtered by the pointer light, cleared and
    * rebuilt by every `render()`, and the thing added to the Pixi stage.
@@ -472,7 +478,7 @@ export class GpuRenderer {
    * arrival gem. Sibling, drawn after, so the header gem still sits on the
    * bar rather than under it.
    */
-  readonly markRoot = new Container();
+  readonly markRoot = new Container({ isRenderGroup: true });
   /**
    * The one crystal, RETAINED across scene rebuilds like the far field.
    * Attaching per render leaked its render textures, geometries and shader —
@@ -518,6 +524,11 @@ export class GpuRenderer {
   private snapshot: GpuRenderSnapshot | null = null;
   readonly scrollMax: Partial<Record<ViewName, number>> = {};
   private readonly tickerCallbacks = new Set<(ticker: Ticker) => void>();
+  /**
+   * The animated bands, RETAINED across scene rebuilds — see `animatedLayer`.
+   * Keyed by label, plus a `#n` suffix when one render asks for a label twice.
+   */
+  private readonly animatedLayers = new Map<string, Container>();
   /**
    * Survives scene rebuilds so wheel-driven redraws cannot keep resetting the
    * 250ms measurement window or flash the header back to its placeholder.
@@ -592,7 +603,7 @@ export class GpuRenderer {
    * everything including the account menu.
    */
   private tooltipLayer: TooltipLayer | null = null;
-  private readonly tooltipRoot = new Container();
+  private readonly tooltipRoot = new Container({ isRenderGroup: true });
   private readonly labels = new LabelCache<Text>({
     detach: (label) => label.removeFromParent(),
     release: (label) => {
@@ -1045,12 +1056,20 @@ export class GpuRenderer {
 
   async init(host: HTMLElement) {
     this.host = host;
-    const forceWebGl = new URLSearchParams(location.search).get('renderer') === 'webgl';
+    const params = new URLSearchParams(location.search);
+    const forceWebGl = params.get('renderer') === 'webgl';
+    // MSAA is the single largest cost of a frame on an integrated GPU: the
+    // 4-sample colour and stencil targets at 2560×1600 cost 2.5–3× the rest of
+    // the frame put together, whatever the view draws (measured 2026-09-06,
+    // docs/incidents/gpu-frame-cost-2026-09-06.md). `?atomaQuality=performance`
+    // trades edge antialiasing for that headroom for ONE session — a
+    // diagnostic switch beside `?renderer=webgl`, never the default.
+    const antialias = params.get('atomaQuality') !== 'performance';
     try {
       await this.app.init({
         resizeTo: host,
         preference: forceWebGl ? ['webgl'] : ['webgpu', 'webgl'],
-        antialias: true,
+        antialias,
         autoDensity: true,
         resolution: Math.min(devicePixelRatio || 1, 2),
         backgroundAlpha: 0,
@@ -1063,7 +1082,7 @@ export class GpuRenderer {
       await this.app.init({
         resizeTo: host,
         preference: ['webgl'],
-        antialias: true,
+        antialias,
         autoDensity: true,
         resolution: Math.min(devicePixelRatio || 1, 2),
         backgroundAlpha: 0,
@@ -1259,6 +1278,14 @@ export class GpuRenderer {
     this.utilityDockTransition = null;
     this.labels.clear();
     this.textStyles.clear();
+    // Retained bands die with the renderer, not with a scene: detach first so
+    // the app's own stage walk below cannot destroy them a second time.
+    for (const layer of this.animatedLayers.values()) {
+      if (layer.destroyed) continue;
+      layer.removeFromParent();
+      layer.destroy({ children: true, context: true });
+    }
+    this.animatedLayers.clear();
     this.app.canvas.removeEventListener('wheel', this.wheel);
     window.removeEventListener('pointermove', this.tuningPointerMove);
     window.removeEventListener('pointerup', this.tuningPointerUp);
@@ -1326,6 +1353,10 @@ export class GpuRenderer {
       child.destroy({ children: true, context: true });
     }
     this.retainFarField();
+    // Bands step out AFTER the labels did and BEFORE the stage is walked, so
+    // neither the retained labels inside them nor the bands themselves are
+    // destroyed with the scene.
+    this.releaseAnimatedLayers();
     this.root = this.stage;
     for (const child of this.stage.removeChildren()) {
       // Pixi Graphics owns a GraphicsContext, but passing ANY options object
@@ -2855,6 +2886,65 @@ export class GpuRenderer {
   addTicker(callback: (ticker: Ticker) => void) {
     this.tickerCallbacks.add(callback);
     this.app.ticker.add(callback);
+  }
+
+  /**
+   * THE HOME OF EVERY PER-FRAME ANIMATION. A subtree whose ticker mutates it
+   * every frame — a pulsing chip, a nav button's scanline and sparks, a
+   * spinning icon, a redrawn mask — draws into its own Pixi render group.
+   *
+   * Pixi 8 keeps ONE batch geometry per render group and re-uploads the WHOLE
+   * buffer whenever any element in it moves (`Batcher.dirty` →
+   * `BatcherPipe.upload`), and a redrawn batchable `Graphics` sets
+   * `structureDidChange`, which rebuilds the whole group's instruction set.
+   * With everything in the root group, one active chip's pulse re-uploaded
+   * every card, label and panel of the Runs view on every frame (287KB/frame
+   * on an 80-event trace, ~1 instruction rebuild per frame; measured
+   * 2026-09-06 on the compiled client) and the crystal's silhouette masks did
+   * the same on every view. Each layer here costs one batch break in its
+   * parent, so ANIMATED CONTROLS SHARE ONE LAYER PER BAND (the rail, a chip
+   * row, a tile grid) rather than taking one each.
+   *
+   * The layer sits at the parent's origin and has no transform of its own, so
+   * `recordHitTarget` projections, wheel routing and `toGlobal()` closures are
+   * unchanged. Static chrome behind the controls (frames, headings) stays in
+   * the parent: the layer is for what MOVES.
+   */
+  animatedLayer(parent: Container, label: string): Container {
+    // RETAINED, like the labels and the card material. A render group owns a
+    // batcher whose attribute and index buffers live in Pixi's BatcherPipe,
+    // keyed by the group's instruction set; destroying the container with the
+    // scene drops the group but not those buffers, and WebGPU GC is pinned
+    // off, so every wheel tick leaked two GPU buffers per band (603 → 923
+    // over one 32-tick smoke cycle, 2026-09-06). Reusing the same container
+    // keeps the same group, the same instruction set and the same buffers.
+    let key = label;
+    let ordinal = 1;
+    while (this.animatedLayers.get(key)?.parent) key = `${label}#${++ordinal}`;
+    let layer = this.animatedLayers.get(key);
+    if (!layer || layer.destroyed) {
+      layer = new Container({ isRenderGroup: true });
+      layer.label = label;
+      this.animatedLayers.set(key, layer);
+    }
+    parent.addChild(layer);
+    return layer;
+  }
+
+  /**
+   * Step the retained bands out of the scene before it is torn down, and
+   * destroy what they drew: the widgets are per-render, the band is not.
+   * Labels have already been detached by `labels.beginRender()`, so the
+   * recursive destroy here walks past them exactly as the stage teardown does.
+   */
+  private releaseAnimatedLayers() {
+    for (const layer of this.animatedLayers.values()) {
+      if (layer.destroyed) continue;
+      layer.removeFromParent();
+      for (const child of layer.removeChildren()) {
+        child.destroy({ children: true, context: true });
+      }
+    }
   }
 
   filterButton(
@@ -4585,7 +4675,9 @@ export class GpuRenderer {
     readout.eventMode = 'none';
     readout.tint = multiplyTint(GPU_COLORS.text, fpsColor(this.lastFps));
     readout.label = 'fps-readout';
-    this.root.addChild(readout);
+    // Its glyph quads change four times a second; keep that out of the root
+    // group's batch (see `animatedLayer`).
+    this.animatedLayer(this.root, 'fps-readout-layer').addChild(readout);
 
     this.addTicker((ticker) => {
       if (readout.destroyed) return;
@@ -4766,6 +4858,7 @@ export type RendererCtx = Pick<
   | 'markBeadCheck'
   | 'detailMask'
   | 'addTicker'
+  | 'animatedLayer'
   | 'retainAtomaMark'
   | 'retainAvatarOrb'
   | 'drawExitingFilterButtons'

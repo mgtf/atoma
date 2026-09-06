@@ -77,7 +77,9 @@ npm run viz:mark-turn:analyze
   a second context for a tiny widget. Smoke tests assert exactly one canvas and
   both backends.
 - Keep GPU animation state out of React/Zustand hot paths. Use mutable samples
-  read once per frame; do not rebuild the scene for pointer motion.
+  read once per frame; do not rebuild the scene for pointer motion. A subtree
+  that MUTATES EVERY FRAME draws into its own render group (`ctx.animatedLayer`,
+  ONE per band): Pixi re-uploads a group's whole batch when anything in it moves. Frame cost is measured, never guessed: `npm run viz:frame-probe` ([record](../../docs/incidents/gpu-frame-cost-2026-09-06.md)).
 - The hover bubble is ONE bubble, on its own sibling layer above the crystal,
   and it obeys the rule above: views declare RECTANGLES per render through
   `ctx.tooltip` (local coordinates, projected while the parent transform is

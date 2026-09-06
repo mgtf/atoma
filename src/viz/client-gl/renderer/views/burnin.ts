@@ -303,6 +303,9 @@ export function drawBurnin(
     return true;
   });
   const families = [...new Set(payload.rows.map((row) => row.family))].sort();
+  // Chips animate every frame; one render group keeps that off the table and
+  // chart behind them (`animatedLayer`).
+  const chips = ctx.animatedLayer(pane.content, 'burnin-filter-chips');
   let x = left;
   let familyY = top;
   const addFamilyFilter = (id: string, label: string, active: boolean) => {
@@ -312,7 +315,7 @@ export function drawBurnin(
       familyY += 34;
     }
     ctx.filterButton(
-      pane.content,
+      chips,
       id,
       label,
       x,
@@ -337,7 +340,7 @@ export function drawBurnin(
       optionY += 32;
     }
     ctx.filterButton(
-      pane.content,
+      chips,
       id,
       label,
       optionX,
@@ -395,10 +398,11 @@ export function drawBurnin(
   ];
   const statsY = optionY + 38;
   const statWidth = (inner - GPU_LAYOUT.gap * 3) / 4;
+  const tiles = ctx.animatedLayer(pane.content, 'burnin-stat-tiles');
   stats.forEach(([label, value], index) => {
     const statX = left + index * (statWidth + GPU_LAYOUT.gap);
     ctx.statCard(
-      pane.content,
+      tiles,
       `burnin.stat.${index}`,
       label!,
       value!,
