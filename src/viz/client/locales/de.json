@@ -1073,5 +1073,13 @@
   "settings.mcpCheckSteps": "Führen Sie in Claude Code /mcp aus und prüfen Sie, ob atoma verbunden ist. Bitten Sie dann den Agenten, Ihre Atoma-Projekte aufzulisten. Aktualisieren Sie in einem anderen Client dessen MCP-Tools und versuchen Sie eine Leseaktion. Allein durch das Erstellen eines Tokens wird keine Verbindung hergestellt.",
   "settings.mcpCheckUsage": "Das unten angegebene Datum der letzten Verwendung wird aktualisiert, nachdem der Client einen gültigen Token übermittelt hat; laden Sie die Einstellungen neu, um es zu aktualisieren. Es belegt nicht, dass ein Tool-Aufruf erfolgreich war. Wenn atoma bereits registriert ist, bearbeiten oder entfernen Sie diesen vorhandenen Client-Eintrag, bevor Sie ihn erneut hinzufügen.",
   "settings.mcpTroubleshootAuth": "401: Prüfen Sie den Bearer-Token. Falls er verloren ging oder widerrufen wurde, erstellen Sie einen Ersatz und aktualisieren Sie den Client. 403: Prüfen Sie die Organisationsberechtigungen und die MCP-Adresse. Der Widerruf eines Tokens beendet dessen Zugriff bei der nächsten Anfrage.",
-  "settings.mcpTroubleshoot404": "404 bei der ersten Verbindung: Prüfen Sie die vollständige /mcp-Adresse und bitten Sie den Bereitstellungsadministrator, deren Routing zu prüfen. 404 nach einer zuvor funktionierenden Sitzung: Verbinden Sie den Client erneut, damit er eine neue MCP-Sitzung startet. Dies kann nach einem Serverneustart auftreten. Ein OAuth-Discovery-Fehler erfordert einen für Bearer-Token konfigurierten Client."
+  "settings.mcpTroubleshoot404": "404 bei der ersten Verbindung: Prüfen Sie die vollständige /mcp-Adresse und bitten Sie den Bereitstellungsadministrator, deren Routing zu prüfen. 404 nach einer zuvor funktionierenden Sitzung: Verbinden Sie den Client erneut, damit er eine neue MCP-Sitzung startet. Dies kann nach einem Serverneustart auftreten. Ein OAuth-Discovery-Fehler erfordert einen für Bearer-Token konfigurierten Client.",
+  "settings.tab.general": "Allgemein",
+  "settings.tab.models": "LLM-Modelle",
+  "settings.tab.subscriptions": "Ihre KI-Abonnements",
+  "settings.tab.keys": "Ihre KI-API-Schlüssel",
+  "settings.tab.mcp": "Atoma MCP",
+  "settings.tabs": "Einstellungsbereiche",
+  "settings.orgDefaultsReadOnly": "Nur Eigentümer und Administratoren der Organisation können diese Standardwerte ändern; Ihre eigenen obigen Pins haben Vorrang.",
+  "settings.orgKeysReadOnly": "Anbieterschlüssel werden von Eigentümern und Administratoren der Organisation verwaltet. Bitten Sie eine dieser Personen, einen Schlüssel hinzuzufügen oder zu ersetzen."
 }

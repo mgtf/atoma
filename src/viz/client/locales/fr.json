@@ -1073,5 +1073,13 @@
   "settings.mcpCheckSteps": "Dans Claude Code, exécute /mcp et vérifie qu’atoma est connecté, puis demande à l’agent de lister tes projets Atoma. Dans un autre client, actualise ses outils MCP et essaie une action de lecture. Créer un token ne suffit pas à établir une connexion.",
   "settings.mcpCheckUsage": "La date de dernière utilisation ci-dessous est mise à jour une fois que le client présente un token valide ; recharge les paramètres pour l’actualiser. Elle ne prouve pas qu’un appel d’outil a réussi. Si atoma est déjà enregistré, modifie ou supprime cette entrée existante du client avant de l’ajouter à nouveau.",
   "settings.mcpTroubleshootAuth": "401 : vérifie le token Bearer ; s’il est perdu ou révoqué, crée-en un autre et mets à jour le client. 403 : vérifie les autorisations de l’organisation et l’adresse MCP. La révocation d’un token met fin à son accès dès la requête suivante.",
-  "settings.mcpTroubleshoot404": "404 lors de la première connexion : vérifie l’adresse /mcp complète et demande à l’administrateur du déploiement de vérifier son routage. 404 après une session qui fonctionnait auparavant : reconnecte le client pour qu’il démarre une nouvelle session MCP ; cela peut arriver après le redémarrage d’un serveur. Une erreur de découverte OAuth nécessite un client configuré pour les tokens Bearer."
+  "settings.mcpTroubleshoot404": "404 lors de la première connexion : vérifie l’adresse /mcp complète et demande à l’administrateur du déploiement de vérifier son routage. 404 après une session qui fonctionnait auparavant : reconnecte le client pour qu’il démarre une nouvelle session MCP ; cela peut arriver après le redémarrage d’un serveur. Une erreur de découverte OAuth nécessite un client configuré pour les tokens Bearer.",
+  "settings.tab.general": "Général",
+  "settings.tab.models": "Modèles LLM",
+  "settings.tab.subscriptions": "Tes abonnements IA",
+  "settings.tab.keys": "Tes clés API d’IA",
+  "settings.tab.mcp": "MCP d’atoma",
+  "settings.tabs": "Sections des paramètres",
+  "settings.orgDefaultsReadOnly": "Seuls les propriétaires et les admins de l’organisation peuvent modifier ces valeurs par défaut ; tes propres choix ci-dessus sont prioritaires.",
+  "settings.orgKeysReadOnly": "Les clés des fournisseurs sont gérées par les propriétaires et les admins de l’organisation. Demande à l’un d’eux d’ajouter ou de remplacer une clé."
 }

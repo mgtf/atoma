@@ -1073,5 +1073,13 @@
   "settings.mcpCheckSteps": "Di Claude Code, run /mcp dan pastikan atoma terhubung, lalu minta agen mencantumkan proyek Atoma Anda. Di klien lain, segarkan alat MCP-nya dan coba tindakan baca. Membuat token saja tidak membangun koneksi.",
   "settings.mcpCheckUsage": "Tanggal terakhir digunakan di bawah diperbarui setelah klien memberikan token yang valid; muat ulang Pengaturan untuk menyegarkannya. Ini tidak membuktikan bahwa panggilan alat berhasil. Jika atoma sudah terdaftar, edit atau hapus entri klien yang ada sebelum menambahkannya lagi.",
   "settings.mcpTroubleshootAuth": "401: periksa token Bearer; jika hilang atau dicabut, buat pengganti dan perbarui klien. 403: periksa izin organisasi dan alamat MCP. Pencabutan token menghentikan aksesnya pada permintaan berikutnya.",
-  "settings.mcpTroubleshoot404": "404 pada koneksi pertama: periksa alamat lengkap /mcp dan minta administrator deployment memeriksa peruteannya. 404 setelah sesi yang sebelumnya berfungsi: hubungkan kembali klien agar memulai sesi MCP baru; ini dapat terjadi setelah server dimulai ulang. Kesalahan penemuan OAuth memerlukan klien yang dikonfigurasi untuk token Bearer."
+  "settings.mcpTroubleshoot404": "404 pada koneksi pertama: periksa alamat lengkap /mcp dan minta administrator deployment memeriksa peruteannya. 404 setelah sesi yang sebelumnya berfungsi: hubungkan kembali klien agar memulai sesi MCP baru; ini dapat terjadi setelah server dimulai ulang. Kesalahan penemuan OAuth memerlukan klien yang dikonfigurasi untuk token Bearer.",
+  "settings.tab.general": "Umum",
+  "settings.tab.models": "Model LLM",
+  "settings.tab.subscriptions": "Langganan AI Anda",
+  "settings.tab.keys": "Kunci API AI Anda",
+  "settings.tab.mcp": "MCP Atoma",
+  "settings.tabs": "Bagian pengaturan",
+  "settings.orgDefaultsReadOnly": "Hanya pemilik dan admin organisasi yang dapat mengubah nilai default ini; sematan Anda sendiri di atas akan menggantikannya.",
+  "settings.orgKeysReadOnly": "Kunci penyedia dikelola oleh pemilik dan admin organisasi. Minta mereka menambahkan atau mengganti kunci."
 }

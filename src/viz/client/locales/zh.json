@@ -1073,5 +1073,13 @@
   "settings.mcpCheckSteps": "在 Claude Code 中运行 /mcp，检查 atoma 是否已连接，然后让代理列出您的 Atoma 项目。在其他客户端中，刷新其 MCP 工具并尝试执行读取操作。仅创建令牌并不会建立连接。",
   "settings.mcpCheckUsage": "客户端提交有效令牌后，下面的上次使用日期会更新；请重新加载“设置”以刷新该日期。这并不能证明工具调用成功。如果已注册 atoma，请先编辑或移除现有客户端条目，再重新添加。",
   "settings.mcpTroubleshootAuth": "401：检查 Bearer 令牌；如果令牌已丢失或撤销，请创建替代令牌并更新客户端。403：检查组织权限和 MCP 地址。撤销令牌后，其访问权限将在下次请求时终止。",
-  "settings.mcpTroubleshoot404": "首次连接时出现 404：请检查完整的 /mcp 地址，并让部署管理员检查其路由。之前正常工作的会话出现 404：请重新连接客户端，使其启动新的 MCP 会话；服务器重启后可能会发生这种情况。OAuth 发现错误表示需要使用配置为 Bearer 令牌的客户端。"
+  "settings.mcpTroubleshoot404": "首次连接时出现 404：请检查完整的 /mcp 地址，并让部署管理员检查其路由。之前正常工作的会话出现 404：请重新连接客户端，使其启动新的 MCP 会话；服务器重启后可能会发生这种情况。OAuth 发现错误表示需要使用配置为 Bearer 令牌的客户端。",
+  "settings.tab.general": "常规",
+  "settings.tab.models": "LLM 模型",
+  "settings.tab.subscriptions": "您的 AI 订阅",
+  "settings.tab.keys": "您的 AI API 密钥",
+  "settings.tab.mcp": "Atoma MCP",
+  "settings.tabs": "设置部分",
+  "settings.orgDefaultsReadOnly": "只有组织所有者和管理员可以更改这些默认设置；您在上方自行固定的设置优先于这些默认设置。",
+  "settings.orgKeysReadOnly": "提供商密钥由组织所有者和管理员管理。请联系他们添加或替换密钥。"
 }

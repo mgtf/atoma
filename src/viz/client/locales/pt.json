@@ -1073,5 +1073,13 @@
   "settings.mcpCheckSteps": "No Claude Code, execute /mcp e confirme que o atoma está ligado. Depois, peça ao agente para listar os seus projetos Atoma. Noutro cliente, atualize as respetivas ferramentas MCP e tente uma ação de leitura. Criar um token, por si só, não estabelece uma ligação.",
   "settings.mcpCheckUsage": "A data da última utilização abaixo é atualizada depois de o cliente apresentar um token válido; recarregue as Definições para a atualizar. Isto não comprova que uma chamada de ferramenta tenha sido bem-sucedida. Se o atoma já estiver registado, edite ou remova essa entrada existente no cliente antes de o adicionar novamente.",
   "settings.mcpTroubleshootAuth": "401: verifique o token Bearer; se tiver sido perdido ou revogado, crie um substituto e atualize o cliente. 403: verifique as permissões da organização e o endereço MCP. A revogação de um token termina o respetivo acesso no pedido seguinte.",
-  "settings.mcpTroubleshoot404": "404 na primeira ligação: verifique o endereço /mcp completo e peça ao administrador da implementação para verificar o respetivo encaminhamento. 404 após uma sessão que funcionava anteriormente: volte a ligar o cliente para que este inicie uma nova sessão MCP; isto pode acontecer após o reinício do servidor. Um erro de descoberta OAuth requer um cliente configurado para tokens Bearer."
+  "settings.mcpTroubleshoot404": "404 na primeira ligação: verifique o endereço /mcp completo e peça ao administrador da implementação para verificar o respetivo encaminhamento. 404 após uma sessão que funcionava anteriormente: volte a ligar o cliente para que este inicie uma nova sessão MCP; isto pode acontecer após o reinício do servidor. Um erro de descoberta OAuth requer um cliente configurado para tokens Bearer.",
+  "settings.tab.general": "Geral",
+  "settings.tab.models": "Modelos LLM",
+  "settings.tab.subscriptions": "As suas subscrições de IA",
+  "settings.tab.keys": "As suas chaves de API de IA",
+  "settings.tab.mcp": "MCP da Atoma",
+  "settings.tabs": "Secções das definições",
+  "settings.orgDefaultsReadOnly": "Apenas os proprietários e administradores da organização podem alterar estas predefinições; as suas próprias afixações acima têm prioridade sobre elas.",
+  "settings.orgKeysReadOnly": "As chaves dos fornecedores são geridas pelos proprietários e administradores da organização. Peça a um deles para adicionar ou substituir uma chave."
 }

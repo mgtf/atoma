@@ -1073,5 +1073,13 @@
   "settings.mcpCheckSteps": "En Claude Code, ejecuta /mcp y comprueba que atoma esté conectado; después, pide al agente que enumere tus proyectos de Atoma. En otro cliente, actualiza sus herramientas MCP y prueba una acción de lectura. Crear un token por sí solo no establece una conexión.",
   "settings.mcpCheckUsage": "La fecha de último uso que aparece abajo se actualiza después de que el cliente presente un token válido; recarga Configuración para actualizarla. No demuestra que una llamada a una herramienta se haya realizado correctamente. Si atoma ya está registrado, edita o elimina esa entrada existente del cliente antes de volver a añadirlo.",
   "settings.mcpTroubleshootAuth": "401: comprueba el token Bearer; si se ha perdido o revocado, crea otro y actualiza el cliente. 403: comprueba los permisos de la organización y la dirección MCP. Revocar un token pone fin a su acceso en la siguiente solicitud.",
-  "settings.mcpTroubleshoot404": "404 en la primera conexión: comprueba la dirección /mcp completa y pide al administrador del despliegue que revise su enrutamiento. 404 después de una sesión que antes funcionaba: vuelve a conectar el cliente para que inicie una nueva sesión MCP; esto puede ocurrir después de reiniciar el servidor. Un error de detección de OAuth requiere un cliente configurado para tokens Bearer."
+  "settings.mcpTroubleshoot404": "404 en la primera conexión: comprueba la dirección /mcp completa y pide al administrador del despliegue que revise su enrutamiento. 404 después de una sesión que antes funcionaba: vuelve a conectar el cliente para que inicie una nueva sesión MCP; esto puede ocurrir después de reiniciar el servidor. Un error de detección de OAuth requiere un cliente configurado para tokens Bearer.",
+  "settings.tab.general": "General",
+  "settings.tab.models": "Modelos LLM",
+  "settings.tab.subscriptions": "Tus suscripciones de IA",
+  "settings.tab.keys": "Tus claves de API de IA",
+  "settings.tab.mcp": "MCP de Atoma",
+  "settings.tabs": "Secciones de configuración",
+  "settings.orgDefaultsReadOnly": "Solo los propietarios y administradores de la organización pueden cambiar estos valores predeterminados; tus propias preferencias fijadas arriba tienen prioridad.",
+  "settings.orgKeysReadOnly": "Las claves de proveedores las gestionan los propietarios y administradores de la organización. Pídeles que añadan o sustituyan una clave."
 }
