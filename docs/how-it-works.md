@@ -461,12 +461,14 @@ Recorded so nobody has to discover it in a demo:
   multi-organisation login gate. A first login creates a personal organisation unless it redeems
   an invitation; a principal may join several organisations and choose an active one.
   Authenticated projects, their run workspaces, traces and project skills are scoped to that
-  organisation, while a platform admin can read across organisations. The atom catalogue, atom
+  organisation for now, while a platform admin can read across organisations. Skills are
+  meant to become a commons shared across organisations, with trust earned per organisation;
+  the partitioning is containment, not the premise. The atom catalogue, atom
   trust and lifecycle ledger remain instance-global, so this is not yet safe for mutually
   untrusted organisations; see the dated boundary in
   [`saas-architecture.md`](saas-architecture.md).
-- **No hosted service.** The repository is public and source-available under the
-  [FSL-1.1-ALv2](../LICENSE.md); nothing runs it for you yet.
+- **No hosted service.** The repository is public under the [AGPL-3.0](../LICENSE);
+  nothing runs it for you yet.
 - **The browser-based family cannot reach zero cost yet.** Compiled scripts have no browser, so
   the compiler correctly refuses to compile web-validation recipes. Every compiled script in the
   catalogue belongs to the command-line and documentation bucket; other families borrow them

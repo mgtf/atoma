@@ -13,8 +13,10 @@ agents alike.
 2. **Open an issue first for anything beyond a bug fix.** New gates, heuristics
    or validators are designed against collected incidents, not during the
    session that surfaced one; see the cooling-off rule in `AGENTS.md`.
-3. **Sign the CLA** ([`CLA.md`](CLA.md)) on your first pull request. The bot
-   asks for it; we cannot merge without it.
+3. **Sign the CLA** ([`CLA.md`](CLA.md)) on your first pull request. The `CLA`
+   workflow comments on the pull request; you sign by replying with the exact
+   sentence it quotes. One signature covers your future contributions, and we
+   cannot merge without it.
 
 ## Working on a change
 
@@ -52,7 +54,9 @@ Do not open a public issue. Follow [`SECURITY.md`](SECURITY.md).
 
 ## Licence
 
-atoma is source-available under the Functional Source License, FSL-1.1-ALv2
-([`LICENSE.md`](LICENSE.md)). Your contribution is licensed to the project
-under the terms of the CLA so that it can be released under that licence, under
-the Apache-2.0 licence it converts to, and under commercial terms.
+atoma is free software under the GNU Affero General Public License v3.0
+([`LICENSE`](LICENSE)). Your contribution is licensed to the project under the
+terms of the CLA so that it can be released under the AGPL and, for organisations
+that cannot accept the AGPL, under commercial terms. The CLA commits the project
+to staying under an OSI-approved licence: the rights you grant will never be used
+to take the code closed.

@@ -1,6 +1,6 @@
 # atoma SaaS architecture
 
-> **CURRENT REVIEW: 2026-09-04.**
+> **CURRENT REVIEW: 2026-09-06.**
 >
 > This document is the architecture boundary for hosted atoma. It is organised
 > in four layers on purpose:
@@ -18,6 +18,11 @@
 > It is neither a production SaaS deployment nor the Track B shared-learning
 > system. Do not use the existence of auth tables or projects as evidence that
 > the atom catalogue, trust state or lifecycle ledger are tenant-safe.
+>
+> The product premise, stated 2026-09-06, is Track B: skills are a commons
+> shared across organisations, and the organisation bounds trust and execution
+> rights, not knowledge. Today's project-local partitioning is containment on
+> the way there, not the design (§2, *Skills are a commons*).
 
 ## 1. Current state — 2026-09-04
 
@@ -40,7 +45,8 @@ dedicated-instance gate:
   viewer, not from an organisation id supplied by the browser.
 - Project learning is enabled and isolated under the project's own skills
   root. Promotion, deterministic skill dispatch and the shared prefilter cache
-  are disabled for project runs.
+  are disabled for project runs. The isolation is containment until the
+  body/trust split lands, not the intended resting place of a skill (§2).
 - The atom catalogue, atom trust counters and lifecycle ledger remain
   instance-global. They are opened from the same product SQLite store for every
   project run.
@@ -99,7 +105,7 @@ Current resource scopes:
 | Principals, identities, sessions | instance control plane | Provider identities join on `(provider, subject)`, never email. A session names one active organisation. |
 | Projects, project runs and cost | organisation | A run has one project and one requesting principal. `org:viewer` reads but cannot execute. |
 | Traces, workspaces and manifests | project/run | `projectRunHostLayout` stores them below `orgs/<org>/projects/<project>/runs/<run>`. |
-| Project skill bodies and counters | project filesystem | Learning is on. Promotion and deterministic dispatch are off. Nothing is offered to another project or organisation. |
+| Project skill bodies and counters | project filesystem | Learning is on. Promotion and deterministic dispatch are off. Nothing is offered to another project or organisation yet; the premise is that bodies travel and trust does not (§2). |
 | Atom bodies and trust | instance SQLite row | `atom_types.successes/failures` have no `org_id`. Dynamic atom types have no platform/org scope column. |
 | Lifecycle ledger | instance SQLite table | `lifecycle_events` has `at/kind/entity/detail` and no `org_id` or `store_id`. Atom entities remain name-keyed. |
 | Platform events | organisation/project/run-aware | The control-plane audit journal already carries nullable scope ids and retention. |
@@ -233,6 +239,43 @@ evidence.
   attributable, audited and subject to a product decision on customer
   notification.
 
+### Skills are a commons
+
+Stated 2026-09-06. It replaces the earlier working assumption that skills are
+partitioned by organisation and that cross-organisation sharing is an
+exception. The threat evidence in §4 is unchanged; this premise is compatible
+with it because what the attack chain transfers is execution rights, and
+execution rights are exactly what does not travel.
+
+- **Skills are a platform commons.** What one organisation's runs learn is
+  meant to reach every other organisation. A body that stays in one project is
+  a transitional state. Learning that never leaves its tenant makes atoma a set
+  of private caches, not a collaborative platform, and pays distillation and
+  compilation once per tenant instead of once.
+- **The organisation bounds trust and execution rights, never knowledge.** A
+  body may travel; the right to run it without a validator is earned again,
+  from zero, by each receiving organisation. That is the body/trust split in
+  the shared-learning construction below.
+- **Provenance travels with the body.** Author organisation, version, hash and
+  the approval that admitted the body to the platform catalogue are immutable
+  and visible to the receiver. Authorship is attribution, never authority.
+- **The offer path is the normal path.** A catalogue nobody can get into is an
+  absent feature with a safety story attached ([offer
+  review](platform-skill-offer-review-2026-08-23.md) §1). Reviewer latency and
+  fatigue are therefore product requirements, not afterthoughts (owner
+  decision 1).
+- **Sharing terms belong to the platform, not to the code licence.** The
+  licence an author grants on a body offered to the catalogue, and the
+  platform's right to distribute it, are platform terms still to be written
+  (owner decision 7).
+
+What the premise does not change: human approval before a body enters the
+catalogue, the zero-trust start in the receiving organisation, the exclusion
+of raw trace content from platform learning, and the open prefilter policy.
+Whether instruction-text bodies may be admitted by a lighter path than
+scripts is owner decision 8; this document records the premise, not that
+mechanism.
+
 ### Resource ownership
 
 | Resource | Normative target scope |
@@ -242,7 +285,7 @@ evidence.
 | Canonical platform atom body | platform |
 | Dynamic atom body | organisation until explicitly offered and approved |
 | Atom trust | organisation or stricter |
-| Organisation-authored skill body | organisation/project |
+| Organisation-authored skill body | organisation/project until offered; offering is the expected path |
 | Approved platform skill body | platform body with immutable approval provenance |
 | Skill trust, matches and demotion state | organisation or stricter |
 | Lifecycle event | store + organisation + stable entity; project/run/actor where applicable |
@@ -397,7 +440,9 @@ hostile body and proves that property at the actual process/container boundary.
 | Storage topology | one-node hardened SQLite may fit | PostgreSQL is favoured if nodes/writers scale |
 | Product claim | dedicated hosted atoma | hosted shared-learning SaaS |
 
-The current repository is between the tracks: its control plane permits several
+Track B is the product target since 2026-09-06 (§2, *Skills are a commons*);
+Track A stays a supported deployment shape, not the thesis. The current
+repository is between the tracks: its control plane permits several
 organisations, while atom trust remains instance-global. Project-local skills
 and disabled deterministic dispatch contain one attack path, but they do not
 make global atom trust tenant-safe. **Do not deploy the current instance to
@@ -507,6 +552,11 @@ parallel but do not block writing its decision record:
 5. Is the platform eventually a BYO-key product only, or will it meter and
    rebill platform API keys?
 6. Is the prefilter existence oracle accepted for Track B?
+7. Under which terms does an author offer a body to the catalogue, and what
+   distribution right does the platform receive? These are platform terms,
+   separate from the repository's AGPL-3.0 licence.
+8. May instruction-text bodies be admitted to the catalogue by a lighter path
+   than compiled scripts, given that only scripts carry execution rights?
 
 ## 4. Historical evidence
 
@@ -531,6 +581,7 @@ resolve through the legacy map below.
 | 2026-08-27–28 | Encrypted BYO keys and per-tier model precedence landed. A narrow operator host-subscription exception was decided and implemented. | Current control-plane behavior; no consumer-subscription passthrough. | [subscription decision](subscription-per-tier-design-2026-08-28.md), commit `6a033b3` |
 | 2026-09-04 | Principal-scoped Codex device login, private provider profiles and personal payer rows landed. | ChatGPT personal subscriptions are requester-only and L2/L3-only; personal Claude login remains blocked pending Anthropic approval. | `src/auth/subscriptionProfiles.ts`, `src/contracts/runPayers.ts` |
 | 2026-08-28 | SaaS deployment selected Docker images plus one in-house launcher; Kubernetes deferred behind the interface. | Decided, not implemented. | [launcher decision](deployment-docker-launcher-2026-08-28.md) |
+| 2026-09-06 | Premise changed: skills are a platform commons; the organisation bounds trust and execution rights, not knowledge. Track B named as the product target. | Documentation only. The body/trust split, the human gate on catalogue entry and the Track B build order are unchanged; owner decisions 7 and 8 added. | §2 *Skills are a commons*; [root contract](../AGENTS.md#skills-lifecycle); [projects contract](../src/projects/AGENTS.md) |
 
 <a id="3-prerequisite-f1-the-sandbox-is-not-an-isolation-boundary"></a>
 
