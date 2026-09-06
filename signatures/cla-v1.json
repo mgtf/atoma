@@ -1,3 +1,12 @@
 {
-   "signedContributors": []
+  "signedContributors": [
+    {
+      "name": "mgtf2",
+      "id": 321852970,
+      "comment_id": 5560381132,
+      "created_at": "2026-09-06T15:54:15Z",
+      "repoId": 1213948861,
+      "pullRequestNo": 4
+    }
+  ]
 }
