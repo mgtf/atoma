@@ -1,4 +1,5 @@
 import { runIsolatedMenderCommand } from './menderIsolation.js';
+import { runCodexSupervisor } from './codexSession.js';
 import {
   appendFileSync,
   existsSync,
@@ -71,6 +72,7 @@ import { runClaudeSession, runCommand, servedMatchesPin, type SupervisorProvider
  */
 
 export interface MenderCommands {
+  readonly codex?: string;
   readonly claude: string;
   readonly gh: string;
   readonly install: string;
@@ -89,6 +91,7 @@ export const DEFAULT_MENDER_COMMANDS: MenderCommands = {
 /** The `ATOMA_MENDER_CMD_*` seams, for tests and unusual hosts. */
 export function menderCommandsFromEnv(env: NodeJS.ProcessEnv = process.env): MenderCommands {
   return {
+    codex: env['ATOMA_MENDER_CMD_CODEX'] ?? 'codex',
     claude: env['ATOMA_MENDER_CMD_CLAUDE'] ?? DEFAULT_MENDER_COMMANDS.claude,
     gh: env['ATOMA_MENDER_CMD_GH'] ?? DEFAULT_MENDER_COMMANDS.gh,
     install: env['ATOMA_MENDER_CMD_INSTALL'] ?? DEFAULT_MENDER_COMMANDS.install,
@@ -469,7 +472,7 @@ export async function mendFinding(input: MendInput, options: MenderOptions): Pro
     const args = menderSessionArgs(prompt, provider, options.budgetUsd);
     if (options.dryRun) {
       options.log(`dry-run: provider ${provider.model} via ${provider.source}${provider.baseUrl ? ` (${provider.baseUrl})` : ''}`);
-      options.log(`dry-run: would spawn ${options.commands.claude} ${args.slice(0, -1).join(' ')}`);
+      options.log(provider.transport === 'codex' ? 'dry-run: would start a container-isolated Codex ChatGPT session' : `dry-run: would spawn ${options.commands.claude} ${args.slice(0, -1).join(' ')}`);
       options.log(`dry-run: prompt is ${prompt.length} chars; worktree ${worktree}`);
       return record({ outcome: 'dry-run', baseSha, provider: providerFacts });
     }
@@ -481,7 +484,11 @@ export async function mendFinding(input: MendInput, options: MenderOptions): Pro
     journal(mendEvent({ runId, findingIndex: index, key, branch, outcome: 'started', modelRequested: provider.model })!);
     options.log(`mending ${runId}#${index} "${truncate(finding.title, 80)}" with ${provider.model} (${provider.source} provider)`);
     const startedAt = Date.now();
-    const session = await runClaudeSession({
+    const session = provider.transport === 'codex' ? await runCodexSupervisor({
+      command: options.commands.codex ?? 'codex', provider, cwd: worktree, prompt,
+      hardening: MENDER_HARDENING, schema: SUPERVISOR_MEND_JSON_SCHEMA,
+      timeoutMs: options.timeoutMs, execute: executeUntrusted, onLog: options.warn,
+    }) : await runClaudeSession({
       claudeCommand: options.commands.claude,
       execute: executeUntrusted,
       args,

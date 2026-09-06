@@ -47,7 +47,7 @@ usage:
 what it does:
   Watches BOTH run corpora — the operator index and, when this store holds a
   tenant control plane, every finished project run — and once a run has been
-  quiet for --quiet-ms and no run is active, drives ONE read-only headless claude session
+  quiet for --quiet-ms and no run is active, drives ONE read-only headless session
   over a mechanical digest of its trace. The structured verdict is validated
   against src/contracts/supervisorVerdict.ts, written to supervisor/verdicts/,
   routed (mechanism candidates → backlog.jsonl, security → ALERTS.jsonl) and
@@ -63,6 +63,9 @@ provider:
   ATOMA_ANALYST_MODEL / ATOMA_ANALYST_BASE_URL / ATOMA_ANALYST_AUTH_TOKEN, read
   as a set and forwarded to the child session only. Default: the login
   subscription with a pinned claude-sonnet-5.
+  ATOMA_ANALYST_TRANSPORT=codex selects ChatGPT subscription auth instead,
+  with ATOMA_ANALYST_MODEL (default gpt-5.6-sol), ATOMA_ANALYST_CODEX_HOME,
+  and ATOMA_SUPERVISOR_CMD_CODEX for the binary. No API token or base URL.
 
 flags:
   --once                 analyse pending runs (see --backfill), then exit
@@ -71,7 +74,7 @@ flags:
   --dry-run              build the digest and print the session line; spend nothing
   --quiet-ms <ms>        quiet period before a finished run is analysed (default ${ANALYST_DEFAULT_QUIET_MS})
   --poll-ms <ms>         poll interval (default ${ANALYST_DEFAULT_POLL_MS})
-  --budget-usd <usd>     spend ceiling per analysis (default 2)
+  --budget-usd <usd>     Claude spend ceiling per analysis (default 2; unsupported by Codex)
   --timeout-ms <ms>      wall clock per analysis (default 900000)
   --runs <dir>           operator runs directory (default ATOMA_RUNS_DIR or ./runs)
   --supervisor-dir <dir> where verdicts live (default ./supervisor)

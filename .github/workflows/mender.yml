@@ -44,9 +44,9 @@ jobs:
     # mender's own timeout well before this.
     timeout-minutes: 90
     env:
+      ATOMA_MENDER_TRANSPORT: codex
       ATOMA_MENDER_MODEL: ${{ vars.ATOMA_MENDER_MODEL }}
-      ATOMA_MENDER_BASE_URL: ${{ vars.ATOMA_MENDER_BASE_URL }}
-      ATOMA_MENDER_AUTH_TOKEN: ${{ secrets.ATOMA_MENDER_AUTH_TOKEN }}
+      ATOMA_MENDER_CODEX_HOME: ${{ runner.temp }}/codex-mender
       # Publisher only: the model and tests run in containers without this env.
       # `gh pr create` and the branch push. A fine-grained PAT when the
       # repository forbids Actions from opening pull requests; the workflow
@@ -66,6 +66,19 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      - name: Restore the mender ChatGPT subscription session
+        shell: bash
+        env:
+          CODEX_AUTH_JSON: ${{ secrets.ATOMA_MENDER_CODEX_AUTH_JSON }}
+          PUBLISHER_TOKEN: ${{ secrets.ATOMA_MENDER_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${PUBLISHER_TOKEN}" || { echo 'ATOMA_MENDER_GITHUB_TOKEN needs Contents, Pull requests and Secrets write'; exit 1; }
+          test -n "${CODEX_AUTH_JSON}" || { echo 'Set ATOMA_MENDER_CODEX_AUTH_JSON from a dedicated ChatGPT login'; exit 1; }
+          install -d -m 0700 "${ATOMA_MENDER_CODEX_HOME}"
+          printf '%s' "${CODEX_AUTH_JSON}" > "${ATOMA_MENDER_CODEX_HOME}/auth.json"
+          chmod 0600 "${ATOMA_MENDER_CODEX_HOME}/auth.json"
 
       - name: Build the credential-isolated execution image
         run: docker build -f docker/mender.Dockerfile -t atoma-mender:local .
@@ -107,3 +120,17 @@ jobs:
           path: ${{ runner.temp }}/supervisor
           if-no-files-found: ignore
           retention-days: 30
+
+      # Codex rotates refresh tokens. Persist even after a failed mend; never
+      # upload auth as an artifact or cache, and never borrow the Debian session.
+      - name: Preserve refreshed ChatGPT authentication
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.ATOMA_MENDER_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          auth="${ATOMA_MENDER_CODEX_HOME}/auth.json"
+          if test -f "${auth}"; then
+            gh secret set ATOMA_MENDER_CODEX_AUTH_JSON --repo "${GITHUB_REPOSITORY}" < "${auth}"
+          fi

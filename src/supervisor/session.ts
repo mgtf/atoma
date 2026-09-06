@@ -58,6 +58,10 @@ export interface RunCommandOptions {
   readonly timeoutMs: number;
   readonly input?: string;
   readonly onLog?: (line: string) => void;
+  /** JSONL duplex protocol; callbacks run in the trusted harness. */
+  readonly onLine?: (line: string, send: (message: unknown) => void, end: () => void) => void;
+  /** Temporary credential-only directory, mounted by the container executor. */
+  readonly codexHome?: string;
 }
 
 /**
@@ -79,7 +83,7 @@ export function runCommand(
       env: options.env ?? process.env,
       shell: resolved.shell,
       detached: process.platform !== 'win32',
-      stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+      stdio: [options.input === undefined && !options.onLine ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     });
     let stdout = '';
     let stderr = '';
@@ -107,7 +111,19 @@ export function runCommand(
         finishTimeout();
       })();
     }, options.timeoutMs);
-    child.stdout?.on('data', (chunk: Buffer | string) => (stdout += String(chunk)));
+    let lines = '';
+    child.stdout?.setEncoding('utf8');
+    child.stdout?.on('data', (chunk: string) => {
+      stdout += chunk;
+      if (!options.onLine) return;
+      lines += chunk;
+      let newline: number;
+      while ((newline = lines.indexOf('\n')) !== -1) {
+        const line = lines.slice(0, newline);
+        lines = lines.slice(newline + 1);
+        options.onLine(line, (message) => { child.stdin?.write(`${JSON.stringify(message)}\n`); }, () => { child.stdin?.end(); });
+      }
+    });
     child.stderr?.on('data', (chunk: Buffer | string) => (stderr += String(chunk)));
     child.on('error', (error) => {
       if (settled) return;
@@ -123,7 +139,11 @@ export function runCommand(
       clearTimeout(timer);
       resolveRun({ code, stdout, stderr });
     });
-    if (options.input !== undefined) child.stdin?.end(options.input);
+    child.stdin?.on('error', () => { /* close/error owns the result */ });
+    if (options.input !== undefined) {
+      if (options.onLine) child.stdin?.write(options.input);
+      else child.stdin?.end(options.input);
+    }
   });
 }
 
@@ -132,6 +152,8 @@ export function runCommand(
 export type ProviderSource = 'mender' | 'analyst' | 'default';
 
 export interface SupervisorProvider {
+  readonly transport?: 'claude' | 'codex';
+  readonly codexHome?: string;
   readonly model: string;
   readonly baseUrl: string | null;
   readonly authToken: string | null;
@@ -155,7 +177,15 @@ function providerSet(
   names: readonly [string, string, string],
   source: ProviderSource
 ): SupervisorProvider | null {
-  if (!names.some((name) => present(env[name]) !== null)) return null;
+  const prefix = source === 'mender' ? 'ATOMA_MENDER' : 'ATOMA_ANALYST';
+  const transport = present(env[`${prefix}_TRANSPORT`]);
+  if (transport && transport !== 'claude' && transport !== 'codex') throw new Error(`${prefix}_TRANSPORT must be claude or codex`);
+  if (!transport && !names.some((name) => present(env[name]) !== null)) return null;
+  if (transport === 'codex') {
+    if (present(env[names[1]]) || present(env[names[2]])) throw new Error(`${prefix}: Codex uses ChatGPT login; remove BASE_URL and AUTH_TOKEN`);
+    return { transport, model: present(env[names[0]]) ?? 'gpt-5.6-sol', baseUrl: null, authToken: null, source,
+      ...(present(env[`${prefix}_CODEX_HOME`]) ? { codexHome: present(env[`${prefix}_CODEX_HOME`])! } : {}) };
+  }
   return {
     model: present(env[names[0]]) ?? DEFAULT_SUPERVISOR_MODEL,
     baseUrl: present(env[names[1]]),

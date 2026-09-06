@@ -1,9 +1,10 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { menderContainerEnv, runIsolatedMenderCommand } from '../src/supervisor/menderIsolation.js';
+import { codexSupervisorConfigArgs } from '../src/supervisor/codexSession.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -44,6 +45,19 @@ describe.skipIf(process.env['ATOMA_MENDER_CONTAINER_TESTS'] !== '1')('mender con
     expect(result.code, result.stderr).toBe(0);
     expect(readFileSync(join(work, 'result.txt'), 'utf8')).toBe('isolated');
     expect(readFileSync(join(work, '.git'), 'utf8')).toBe(original);
+    const auth = join(root, 'auth'); mkdirSync(auth);
+    writeFileSync(join(auth, 'auth.json'), JSON.stringify({ auth_mode: 'chatgpt', tokens: { refresh_token: 'credential-sentinel' } }));
+    const sandboxed = await runIsolatedMenderCommand('codex', ['sandbox', ...codexSupervisorConfigArgs(true), '--', 'node', '-e', `
+      const fs = require('node:fs');
+      try { fs.readFileSync('/codex-home/auth.json'); process.exit(15); } catch {}
+      fs.writeFileSync('/work/codex-proof.txt', 'sandboxed');
+      const socket = require('node:net').connect(443, '1.1.1.1');
+      socket.on('connect', () => process.exit(16));
+      socket.on('error', error => process.exit(['EPERM','EACCES','ENETUNREACH'].includes(error.code) ? 0 : 17));
+      setTimeout(() => process.exit(18), 5000);
+    `], { cwd: work, codexHome: auth, timeoutMs: 60_000 });
+    expect(sandboxed.code, sandboxed.stderr).toBe(0);
+    expect(readFileSync(join(work, 'codex-proof.txt'), 'utf8')).toBe('sandboxed');
     await expect(runIsolatedMenderCommand('node', ['-e', `
       const {spawn} = require('node:child_process');
       spawn(process.execPath, ['-e', "setTimeout(() => require('node:fs').writeFileSync('/work/late-write', 'survived'), 3000)"], {stdio:'ignore'});

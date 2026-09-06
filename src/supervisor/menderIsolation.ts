@@ -29,9 +29,10 @@ export const runIsolatedMenderCommand: typeof runCommand = async (spec, extraArg
   const name = `atoma-mender-${randomUUID()}`;
   let started = false;
   try {
-    const cloned = await runCommand('git', ['clone', '--bare', '--no-local', options.cwd, metadata], options);
+    const controlOptions = { cwd: options.cwd, timeoutMs: options.timeoutMs };
+    const cloned = await runCommand('git', ['clone', '--bare', '--no-local', options.cwd, metadata], controlOptions);
     if (cloned.code !== 0) throw new Error('could not prepare isolated mender git metadata');
-    const indexed = await runCommand('git', ['--git-dir', metadata, 'read-tree', 'HEAD'], options);
+    const indexed = await runCommand('git', ['--git-dir', metadata, 'read-tree', 'HEAD'], controlOptions);
     if (indexed.code !== 0) throw new Error('could not prepare isolated mender index');
     appendFileSync(join(metadata, 'config'), '\n[core]\n\tbare = false\n\tworktree = /work\n');
     writeFileSync(gitFile, 'gitdir: /atoma-git\n');
@@ -39,6 +40,7 @@ export const runIsolatedMenderCommand: typeof runCommand = async (spec, extraArg
     const command = resolveCommand(spec);
     const args = [
       'run', '--name', name, '--rm', '--init',
+      ...(options.input !== undefined || options.onLine ? ['--interactive'] : []),
       '--cap-drop=ALL', '--security-opt=no-new-privileges', '--read-only',
       '--pids-limit=512', '--memory=6g', '--cpus=2',
       '--user', `${process.getuid!()}:${process.getgid!()}`,
@@ -46,6 +48,10 @@ export const runIsolatedMenderCommand: typeof runCommand = async (spec, extraArg
       '--mount', `type=bind,src=${options.cwd},dst=/work`,
       '--mount', `type=bind,src=${metadata},dst=/atoma-git,readonly`,
       '--workdir', '/work', '--env', 'HOME=/tmp', '--env', 'HUSKY=0',
+      // Only a temporary auth.json-only profile enters the model container.
+      // It is absent from install/tests/checks and from all host HOME mounts.
+      ...(options.codexHome ? ['--mount', `type=bind,src=${options.codexHome},dst=/codex-home`,
+        '--env', 'CODEX_HOME=/codex-home', '--env', 'CODEX_SQLITE_HOME=/codex-home'] : []),
       ...Object.keys(env).flatMap((key) => ['--env', key]),
       process.env['ATOMA_MENDER_SANDBOX_IMAGE'] ?? 'atoma-mender:local',
       command.command === process.execPath ? 'node' : command.command,

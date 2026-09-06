@@ -50,6 +50,13 @@ Neighbours:
 - COST IS RECORDED FROM WHAT WAS SERVED (`modelUsage`), never from the
   requested id — the same lie `servedModel` prevents in the product's traces.
   A pin absent from what was served is warned about as "not comparable".
+- CODEX IS EXPLICIT (`ATOMA_ANALYST_TRANSPORT=codex`, likewise MENDER).
+  It requires ChatGPT subscription auth and rejects API-key profiles and
+  provider token/endpoint overrides. Each session gets a fresh auth-only
+  profile under the shared Codex HOME lease; rotated credentials are copied
+  back atomically after the process/container has been reaped, on errors too.
+  Codex reports tokens and the model resolved by thread/start, but no price:
+  cost stays null. USD ceilings are Claude-only; both retain wall-clock limits.
 
 ## Where each stage runs — three machines, by design
 
@@ -59,8 +66,10 @@ Neighbours:
   rows — the one fact "a run ended" the platform already records — waits the
   quiet period, asserts the idle predicate, analyses one run at a time, and
   re-queues at boot whatever the store lists as ended and un-analysed. OPT-IN
-  where the sentinel is opt-out, because it spends quota. It needs a `claude`
-  binary on the host and the `ATOMA_ANALYST_*` set in the service env.
+  where the sentinel is opt-out, because it spends quota. It needs the selected
+  `claude` or `codex` binary and the `ATOMA_ANALYST_*` set in the service env.
+  Deployment archives include src/, docs/ and AGENTS.md as read-only evidence
+  matching the deployed revision. Persist supervisor output outside releases.
 - THE MENDER NEVER RUNS ON THE SERVING HOST. That machine has no git checkout,
   no devDependencies, no `gh`, and a full check beside a customer run is what
   the idle gate exists to prevent. A verdict's eligible defects are DISPATCHED
@@ -95,6 +104,12 @@ Neighbours:
 - Every trace string is UNTRUSTED. The prompt says so, the appended system
   prompt says so again, and an instruction-shaped payload in a trace is itself
   a `security_incident` finding.
+- Codex uses an ephemeral app-server thread with one private dynamic reader
+  (`codexReader.ts`): an exact allowlist of source/docs and this run's evidence,
+  bounded lines and literal searches, no model-authored commands. Built-in
+  execution, Apps, plugins, hooks, skills, delegation and MCP are disabled;
+  residual file tools see only an empty read-only jail. This is not a second
+  atoma MCP surface. The same verdict schema derives Codex's nullable optionals.
 - A run with no `endedAt` is refused, never analysed: the digest of a live
   trace is a partial view and the session would spend beside the run.
 - Routing reads FINDINGS, never the grade: `mechanism_candidate` → the dated
@@ -125,6 +140,14 @@ Neighbours:
   `git`; no MCP, no network tools). It never runs `git commit`, `git push` or
   `gh`. The harness does, AFTER its own verification. The model's report is
   recorded, never trusted.
+- Codex's app-server runs inside the same container boundary with workspace
+  writes and command networking denied by its permission profile. Only the
+  model phase mounts an auth-only temporary Codex HOME; install, regression
+  tests and the full check never receive it. No sandbox bypass flag is used.
+  Actions restores a DEDICATED ChatGPT login from ATOMA_MENDER_CODEX_AUTH_JSON
+  and saves refreshed auth back as a secret, never an artifact/cache. Its
+  publisher token needs Contents, Pull requests and Secrets write. Do not copy
+  the serving host's active login into CI and race refresh-token rotation.
 - THE EXIT CONTRACT IS THE MANUAL BURN-IN LOOP'S, proven mechanically: the
   source change is stashed (untracked files included), the new test files run
   and must FAIL, the stash is restored, the full check runs and must PASS.

@@ -55,8 +55,9 @@ jobs:
           set -euo pipefail
           root="atoma-${GITHUB_SHA}"
           mkdir -p "deployment/${root}"
-          cp -R dist docker scripts deploy "deployment/${root}/"
-          cp package.json package-lock.json .env.example "deployment/${root}/"
+          cp -R dist docker scripts deploy src docs "deployment/${root}/"
+          cp package.json package-lock.json .env.example AGENTS.md CLAUDE.md "deployment/${root}/"
+          node scripts/supervisor-release-smoke.mjs "deployment/${root}"
           printf '%s\n' "${GITHUB_SHA}" > "deployment/${root}/REVISION"
           tar -C deployment -czf "deployment/${root}.tar.gz" "${root}"
           (cd deployment && sha256sum "${root}.tar.gz" > "${root}.tar.gz.sha256")

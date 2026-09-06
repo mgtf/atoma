@@ -18,6 +18,8 @@ import { dispatchMendRequests, mendRequestsFor, type DispatchConfig, type FetchL
 import { truncate, writeDigest } from './digest.js';
 import { ANALYST_HARDENING, ANALYST_PROMPT_VERSION, buildAnalystPrompt } from './analystPrompt.js';
 import { safeSink, verdictEvent } from './journal.js';
+import { createEvidenceReader } from './codexReader.js';
+import { runCodexSupervisor } from './codexSession.js';
 import {
   runClaudeSession,
   servedMatchesPin,
@@ -100,6 +102,7 @@ export interface AnalystOptions {
   readonly provider: SupervisorProvider;
   /** Command spec for the claude binary (the test seam). */
   readonly claudeCommand: string;
+  readonly codexCommand?: string;
   readonly budgetUsd: number;
   readonly timeoutMs: number;
   readonly dryRun: boolean;
@@ -261,6 +264,7 @@ export async function analyseTarget(target: AnalysisTarget, options: AnalystOpti
     return { runId, outcome: 'refused-live', verdictPath: null };
   }
   const rel = (path: string): string => relative(options.repoRoot, path).split('\\').join('/');
+  const codex = options.provider.transport === 'codex';
   const prompt = buildAnalystPrompt({
     runId,
     runStatus: digest.status,
@@ -268,9 +272,9 @@ export async function analyseTarget(target: AnalysisTarget, options: AnalystOpti
     costUsd: String(digest.totals?.costUsd ?? 'unknown'),
     durationS: String(Math.round((digest.durationMs ?? 0) / 1000)),
     eventCount: String(digest.eventCount),
-    digestPath: rel(digestPaths.digestPath),
-    eventsPath: rel(digestPaths.eventsPath),
-    runFile: rel(runFile),
+    digestPath: codex ? 'digest.json' : rel(digestPaths.digestPath),
+    eventsPath: codex ? 'events.jsonl' : rel(digestPaths.eventsPath),
+    runFile: codex ? 'run.json' : rel(runFile),
   });
   const args = analystSessionArgs(prompt, options.provider, options.budgetUsd);
   options.log(
@@ -278,7 +282,7 @@ export async function analyseTarget(target: AnalysisTarget, options: AnalystOpti
   );
   if (options.dryRun) {
     options.log(`dry-run: digest at ${rel(digestPaths.digestPath)}`);
-    options.log(`dry-run: would spawn ${options.claudeCommand} ${args.slice(0, -1).join(' ')}`);
+    options.log(codex ? 'dry-run: would start a Codex ChatGPT session with bounded evidence reads' : `dry-run: would spawn ${options.claudeCommand} ${args.slice(0, -1).join(' ')}`);
     options.log(`dry-run: prompt is ${prompt.length} chars`);
     return { runId, outcome: 'dry-run', verdictPath: null };
   }
@@ -288,7 +292,13 @@ export async function analyseTarget(target: AnalysisTarget, options: AnalystOpti
   }
 
   const startedAt = Date.now();
-  const session = await runClaudeSession({
+  const session = codex ? await runCodexSupervisor({
+    command: options.codexCommand ?? process.env['ATOMA_SUPERVISOR_CMD_CODEX'] ?? 'codex',
+    provider: options.provider, cwd: options.repoRoot, prompt,
+    hardening: `${ANALYST_HARDENING} Use only read_evidence to list, search and read files; there is no shell. Empty path lists files.`,
+    schema: SUPERVISOR_VERDICT_JSON_SCHEMA, timeoutMs: options.timeoutMs, onLog: options.warn,
+    readEvidence: createEvidenceReader(options.repoRoot, { 'digest.json': digestPaths.digestPath, 'events.jsonl': digestPaths.eventsPath, 'run.json': runFile }),
+  }) : await runClaudeSession({
     claudeCommand: options.claudeCommand,
     args,
     cwd: options.repoRoot,
@@ -298,7 +308,7 @@ export async function analyseTarget(target: AnalysisTarget, options: AnalystOpti
   });
   if (session.code !== 0) {
     const detail = truncate(session.stderr.trim() || session.stdout.trim(), 2000);
-    options.warn(`claude exited ${session.code} for ${runId}: ${detail}`);
+    options.warn(`${codex ? 'codex' : 'claude'} exited ${session.code} for ${runId}: ${detail}`);
     return { runId, outcome: 'session-failed', verdictPath: null, detail };
   }
   const parsed = supervisorVerdictSchema.safeParse(session.structured);

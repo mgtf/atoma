@@ -66,6 +66,9 @@ provider:
   ATOMA_MENDER_MODEL / _BASE_URL / _AUTH_TOKEN as a set, else the ATOMA_ANALYST_*
   set, else pinned claude-sonnet-5 with explicit ANTHROPIC_API_KEY / AUTH_TOKEN.
   Host login files are not exposed to the execution container.
+  ATOMA_MENDER_TRANSPORT=codex selects a dedicated ChatGPT subscription login
+  from ATOMA_MENDER_CODEX_HOME. Only an auth-only temporary copy is mounted
+  during the model phase; refreshes are preserved. No OpenAI API billing.
 
 execution host:
   Linux / WSL2 with Docker; build the disposable image before the first mend:
@@ -89,7 +92,7 @@ flags:
   --dry-run              prepare the worktree and print the session line; spend nothing
   --keep-worktree        keep the worktree even after a pull request
   --min-confidence <c>   confidence floor (default high)
-  --budget-usd <usd>     spend ceiling per mend (default 5)
+  --budget-usd <usd>     Claude spend ceiling per mend (default 5; unsupported by Codex)
   --timeout-ms <ms>      wall clock per phase (default 1800000)
   --max-diff-lines <n>   refuse a larger change (default ${DEFAULT_MAX_DIFF_LINES})
   --poll-ms <ms>         watch poll interval (default ${MENDER_DEFAULT_POLL_MS})

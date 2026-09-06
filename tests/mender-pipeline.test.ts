@@ -1,4 +1,5 @@
 import { runCommand } from '../src/supervisor/session.js';
+import { writeCodexStub } from './supervisorCodexFixture.js';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -239,6 +240,26 @@ async function mendPending(f: Fixture, options: MenderOptions): Promise<{ failur
 }
 
 describe('the mender, end to end against a real repository', () => {
+  it.skipIf(process.platform === 'win32')('mends through a ChatGPT Codex session, verifies the regression and publishes via the harness', async () => {
+    const f = fixture();
+    const home = join(f.root, 'codex-home'); mkdirSync(home);
+    writeFileSync(join(home, 'auth.json'), JSON.stringify({ auth_mode: 'chatgpt', tokens: { refresh_token: 'initial' } }));
+    const stub = join(f.stubs, 'codex.mjs');
+    writeCodexStub(stub, { log: join(f.root, 'codex.jsonl'), edit: true, report: {
+      schema: 'atoma.supervisor.mend/v1', outcome: 'fixed', title: 'make add() add', summary: 'Return the sum.',
+      checkedIntentionalChoices: 'src/AGENTS.md read.', regressionTests: ['tests/adder.test.mjs'],
+    } });
+    const options = f.options();
+    const result = await mendPending(f, { ...options,
+      provider: { transport: 'codex', codexHome: home, model: 'gpt-5.6-sol', source: 'mender', baseUrl: null, authToken: null },
+      commands: { ...options.commands, codex: stub },
+    });
+    expect(result.failures).toBe(0);
+    expect(result.records[0]).toMatchObject({ outcome: 'pr-opened', mendCostUsd: null, verification: { testFailedBefore: true, checkPassed: true } });
+    expect(remoteBranches(f)).toHaveLength(1);
+    expect(readFileSync(join(home, 'auth.json'), 'utf8')).toContain('rotated');
+  }, TIMEOUT_MS);
+
   it('turns a cited defect into a pushed branch, a pull request and a journal row, then cleans up', async () => {
     const f = fixture();
     const { failures } = await mendPending(f, f.options());
