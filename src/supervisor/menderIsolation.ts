@@ -38,17 +38,29 @@ export const runIsolatedMenderCommand: typeof runCommand = async (spec, extraArg
     writeFileSync(gitFile, 'gitdir: /atoma-git\n');
     const env = menderContainerEnv(options.env ?? {});
     const command = resolveCommand(spec);
+    // Numeric --user preserves worktree ownership, but does not create a passwd
+    // entry. Supply container-only identity data so homedir() also works when
+    // a child unsets HOME. Never mount the host's account database.
+    const uid = process.getuid!();
+    const gid = process.getgid!();
+    const passwd = join(metadataRoot, 'passwd');
+    const group = join(metadataRoot, 'group');
+    writeFileSync(passwd, `mender:x:${uid}:${gid}:Mender:/tmp:/usr/sbin/nologin\n`, { mode: 0o644 });
+    writeFileSync(group, `mender:x:${gid}:\n`, { mode: 0o644 });
     const args = [
       'run', '--name', name, '--label', 'atoma.role=mender', '--rm', '--init',
       ...(options.input !== undefined || options.onLine ? ['--interactive'] : []),
       '--cap-drop=ALL', '--security-opt=no-new-privileges', '--read-only',
       '--pids-limit=512', '--memory=2g', '--memory-swap=2g', '--cpus=1',
-      '--user', `${process.getuid!()}:${process.getgid!()}`,
+      '--user', `${uid}:${gid}`,
       '--tmpfs', '/tmp:rw,nosuid,nodev,exec,size=512m',
       '--mount', `type=bind,src=${options.cwd},dst=/work`,
       '--mount', `type=bind,src=${metadata},dst=/atoma-git,readonly`,
+      '--mount', `type=bind,src=${passwd},dst=/etc/passwd,readonly`,
+      '--mount', `type=bind,src=${group},dst=/etc/group,readonly`,
       '--workdir', '/work', '--env', 'HOME=/tmp', '--env', 'HUSKY=0',
       '--env', 'VITEST_MAX_WORKERS=1',
+      '--env', 'NODE_OPTIONS=--max-old-space-size=1536',
       ...(options.network ? ['--network', options.network] : []),
       ...Object.keys(env).flatMap((key) => ['--env', key]),
       process.env['ATOMA_MENDER_SANDBOX_IMAGE'] ?? 'atoma-mender:local',

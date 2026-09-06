@@ -75,6 +75,10 @@ Neighbours:
   no additional swap, one CPU, 512 MiB tmpfs, one Vitest worker. Host Codex is
   text-only and holds a dedicated ChatGPT profile; the harness alone holds the
   GitHub publisher token. Never give containers product state or credentials.
+- Chromium and its libraries live in the mender image, with Puppeteer downloads
+  disabled. Each fresh command can run browser tests without an install cache.
+  Synthetic read-only passwd/group files describe only the executing UID/GID;
+  Node gets a 1536 MiB heap within the existing 2 GiB container limit.
 - `deploy/install-mender.sh` installs from a verified deployed revision, preserves
   an existing clone and configuration, and removes retired dispatch settings.
   The developer CLI remains available with the same idle reservation.
