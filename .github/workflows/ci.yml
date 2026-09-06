@@ -136,6 +136,16 @@ jobs:
           # every batched push silently skip the invalidation for all but its
           # last commit, which is the failure this step exists to prevent.
           fetch-depth: 0
+          # The translation commit is pushed straight to main, and the
+          # `protect-main` ruleset (.github/rulesets/) only lets the repository
+          # admin bypass its pull-request rule: GitHub Actions cannot be a
+          # bypass actor on a user-owned repository. So the push authenticates
+          # with the admin's fine-grained token (Contents: read/write on this
+          # repository) rather than the workflow token. The `[skip ci]` in the
+          # commit message is what keeps that push from re-triggering CI, which
+          # a token push would otherwise do. Without the secret the workflow
+          # token is used and the push is refused by the ruleset.
+          token: ${{ secrets.ATOMA_I18N_PUSH_TOKEN || github.token }}
 
       - uses: actions/setup-node@v7
         with:
