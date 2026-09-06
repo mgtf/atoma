@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs';
 
 /** Real JSONL subprocess; no provider or paid call. */
-export function writeCodexStub(path: string, options: { report: unknown; log: string; edit?: boolean; command?: string; fail?: boolean; read?: boolean }): void {
+export function writeCodexStub(path: string, options: { report: unknown; log: string; edit?: boolean; command?: string; fail?: boolean; read?: boolean; rpcError?: { method: string; code: number; message: string } }): void {
   const editCommand = `printf '%s\\n' 'export const add = (a, b) => a + b;' > src/adder.mjs\nprintf '%s\\n' 'import {add} from "../src/adder.mjs"; if(add(1,2)!==3) process.exit(1);' > tests/adder.test.mjs`;
   writeFileSync(path, `
 import {createInterface} from 'node:readline';
@@ -20,6 +20,9 @@ const done = () => {
 const rl = createInterface({input:process.stdin});
 rl.on('line', line => {
   const m = JSON.parse(line); appendFileSync(config.log, line + '\\n');
+  if (config.rpcError && config.rpcError.method === m.method) {
+    send({ id: m.id, error: { code: config.rpcError.code, message: config.rpcError.message } }); return;
+  }
   if(m.method==='initialize') send({id:m.id,result:{userAgent:'stub'}});
   if(m.method==='thread/start') send({id:m.id,result:{thread:{id:'thread-test'},model:'gpt-5.6-sol'}});
   if(m.method==='turn/start') {
