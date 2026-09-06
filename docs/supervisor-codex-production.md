@@ -4,6 +4,9 @@ The sentinel is quota-free. The analyst and mender explicitly select Codex and
 use a dedicated ChatGPT login each. This path rejects API-key profiles and
 never uses OPENAI_API_KEY. A separate mender service replaces GitHub Actions.
 
+For the current production test and remaining acceptance work, see the
+[2026-09-06 VPS handoff](incidents/mender-vps-handoff-2026-09-06.md).
+
 ## Analyst configuration
 
 Keep these in `/home/atoma/config/atoma.env`:
