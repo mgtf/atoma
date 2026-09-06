@@ -67,8 +67,8 @@ provider:
   set, else pinned claude-sonnet-5 with explicit ANTHROPIC_API_KEY / AUTH_TOKEN.
   Host login files are not exposed to the execution container.
   ATOMA_MENDER_TRANSPORT=codex selects a dedicated ChatGPT subscription login
-  from ATOMA_MENDER_CODEX_HOME. Only an auth-only temporary copy is mounted
-  during the model phase; refreshes are preserved. No OpenAI API billing.
+  from ATOMA_MENDER_CODEX_HOME. Its temporary auth-only copy stays outside
+  command containers; refreshes are preserved. No OpenAI API billing.
 
 execution host:
   Linux / WSL2 with Docker; build the disposable image before the first mend:
@@ -83,7 +83,7 @@ commands (env, resolved inside the execution image):
 
 flags:
   --finding-file <path>  mend ONE request (atoma.supervisor.mend-request/v1) — what a
-                         production analyst dispatches to .github/workflows/mender.yml
+                         an operator supplies for a single retry
   --no-idle-gate         skip the live-run gate; only for a machine with nothing else to do (CI)
   --once                 mend pending findings (all, or the --backfill newest verdicts), exit
   --backfill <n>         limit --once to the n newest verdicts; in watch mode, re-queue them
@@ -99,7 +99,7 @@ flags:
   --base <branch>        base branch (default main)     --remote <name>  (default origin)
   --repo <path>          checkout to cut worktrees from (default cwd)
   --runs <dir>           operator runs directory, for the idle gate (default ATOMA_RUNS_DIR or ./runs)
-  --supervisor-dir <dir> where verdicts and records live (default ./supervisor)
+  --supervisor-dir <dir> where verdicts and records live (default ATOMA_SUPERVISOR_DIR or ./supervisor)
   --db <path>            product store holding the journal (default ATOMA_DB_PATH or ./atoma.db)
   --help                 show this help`;
 
@@ -165,7 +165,7 @@ async function main(): Promise<void> {
   const options: MenderOptions = {
     repo,
     runsDir: resolve(args.flags['runs'] || process.env['ATOMA_RUNS_DIR'] || './runs'),
-    supervisorDir: resolve(args.flags['supervisor-dir'] || './supervisor'),
+    supervisorDir: resolve(args.flags['supervisor-dir'] || process.env['ATOMA_SUPERVISOR_DIR'] || './supervisor'),
     leasePath: mcpRunLockPath(),
     provider,
     commands: menderCommandsFromEnv(),

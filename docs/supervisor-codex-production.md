@@ -1,100 +1,105 @@
-# Supervisor with a ChatGPT subscription
+# Supervisor with a ChatGPT subscription on Debian
 
-The sentinel remains quota-free. The analyst and mender can explicitly select
-Codex and use ChatGPT Pro. This path never uses `OPENAI_API_KEY`, refuses API
-credentials in auth.json, and keeps the existing Claude path available.
+The sentinel is quota-free. The analyst and mender explicitly select Codex and
+use a dedicated ChatGPT login each. This path rejects API-key profiles and
+never uses OPENAI_API_KEY. A separate mender service replaces GitHub Actions.
 
-## Debian analyst
+## Analyst configuration
 
-Install Codex CLI 0.152.0 or a compatible version under the service account.
-A nologin account can run an explicitly selected shell. Create a dedicated
-analyst profile under the writable service state directory:
-
-```sh
-sudo install -d -o atoma -g atoma -m 700 /home/atoma/state/codex /home/atoma/state/codex/analyst
-sudo -H -u atoma env CODEX_HOME=/home/atoma/state/codex/analyst /bin/bash -lc 'codex login --device-auth'
-sudo -H -u atoma env CODEX_HOME=/home/atoma/state/codex/analyst /bin/bash -lc 'codex login status'
-sudo -H -u atoma /bin/bash -lc 'command -v codex'
-```
-
-Add these to the service's EnvironmentFile, normally
-`/home/atoma/config/atoma.env`:
+Keep these in `/home/atoma/config/atoma.env`:
 
 ```dotenv
+ATOMA_VIZ_ANALYST=1
 ATOMA_ANALYST_TRANSPORT=codex
 ATOMA_ANALYST_MODEL=gpt-5.6-sol
 ATOMA_ANALYST_CODEX_HOME=/home/atoma/state/codex/analyst
 ATOMA_SUPERVISOR_CMD_CODEX=/home/atoma/state/.local/bin/codex
-ATOMA_SUPERVISOR_DIR=/home/atoma/supervisor
-ATOMA_VIZ_ANALYST=1
-ATOMA_ANALYST_QUIET_MS=120000
-ATOMA_MENDER_DISPATCH_REPO=mgtf/atoma
-ATOMA_MENDER_DISPATCH_TOKEN=<repository-dispatch token>
-ATOMA_MENDER_DISPATCH_MIN_CONFIDENCE=high
+ATOMA_SUPERVISOR_DIR=/home/atoma/state/supervisor
 ```
 
-Use the actual installed binary path printed above. The profile's parent must
-also be writable by atoma: its SQLite lease is a sibling of CODEX_HOME. A
-root-owned `/home/atoma` does not meet that requirement for `/home/atoma/.codex`.
-Remove `ATOMA_ANALYST_BASE_URL` and
-`ATOMA_ANALYST_AUTH_TOKEN` when selecting Codex. Create the supervisor directory
-owned by atoma. Restart the service when no run/preview is active. The sentinel
-is on by default behind the auth gate; `ATOMA_VIZ_SENTINEL=0` disables it.
+The profile and its parent must be writable by atoma. Remove analyst API token
+and base URL overrides when using Codex. Keep supervisor state outside releases.
 
-The deployment artifact carries sources, docs and subsystem contracts matching
-the deployed revision. The analyst's single dynamic tool reads only that
-allowlisted evidence and the selected run. It has no command execution or
-access to credentials, stores, or other runs. The product MCP stays on `/mcp`.
+## Install the separate mender
 
-## GitHub Actions mender
-
-Repository-level Actions settings (the workflow has no GitHub environment):
-
-| Kind | Name | Value |
-| --- | --- | --- |
-| Variable | `ATOMA_MENDER_MODEL` | `gpt-5.6-sol`, or an explicitly chosen model |
-| Secret | `ATOMA_MENDER_CODEX_AUTH_JSON` | auth.json from a dedicated ChatGPT login |
-| Secret | `ATOMA_MENDER_GITHUB_TOKEN` | Fine-grained PAT: Contents, Pull requests and Secrets read/write on this repository |
-
-Create a **separate** Codex login for Actions under a dedicated CODEX_HOME.
-Authenticate it with the same ChatGPT subscription using device login; do not
-copy the Debian service's active profile. Upload auth.json without displaying it:
+Deploy the migration first. On Debian install `git`, `gh`, `python3` and Docker;
+the supported Node and Codex binaries must already exist. Disable the former
+Mender workflow before reusing its dedicated login. The installation script
+uses `/home/atoma/.codex-mender-ci/auth.json` only when the new mender profile
+has no auth file. It never copies the analyst login.
 
 ```sh
-gh secret set ATOMA_MENDER_CODEX_AUTH_JSON --repo mgtf/atoma < /path/to/ci-profile/auth.json
+sudo apt-get install -y git gh python3
+sudo bash /home/atoma/current/deploy/install-mender.sh
 ```
 
-Stop using that CI profile interactively after uploading it. The serial Mender
-workflow owns its refresh lifecycle. Its final step stores renewed auth back
-into the same GitHub secret even after a failed mend. An interrupted runner
-may still lose a refresh; if login becomes invalid, create and upload a new
-dedicated session. Credentials are never included in artifacts or caches.
+The installer asks for the GitHub publisher PAT without echoing it. It needs
+Contents and Pull requests read/write on `mgtf/atoma`; Secrets write is no
+longer needed. Do not paste credentials in chat. It stores the token in
+`/home/atoma/config/mender.env` (root:atoma, 0640).
 
-Codex runs as a text-only app-server in an empty jail, with built-in execution,
-Apps, plugins, MCP and skills disabled. A private worktree_command dynamic tool
-executes proposed commands through the mender's Docker boundary with no network
-or credentials. Docker's default security profiles remain intact. The temporary
-ChatGPT profile stays outside every command container. Tests also receive no
-model credentials; GitHub credentials and the Docker socket are never mounted.
-The harness alone publishes. CI exercises this protocol-to-container boundary.
+Installation refuses active runs/previews, then briefly stops Atoma while
+preparing the clone and image. A failure restarts Atoma. The clone is pinned
+to the deployed revision; rerunning the installer upgrades it only if clean.
+Each actual mend fetches current main into its own disposable worktree.
+The installer preserves existing configuration and verdicts, copies the shared
+DB/runs/lease paths from atoma.env, and removes ATOMA_MENDER_DISPATCH_* settings
+with a root-only backup. It never changes the production release checkout.
 
-## Verification
+The mender service has its own environment, no product OAuth/provider secrets,
+and a dedicated profile at `/home/atoma/state/codex/mender`. Do not keep using
+the old CI profile after migration. Once the new login is verified, remove the
+obsolete CI profile securely as an operator; keep the analyst profile.
 
-After deployment, expect `sentinel: watching` and `analyst: on` in the journal.
-Run a project task reproducing an existing source defect and let it finish.
-After the quiet period, with no run active, inspect:
+```sh
+sudo systemctl status atoma-mender --no-pager
+sudo journalctl -u atoma-mender -f
+```
 
-1. `/home/atoma/supervisor/verdicts/<runId>.json` and `supervisor.verdict`.
-2. An eligible high-confidence `defect` with a cited proposedFix.
-3. `mender.dispatched`, followed by the Mender Actions run.
-4. The workflow artifact's mend record and the correction PR.
+## Execution and resource boundaries
 
-The regression must fail on the unfixed source and the full check must pass
-after the fix. A failed task does not guarantee an eligible source defect.
-Manual workflow dispatch accepts a genuine MendRequest to test only the CI half.
-Merge remains manual; the ordinary main CI/deployment activates the correction.
+The analyst and mender hold the existing machine-global run lease through their
+work and cleanup. New product starts are refused while this slot is reserved;
+deployment waits too. An occupied or stale lease is never recovered by a
+background supervisor. After a crash, inspect the owner and surviving processes
+before using the normal run recovery path; do not delete the lease database.
 
-Codex does not expose Claude's USD ceiling. The analyst retains a 15-minute
-wall clock and at most 40 evidence reads; the mender retains its 30-minute
-phase clock. Recorded cost is null, never zero or a guessed subscription price.
-All runs draw from the same subscription quota.
+Codex runs as a text-only app-server in an empty jail. Built-in execution,
+Apps, plugins, MCP and skills are disabled. Its private worktree command sends
+executable proposals to Docker without network or inference credentials.
+Containers receive only the worktree and sanitized read-only git metadata,
+never host HOME, product state, publisher credentials or Docker socket.
+
+Docker enforces 2 GiB RAM, no extra swap, one CPU and a 512 MiB tmpfs. Vitest
+runs one worker. The service itself has a separate 1 GiB cap and reduced CPU
+priority. systemd allows the current bounded attempt to finish on stop; its
+stop backstop reaps containers labeled atoma.role=mender after process death.
+
+## Clean up GitHub
+
+After local publisher authentication is installed, delete the repository secrets
+ATOMA_MENDER_CODEX_AUTH_JSON and ATOMA_MENDER_GITHUB_TOKEN. Delete obsolete
+ATOMA_MENDER_MODEL, ATOMA_MENDER_BASE_URL and ATOMA_MENDER_AUTH_TOKEN variables
+or secrets if present. The Mender Actions workflow is retired.
+
+Keep OPENAI_API_KEY while the i18n CI job still uses it. Keep ATOMA_DEPLOY_ENABLED
+and all production environment deployment variables and SSH secrets. Revoke the
+retired dispatch PAT, and remove Secrets write from the publisher PAT once its
+CI use is over. GitHub secret deletion does not revoke a PAT.
+
+## End-to-end verification
+
+A finished run produces a supervisor.verdict row. An eligible high-confidence
+defect with cited intentional choices is consumed from the persistent verdict
+file. The local mender emits mender.started and one terminal outcome; inspect
+`/home/atoma/state/supervisor/mender/<runId>.<finding>.json` and the production
+journal. A refusal or decline is a valid outcome, not proof of a correction PR.
+
+The harness requires a regression that fails on the unfixed code, then a full
+passing check with the fix, before pushing a branch and opening a PR. A person
+merges it; ordinary main CI and deployment activate the correction. An existing
+genuine verdict can be retried with `--verdict <id> --finding <n> --force` while
+the watch service is stopped. Never manufacture a finding just to get a PR.
+
+ChatGPT usage consumes the subscription quota. Codex cost remains null because
+it does not report USD cost; wall-clock limits still apply.

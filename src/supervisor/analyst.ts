@@ -12,6 +12,7 @@ import {
   type VerdictMeta,
 } from '../contracts/supervisorVerdict.js';
 import { readBoundedJson } from '../sentinel/sources.js';
+import { acquireRunLeaseWithoutRecovery, RunLockBusyError } from '../mcp/runLock.js';
 import type { VizRun, VizRunIndexEntry } from '../viz/trace.js';
 import { anyRunActive, finishedRuns } from './activity.js';
 import { dispatchMendRequests, mendRequestsFor, type DispatchConfig, type FetchLike } from './dispatch.js';
@@ -291,77 +292,88 @@ export async function analyseTarget(target: AnalysisTarget, options: AnalystOpti
     return { runId, outcome: 'refused-active', verdictPath: null };
   }
 
-  const startedAt = Date.now();
-  const session = codex ? await runCodexSupervisor({
-    command: options.codexCommand ?? process.env['ATOMA_SUPERVISOR_CMD_CODEX'] ?? 'codex',
-    provider: options.provider, cwd: options.repoRoot, prompt,
-    hardening: `${ANALYST_HARDENING} Use only read_evidence to list, search and read files; there is no shell. Empty path lists files.`,
-    schema: SUPERVISOR_VERDICT_JSON_SCHEMA, timeoutMs: options.timeoutMs, onLog: options.warn,
-    readEvidence: createEvidenceReader(options.repoRoot, { 'digest.json': digestPaths.digestPath, 'events.jsonl': digestPaths.eventsPath, 'run.json': runFile }),
-  }) : await runClaudeSession({
-    claudeCommand: options.claudeCommand,
-    args,
-    cwd: options.repoRoot,
-    provider: options.provider,
-    timeoutMs: options.timeoutMs,
-    onLog: options.warn,
-  });
-  if (session.code !== 0) {
-    const detail = truncate(session.stderr.trim() || session.stdout.trim(), 2000);
-    options.warn(`${codex ? 'codex' : 'claude'} exited ${session.code} for ${runId}: ${detail}`);
-    return { runId, outcome: 'session-failed', verdictPath: null, detail };
+  let lease;
+  try {
+    lease = acquireRunLeaseWithoutRecovery(`analyst:${runId}`, options.leasePath);
+  } catch (error) {
+    if (error instanceof RunLockBusyError) return { runId, outcome: 'refused-active', verdictPath: null };
+    throw error;
   }
-  const parsed = supervisorVerdictSchema.safeParse(session.structured);
-  if (!parsed.success) {
-    mkdirSync(paths.verdictsDir, { recursive: true });
-    const rawPath = join(paths.verdictsDir, `${runId}.raw.txt`);
-    writeFileSync(rawPath, session.stdout);
-    const problems = parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ');
-    options.warn(`invalid verdict for ${runId} (${problems}); raw kept at ${rawPath}`);
-    return { runId, outcome: 'invalid-verdict', verdictPath: null, detail: problems };
-  }
-  if (!servedMatchesPin(options.provider, session.usage)) {
-    options.warn(
-      `requested ${options.provider.model} but served ${session.usage.served?.map((m) => m.model).join(' + ')} — ` +
-        'this verdict is not comparable to one recorded under the pin'
-    );
-  }
-  // Never trust even the run id to echo correctly.
-  const verdict: SupervisorVerdict = { ...parsed.data, runId };
-  const meta: VerdictMeta = {
-    analysedAt: new Date().toISOString(),
-    promptVersion: ANALYST_PROMPT_VERSION,
-    modelRequested: options.provider.model,
-    providerBaseUrl: options.provider.baseUrl,
-    modelsServed: session.usage.served,
-    worstFindingKind: worstFindingKind(verdict.findings),
-    analysisCostUsd: session.usage.costUsd,
-    analysisDurationMs: session.usage.durationMs ?? Date.now() - startedAt,
-    analysisTurns: session.usage.turns,
-    sessionId: session.usage.sessionId,
-  };
-  const written = routeVerdict(verdict, meta, paths, journal, options.log, options.warn, {
-    orgId: target.orgId,
-    projectId: target.projectId,
-  });
-  let dispatched = 0;
-  if (options.dispatch) {
-    const requests = mendRequestsFor(verdict, options.dispatch);
-    if (requests.length > 0) {
-      const outcomes = await dispatchMendRequests({
-        requests,
-        config: options.dispatch,
-        journal,
-        orgId: target.orgId,
-        projectId: target.projectId,
-        warn: options.warn,
-        ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-      });
-      dispatched = outcomes.filter((outcome) => outcome.ok).length;
-      options.log(`dispatched ${dispatched}/${requests.length} mend request(s) to ${options.dispatch.repo}`);
+  try {
+    const startedAt = Date.now();
+    const session = codex ? await runCodexSupervisor({
+      command: options.codexCommand ?? process.env['ATOMA_SUPERVISOR_CMD_CODEX'] ?? 'codex',
+      provider: options.provider, cwd: options.repoRoot, prompt,
+      hardening: `${ANALYST_HARDENING} Use only read_evidence to list, search and read files; there is no shell. Empty path lists files.`,
+      schema: SUPERVISOR_VERDICT_JSON_SCHEMA, timeoutMs: options.timeoutMs, onLog: options.warn,
+      readEvidence: createEvidenceReader(options.repoRoot, { 'digest.json': digestPaths.digestPath, 'events.jsonl': digestPaths.eventsPath, 'run.json': runFile }),
+    }) : await runClaudeSession({
+      claudeCommand: options.claudeCommand,
+      args,
+      cwd: options.repoRoot,
+      provider: options.provider,
+      timeoutMs: options.timeoutMs,
+      onLog: options.warn,
+    });
+    if (session.code !== 0) {
+      const detail = truncate(session.stderr.trim() || session.stdout.trim(), 2000);
+      options.warn(`${codex ? 'codex' : 'claude'} exited ${session.code} for ${runId}: ${detail}`);
+      return { runId, outcome: 'session-failed', verdictPath: null, detail };
     }
+    const parsed = supervisorVerdictSchema.safeParse(session.structured);
+    if (!parsed.success) {
+      mkdirSync(paths.verdictsDir, { recursive: true });
+      const rawPath = join(paths.verdictsDir, `${runId}.raw.txt`);
+      writeFileSync(rawPath, session.stdout);
+      const problems = parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ');
+      options.warn(`invalid verdict for ${runId} (${problems}); raw kept at ${rawPath}`);
+      return { runId, outcome: 'invalid-verdict', verdictPath: null, detail: problems };
+    }
+    if (!servedMatchesPin(options.provider, session.usage)) {
+      options.warn(
+        `requested ${options.provider.model} but served ${session.usage.served?.map((m) => m.model).join(' + ')} — ` +
+          'this verdict is not comparable to one recorded under the pin'
+      );
+    }
+    // Never trust even the run id to echo correctly.
+    const verdict: SupervisorVerdict = { ...parsed.data, runId };
+    const meta: VerdictMeta = {
+      analysedAt: new Date().toISOString(),
+      promptVersion: ANALYST_PROMPT_VERSION,
+      modelRequested: options.provider.model,
+      providerBaseUrl: options.provider.baseUrl,
+      modelsServed: session.usage.served,
+      worstFindingKind: worstFindingKind(verdict.findings),
+      analysisCostUsd: session.usage.costUsd,
+      analysisDurationMs: session.usage.durationMs ?? Date.now() - startedAt,
+      analysisTurns: session.usage.turns,
+      sessionId: session.usage.sessionId,
+    };
+    const written = routeVerdict(verdict, meta, paths, journal, options.log, options.warn, {
+      orgId: target.orgId,
+      projectId: target.projectId,
+    });
+    let dispatched = 0;
+    if (options.dispatch) {
+      const requests = mendRequestsFor(verdict, options.dispatch);
+      if (requests.length > 0) {
+        const outcomes = await dispatchMendRequests({
+          requests,
+          config: options.dispatch,
+          journal,
+          orgId: target.orgId,
+          projectId: target.projectId,
+          warn: options.warn,
+          ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+        });
+        dispatched = outcomes.filter((outcome) => outcome.ok).length;
+        options.log(`dispatched ${dispatched}/${requests.length} mend request(s) to ${options.dispatch.repo}`);
+      }
+    }
+    return { runId, outcome: 'analysed', verdictPath: written, dispatched };
+  } finally {
+    lease.release();
   }
-  return { runId, outcome: 'analysed', verdictPath: written, dispatched };
 }
 
 /* ─────────────────────────────── the loop ─────────────────────────────── */

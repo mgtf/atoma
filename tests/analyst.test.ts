@@ -7,6 +7,7 @@ import { PlatformEventLog } from '../src/platform/events.js';
 import { analyseRun, analyseTarget, pendingRuns, pendingTargets, resolveTarget, type AnalystOptions } from '../src/supervisor/analyst.js';
 import type { FetchLike } from '../src/supervisor/dispatch.js';
 import { digestRun, runStatusOf } from '../src/supervisor/digest.js';
+import { acquireRunLeaseWithoutRecovery, peekRunLease } from '../src/mcp/runLock.js';
 
 /**
  * STAGE 2, THE ANALYST, with a stub in place of the model. What these hold:
@@ -132,6 +133,25 @@ describe('digestRun', () => {
 });
 
 describe('analyseRun', () => {
+  it('holds the product slot until the verdict is journaled and defers behind the mender', async () => {
+    const f = fixture();
+    process.env['STUB_VERDICT'] = JSON.stringify(verdict);
+    const options = f.options();
+    const mender = acquireRunLeaseWithoutRecovery('mender:other', options.leasePath);
+    try {
+      expect((await analyseRun(RUN_ID, options)).outcome).toBe('refused-active');
+      expect(existsSync(f.claudeArgs)).toBe(false);
+    } finally { mender.release(); }
+    let journaled = false;
+    const result = await analyseRun(RUN_ID, { ...options, journal: () => {
+      journaled = true;
+      expect(peekRunLease(options.leasePath)?.runId).toBe(`analyst:${RUN_ID}`);
+      expect(() => acquireRunLeaseWithoutRecovery('mender:other', options.leasePath)).toThrow(/occupied/);
+    } });
+    expect(result.outcome).toBe('analysed');
+    expect(journaled).toBe(true);
+    expect(peekRunLease(options.leasePath)).toBeNull();
+  });
   it('digests, drives a read-only session, routes the findings and journals facts only', async () => {
     const f = fixture();
     process.env['STUB_VERDICT'] = JSON.stringify(verdict);

@@ -1,3 +1,5 @@
+> Deployment update, 2026-09-06: the operator selected a separate mender service on the VPS, with a dedicated clone and the shared run lease held throughout maintenance. The earlier CI and phase-boundary-only design below is historical. Current setup: [production guide](supervisor-codex-production.md).
+
 # Run supervision and the self-improvement loop — design
 
 Status: **accepted; P0, P1 and P2 landed (last update 2026-09-05)**. The

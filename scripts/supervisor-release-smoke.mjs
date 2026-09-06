@@ -4,7 +4,9 @@ import { pathToFileURL } from 'node:url';
 
 const root = resolve(process.argv[2] ?? '.');
 for (const file of ['AGENTS.md', 'docs/supervisor-design.md', 'src/supervisor/AGENTS.md',
-  'src/supervisor/analyst.ts', 'dist/supervisor/codexSession.js', 'dist/supervisor/codexReader.js']) {
+  'src/supervisor/analyst.ts', 'dist/supervisor/codexSession.js', 'dist/supervisor/codexReader.js',
+  'dist/cli/mender.js', 'deploy/install-mender.sh', 'deploy/atoma-mender.service',
+  'deploy/mender.env.example', 'deploy/mender-reap.sh']) {
   accessSync(join(root, file), constants.R_OK);
 }
 const contract = readFileSync(join(root, 'AGENTS.md'), 'utf8');

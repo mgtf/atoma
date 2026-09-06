@@ -9,12 +9,14 @@ import type { PlatformEventKind } from '../src/contracts/platformEvents.js';
 import { closeStoreHandles } from '../src/core/stores.js';
 import { PlatformEventLog } from '../src/platform/events.js';
 import { EXAMPLE_MEND_REQUEST } from '../src/contracts/supervisorMend.js';
+import { acquireRunLeaseWithoutRecovery, peekRunLease } from '../src/mcp/runLock.js';
 import {
   mendFinding,
   mendInputFromRequest,
   mendRecordPath,
   pendingMends,
   processMends,
+  runMenderLoop,
   type MendRecord,
   type MenderOptions,
 } from '../src/supervisor/mender.js';
@@ -422,6 +424,53 @@ describe('the mender, end to end against a real repository', () => {
     const { failures } = await mendPending(f, f.options({ idleGate: false }));
     expect(failures).toBe(0);
     expect(record(f)?.outcome).toBe('pr-opened');
+  }, TIMEOUT_MS);
+
+  it('reserves the product slot through every executable phase and releases it afterwards', async () => {
+    const f = fixture();
+    const options = f.options();
+    let phases = 0;
+    const executeUntrusted: typeof runCommand = async (...args) => {
+      phases++;
+      expect(peekRunLease(options.leasePath)?.runId).toBe(`mender:${RUN_ID}`);
+      expect(() => acquireRunLeaseWithoutRecovery('product-run', options.leasePath)).toThrow(/occupied/);
+      if (phases === 1) {
+        const probe = await runCommand(process.execPath, ['--import', 'tsx', '--input-type=module', '-e',
+          `import { acquireRunLeaseWithoutRecovery } from './src/mcp/runLock.ts';
+           try { acquireRunLeaseWithoutRecovery('other-process', ${JSON.stringify(options.leasePath)}); process.exit(12); }
+           catch (error) { if (error.name !== 'RunLockBusyError') throw error; }`,
+        ], { cwd: process.cwd(), timeoutMs: 10_000 });
+        expect(probe.code).toBe(0);
+      }
+      return options.executeUntrusted!(...args);
+    };
+    await mendPending(f, { ...options, executeUntrusted });
+    expect(record(f)?.outcome).toBe('pr-opened');
+    expect(phases).toBeGreaterThan(2);
+    expect(peekRunLease(options.leasePath)).toBeNull();
+  }, TIMEOUT_MS);
+
+  it('resumes an existing verdict and retries a deferred finding without a restart', async () => {
+    const f = fixture();
+    const controller = new AbortController();
+    const options = f.options({ pollMs: 20 }, { STUB_MODE: 'declined' });
+    const lease = acquireRunLeaseWithoutRecovery('analyst:other', options.leasePath);
+    let polls = 0;
+    const timer = setInterval(() => {
+      polls++;
+      if (polls === 3) lease.release();
+      if (existsSync(mendRecordPath(join(f.supervisor, 'mender'), RUN_ID, 1))) controller.abort();
+    }, 30);
+    const deadline = setTimeout(() => controller.abort(), 30_000);
+    try {
+      await runMenderLoop({ options, signal: controller.signal });
+      expect(record(f)?.outcome).toBe('declined');
+    } finally {
+      controller.abort();
+      lease.release();
+      clearInterval(timer);
+      clearTimeout(deadline);
+    }
   }, TIMEOUT_MS);
 
   it('does not run the same finding twice unless forced', async () => {

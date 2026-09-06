@@ -33,6 +33,9 @@ describe.skipIf(process.env['ATOMA_MENDER_CONTAINER_TESTS'] !== '1')('mender con
       const fs = require('node:fs');
       const cp = require('node:child_process');
       if (process.env.GH_TOKEN || process.env.GITHUB_TOKEN) process.exit(10);
+      if (process.env.VITEST_MAX_WORKERS !== '1') process.exit(21);
+      if (fs.existsSync('/sys/fs/cgroup/memory.max') && fs.readFileSync('/sys/fs/cgroup/memory.max', 'utf8').trim() !== '2147483648') process.exit(22);
+      if (fs.existsSync('/sys/fs/cgroup/memory.swap.max') && fs.readFileSync('/sys/fs/cgroup/memory.swap.max', 'utf8').trim() !== '0') process.exit(23);
       if (fs.existsSync(${JSON.stringify(secretPath)})) process.exit(11);
       if (fs.existsSync('/var/run/docker.sock')) process.exit(12);
       if (cp.execFileSync('git', ['config', '--list'], {encoding:'utf8'}).includes('sentinel-publisher')) process.exit(13);

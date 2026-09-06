@@ -29,7 +29,7 @@ import {
   type SupervisorVerdict,
   type VerdictFinding,
 } from '../contracts/supervisorVerdict.js';
-import { processExists } from '../mcp/runLock.js';
+import { acquireRunLeaseWithoutRecovery, RunLockBusyError, processExists } from '../mcp/runLock.js';
 import { readBoundedJson } from '../sentinel/sources.js';
 import { anyRunActive } from './activity.js';
 import { truncate } from './digest.js';
@@ -364,6 +364,25 @@ export function mendInputFromRequest(raw: unknown): MendInput {
  * idle gate refused before anything was prepared).
  */
 export async function mendFinding(input: MendInput, options: MenderOptions): Promise<MendRecord | null> {
+  if (!options.idleGate) return mendFindingReserved(input, options);
+  // Reserve the SAME slot as product runs and deployment, without recovering
+  // another owner's work. The watch retries an unrecorded finding when idle.
+  if (anyRunActive({ runsDir: options.runsDir, leasePath: options.leasePath })) return null;
+  let lease;
+  try {
+    lease = acquireRunLeaseWithoutRecovery(`mender:${input.runId}`, options.leasePath);
+  } catch (error) {
+    if (error instanceof RunLockBusyError) return null;
+    throw error;
+  }
+  try {
+    return await mendFindingReserved(input, { ...options, idleGate: false });
+  } finally {
+    lease.release();
+  }
+}
+
+async function mendFindingReserved(input: MendInput, options: MenderOptions): Promise<MendRecord | null> {
   const paths = menderPaths(options);
   const journal = safeSink(options.journal, options.warn);
   const { runId, index, run, finding } = input;
@@ -641,6 +660,10 @@ export async function mendFinding(input: MendInput, options: MenderOptions): Pro
     }
     const prUrl = /https?:\/\/\S+/.exec(pr.stdout)?.[0] ?? pr.stdout.trim();
     return record({ ...modelMeta, outcome: 'pr-opened', baseSha, sha, prUrl, report, files, diffStat, verification });
+  } catch (error) {
+    keepWorktree = true;
+    options.warn(`mender phase failed: ${String(error)}`);
+    return record({ outcome: 'harness-failed', worktree, reason: 'A harness phase failed; inspect the service log before retrying.' });
   } finally {
     if (!keepWorktree && existsSync(worktree)) {
       await git(options.repo, ['worktree', 'remove', '--force', worktree], options.warn, { allowFailure: true });
@@ -730,20 +753,25 @@ export async function runMenderLoop(args: {
   const { options, signal } = args;
   const paths = menderPaths(options);
   const verdicts = listVerdicts(paths.verdictsDir);
-  const baseline = new Set(verdicts.map((v) => v.runId));
+  const baseline = new Set<string>();
+  // An explicit backfill limits older work; the service default resumes ALL
+  // unrecorded findings after restart. A deferred finding stays pending.
   if (args.backfill && args.backfill > 0) {
-    for (const v of verdicts.slice(-args.backfill)) baseline.delete(v.runId);
+    for (const v of verdicts.slice(0, -args.backfill)) baseline.add(v.runId);
   }
   while (!signal.aborted) {
     const fresh = listVerdicts(paths.verdictsDir).filter((v) => !baseline.has(v.runId));
     if (fresh.length > 0) {
-      await processMends(pendingMends(options, fresh.map((v) => v.runId)), options);
-      for (const v of fresh) baseline.add(v.runId);
+      for (const item of pendingMends(options, fresh.map((v) => v.runId))) {
+        if (signal.aborted) break;
+        await processMends([item], { ...options, force: false });
+      }
     }
     if (signal.aborted) break;
     await new Promise<void>((resolveSleep) => {
-      const timer = setTimeout(resolveSleep, options.pollMs);
-      signal.addEventListener('abort', () => { clearTimeout(timer); resolveSleep(); }, { once: true });
+      const finish = (): void => { clearTimeout(timer); signal.removeEventListener('abort', finish); resolveSleep(); };
+      const timer = setTimeout(finish, options.pollMs);
+      signal.addEventListener('abort', finish, { once: true });
     });
   }
 }

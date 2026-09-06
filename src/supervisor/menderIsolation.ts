@@ -39,15 +39,16 @@ export const runIsolatedMenderCommand: typeof runCommand = async (spec, extraArg
     const env = menderContainerEnv(options.env ?? {});
     const command = resolveCommand(spec);
     const args = [
-      'run', '--name', name, '--rm', '--init',
+      'run', '--name', name, '--label', 'atoma.role=mender', '--rm', '--init',
       ...(options.input !== undefined || options.onLine ? ['--interactive'] : []),
       '--cap-drop=ALL', '--security-opt=no-new-privileges', '--read-only',
-      '--pids-limit=512', '--memory=6g', '--cpus=2',
+      '--pids-limit=512', '--memory=2g', '--memory-swap=2g', '--cpus=1',
       '--user', `${process.getuid!()}:${process.getgid!()}`,
-      '--tmpfs', '/tmp:rw,nosuid,nodev,exec,size=2g',
+      '--tmpfs', '/tmp:rw,nosuid,nodev,exec,size=512m',
       '--mount', `type=bind,src=${options.cwd},dst=/work`,
       '--mount', `type=bind,src=${metadata},dst=/atoma-git,readonly`,
       '--workdir', '/work', '--env', 'HOME=/tmp', '--env', 'HUSKY=0',
+      '--env', 'VITEST_MAX_WORKERS=1',
       ...(options.network ? ['--network', options.network] : []),
       ...Object.keys(env).flatMap((key) => ['--env', key]),
       process.env['ATOMA_MENDER_SANDBOX_IMAGE'] ?? 'atoma-mender:local',

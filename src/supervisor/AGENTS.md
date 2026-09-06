@@ -26,8 +26,7 @@ Neighbours:
   and never reads raw trace prose. Nothing here collapses two of these into
   one process: a resident LLM watcher would be the top injection surface in
   the system holding power (design §"Why not a resident LLM watcher").
-- ONE IDLE PREDICATE (`activity.ts`), asserted before every session and every
-  heavy phase. It is built from the repository's existing facts — the operator
+- ONE IDLE PREDICATE (`activity.ts`), checked before reserving the shared run slot. It is built from the repository's existing facts — the operator
   index through the sentinel's bounded reader, liveness through
   `isIndexEntryLive`, the MCP lease through `peekRunLease` — and never from a
   parser on the runner's stdout. A torn index read counts as ACTIVE. Two
@@ -58,36 +57,27 @@ Neighbours:
   Codex reports tokens and the model resolved by thread/start, but no price:
   cost stays null. USD ceilings are Claude-only; both retain wall-clock limits.
 
-## Where each stage runs — three machines, by design
+## Where each stage runs
 
-- THE PRODUCTION HOST runs the sentinel and the ANALYST, nothing more. The
-  analyst is a resident shell inside the gated viz server (`resident.ts`,
-  `ATOMA_VIZ_ANALYST=1`): it subscribes to the journal's own `run.finished`
-  rows — the one fact "a run ended" the platform already records — waits the
-  quiet period, asserts the idle predicate, analyses one run at a time, and
-  re-queues at boot whatever the store lists as ended and un-analysed. OPT-IN
-  where the sentinel is opt-out, because it spends quota. It needs the selected
-  `claude` or `codex` binary and the `ATOMA_ANALYST_*` set in the service env.
-  Deployment archives include src/, docs/ and AGENTS.md as read-only evidence
-  matching the deployed revision. Persist supervisor output outside releases.
-- THE MENDER NEVER RUNS ON THE SERVING HOST. That machine has no git checkout,
-  no devDependencies, no `gh`, and a full check beside a customer run is what
-  the idle gate exists to prevent. A verdict's eligible defects are DISPATCHED
-  (`dispatch.ts`): one `repository_dispatch` per defect, whose payload is the
-  `MendRequest` contract — the SANITISED finding, the key, the run's status
-  and grade, at most ten flat keys. Half a configuration (`_REPO` without
-  `_TOKEN`) dispatches nothing; a refused POST warns and journals nothing.
-  Each accepted one is a `mender.dispatched` row.
-- THE REPOSITORY'S CI runs the mender (`.github/workflows/mender.yml`):
-  `npm run mender:dev -- --finding-file <payload> --no-idle-gate`. That flag
-  exists for exactly one host, the runner, which has nothing else to do; the
-  CLI says so out loud when it is set. The workflow is queued one mend at a
-  time, never merges, and keeps its `supervisor/` records as an artifact
-  whatever happened. Its journal is the pull request and the artifact; the
-  production journal holds the verdict and the dispatch.
-- The developer machine keeps the local loop for the operator corpus:
-  `npm run analyst` and `npm run mender` over `runs/` and
-  `supervisor/verdicts/`, with the idle gate on.
+- Production hosts the sentinel and resident read-only analyst inside the viz
+  server (`ATOMA_VIZ_ANALYST=1`), and a SEPARATE `atoma-mender.service` over a
+  dedicated clone. This shared-host arrangement was explicitly selected by the
+  operator on 2026-09-06; it replaces the GitHub Actions mender.
+- Verdicts and mend records persist under `ATOMA_SUPERVISOR_DIR`, outside
+  releases. The mender resumes every unrecorded eligible finding after restart;
+  busy findings stay pending, completed or failed attempts require an explicit
+  retry. No dispatch credential or auth-secret rotation through GitHub is needed.
+- Analyst and mender reserve the existing machine-global run lease, without
+  stale recovery, throughout their work and cleanup. Product admission and
+  deployment use that same slot. A new product run is refused while maintenance
+  holds it; this is the explicit resource trade on the 4 GB production host.
+- The mender model and checks stay in disposable Docker containers: 2 GiB RAM,
+  no additional swap, one CPU, 512 MiB tmpfs, one Vitest worker. Host Codex is
+  text-only and holds a dedicated ChatGPT profile; the harness alone holds the
+  GitHub publisher token. Never give containers product state or credentials.
+- `deploy/install-mender.sh` installs from a verified deployed revision, preserves
+  an existing clone and configuration, and removes retired dispatch settings.
+  The developer CLI remains available with the same idle reservation.
 
 ## The analyst
 
@@ -148,10 +138,7 @@ Neighbours:
   session clock; queued commands are cancelled when the session ends and
   active containers are reaped before releasing the worktree or auth lease.
   The auth-only temporary Codex HOME stays outside every command container.
-  Actions restores a DEDICATED ChatGPT login from ATOMA_MENDER_CODEX_AUTH_JSON
-  and saves refreshed auth back as a secret, never an artifact/cache. Its
-  publisher token needs Contents, Pull requests and Secrets write. Do not copy
-  the serving host's active login into CI and race refresh-token rotation.
+  The dedicated local ChatGPT profile owns its refresh lifecycle. The host publisher token needs Contents and Pull requests write only; no Secrets permission. Never share the analyst profile or renew this profile elsewhere.
 - THE EXIT CONTRACT IS THE MANUAL BURN-IN LOOP'S, proven mechanically: the
   source change is stashed (untracked files included), the new test files run
   and must FAIL, the stash is restored, the full check runs and must PASS.
@@ -214,19 +201,12 @@ Neighbours:
   the current Node, so the pipeline tests substitute `claude`, `gh` and `npm`
   on every platform; `npm`/`npx` get a shell on Windows because they are
   `.cmd` shims, and nothing else ever does.
-- The idle gate is asserted at phase boundaries, not held. Holding the MCP run
-  lease during a mend (as `deploy:preflight --hold` does) would refuse product
-  runs for a background improver; the trade is documented as open work in the
-  design document, with the data to revisit it.
+- The shared host holds the run lease through cleanup. It never recovers a stale lease to make background work proceed; an occupied slot defers the finding.
 - The idle gate is a decision, not an inference. `--no-idle-gate` is a flag
-  the CI workflow passes, never a default derived from `CI=true`: an
+  an operator explicitly passes on a dedicated machine, never a default derived from `CI=true`: an
   environment variable that silently disabled a safety gate on a developer's
   machine would be the exact silence the run-host contract exists to end.
-- The dispatch token is a fine-grained PAT (or an App installation token) read
-  from the service env, scoped to one repository and `contents: write`. Using
-  the project-publishing GitHub App for it was considered and deferred: the
-  App is installed per TENANT organisation for their repositories, and the
-  atoma repository is the operator's, so the identities do not line up.
+- The legacy optional dispatch API remains available for external integrations; the production deployment does not configure it and ships no Mender Actions workflow.
 - Prompts are TypeScript constants (`analystPrompt.ts`, `menderPrompt.ts`),
   not Markdown assets: `tsc` ships nothing but `.js`, and a prompt the
   compiled CLI cannot find is a release-path failure typecheck never sees.
