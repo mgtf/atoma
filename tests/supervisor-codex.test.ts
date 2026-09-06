@@ -51,6 +51,21 @@ it('reads only enumerated evidence and bounds queries without executing patterns
 });
 
 describe.skipIf(process.platform === 'win32')('Codex supervisor process boundaries', () => {
+  it.each(['initialize', 'thread/start', 'turn/start'])('identifies a rejected %s without persisting provider prose', async (method) => {
+    const root = fixture(); const stub = join(root, 'rejected.mjs');
+    writeCodexStub(stub, { report: {}, log: join(root, 'rejected.jsonl'),
+      rpcError: { method, code: -32600, message: 'HTTP 401 Unauthorized private@example.test refresh_token=secret-value /private/profile' },
+    });
+    const result = await runCodexSupervisor({ command: stub,
+      provider: { transport: 'codex', codexHome: join(root, 'auth'), model: 'gpt-5.6-sol', source: 'mender', baseUrl: null, authToken: null },
+      cwd: root, prompt: 'x', hardening: 'x', schema: SUPERVISOR_VERDICT_JSON_SCHEMA, timeoutMs: 5000,
+    });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toBe(`Codex rejected supervisor ${method} (RPC -32600; authentication-required)`);
+    expect(result.usage.served).toBeNull();
+    expect(readFileSync(join(root, 'auth/auth.json'), 'utf8')).toContain('initial');
+  });
+
   it('preserves subscription refreshes and partial usage even when the model turn fails', async () => {
     const root = fixture(); const stub = join(root, 'failed.mjs');
     writeCodexStub(stub, { report: {}, log: join(root, 'failed.jsonl'), fail: true });

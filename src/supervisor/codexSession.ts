@@ -3,7 +3,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { acquireCodexHomeLease } from '../core/codexHomeLease.js';
-import { CODEX_TEXT_ONLY_DISABLED_FEATURES, codexChildEnvironment } from '../core/llmCodexCli.js';
+import { CODEX_TEXT_ONLY_DISABLED_FEATURES, classifyCodexDiagnostic, codexChildEnvironment } from '../core/llmCodexCli.js';
 import { jsonSchemaFromZod, type JsonSchema } from '../contracts/jsonSchema.js';
 import { CODEX_EVIDENCE_TOOL } from './codexReader.js';
 import { parseLooseJson, runCommand, type ClaudeSessionResult, type SupervisorProvider } from './session.js';
@@ -119,7 +119,17 @@ export async function runCodexSupervisor(options: CodexSupervisorOptions): Promi
           const message = object(JSON.parse(line));
           const response = object(message['result']);
           const params = object(message['params']);
-          if (message['error']) { failed = true; protocolError = 'Codex rejected the supervisor protocol/configuration'; end(); return; }
+          if (message['error']) {
+            const error = object(message['error']);
+            const request = message['id'] === 1 ? 'initialize' : message['id'] === 2 ? 'thread/start' : message['id'] === 3 ? 'turn/start' : 'unknown';
+            const rpcCode = Number.isSafeInteger(error['code']) ? String(error['code']) : 'unknown';
+            // Provider prose can contain credentials or private paths. Reuse
+            // the transport's safe vocabulary; persist only our stage and code.
+            const category = classifyCodexDiagnostic(JSON.stringify(error), 'request-rejected');
+            failed = true;
+            protocolError = `Codex rejected supervisor ${request} (RPC ${rpcCode}; ${category})`;
+            end(); return;
+          }
           if (message['id'] === 1 && !message['method']) {
             send({ method: 'initialized' });
             send({ id: 2, method: 'thread/start', params: {
