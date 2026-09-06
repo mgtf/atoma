@@ -16,6 +16,24 @@ it('passes inference credentials only, without publisher tokens or host config',
 });
 
 describe.skipIf(process.env['ATOMA_MENDER_CONTAINER_TESTS'] !== '1')('mender container boundary', () => {
+  it('installs then runs the production browser and HOME regressions in a fresh offline container', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'atoma-mender-runtime-'));
+    roots.push(root);
+    const repo = join(root, 'repo');
+    const work = join(root, 'work');
+    execFileSync('git', ['clone', '--no-local', process.cwd(), repo], { stdio: 'pipe' });
+    execFileSync('git', ['-C', repo, 'worktree', 'add', '--detach', work, 'HEAD'], { stdio: 'pipe' });
+    const install = await runIsolatedMenderCommand('npm ci', [], { cwd: work, timeoutMs: 300_000 });
+    expect(install.code, install.stdout + install.stderr).toBe(0);
+    const checked = await runIsolatedMenderCommand('npx vitest run', [
+      'tests/smoke-message-legibility.test.ts',
+      'tests/validate-html-bounds.test.ts',
+      'tests/puppeteer-orphan-reaping.test.ts',
+      'tests/backup.test.ts',
+    ], { cwd: work, timeoutMs: 180_000, network: 'none' });
+    expect(checked.code, checked.stdout + checked.stderr).toBe(0);
+  }, 600_000);
+
   it('executes proposed code without publisher credentials, host files or host processes', async () => {
     const root = mkdtempSync(join(tmpdir(), 'atoma-mender-isolation-'));
     roots.push(root);
@@ -49,6 +67,29 @@ describe.skipIf(process.env['ATOMA_MENDER_CONTAINER_TESTS'] !== '1')('mender con
     expect(result.code, result.stderr).toBe(0);
     expect(readFileSync(join(work, 'result.txt'), 'utf8')).toBe('isolated');
     expect(readFileSync(join(work, '.git'), 'utf8')).toBe(original);
+    // Installation and verification are separate disposable containers. Both
+    // must find a browser without downloading one, even with networking off.
+    writeFileSync(join(work, 'browser.html'), '<html><body>mender-browser-proof</body></html>');
+    for (let phase = 0; phase < 2; phase++) {
+      const runtime = await runIsolatedMenderCommand('node', ['-e', `
+        const assert = require('node:assert/strict');
+        const os = require('node:os');
+        const cp = require('node:child_process');
+        delete process.env.HOME;
+        assert.equal(os.homedir(), '/tmp');
+        assert.equal(os.userInfo().uid, process.getuid());
+        assert.equal(os.userInfo().gid, process.getgid());
+        assert.ok(require('node:v8').getHeapStatistics().heap_size_limit > 1500 * 1024 * 1024);
+        assert.equal(process.env.PUPPETEER_SKIP_DOWNLOAD, '1');
+        const html = cp.execFileSync(process.env.PUPPETEER_EXECUTABLE_PATH, [
+          '--headless', '--no-sandbox', '--disable-dev-shm-usage',
+          '--dump-dom', 'file:///work/browser.html',
+        ], { encoding: 'utf8', timeout: 30000 });
+        assert.ok(html.includes('mender-browser-proof'));
+      `], { cwd: work, timeoutMs: 60_000, network: 'none' });
+      expect(runtime.code, runtime.stderr).toBe(0);
+      expect(readFileSync(join(work, '.git'), 'utf8')).toBe(original);
+    }
     const auth = join(root, 'auth'); mkdirSync(auth);
     writeFileSync(join(auth, 'auth.json'), JSON.stringify({ auth_mode: 'chatgpt', tokens: { refresh_token: 'credential-sentinel' } }));
     const command = `
@@ -82,5 +123,5 @@ describe.skipIf(process.env['ATOMA_MENDER_CONTAINER_TESTS'] !== '1')('mender con
     await new Promise((resolveWait) => setTimeout(resolveWait, 3_100));
     expect(() => readFileSync(join(work, 'late-write'))).toThrow();
     expect(readFileSync(join(work, '.git'), 'utf8')).toBe(original);
-  }, 90_000);
+  }, 180_000);
 });
