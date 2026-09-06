@@ -35,7 +35,7 @@ it('derives required nullable optional fields and restores the original strict c
 });
 
 it('keeps model execution and external capabilities disabled for the analyst', () => {
-  const config = codexSupervisorConfig(false);
+  const config = codexSupervisorConfig();
   expect(config['features']).toMatchObject({ shell_tool: false, unified_exec: false, apps: false, hooks: false, multi_agent: false });
   expect(config['forced_login_method']).toBe('chatgpt');
   expect(config['permissions.atoma-supervisor.network.enabled']).toBe(false);

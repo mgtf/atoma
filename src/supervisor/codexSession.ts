@@ -1,9 +1,10 @@
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { z } from 'zod';
 import { acquireCodexHomeLease } from '../core/codexHomeLease.js';
 import { CODEX_TEXT_ONLY_DISABLED_FEATURES, codexChildEnvironment } from '../core/llmCodexCli.js';
-import type { JsonSchema } from '../contracts/jsonSchema.js';
+import { jsonSchemaFromZod, type JsonSchema } from '../contracts/jsonSchema.js';
 import { CODEX_EVIDENCE_TOOL } from './codexReader.js';
 import { parseLooseJson, runCommand, type ClaudeSessionResult, type SupervisorProvider } from './session.js';
 
@@ -37,21 +38,17 @@ export function restoreOptionalFields(value: unknown, schema: JsonSchema): unkno
     .map(([key, child]) => [key, restoreOptionalFields(child, object(properties[key]))]));
 }
 
-export function codexSupervisorConfig(mender: boolean): Record<string, unknown> {
-  const disabled: readonly string[] = mender
-    ? CODEX_TEXT_ONLY_DISABLED_FEATURES.filter((feature) => feature !== 'shell_tool' && feature !== 'unified_exec')
-    : CODEX_TEXT_ONLY_DISABLED_FEATURES;
+export function codexSupervisorConfig(): Record<string, unknown> {
   return {
-    features: Object.fromEntries(disabled.map((feature) => [feature, false])),
+    features: Object.fromEntries(CODEX_TEXT_ONLY_DISABLED_FEATURES.map((feature) => [feature, false])),
     cli_auth_credentials_store: 'file', forced_login_method: 'chatgpt',
     approval_policy: 'never', allow_login_shell: false, web_search: 'disabled',
     'agents.enabled': false, 'orchestrator.mcp.enabled': false, 'orchestrator.skills.enabled': false,
     'shell_environment_policy.inherit': 'none',
     'shell_environment_policy.ignore_default_excludes': false,
-    // The mender uses Docker as its outer boundary. Codex still denies network
-    // and host paths to model-authored commands; no bypass flag is used.
+    // Both sessions are text-only. Residual file tools see an empty jail.
     default_permissions: 'atoma-supervisor',
-    'permissions.atoma-supervisor.filesystem': { ':root': 'deny', ':minimal': 'read', ':workspace_roots': { '.': mender ? 'write' : 'read' }, ...(mender ? { '/tmp': 'write' } : {}) },
+    'permissions.atoma-supervisor.filesystem': { ':root': 'deny', ':minimal': 'read', ':workspace_roots': { '.': 'read' } },
     'permissions.atoma-supervisor.network.enabled': false,
   };
 }
@@ -69,9 +66,16 @@ export interface CodexSupervisorOptions {
   onLog?: (line: string) => void;
 }
 
-export function codexSupervisorConfigArgs(mender: boolean): string[] {
-  return Object.entries(codexSupervisorConfig(mender)).flatMap(([key, value]) => ['-c', `${key}=${toml(value)}`]);
+export function codexSupervisorConfigArgs(): string[] {
+  return Object.entries(codexSupervisorConfig()).flatMap(([key, value]) => ['-c', `${key}=${toml(value)}`]);
 }
+
+const commandSchema = z.object({ command: z.string().min(1).max(16_000) }).strict();
+const commandTool = {
+  name: 'worktree_command',
+  description: 'Run a shell command inside the isolated worktree at /work. Use for reading, editing, and testing. No network, credentials, host files, or persistent background processes. Output is capped at 24000 characters. Each command has at most 120 seconds.',
+  inputSchema: jsonSchemaFromZod(commandSchema),
+};
 
 /** One ephemeral app-server thread; dynamic reads never execute model commands. */
 export async function runCodexSupervisor(options: CodexSupervisorOptions): Promise<ClaudeSessionResult> {
@@ -85,6 +89,8 @@ export async function runCodexSupervisor(options: CodexSupervisorOptions): Promi
   const originalAuth = join(originalHome, 'auth.json');
   const authFile = join(profile, 'auth.json');
   let started = false;
+  let pending = Promise.resolve();
+  let accepting = true;
   try {
     const auth = object(JSON.parse(readFileSync(originalAuth, 'utf8')));
     if (!object(auth['tokens'])['refresh_token'] || auth['OPENAI_API_KEY'] || auth['auth_mode'] === 'apikey') {
@@ -93,8 +99,8 @@ export async function runCodexSupervisor(options: CodexSupervisorOptions): Promi
     copyFileSync(originalAuth, authFile);
     const env = codexChildEnvironment({ ...process.env, CODEX_HOME: profile, CODEX_SQLITE_HOME: profile });
     // No personal config, plugins, rules or MCP registrations enter this fresh profile.
-    const config = codexSupervisorConfig(mender);
-    const args = ['app-server', '--strict-config', ...codexSupervisorConfigArgs(mender)];
+    const config = codexSupervisorConfig();
+    const args = ['app-server', '--strict-config', ...codexSupervisorConfigArgs()];
     let text = '';
     let threadId: string | null = null;
     let model: string | null = null;
@@ -104,9 +110,8 @@ export async function runCodexSupervisor(options: CodexSupervisorOptions): Promi
     let protocolError: string | null = null;
     const startedAt = Date.now();
     started = true;
-    const result = await (options.execute ?? runCommand)(options.command, args, {
-      cwd: mender ? options.cwd : jail, env, timeoutMs: options.timeoutMs,
-      ...(mender ? { codexHome: profile } : {}),
+    const result = await runCommand(options.command, args, {
+      cwd: jail, env, timeoutMs: options.timeoutMs,
       ...(options.onLog ? { onLog: options.onLog } : {}),
       input: `${JSON.stringify({ id: 1, method: 'initialize', params: { clientInfo: { name: 'atoma-supervisor', version: '1' }, capabilities: { experimentalApi: true } } })}\n`,
       onLine(line, send, end) {
@@ -118,15 +123,32 @@ export async function runCodexSupervisor(options: CodexSupervisorOptions): Promi
           if (message['id'] === 1 && !message['method']) {
             send({ method: 'initialized' });
             send({ id: 2, method: 'thread/start', params: {
-              model: options.provider.model, cwd: mender ? '/work' : jail, ephemeral: true,
+              model: options.provider.model, cwd: jail, ephemeral: true,
               approvalPolicy: 'never', baseInstructions: options.hardening,
-              config, ...(options.readEvidence ? { dynamicTools: [CODEX_EVIDENCE_TOOL] } : {}),
+              config, dynamicTools: [options.readEvidence ? CODEX_EVIDENCE_TOOL : commandTool],
             } });
           } else if (message['id'] === 2 && !message['method']) {
             threadId = String(object(response['thread'])['id']);
             model = typeof response['model'] === 'string' ? response['model'] : null;
             send({ id: 3, method: 'turn/start', params: { threadId, input: [{ type: 'text', text: options.prompt }], outputSchema: codexOutputSchema(options.schema) } });
           } else if (message['method'] === 'item/tool/call') {
+            if (mender && params['tool'] === commandTool.name) {
+              pending = pending.then(async () => {
+                let output = 'Command refused'; let success = false;
+                try {
+                  const remaining = options.timeoutMs - (Date.now() - startedAt);
+                  if (!accepting || remaining <= 0 || !options.execute) throw new Error('Session ended');
+                  const request = commandSchema.parse(params['arguments']);
+                  const executed = await options.execute('sh', ['-c', request.command], {
+                    cwd: options.cwd, env: {}, network: 'none', timeoutMs: Math.min(120_000, remaining),
+                  });
+                  output = JSON.stringify({ code: executed.code, stdout: executed.stdout.slice(-16_000), stderr: executed.stderr.slice(-8_000) });
+                  success = executed.code === 0;
+                } catch { output = 'Command failed or refused by the isolated executor'; }
+                if (accepting) send({ id: message['id'], result: { contentItems: [{ type: 'inputText', text: output }], success } });
+              });
+              return;
+            }
             let output = 'Tool unavailable'; let success = false;
             try {
               if (params['tool'] !== CODEX_EVIDENCE_TOOL.name || !options.readEvidence) throw new Error('Tool unavailable');
@@ -141,7 +163,7 @@ export async function runCodexSupervisor(options: CodexSupervisorOptions): Promi
           } else if (message['method'] === 'thread/tokenUsage/updated') {
             tokenUsage = object(object(params['tokenUsage'])['total']);
           } else if (message['method'] === 'turn/completed') {
-            done = true; failed = object(params['turn'])['status'] !== 'completed'; end();
+            done = true; accepting = false; failed = object(params['turn'])['status'] !== 'completed'; end();
           }
         } catch { failed = true; protocolError = 'Invalid Codex supervisor protocol response'; end(); }
       },
@@ -158,6 +180,10 @@ export async function runCodexSupervisor(options: CodexSupervisorOptions): Promi
           outputTokens: count('outputTokens'), cacheReadInputTokens: count('cachedInputTokens'), cacheCreationInputTokens: 0 }] : null },
     };
   } finally {
+    accepting = false;
+    // A protocol failure/deadline must not release the worktree while a
+    // dynamic command container is still running or being reaped.
+    await pending;
     try {
       // The executor reaps the child/container before returning, including timeout.
       // Preserve a rotated refresh token under the same HOME lease, on failures too.

@@ -66,9 +66,13 @@ into the same GitHub secret even after a failed mend. An interrupted runner
 may still lose a refresh; if login becomes invalid, create and upload a new
 dedicated session. Credentials are never included in artifacts or caches.
 
-Only the model container mounts an auth-only temporary profile. The model and
-tests never receive GitHub credentials or the Docker socket. Install and
-verification phases receive no model credentials. The harness alone publishes.
+Codex runs as a text-only app-server in an empty jail, with built-in execution,
+Apps, plugins, MCP and skills disabled. A private worktree_command dynamic tool
+executes proposed commands through the mender's Docker boundary with no network
+or credentials. Docker's default security profiles remain intact. The temporary
+ChatGPT profile stays outside every command container. Tests also receive no
+model credentials; GitHub credentials and the Docker socket are never mounted.
+The harness alone publishes. CI exercises this protocol-to-container boundary.
 
 ## Verification
 

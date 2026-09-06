@@ -1,7 +1,8 @@
 import { writeFileSync } from 'node:fs';
 
 /** Real JSONL subprocess; no provider or paid call. */
-export function writeCodexStub(path: string, options: { report: unknown; log: string; edit?: boolean; fail?: boolean; read?: boolean }): void {
+export function writeCodexStub(path: string, options: { report: unknown; log: string; edit?: boolean; command?: string; fail?: boolean; read?: boolean }): void {
+  const editCommand = `printf '%s\\n' 'export const add = (a, b) => a + b;' > src/adder.mjs\nprintf '%s\\n' 'import {add} from "../src/adder.mjs"; if(add(1,2)!==3) process.exit(1);' > tests/adder.test.mjs`;
   writeFileSync(path, `
 import {createInterface} from 'node:readline';
 import {writeFileSync,readFileSync,appendFileSync} from 'node:fs';
@@ -9,10 +10,6 @@ const config = ${JSON.stringify(options)};
 const send = x => process.stdout.write(JSON.stringify(x) + '\\n');
 if (process.env.OPENAI_API_KEY || process.env.GH_TOKEN || process.env.ATOMA_MENDER_DISPATCH_TOKEN) process.exit(21);
 const done = () => {
-  if (config.edit) {
-    writeFileSync('src/adder.mjs', 'export const add = (a, b) => a + b;\\n');
-    writeFileSync('tests/adder.test.mjs', "import {add} from '../src/adder.mjs'; if(add(1,2)!==3) process.exit(1);\\n");
-  }
   const auth = JSON.parse(readFileSync(process.env.CODEX_HOME + '/auth.json','utf8'));
   auth.tokens.refresh_token = 'rotated';
   writeFileSync(process.env.CODEX_HOME + '/auth.json', JSON.stringify(auth));
@@ -28,12 +25,14 @@ rl.on('line', line => {
   if(m.method==='turn/start') {
     send({id:m.id,result:{turn:{id:'turn-test',status:'inProgress'}}});
     if(config.read) send({id:10,method:'item/tool/call',params:{tool:'read_evidence',arguments:{path:'src/example.ts',query:'',offset:0,limit:20}}});
+    else if(config.edit || config.command) send({id:12,method:'item/tool/call',params:{tool:'worktree_command',arguments:{command:config.command || ${JSON.stringify(editCommand)}}}});
     else done();
   }
   if(m.id===10 && m.result) {
     send({id:11,method:'item/tool/call',params:{tool:'read_evidence',arguments:{path:'../.env',query:'',offset:0,limit:20}}});
   }
   if(m.id===11 && m.result) done();
+  if(m.id===12 && m.result) done();
 });
 `);
 }

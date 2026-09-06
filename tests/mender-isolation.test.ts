@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { menderContainerEnv, runIsolatedMenderCommand } from '../src/supervisor/menderIsolation.js';
-import { codexSupervisorConfigArgs } from '../src/supervisor/codexSession.js';
+import { runCodexSupervisor } from '../src/supervisor/codexSession.js';
+import { writeCodexStub } from './supervisorCodexFixture.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -47,16 +48,28 @@ describe.skipIf(process.env['ATOMA_MENDER_CONTAINER_TESTS'] !== '1')('mender con
     expect(readFileSync(join(work, '.git'), 'utf8')).toBe(original);
     const auth = join(root, 'auth'); mkdirSync(auth);
     writeFileSync(join(auth, 'auth.json'), JSON.stringify({ auth_mode: 'chatgpt', tokens: { refresh_token: 'credential-sentinel' } }));
-    const sandboxed = await runIsolatedMenderCommand('codex', ['sandbox', ...codexSupervisorConfigArgs(true), '--', 'node', '-e', `
+    const command = `
       const fs = require('node:fs');
-      try { fs.readFileSync('/codex-home/auth.json'); process.exit(15); } catch {}
+      if (process.env.CODEX_HOME || process.env.OPENAI_API_KEY || process.env.GH_TOKEN) process.exit(15);
+      if (fs.existsSync(${JSON.stringify(auth)})) process.exit(19);
+      if (fs.existsSync('/codex-home/auth.json')) process.exit(20);
       fs.writeFileSync('/work/codex-proof.txt', 'sandboxed');
       const socket = require('node:net').connect(443, '1.1.1.1');
       socket.on('connect', () => process.exit(16));
       socket.on('error', error => process.exit(['EPERM','EACCES','ENETUNREACH'].includes(error.code) ? 0 : 17));
       setTimeout(() => process.exit(18), 5000);
-    `], { cwd: work, codexHome: auth, timeoutMs: 60_000 });
+    `;
+    const stub = join(root, 'codex.mjs');
+    const log = join(root, 'codex.jsonl');
+    writeCodexStub(stub, { log, report: {}, command: `node -e '${command.replaceAll("'", "'\\''")}'` });
+    const sandboxed = await runCodexSupervisor({ command: stub, cwd: work,
+      provider: { transport: 'codex', codexHome: auth, model: 'gpt-5.6-sol', source: 'mender', baseUrl: null, authToken: null },
+      prompt: 'exercise the isolated worktree command', hardening: '', schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
+      execute: runIsolatedMenderCommand, timeoutMs: 60_000,
+    });
     expect(sandboxed.code, sandboxed.stderr).toBe(0);
+    const reply = readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line)).find((entry) => entry.id === 12);
+    expect(reply.result, 'dynamic command must succeed inside the real Docker boundary').toMatchObject({ success: true });
     expect(readFileSync(join(work, 'codex-proof.txt'), 'utf8')).toBe('sandboxed');
     await expect(runIsolatedMenderCommand('node', ['-e', `
       const {spawn} = require('node:child_process');

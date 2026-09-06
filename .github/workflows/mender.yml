@@ -46,7 +46,6 @@ jobs:
     env:
       ATOMA_MENDER_TRANSPORT: codex
       ATOMA_MENDER_MODEL: ${{ vars.ATOMA_MENDER_MODEL }}
-      ATOMA_MENDER_CODEX_HOME: ${{ runner.temp }}/codex-mender
       # Publisher only: the model and tests run in containers without this env.
       # `gh pr create` and the branch push. A fine-grained PAT when the
       # repository forbids Actions from opening pull requests; the workflow
@@ -67,6 +66,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Install the ChatGPT subscription client for the text-only model session
+        run: npm install -g @openai/codex@0.152.0
+
       - name: Restore the mender ChatGPT subscription session
         shell: bash
         env:
@@ -76,6 +78,8 @@ jobs:
           set -euo pipefail
           test -n "${PUBLISHER_TOKEN}" || { echo 'ATOMA_MENDER_GITHUB_TOKEN needs Contents, Pull requests and Secrets write'; exit 1; }
           test -n "${CODEX_AUTH_JSON}" || { echo 'Set ATOMA_MENDER_CODEX_AUTH_JSON from a dedicated ChatGPT login'; exit 1; }
+          ATOMA_MENDER_CODEX_HOME="${RUNNER_TEMP}/codex-mender"
+          printf 'ATOMA_MENDER_CODEX_HOME=%s\n' "${ATOMA_MENDER_CODEX_HOME}" >> "${GITHUB_ENV}"
           install -d -m 0700 "${ATOMA_MENDER_CODEX_HOME}"
           printf '%s' "${CODEX_AUTH_JSON}" > "${ATOMA_MENDER_CODEX_HOME}/auth.json"
           chmod 0600 "${ATOMA_MENDER_CODEX_HOME}/auth.json"

@@ -140,10 +140,14 @@ Neighbours:
   `git`; no MCP, no network tools). It never runs `git commit`, `git push` or
   `gh`. The harness does, AFTER its own verification. The model's report is
   recorded, never trusted.
-- Codex's app-server runs inside the same container boundary with workspace
-  writes and command networking denied by its permission profile. Only the
-  model phase mounts an auth-only temporary Codex HOME; install, regression
-  tests and the full check never receive it. No sandbox bypass flag is used.
+- Codex's app-server is text-only, with the same empty jail and disabled
+  built-ins as the analyst. Its private worktree_command dynamic tool sends
+  model-authored commands to the existing Docker executor, with networking
+  disabled and no inference credentials. Docker's default security profiles
+  remain intact. Each command is bounded to 120 seconds and the remaining
+  session clock; queued commands are cancelled when the session ends and
+  active containers are reaped before releasing the worktree or auth lease.
+  The auth-only temporary Codex HOME stays outside every command container.
   Actions restores a DEDICATED ChatGPT login from ATOMA_MENDER_CODEX_AUTH_JSON
   and saves refreshed auth back as a secret, never an artifact/cache. Its
   publisher token needs Contents, Pull requests and Secrets write. Do not copy

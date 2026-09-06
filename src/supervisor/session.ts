@@ -60,8 +60,8 @@ export interface RunCommandOptions {
   readonly onLog?: (line: string) => void;
   /** JSONL duplex protocol; callbacks run in the trusted harness. */
   readonly onLine?: (line: string, send: (message: unknown) => void, end: () => void) => void;
-  /** Temporary credential-only directory, mounted by the container executor. */
-  readonly codexHome?: string;
+  /** Model-authored mender commands run without networking. */
+  readonly network?: 'none';
 }
 
 /**

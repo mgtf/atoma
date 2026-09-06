@@ -486,7 +486,7 @@ export async function mendFinding(input: MendInput, options: MenderOptions): Pro
     const startedAt = Date.now();
     const session = provider.transport === 'codex' ? await runCodexSupervisor({
       command: options.commands.codex ?? 'codex', provider, cwd: worktree, prompt,
-      hardening: MENDER_HARDENING, schema: SUPERVISOR_MEND_JSON_SCHEMA,
+      hardening: `${MENDER_HARDENING}\nUse worktree_command for all reading, editing and tests. It runs inside /work with no credentials or network.`, schema: SUPERVISOR_MEND_JSON_SCHEMA,
       timeoutMs: options.timeoutMs, execute: executeUntrusted, onLog: options.warn,
     }) : await runClaudeSession({
       claudeCommand: options.commands.claude,

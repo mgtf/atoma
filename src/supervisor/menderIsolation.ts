@@ -48,10 +48,7 @@ export const runIsolatedMenderCommand: typeof runCommand = async (spec, extraArg
       '--mount', `type=bind,src=${options.cwd},dst=/work`,
       '--mount', `type=bind,src=${metadata},dst=/atoma-git,readonly`,
       '--workdir', '/work', '--env', 'HOME=/tmp', '--env', 'HUSKY=0',
-      // Only a temporary auth.json-only profile enters the model container.
-      // It is absent from install/tests/checks and from all host HOME mounts.
-      ...(options.codexHome ? ['--mount', `type=bind,src=${options.codexHome},dst=/codex-home`,
-        '--env', 'CODEX_HOME=/codex-home', '--env', 'CODEX_SQLITE_HOME=/codex-home'] : []),
+      ...(options.network ? ['--network', options.network] : []),
       ...Object.keys(env).flatMap((key) => ['--env', key]),
       process.env['ATOMA_MENDER_SANDBOX_IMAGE'] ?? 'atoma-mender:local',
       command.command === process.execPath ? 'node' : command.command,
