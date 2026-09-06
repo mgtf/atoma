@@ -6,24 +6,22 @@ import { drawViewFrame, viewFrame, VIEW_FRAME_CONTENT_TOP } from '../view-frame.
  * SETTINGS — the account's own page, reached from the header orb and
  * deliberately absent from the nav tabs (`isRoutableView` in store.ts).
  *
- * The display-name field and the rest of Settings (models, keys, org
- * directory) are real DOM (`.gpu-settings-form` / `.gpu-org-models-form`).
- * GPU draws the column frame and the account orb only: a second copy of the
- * directory in the scroll pane painted *through* the form (the 2026-08-27
- * overlap). Membership is still changed by invitation, in the admin plane.
+ * The whole Settings body — profile and organisation, models, subscriptions,
+ * keys, MCP — is real DOM (`.gpu-org-models-form`), laid out as TABS under
+ * the account orb. GPU draws the column frame and the orb only: a second copy
+ * of the directory in the scroll pane painted *through* the form (the
+ * 2026-08-27 overlap). Membership is still changed by invitation, in the
+ * admin plane.
  */
 
 /** Settings reads as a centred column; Projects and Admin went full-bleed. */
 const SETTINGS_COLUMN_MAX_WIDTH = 720;
 /**
- * Must match `.gpu-settings-form { top }` in styles.css: the account orb is
- * the first thing inside the column frame, and the rename field sits under it.
+ * Must match `.gpu-org-models-form { top }` in styles.css: the account orb is
+ * the first thing inside the column frame, and the tabbed body sits under it.
  */
-export const SETTINGS_DOM_FORM_TOP =
+export const SETTINGS_BODY_TOP =
   GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap + VIEW_FRAME_CONTENT_TOP + 56 + 12;
-export const SETTINGS_DOM_FORM_HEIGHT = 96;
-/** Must match `.gpu-org-models-form { top }` — sits under the rename form. */
-export const SETTINGS_LLM_FORM_TOP = SETTINGS_DOM_FORM_TOP + SETTINGS_DOM_FORM_HEIGHT + 16;
 const ORB_SIZE = 56;
 /** Height of one member row; exported so the layout test speaks the same unit. */
 export const MEMBER_ROW_HEIGHT = 30;
@@ -33,11 +31,6 @@ const FACTS_TOP = 38;
 const FACT_LINE_HEIGHT = 26;
 const MEMBERS_HEADER_GAP = 10;
 const MEMBERS_LIST_GAP = 18;
-const PANEL_GAP = 16;
-
-export function settingsGpuContentTop(): number {
-  return SETTINGS_DOM_FORM_TOP + SETTINGS_DOM_FORM_HEIGHT + PANEL_GAP;
-}
 
 export interface OrganisationPanelLayout {
   /** Fact pairs are laid out two per line; this is how many lines that takes. */
@@ -117,8 +110,8 @@ export function drawSettings(
     );
   }
 
-  // Models, keys and the organisation directory live in DOM filling the
-  // frame under the rename field. Nothing GPU is drawn there — a pane that
-  // reserved a band and then painted the directory is what overlapped.
+  // Every Settings section lives in DOM filling the frame under the orb
+  // (`SETTINGS_BODY_TOP`). Nothing GPU is drawn there — a pane that reserved
+  // a band and then painted the directory is what overlapped.
   ctx.scrollMax.settings = 0;
 }

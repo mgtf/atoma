@@ -363,10 +363,10 @@ npm run viz:mark-turn:analyze
   selects, links), on a TRANSPARENT wrapper with the frame drawn by the view
   (`panel()`, the Projects-form pattern): a DOM-painted frame has both defects
   at any z-index, because the canvas is one element. The CSS-framed overlays
-  that predate this rule (`gpu-settings-form`, `gpu-org-models-form`,
-  `gpu-announce-form`, plus `gpu-scene-tuning`, a floating window by
-  contract) are grandfathered debts: migrate one by giving it the Projects
-  treatment, never add another. `tests/viz-overlay-stack.test.ts` pins the
+  that predate this rule (`gpu-org-models-form`, `gpu-announce-form`, plus
+  `gpu-scene-tuning`, a floating window) are grandfathered debts: migrate one
+  with the Projects treatment, never add another. Settings is ONE tabbed DOM
+  body; panels stay MOUNTED and `hidden` so a once-shown MCP token survives. `tests/viz-overlay-stack.test.ts` pins the
   mount order, the filter's home, the views' no-direct-`markRoot` rule and
   holds the skin list closed; `viz:smoke` remains the on-device proof.
 - The renderer draws in two PIXI spaces. `stage` is the persistent scene root;

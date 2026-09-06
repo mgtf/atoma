@@ -2159,7 +2159,7 @@ try {
         // organisation, the models/keys panel. Its presence is what proves the
         // view rendered, and it is the layer the controls actually live in now.
         () => accountPage.evaluate(
-          () => document.querySelector('.gpu-settings-form') !== null
+          () => document.querySelector('.gpu-settings-rename') !== null
         ),
         'account scenario: Settings never opened from the menu'
       );
@@ -2184,7 +2184,7 @@ try {
         'account scenario: Settings never republished its account control'
       );
       const settingsDom = await accountPage.evaluate(() => ({
-        accountForm: document.querySelectorAll('.gpu-settings-form').length,
+        accountForm: document.querySelectorAll('.gpu-settings-rename').length,
         // The per-tier pickers: one row per tier for the account, and one per
         // tier for the organisation when the viewer may manage it.
         accountPickers: document.querySelectorAll('[id^="accountmodel-"]').length,

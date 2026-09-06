@@ -17,6 +17,60 @@ import { AnnouncementForm } from './AnnouncementForm.js';
 
 const DEFAULT_VIEWS: ViewName[] = ['projects', 'runs', 'registry', 'skills', 'burnin', 'docs'];
 
+/**
+ * SETTINGS › GENERAL — the display-name field. Real DOM for the same reason
+ * the project form is: text entry, autofill and screen readers belong to the
+ * browser. It is an ORDINARY block inside the Settings body's General tab
+ * (`OrgModelsForm`'s `profile` slot), not a fixed overlay of its own: the
+ * former `.gpu-settings-form` was one of the CSS-framed debts and is gone.
+ * The draft lives in the store (`search.displayName`) so the GL keyboard
+ * routing knows an input owns the keys while it has focus.
+ */
+export function SettingsProfileForm({
+  t,
+  onRenameAccount,
+  accountError = null,
+}: {
+  t: (key: string, vars?: Record<string, unknown>) => string;
+  onRenameAccount?: (displayName: string) => void;
+  accountError?: string | null;
+}) {
+  const displayName = useGpuStore((state) => state.search.displayName);
+  const setSearch = useGpuStore((state) => state.setSearch);
+  const setFocusedInput = useGpuStore((state) => state.setFocusedInput);
+  return (
+    <form
+      className="gpu-settings-rename"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const next = displayName.trim();
+        if (next) onRenameAccount?.(next);
+      }}
+    >
+      <label className="gpu-settings-username" htmlFor="settings-display-name">
+        {t('settings.username')}
+      </label>
+      <input
+        id="settings-display-name"
+        className="gpu-dom-input gpu-settings-name"
+        aria-label={t('settings.username')}
+        value={displayName}
+        placeholder={t('settings.displayName')}
+        maxLength={120}
+        onFocus={() => setFocusedInput('displayName')}
+        onBlur={() => setFocusedInput(null)}
+        onChange={(event) => setSearch('displayName', event.target.value)}
+      />
+      <div className="gpu-settings-actions">
+        <button type="submit" disabled={displayName.trim().length === 0}>
+          {t('settings.save')}
+        </button>
+        {accountError ? <span role="alert">{accountError}</span> : null}
+      </div>
+    </form>
+  );
+}
+
 function AccessibleDocs({
   selected,
   onSelect,
@@ -91,8 +145,6 @@ export function DomBridge({
   pushAdmin = false,
   onEnablePush,
   onDismissPush,
-  onRenameAccount,
-  accountError = null,
   announcementsEnabled = false,
   orgModelsForm = null,
   domOverlaysVeiled = false,
@@ -128,12 +180,9 @@ export function DomBridge({
   pushAdmin?: boolean;
   onEnablePush?: () => void;
   onDismissPush?: () => void;
-  /** Settings: the display name is a real input, so its submit lives here. */
-  onRenameAccount?: (displayName: string) => void;
-  accountError?: string | null;
   /** Platform admins only: the broadcast composer lives on the admin view. */
   announcementsEnabled?: boolean;
-  /** Settings: the org defaults + provider keys form, for org admins. */
+  /** Settings: the whole tabbed body (profile, models, subscriptions, keys, MCP). */
   orgModelsForm?: ReactNode;
   /** Shared veil state applied to every DOM overlay (see overlaysInert below). */
   domOverlaysVeiled?: boolean;
@@ -518,38 +567,6 @@ export function DomBridge({
                     : 'projects.visibility.privateHint'
                 )}`}
           </p>
-        </form>
-      ) : null}
-      {view === 'settings' ? (
-        <form
-          className={`gpu-panel-skin gpu-settings-form${overlaysInert ? ' gpu-overlays-veiled' : ''}`}
-          inert={overlaysInert}
-          onSubmit={(event) => {
-            event.preventDefault();
-            const next = search.displayName.trim();
-            if (next) onRenameAccount?.(next);
-          }}
-        >
-          <label className="gpu-settings-username" htmlFor="settings-display-name">
-            {t('settings.username')}
-          </label>
-          <input
-            id="settings-display-name"
-            className="gpu-dom-input gpu-settings-name"
-            aria-label={t('settings.username')}
-            value={search.displayName}
-            placeholder={t('settings.displayName')}
-            maxLength={120}
-            onFocus={() => setFocusedInput('displayName')}
-            onBlur={() => setFocusedInput(null)}
-            onChange={(event) => setSearch('displayName', event.target.value)}
-          />
-          <div className="gpu-settings-actions">
-            <button type="submit" disabled={search.displayName.trim().length === 0}>
-              {t('settings.save')}
-            </button>
-            {accountError ? <span role="alert">{accountError}</span> : null}
-          </div>
         </form>
       ) : null}
       {view === 'settings' && orgModelsForm ? (

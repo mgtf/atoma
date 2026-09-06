@@ -24,7 +24,7 @@ import {
 import { AtomaCursor } from './AtomaCursor.js';
 import { AuthControls } from './AuthControls.js';
 import { useAuthController } from './session-controller.js';
-import { GpuDomBridge } from './DomBridge.js';
+import { GpuDomBridge, SettingsProfileForm } from './DomBridge.js';
 import { McpAccess } from './McpAccessPanel.js';
 import { OrgModelsForm } from './OrgModelsForm.js';
 import { EntryVeilLayer } from './EntryVeilLayer.js';
@@ -1178,8 +1178,6 @@ function GpuAppContent({
           pushPrompt={pushPrompt}
           onEnablePush={() => { void enablePush(); }}
           onDismissPush={dismissPush}
-          onRenameAccount={(displayName) => { void renameAccount(displayName); }}
-          accountError={accountError}
           preview={previewSummary}
           onActivate={activate}
           orgModelsForm={
@@ -1201,6 +1199,13 @@ function GpuAppContent({
                   state.accountMenuOpen || state.localeMenuOpen || state.notificationsMenuOpen
                 }
                 onError={setAccountError}
+                profile={
+                  <SettingsProfileForm
+                    t={t}
+                    onRenameAccount={(displayName) => { void renameAccount(displayName); }}
+                    accountError={accountError}
+                  />
+                }
               >
                 <McpAccess
                   key={`${authSnapshot.viewer.principalId}:${authSnapshot.viewer.activeOrganisation.id}`}
