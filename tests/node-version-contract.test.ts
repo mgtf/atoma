@@ -17,7 +17,6 @@ describe('Node version contract', () => {
     expect(ci).toContain("node: ['22.14.0', '24.20.0']");
     expect(ci.match(/node-version:\s*\$\{\{ matrix.node \}\}/g)).toHaveLength(1);
     expect(ci.match(/node-version:\s*22\.14\.0/g)).toHaveLength(5);
-    expect(readFileSync('.github/workflows/mender.yml', 'utf8')).toContain('node-version: 22.14.0');
     expect(readFileSync('docker/mender.Dockerfile', 'utf8')).toContain('FROM node:22.14.0-bookworm');
     expect(release.match(/node-version:\s*22\.14\.0/g)).toHaveLength(1);
     expect(pkg.engines?.node).toContain('^22.14.0');

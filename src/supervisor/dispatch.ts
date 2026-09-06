@@ -13,7 +13,8 @@ import { defectKey, eligibleFindings, sanitiseFinding } from './menderPolicy.js'
  * idle gate exists to prevent. The repository's CI has everything the mender
  * needs and nothing else to do. So a verdict's eligible defects are SENT — a
  * GitHub `repository_dispatch` whose client payload is one `MendRequest` —
- * and `.github/workflows/mender.yml` picks them up.
+ * for an explicitly configured external consumer. The VPS mender reads the
+ * persistent verdict directory directly and does not configure dispatch.
  *
  * What crosses the wire is the SANITISED finding: no trace text, no verdict
  * summary, no raw evidence. The workflow's model reads the same shape the
