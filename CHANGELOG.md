@@ -67,6 +67,10 @@
   way there; Track B is named the product target. The body/trust split and
   the human gate on catalogue entry are unchanged (`docs/saas-architecture.md`
   §2, root and projects contracts, README, how-it-works).
+- The hermetic CI jobs are named by Node line (`Hermetic checks (Node 22)`,
+  `Hermetic checks (Node 24)`) instead of the pinned patch version, so the
+  `protect-main` ruleset can require them by name. The ruleset itself is
+  versioned in `.github/rulesets/protect-main.json` with import instructions.
 - The visualizer opens on Projects. Its create-project and start-run forms are
   mutually exclusive, re-clicking the selected project returns to creation,
   and single-column views share one framed layout across their GL and DOM

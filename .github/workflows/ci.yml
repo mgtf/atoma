@@ -32,11 +32,18 @@ jobs:
           ATOMA_MENDER_CONTAINER_TESTS: '1'
 
   core:
-    name: Hermetic checks (Node ${{ matrix.node }})
+    # The check name carries the Node LINE, not the pinned patch version: the
+    # `protect-main` ruleset requires these checks by name, and a version bump
+    # must not silently orphan a required check.
+    name: Hermetic checks (Node ${{ matrix.line }})
     strategy:
       fail-fast: false
       matrix:
-        node: ['22.14.0', '24.20.0']
+        include:
+          - node: '22.14.0'
+            line: '22'
+          - node: '24.20.0'
+            line: '24'
     runs-on: ubuntu-latest
     # `viz:smoke` no longer runs here (see release:check), so this step is back
     # to hermetic work: tests, audit, build, and the node-only release smokes.
