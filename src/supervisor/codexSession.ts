@@ -71,7 +71,7 @@ export function codexSupervisorConfigArgs(): string[] {
 }
 
 const commandSchema = z.object({ command: z.string().min(1).max(16_000) }).strict();
-const commandTool = {
+export const CODEX_WORKTREE_TOOL = {
   name: 'worktree_command',
   description: 'Run a shell command inside the isolated worktree at /work. Use for reading, editing, and testing. No network, credentials, host files, or persistent background processes. Output is capped at 24000 characters. Each command has at most 120 seconds.',
   inputSchema: jsonSchemaFromZod(commandSchema),
@@ -135,14 +135,14 @@ export async function runCodexSupervisor(options: CodexSupervisorOptions): Promi
             send({ id: 2, method: 'thread/start', params: {
               model: options.provider.model, cwd: jail, ephemeral: true,
               approvalPolicy: 'never', baseInstructions: options.hardening,
-              config, dynamicTools: [options.readEvidence ? CODEX_EVIDENCE_TOOL : commandTool],
+              config, dynamicTools: [options.readEvidence ? CODEX_EVIDENCE_TOOL : CODEX_WORKTREE_TOOL],
             } });
           } else if (message['id'] === 2 && !message['method']) {
             threadId = String(object(response['thread'])['id']);
             model = typeof response['model'] === 'string' ? response['model'] : null;
             send({ id: 3, method: 'turn/start', params: { threadId, input: [{ type: 'text', text: options.prompt }], outputSchema: codexOutputSchema(options.schema) } });
           } else if (message['method'] === 'item/tool/call') {
-            if (mender && params['tool'] === commandTool.name) {
+            if (mender && params['tool'] === CODEX_WORKTREE_TOOL.name) {
               pending = pending.then(async () => {
                 let output = 'Command refused'; let success = false;
                 try {

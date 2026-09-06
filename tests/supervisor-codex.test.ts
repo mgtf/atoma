@@ -6,7 +6,7 @@ import { EXAMPLE_SUPERVISOR_VERDICT, SUPERVISOR_VERDICT_JSON_SCHEMA, supervisorV
 import { analyseRun } from '../src/supervisor/analyst.js';
 import { createEvidenceReader } from '../src/supervisor/codexReader.js';
 import { codexOutputSchema, codexSupervisorConfig, restoreOptionalFields, runCodexSupervisor } from '../src/supervisor/codexSession.js';
-import { analystProvider, menderProvider } from '../src/supervisor/session.js';
+import { analystProvider, menderProvider, runCommand } from '../src/supervisor/session.js';
 import { writeCodexStub } from './supervisorCodexFixture.js';
 
 const roots: string[] = [];
@@ -51,6 +51,20 @@ it('reads only enumerated evidence and bounds queries without executing patterns
 });
 
 describe.skipIf(process.platform === 'win32')('Codex supervisor process boundaries', () => {
+  it('preflights the real script without credentials or starting inference', async () => {
+    const root = fixture(); const stub = join(root, 'smoke.mjs'); const log = join(root, 'smoke.jsonl');
+    writeCodexStub(stub, { report: {}, log });
+    const result = await runCommand(process.execPath, ['--import', 'tsx', 'scripts/codex-supervisor-smoke.mjs'], {
+      cwd: process.cwd(), timeoutMs: 15_000,
+      env: { ...process.env, ATOMA_SUPERVISOR_CMD_CODEX: stub, OPENAI_API_KEY: 'must-not-inherit', GH_TOKEN: 'must-not-inherit' },
+    });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain('no credentials or inference');
+    const requests = readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+    expect(requests.map((request) => request.method)).toEqual(['initialize', 'initialized', 'thread/start']);
+    expect(requests[2].params.dynamicTools[0].name).toBe('worktree_command');
+  }, 20_000);
+
   it.each(['initialize', 'thread/start', 'turn/start'])('identifies a rejected %s without persisting provider prose', async (method) => {
     const root = fixture(); const stub = join(root, 'rejected.mjs');
     writeCodexStub(stub, { report: {}, log: join(root, 'rejected.jsonl'),
