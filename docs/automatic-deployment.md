@@ -280,6 +280,18 @@ prepare correction PRs. Both reserve the existing machine-global run slot;
 Docker limits the executable checks independently of the service's memory cap.
 A person merges, and the merge follows the deployment path above.
 
+The activator moves that clone to the deployed revision at the END of every
+deployment — fetch, checkout, `npm ci`, `tsc`, the `atoma-mender:local` image,
+the unit file, restart — after the application is healthy and outside the
+rollback section. A refresh failure leaves the mender STOPPED on its previous
+checkout and fails the deployment run so it is seen, but never restores the
+previous application generation. A host without a mender (no clone at
+`ATOMA_DEPLOY_MENDER_CHECKOUT`, no `ATOMA_DEPLOY_MENDER_ENV`) skips the phase.
+`install-mender.sh` remains the first installation and the manual recovery.
+The activator itself is root-owned and installed by hand: after changing
+`deploy/host-deploy.sh`, reinstall it from the deployed release
+(`sudo install -m 0755 /home/atoma/current/deploy/host-deploy.sh /usr/local/sbin/atoma-deploy`).
+
 Follow [the production supervisor guide](supervisor-codex-production.md) for
 installation, GitHub configuration cleanup, and end-to-end verification.
 

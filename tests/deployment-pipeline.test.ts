@@ -99,6 +99,31 @@ describe('post-CI deployment pipeline', () => {
     expect(preflight).toMatch(/finally \{\s+lease\?\.release\(\);[\s\S]+rmSync\(resolve\(options\.admissionMarker\)/);
   });
 
+  it('refreshes the mender after the application is healthy, outside the rollback section', () => {
+    // 2026-09-07: the mender runs from its OWN clone, so nothing moved it to
+    // the deployed revision — it stayed on whatever install-mender.sh last
+    // pinned while mender.env already described the new one. The refresh runs
+    // after health verification and after ACTIVATION_STARTED is cleared, so a
+    // mender failure can never restore the previous application generation.
+    const healthy = hostDeploy.indexOf('fail "new generation failed health verification"');
+    const closed = hostDeploy.lastIndexOf('ACTIVATION_STARTED=0');
+    const refresh = hostDeploy.indexOf('\nrefresh_mender\n');
+    expect(healthy).toBeGreaterThan(0);
+    expect(closed).toBeGreaterThan(healthy);
+    expect(refresh).toBeGreaterThan(closed);
+    // A host without a mender skips; a present one is moved to THIS revision,
+    // rebuilt with its image and unit, and restarted.
+    expect(hostDeploy).toContain('echo "mender: not installed on this host');
+    expect(hostDeploy).toContain('git checkout --quiet --detach "$MENDER_REVISION"');
+    expect(hostDeploy).toContain('docker build -f docker/mender.Dockerfile -t atoma-mender:local .');
+    expect(hostDeploy).toContain('"/etc/systemd/system/${MENDER_SERVICE}"');
+    expect(hostDeploy).toContain('systemctl start "${MENDER_SERVICE}"');
+    // Failure is reported, not hidden, and names the application as deployed.
+    expect(hostDeploy).toContain('(the application itself is deployed)');
+    expect(hostDeploy).toContain('ATOMA_DEPLOY_MENDER_CHECKOUT');
+    expect(readFileSync('deploy/deploy.env.example', 'utf8')).toContain('ATOMA_DEPLOY_MENDER_ENV=');
+  });
+
   it('restricts the SSH key and keeps state/environment outside the release link', () => {
     expect(sshCommand).toContain('SSH_ORIGINAL_COMMAND');
     expect(sshCommand).toMatch(/\^deploy\\ \(\[0-9a-f\]\{40\}\)\\ \(\[0-9a-f\]\{64\}\)\$/);

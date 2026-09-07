@@ -4,6 +4,12 @@
 
 ### Changed
 
+- The production activator refreshes the mender at the end of every
+  deployment: its clone is moved to the deployed revision, rebuilt with its
+  image and unit file, and restarted — after the application is healthy and
+  outside the rollback section, so a mender failure is reported and never
+  restores the previous application. Hosts without a mender skip the phase;
+  `deploy.env` gains three optional `ATOMA_DEPLOY_MENDER_*` paths.
 - ONE model selector, `<api|sub|own>:<vendor>:<model>`, for every tier.
   `ATOMA_MODEL_L1/L2/L3` are all REQUIRED and there is no default: a tier
   nobody configured is a launch error naming the variable. `api` bills a key

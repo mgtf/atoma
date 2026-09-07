@@ -30,6 +30,14 @@ SERVICE_NAME="${ATOMA_DEPLOY_SERVICE:-atoma.service}"
 SERVICE_USER="${ATOMA_DEPLOY_USER:-atoma}"
 APP_ENV="${ATOMA_DEPLOY_APP_ENV:-/home/atoma/config/atoma.env}"
 HEALTH_URL="${ATOMA_DEPLOY_HEALTH_URL:-http://127.0.0.1:4111/}"
+# The mender runs from its OWN clone, not from the CI artefact (worktrees,
+# devDependencies, gh). These name that installation so the activator can
+# move it to the deployed revision; an absent checkout or env means "no mender
+# on this host" and the phase is skipped, never failed.
+MENDER_SERVICE="${ATOMA_DEPLOY_MENDER_SERVICE:-atoma-mender.service}"
+MENDER_CHECKOUT="${ATOMA_DEPLOY_MENDER_CHECKOUT:-/home/atoma/mender}"
+MENDER_ENV="${ATOMA_DEPLOY_MENDER_ENV:-/home/atoma/config/mender.env}"
+MENDER_REMOTE="https://github.com/mgtf/atoma.git"
 
 fail() {
   echo "deployment failed: $*" >&2
@@ -47,6 +55,9 @@ valid_absolute_path() {
 valid_absolute_path "${DEPLOY_ROOT}" || fail "ATOMA_DEPLOY_ROOT must be a narrow absolute path"
 valid_absolute_path "${REQUIRED_MOUNT}" || fail "ATOMA_DEPLOY_REQUIRED_MOUNT must be a narrow absolute path"
 [[ "${SERVICE_NAME}" =~ ^[A-Za-z0-9_.@-]+$ ]] || fail "invalid systemd service name"
+[[ "${MENDER_SERVICE}" =~ ^[A-Za-z0-9_.@-]+$ ]] || fail "invalid mender service name"
+valid_absolute_path "${MENDER_CHECKOUT}" || fail "ATOMA_DEPLOY_MENDER_CHECKOUT must be a narrow absolute path"
+valid_absolute_path "${MENDER_ENV}" || fail "ATOMA_DEPLOY_MENDER_ENV must be a narrow absolute path"
 [[ "${SERVICE_USER}" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] || fail "invalid service user"
 [[ "${HEALTH_URL}" =~ ^http://(127\.0\.0\.1|localhost):[0-9]+/ ]] ||
   fail "ATOMA_DEPLOY_HEALTH_URL must be a loopback HTTP URL"
@@ -268,3 +279,45 @@ done
 
 ACTIVATION_STARTED=0
 echo "deployed ${REVISION} to ${SERVICE_NAME}"
+
+# ── The mender follows the deployed revision ────────────────────────────────
+# Until 2026-09-07 nothing moved the mender's clone: it stayed on whatever
+# revision install-mender.sh last pinned, while mender.env could already
+# describe the new one. This phase runs AFTER the application is healthy and
+# AFTER the rollback section closed: a mender that cannot be refreshed is
+# reported and left STOPPED on its previous checkout, never a reason to
+# restore the previous application generation. No mend is in flight here —
+# the drain guard still holds the machine run lease until this script exits.
+refresh_mender() {
+  if [[ ! -d "${MENDER_CHECKOUT}/.git" || ! -f "${MENDER_ENV}" || -L "${MENDER_ENV}" ]]; then
+    echo "mender: not installed on this host (${MENDER_CHECKOUT}, ${MENDER_ENV}); skipping"
+    return 0
+  fi
+  for command in git gh; do
+    command -v "${command}" >/dev/null 2>&1 || fail "mender refresh needs ${command}"
+  done
+  [[ -f "${TARGET_RELEASE}/deploy/atoma-mender.service" ]] || fail "release ships no mender unit"
+  systemctl stop "${MENDER_SERVICE}" || true
+  if ! runuser -u "${SERVICE_USER}" -- env HOME="${SERVICE_HOME}" MENDER_REVISION="${REVISION}" \
+      MENDER_REMOTE="${MENDER_REMOTE}" bash -c '
+    set -Eeuo pipefail
+    set -a; source "$1"; set +a
+    cd "$2"
+    [[ $(git remote get-url origin) == "$MENDER_REMOTE" ]] || { echo "mender checkout has another origin" >&2; exit 2; }
+    [[ -z $(git status --porcelain) ]] || { echo "mender checkout is dirty; preserve and inspect it" >&2; exit 2; }
+    git fetch --quiet origin main
+    git checkout --quiet --detach "$MENDER_REVISION"
+    HUSKY=0 npm ci
+    npx tsc -p tsconfig.json
+    docker build -f docker/mender.Dockerfile -t atoma-mender:local .
+    node dist/cli/mender.js --help >/dev/null
+  ' bash "${MENDER_ENV}" "${MENDER_CHECKOUT}"; then
+    fail "mender refresh failed; ${MENDER_SERVICE} is stopped on its previous checkout — inspect ${MENDER_CHECKOUT} or rerun deploy/install-mender.sh (the application itself is deployed)"
+  fi
+  install -o root -g root -m 0644 "${TARGET_RELEASE}/deploy/atoma-mender.service" \
+    "/etc/systemd/system/${MENDER_SERVICE}"
+  systemctl daemon-reload
+  systemctl start "${MENDER_SERVICE}"
+  echo "mender: ${MENDER_SERVICE} refreshed to ${REVISION}"
+}
+refresh_mender

@@ -41,8 +41,10 @@ longer needed. Do not paste credentials in chat. It stores the token in
 
 Installation refuses active runs/previews, then briefly stops Atoma while
 preparing the clone and image. A failure restarts Atoma. The clone is pinned
-to the deployed revision; rerunning the installer upgrades it only if clean.
-Each actual mend fetches current main into its own disposable worktree.
+to the deployed revision, and every later deployment moves it to the new one
+(see the deployment guide); rerunning the installer is the manual recovery and
+upgrades a clean clone only. Each actual mend fetches current main into its
+own disposable worktree.
 The installer preserves existing configuration and verdicts, copies the shared
 DB/runs/lease paths from atoma.env, and removes ATOMA_MENDER_DISPATCH_* settings
 with a root-only backup. It never changes the production release checkout.
