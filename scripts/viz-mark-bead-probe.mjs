@@ -1,4 +1,4 @@
-/* global window, requestAnimationFrame */
+/* global window, requestAnimationFrame, OffscreenCanvas */
 
 /** Read the actual live refraction input, never re-render or pin the crystal:
  * a settled pose concealed the mask's stale on-screen transform. */
@@ -31,7 +31,15 @@ export async function assertLiveMarkBead(page) {
         if (!capture) throw new Error('The live crystal did not capture its interior');
         // Passing a Texture reads the rendered bytes; passing its Container
         // would perform a new pass and could repair the bug under test.
-        const { pixels, width, height } = renderer.extract.pixels(capture.target);
+        const image = renderer.extract.canvas(capture.target);
+        const { width, height } = image;
+        // Pixi's pooled 2D extraction context omits willReadFrequently and
+        // emits a browser performance warning after repeated readbacks. Own
+        // this diagnostic-only context so the normal smoke stays noise-free.
+        const canvas = new OffscreenCanvas(width, height);
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(image, 0, 0);
+        const { data: pixels } = ctx.getImageData(0, 0, width, height);
         const cx = Math.round(capture.x * width);
         const cy = Math.round(capture.y * height);
         const radius = Math.ceil(width / 28);
