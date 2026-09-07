@@ -1080,11 +1080,25 @@ const SENTINEL: ResidentSentinel | null = (() => {
  * are handed to the repository's mender workflow — the mender itself never
  * runs on this host (`src/supervisor/AGENTS.md`).
  */
+/** Why the analyst is off although `ATOMA_VIZ_ANALYST` asked for it, when that is the case. */
+let ANALYST_REFUSED: string | null = null;
 const ANALYST: ResidentAnalyst | null = (() => {
   if (!EVENTS || !PROJECTS_RUNTIME) return null;
   if (!vizAnalystEnabled()) return null;
   const journal = EVENTS;
   const log = (line: string): void => console.error(`[analyst] ${line}`);
+  // THE ANALYST NEVER TAKES THE CONTROL PLANE DOWN. Its selector is required
+  // and has no default (`src/supervisor/AGENTS.md`), so a missing or stale
+  // `ATOMA_ANALYST_MODEL` is a refusal of THIS stage, written down at boot and
+  // in the banner — not a crash loop of the server every tenant is using.
+  let provider;
+  try {
+    provider = analystProvider();
+  } catch (error) {
+    ANALYST_REFUSED = error instanceof Error ? error.message : String(error);
+    log(`${ANALYST_REFUSED} — analyst OFF`);
+    return null;
+  }
   let dispatch = null;
   try {
     dispatch = dispatchConfigFromEnv();
@@ -1098,7 +1112,7 @@ const ANALYST: ResidentAnalyst | null = (() => {
     dispatch,
     supervisorDir: resolve(process.env['ATOMA_SUPERVISOR_DIR'] ?? './supervisor'),
     leasePath: mcpRunLockPath(),
-    provider: analystProvider(),
+    provider,
     claudeCommand: process.env['ATOMA_SUPERVISOR_CMD_CLAUDE'] ?? 'claude',
     budgetUsd: analystBudgetFromEnv() ?? 2,
     timeoutMs: 900_000,
@@ -4181,6 +4195,8 @@ server.listen(cli.port, cli.host, () => {
       `analyst: on (quiet ${Math.round(analyst.quietMs / 1000)}s, ${analyst.queued} finished run(s) queued; ` +
         `spends ${analystProvider().selector} — see src/supervisor/AGENTS.md)`
     );
+  } else if (ANALYST_REFUSED) {
+    console.log(`analyst: off (${ANALYST_REFUSED})`);
   } else if (EVENTS && PROJECTS_RUNTIME) {
     console.log('analyst: off (ATOMA_VIZ_ANALYST=1 to analyse finished runs on this host)');
   }

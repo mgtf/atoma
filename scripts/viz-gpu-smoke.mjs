@@ -5,6 +5,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import puppeteer from 'puppeteer';
+import { assertLiveMarkBead } from './viz-mark-bead-probe.mjs';
 
 const packageMetadata = JSON.parse(
   await readFile(new URL('../package.json', import.meta.url), 'utf8')
@@ -808,6 +809,7 @@ try {
     await page.waitForSelector('.gpu-ui-host[data-gpu-backend]', { timeout: READY_TIMEOUT_MS });
     const rasteriser = await readRasteriser(page);
     const softwareRastered = SOFTWARE_RASTERISERS.test(rasteriser);
+    await assertLiveMarkBead(page);
     // The gate GATES: nothing navigable exists behind it until it is passed.
     if (await page.$('[role="tab"]')) {
       throw new Error('arrival gate did not hold: nav tabs rendered before Continue');
@@ -2599,6 +2601,7 @@ try {
       waitUntil: 'load',
     });
     await page.waitForSelector('.gpu-ui-host[data-gpu-backend="webgl"]', { timeout: READY_TIMEOUT_MS });
+    await assertLiveMarkBead(page);
     await passArrivalGate(page);
     await openView(page, 'Runs');
     const fallbackCursorEnv = await readCursorEnvironment(page);

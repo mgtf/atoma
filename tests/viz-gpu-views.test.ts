@@ -4158,6 +4158,9 @@ describe('attachAtomaMark glass layering', () => {
     ) as Container;
     // Masked, so the bead and its light pool cannot spill past the outline.
     expect(interior.mask).toBeTruthy();
+    // The offscreen capture scales `behind` independently of the page. Its
+    // silhouette must inherit that same transform, including during motion.
+    expect((interior.mask as Container).parent).toBe(behind);
     expect(interior.children.map((child) => child.label))
       .toEqual(['mark-core']);
     const glassGlow = crystal.children.find(

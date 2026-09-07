@@ -517,13 +517,15 @@ export function attachAtomaMark(
    */
   const behind = new Container();
   behind.label = 'mark-behind-glass';
-  behind.addChild(shellBack, interior, shellMid);
+  // The interior is captured in its own scaled render group. Its mask must
+  // share that group's coordinates; a mask on `crystal` keeps the on-screen
+  // transform and clips the moving bead out of the offscreen capture.
+  behind.addChild(shellBack, interior, shellMid, interiorMask);
 
   crystal.addChild(
     behind,
     shellFront,
     glassGlow,
-    interiorMask,
     glassMask
   );
   container.addChild(crystal);
