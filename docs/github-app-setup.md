@@ -196,7 +196,10 @@ GitHub not at all.
 1. Restart the visualizer and sign in.
 2. Projects → **Connect GitHub**, which is `GET /auth/github/connect`. It
    requires `org:admin` or above on your active organisation, mints a
-   short-lived state, and redirects you to the App's install page.
+   short-lived state, and checks installations already visible to your GitHub
+   account. Choose **Connect <account>** when the App is already installed,
+   or **Install on another GitHub account** to install it elsewhere. With no
+   existing installation, it opens the App's install page directly.
 3. Install the App on the account or organisation that will own the
    repositories.
 4. GitHub returns your browser to the Setup URL, which reads the installation
@@ -259,7 +262,7 @@ still mandatory *configuration*, it is simply never exercised.
 | `GitHub installation token lacks required publish permissions`, or an opaque 422 when minting a token | Administration and/or Contents write is not granted, or not yet accepted by the installation |
 | `repository creation was refused (HTTP 422)` | an org setting forbids creation or that visibility, or the name is taken outside the installation's scope |
 | publication fails on the first write after a successful creation | most likely an installation scoped to selected repositories, which a just-created repository cannot be in — widen it to all repositories |
-| `connect a GitHub App installation first`, and Connect GitHub only ever shows you GitHub's "Configure" page | the App is already installed on that account, so GitHub never returns the browser to the Setup URL and no installation row is written |
+| `connect a GitHub App installation first`, and Connect GitHub only ever shows you GitHub's "Configure" page | the App is already installed, so changing repository access does not repeat setup. Return to Atoma → Connect GitHub → Connect the existing account. Deploy the installation-discovery fix if that choice is absent |
 
 ## A note for maintainers
 

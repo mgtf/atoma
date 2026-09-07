@@ -41,8 +41,15 @@ Neighbours:
   `startGitHubConnect` therefore REFUSES TO START a flow whose callback could
   not verify: no stored user authorization means a redirect to the authorize
   path first. Almost nobody sees that hop — an ordinary GitHub login already
-  stores one — and a test proves the ordinary admin still goes straight to
-  GitHub.
+  stores one. The authorized viewer then reaches installation discovery.
+- Connect discovers the current user's existing installations before opening
+  GitHub's install page. An already-installed App only opens Configure there,
+  which does not repeat the setup callback. Discovery offers an explicit account
+  choice and writes no installation; the selected link carries the existing
+  principal/org-bound one-use state into the SAME verified setup callback.
+  No matching installation keeps the ordinary install redirect. Discovery errors
+  are visible failures, never interpreted as an empty list. Authorization without
+  an installation id resumes connect so this choice remains reachable.
 - TWO GITHUB SETTINGS ARE LOAD-BEARING AND NEITHER IS OBVIOUS. *Request user
   authorization (OAuth) during installation* must stay OFF: it removes the
   Setup URL field, which is where GitHub returns the browser after a real

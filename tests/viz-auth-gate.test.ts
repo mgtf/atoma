@@ -155,6 +155,7 @@ async function startFakeProvider(input: {
   port: number;
   subject: number;
   displayName?: string;
+  installed?: boolean;
 }): Promise<FakeProvider> {
   const challenges = new Map<string, string>();
   const redirectUris = new Map<string, string>();
@@ -226,6 +227,14 @@ async function startFakeProvider(input: {
           refresh_token_expires_in: 15_811_200,
         }));
       });
+      return;
+    }
+    if (req.method === 'GET' && (url.pathname === '/user/installations' || url.pathname === '/app/installations/99887766')) {
+      const installation = { id: 99887766, app_id: 123456, account: { id: 44, login: 'existing-account', type: 'User' }, target_type: 'User', repository_selection: 'all', permissions: { contents: 'write', administration: 'write' }, suspended_at: null };
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(url.pathname === '/user/installations'
+        ? { total_count: input.installed ? 1 : 0, installations: input.installed ? [installation] : [] }
+        : installation));
       return;
     }
     if (req.method === 'GET' && url.pathname === '/userinfo') {
@@ -1885,12 +1894,12 @@ describe('viz auth gate (process level)', () => {
 
   it('routes GitHub App connect, CSRF and webhook boundaries', async () => {
     const instance = tempInstance();
-    const provider = await startFakeProvider({ port: await freePort(), subject: 44 });
+    const provider = await startFakeProvider({ port: await freePort(), subject: 44, installed: true });
     const port = await freePort();
     const base = `http://127.0.0.1:${port}`;
     const running = startViz(
       [...instance.args, '--port', String(port)],
-      { ...providerEnv(provider, base), ...githubAppEnv(instance.root) }
+      { ...providerEnv(provider, base), ...githubAppEnv(instance.root), ATOMA_GITHUB_API_URL: provider.baseUrl }
     );
     await waitReady(running, `${base}/auth/whoami`);
     expect(running.stderr.join('') + running.stdout.join('')).toContain('github app: atoma-test');
@@ -1903,11 +1912,23 @@ describe('viz auth gate (process level)', () => {
       redirect: 'manual',
       headers: { cookie },
     });
-    expect(connect.status).toBe(302);
-    const location = new URL(connect.headers.get('location')!);
-    expect(location.origin).toBe('https://github.com');
-    expect(location.pathname).toBe('/apps/atoma-test/installations/new');
-    expect(location.searchParams.get('state')).toMatch(/^[A-Za-z0-9_-]{43,128}$/);
+    expect(connect.status).toBe(200);
+    const page = await connect.text();
+    expect(page).toContain('Connect existing-account');
+    expect(page).toContain('Install on another GitHub account');
+    const setupPath = page.match(/href="(\/auth\/github\/setup\?[^"]+)"/)?.[1]?.replaceAll('&amp;', '&');
+    expect(setupPath).toBeTruthy();
+    // Discovery never links implicitly. The user's choice crosses the real
+    // server callback and both GitHub API views, without an install redirect.
+    const before = await fetch(`${base}/api/github/installations`, { headers: { cookie } });
+    expect(await before.json()).toEqual([]);
+    const linked = await fetch(`${base}${setupPath!}`, { redirect: 'manual', headers: { cookie } });
+    expect(linked.status).toBe(302);
+    expect(linked.headers.get('location')).toBe('/');
+    const after = await fetch(`${base}/api/github/installations`, { headers: { cookie } });
+    expect(await after.json()).toEqual([expect.objectContaining({ installationId: '99887766', accountLogin: 'existing-account' })]);
+    const replay = await fetch(`${base}${setupPath!}`, { redirect: 'manual', headers: { cookie } });
+    expect(replay.status).toBe(401);
 
     expect(
       (await fetch(`${base}/api/projects`, {
@@ -1961,6 +1982,6 @@ describe('viz auth gate (process level)', () => {
 
     const listed = await fetch(`${base}/api/github/installations`, { headers: { cookie } });
     expect(listed.status).toBe(200);
-    expect(await listed.json()).toEqual([]);
+    expect(await listed.json()).toEqual([expect.objectContaining({ installationId: '99887766' })]);
   });
 });

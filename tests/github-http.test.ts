@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AUTH_TABLES_DDL, type Viewer } from '../src/auth/store.js';
-import { completeGitHubSetup, GITHUB_COPY, startGitHubConnect } from '../src/github/http.js';
+import { completeGitHubSetup, GITHUB_COPY, prepareGitHubConnect, startGitHubConnect } from '../src/github/http.js';
 import type { GitHubAppClient, GitHubInstallationView } from '../src/github/client.js';
 import {
   GitHubStore,
@@ -262,5 +262,48 @@ describe('connect vs login state alphabets', () => {
     expect(isOauthState(connect)).toBe(false);
     expect(isGitHubConnectState(connect)).toBe(true);
     expect(connect).toHaveLength(43);
+  });
+});
+
+
+describe('existing GitHub installation discovery', () => {
+  const installation: GitHubInstallationView = {
+    installationId: '99887766', appId: '123456', accountId: '44',
+    accountLogin: 'existing-account', targetType: 'User', repositorySelection: 'all',
+    permissions: {}, suspended: false,
+  };
+
+  it('offers every matching account without binding any, excluding other Apps', async () => {
+    const result = await prepareGitHubConnect({
+      viewer: owner, github, config: config(),
+      resolveUserAccessToken: async () => 'user-token',
+      client: { listUserInstallations: async () => [installation,
+        { ...installation, installationId: '2', accountLogin: 'second' },
+        { ...installation, installationId: '3', appId: '999' },
+      ] } as unknown as GitHubAppClient,
+    });
+    expect(result.kind).toBe('installations');
+    if (result.kind !== 'installations') return;
+    expect(result.accounts.map(account => account.accountLogin)).toEqual(['existing-account', 'second']);
+    expect(github.getInstallation(installation.installationId)).toBeNull();
+    expect(github.hasPendingConnectState(result.state)).toBe(true);
+  });
+
+  it('keeps the ordinary install flow when GitHub returns no installations', async () => {
+    const result = await prepareGitHubConnect({
+      viewer: owner, github, config: config(), resolveUserAccessToken: async () => 'user-token',
+      client: { listUserInstallations: async () => [] } as unknown as GitHubAppClient,
+    });
+    expect(result.kind).toBe('redirect');
+    if (result.kind === 'redirect') expect(result.location).toContain('/installations/new?state=');
+  });
+
+  it('does not disguise a discovery failure as a missing installation', async () => {
+    const result = await prepareGitHubConnect({
+      viewer: owner, github, config: config(),
+      resolveUserAccessToken: async () => { throw new Error('token unavailable'); },
+      client: {} as GitHubAppClient,
+    });
+    expect(result).toEqual({ kind: 'html', status: 502, body: GITHUB_COPY.providerFailure });
   });
 });

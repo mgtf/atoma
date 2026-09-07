@@ -88,7 +88,7 @@ import {
   completeGitHubUserCallback,
   GITHUB_COPY,
   handleGitHubWebhook,
-  startGitHubConnect,
+  prepareGitHubConnect,
   startGitHubUserAuthorize,
   type GitHubHttpResult,
 } from '../github/http.js';
@@ -1406,7 +1406,7 @@ function writeAuthRedirect(
   res.end();
 }
 
-function githubNoticePage(message: string): string {
+function githubNoticePage(message: string, actions = ''): string {
   return `<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><title>Atoma — GitHub</title>
@@ -1420,6 +1420,7 @@ a{color:#7ee0c8}
 <body><div class="card">
 <h1>Atoma</h1>
 <p>${escapeHtml(message)}</p>
+${actions}
 <p><a href="/">Back to Atoma</a></p>
 </div></body></html>`;
 }
@@ -1432,6 +1433,14 @@ function applyGitHubResult(
   const cookies = [...(result.kind === 'redirect' || result.kind === 'html' ? result.cookies ?? [] : []), ...extraCookies];
   if (result.kind === 'redirect') {
     writeAuthRedirect(res, result.location, cookies);
+    return;
+  }
+  if (result.kind === 'installations') {
+    const actions = result.accounts.map(account => {
+      const query = new URLSearchParams({ state: result.state, installation_id: account.installationId });
+      return `<p><a href="/auth/github/setup?${escapeHtml(query.toString())}">Connect ${escapeHtml(account.accountLogin)}</a></p>`;
+    }).join('') + `<p><a href="${escapeHtml(result.installUrl)}">Install on another GitHub account</a></p>`;
+    sendAuthHtml(res, 200, githubNoticePage('Choose the GitHub account to connect to this organisation.', actions));
     return;
   }
   if (result.kind === 'html') {
@@ -2192,7 +2201,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
             codeVerifier: tx.codeVerifier,
             installationId: url.searchParams.get('installation_id'),
             client: PROJECTS_RUNTIME.githubClient,
-            homePath: '/',
+            homePath: url.searchParams.get('installation_id') ? '/' : '/auth/github/connect',
             events: emit,
           }),
           [clearCookie(OAUTH_TX_COOKIE, AUTH_RUNTIME.secureCookies, '/auth')]
@@ -2441,13 +2450,13 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         sendJson(res, 401, { error: GITHUB_COPY.authenticationRequired });
         return;
       }
-      if (!PROJECTS_RUNTIME?.githubConfig) {
+      if (!PROJECTS_RUNTIME?.githubConfig || !PROJECTS_RUNTIME.githubClient || !PROJECTS_RUNTIME.resolveUserAccessToken) {
         sendJson(res, 503, { error: GITHUB_COPY.notConfigured });
         return;
       }
       applyGitHubResult(
         res,
-        startGitHubConnect({
+        await prepareGitHubConnect({
           viewer,
           github: PROJECTS_RUNTIME.githubStore,
           config: PROJECTS_RUNTIME.githubConfig,
@@ -2456,6 +2465,8 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           // their token, and a flow whose callback cannot verify must not
           // start. Passing the path is what arms that hop.
           authorizePath: '/auth/github/authorize',
+          client: PROJECTS_RUNTIME.githubClient,
+          resolveUserAccessToken: PROJECTS_RUNTIME.resolveUserAccessToken,
         })
       );
       return;

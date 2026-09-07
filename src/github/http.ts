@@ -100,6 +100,7 @@ function bindInstallation(input: {
 }
 
 export type GitHubHttpResult =
+  | { readonly kind: 'installations'; readonly state: string; readonly installUrl: string; readonly accounts: readonly Pick<GitHubInstallationView, 'installationId' | 'accountLogin'>[] }
   | { readonly kind: 'redirect'; readonly location: string; readonly cookies?: readonly string[] }
   | { readonly kind: 'json'; readonly status: number; readonly body: unknown }
   | { readonly kind: 'html'; readonly status: number; readonly body: string; readonly cookies?: readonly string[] };
@@ -219,6 +220,34 @@ export function startGitHubConnect(input: {
       apiBaseUrl: input.config.apiBaseUrl,
     }),
   };
+}
+
+/** Recover an already-installed App without relying on GitHub repeating setup. */
+export async function prepareGitHubConnect(input: Parameters<typeof startGitHubConnect>[0] & {
+  readonly client: GitHubAppClient;
+  readonly resolveUserAccessToken: (principalId: string) => Promise<string>;
+}): Promise<GitHubHttpResult> {
+  const started = startGitHubConnect(input);
+  if (started.kind !== 'redirect' || started.location === input.authorizePath) return started;
+  try {
+    const token = await input.resolveUserAccessToken(input.viewer.principalId);
+    const installations = await input.client.listUserInstallations(token);
+    const accounts = installations
+      .filter(installation => installation.appId === input.config.appId)
+      .map(({ installationId, accountLogin }) => ({ installationId, accountLogin }));
+    if (accounts.length === 0) return started;
+    // Listing is discovery only. Choosing an account uses the existing setup
+    // callback, which re-verifies both views and enforces org ownership.
+    return {
+      kind: 'installations',
+      state: new URL(started.location).searchParams.get('state')!,
+      installUrl: started.location,
+      accounts,
+    };
+  } catch (error) {
+    console.error('[viz github] installation discovery failed', error);
+    return htmlError(502, GITHUB_COPY.providerFailure);
+  }
 }
 
 export async function completeGitHubSetup(input: {
