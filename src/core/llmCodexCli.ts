@@ -1,3 +1,4 @@
+import { completeCodexToolLoop } from './codexToolLoop.js';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
@@ -28,7 +29,7 @@ process.on('exit', cleanupCodexJails);
  * CODEX_HOME — typically a ChatGPT Plus/Pro subscription. Reached through a
  * tier pin's provider prefix:
  *
- *   ATOMA_MODEL_L3=codex:gpt-5.6-sol
+ *   ATOMA_MODEL_L3=sub:openai:gpt-5.6-sol
  *
  * WHY A SUBPROCESS AND NOT `@openai/codex-sdk`. The CLI exposes MORE
  * isolation than the SDK's ThreadOptions does — `--ephemeral`,
@@ -38,24 +39,11 @@ process.on('exit', cleanupCodexJails);
  * peer override over the zod3/zod4 split, and a second agent SDK is a second
  * chance to wedge the dependency tree.
  *
- * === TIERS 2 AND 3 ONLY — L1 IS REFUSED, AND THE REFUSAL IS STRUCTURAL ===
- *
- * Codex offers no way to expose ONLY atoma's external tools while removing
- * every built-in: shell/unified-exec can now be disabled, but apply_patch
- * still has no supported complete off switch (openai/codex#8161). So the
- * trick that makes `ClaudeCliLlmClient` safe for L1 (`tools: []` plus an
- * in-process MCP bridge, hence every side effect routed through
- * `req.executor`) has no equivalent here. Handing this client a toolset
- * would mean the model acting on the filesystem OUTSIDE `ToolSandbox`:
- * no jail, no #8a scope gate, no `record_probe`, no probe manifest, no
- * `VizToolEvent`s in the trace, and none of the 93.5% cache_read the
- * execute path lives on. `complete` therefore THROWS when handed tools or
- * an executor rather than silently degrading — a wrong tier pin must fail
- * loudly at the first call, not produce an unobservable run.
- *
- * That restriction costs nothing architecturally: L2/L3 never pass `tools`
- * or an `executor` (the tier-split invariant), so their calls are pure text
- * completions and this transport serves them unchanged.
+ * Tool-bearing L1 calls use a host-side JSON action loop. Each Codex child
+ * remains text-only in the same empty read-only jail, with built-ins disabled.
+ * Only the caller's declared tools can reach its sandbox executor; the host
+ * records results and sends a bounded transcript to the next text completion.
+ * No MCP server or native Codex filesystem access is enabled by this bridge.
  *
  * MEASURED on 2026-08-11, codex-cli 0.147.0, ChatGPT subscription auth:
  *   - ZERO parasitic tool turns on a real L3 plan prompt (one
@@ -394,6 +382,7 @@ export function buildCodexArgs(opts: {
   model: string;
   cwd: string;
   instructionsFile: string;
+  outputSchemaFile?: string;
   effort?: string;
 }): string[] {
   return [
@@ -436,6 +425,7 @@ export function buildCodexArgs(opts: {
     '-c',
     `model_instructions_file=${opts.instructionsFile}`,
     ...(opts.effort ? ['-c', `model_reasoning_effort=${opts.effort}`] : []),
+    ...(opts.outputSchemaFile ? ['--output-schema', opts.outputSchemaFile] : []),
     // Prompt on stdin: an atom's userContent carries whole catalogs and can
     // exceed argv limits, and `-` is the documented way to feed it.
     '-',
@@ -589,17 +579,14 @@ export class CodexCliLlmClient implements LlmClient {
   }
 
   async complete(req: LlmCompletionRequest): Promise<LlmCompletionResponse> {
-    // See the class docstring: this transport cannot enforce atoma's tool
-    // contracts (openai/codex#6049), so it refuses tiers that need them.
     if (req.executor !== undefined || (req.tools?.length ?? 0) > 0) {
-      throw new Error(
-        'codex provider serves tiers 2 and 3 only: it cannot host a tool loop because Codex ' +
-          'cannot expose only Atoma tools while disabling every built-in (openai/codex#8161), so tool calls ' +
-          'would bypass ToolSandbox and the #8a scope gate. Pin L1 to a provider with a tool ' +
-          'bridge (e.g. ATOMA_MODEL_L1=claude-haiku-4-5-20251001).'
-      );
+      return completeCodexToolLoop(req, (request, schema) => this.completeText(request, schema));
     }
 
+    return this.completeText(req);
+  }
+
+  private async completeText(req: LlmCompletionRequest, outputSchema?: Record<string, unknown>): Promise<LlmCompletionResponse> {
     // Multiple L2/L3 lanes can share one personal generation. Codex may
     // rotate auth.json during either call, so its complete child lifetime is
     // serialized on CODEX_HOME. The project coordinator's machine-global run
@@ -619,33 +606,42 @@ export class CodexCliLlmClient implements LlmClient {
       // pin billed `codex:claude-opus-5` at the /opus/i row for gpt-5.6-sol
       // tokens (review 2026-08-14 §1.13).
       const served = resolveCodexModel(req.model, this.modelEnv);
-      const first = await this.completeOnce(req);
+      const first = await this.completeOnce(req, outputSchema);
       if (first.error === undefined) return toResponse(first, served);
-      if (!isRetryableCodexFailure(first.error)) throw new CodexTransportError(first.error);
+      if (!isRetryableCodexFailure(first.error)) throw Object.assign(new CodexTransportError(first.error), { partialUsage: first.usage });
       // Transient (5xx / subscription throttle): one retry, then surface it
       // as a real transport error so metrics record an error call instead of
       // a parser crash far from the cause. Only the stable classification
       // crosses this boundary; provider prose was discarded by completeOnce.
       await new Promise((r) => setTimeout(r, 3000));
-      const second = await this.completeOnce(req);
-      if (second.error === undefined) return toResponse(second, served);
-      throw new CodexTransportError(second.error, true);
+      const second = await this.completeOnce(req, outputSchema);
+      const usage = {
+        inputTokens: first.usage.inputTokens + second.usage.inputTokens,
+        outputTokens: first.usage.outputTokens + second.usage.outputTokens,
+        cacheReadInputTokens: (first.usage.cacheReadInputTokens ?? 0) + (second.usage.cacheReadInputTokens ?? 0),
+        cacheCreationInputTokens: (first.usage.cacheCreationInputTokens ?? 0) + (second.usage.cacheCreationInputTokens ?? 0),
+      };
+      if (second.error === undefined) return toResponse({ ...second, usage }, served);
+      throw Object.assign(new CodexTransportError(second.error, true), { partialUsage: usage });
     } finally {
       releaseProfile?.();
     }
   }
 
-  private async completeOnce(req: LlmCompletionRequest): Promise<CodexOutcome> {
+  private async completeOnce(req: LlmCompletionRequest, outputSchema?: Record<string, unknown>): Promise<CodexOutcome> {
     if (req.signal?.aborted) throw req.signal.reason ?? new Error('aborted');
 
     const jail = this.ensureJail();
     const instructionsFile = path.join(jail.root, `instructions-${process.hrtime.bigint()}.txt`);
     writeFileSync(instructionsFile, req.systemPrompt, 'utf8');
+    const outputSchemaFile = outputSchema ? `${instructionsFile}.schema.json` : undefined;
+    if (outputSchemaFile) writeFileSync(outputSchemaFile, JSON.stringify(outputSchema), 'utf8');
 
     const args = buildCodexArgs({
       model: resolveCodexModel(req.model, this.modelEnv),
       cwd: jail.cwd,
       instructionsFile,
+      outputSchemaFile,
       effort: codexEffortFor(req),
     });
 
@@ -654,6 +650,7 @@ export class CodexCliLlmClient implements LlmClient {
       child = this.spawnFn(args, req.userContent, this.childEnv, jail.cwd);
     } catch {
       rmSync(instructionsFile, { force: true });
+      if (outputSchemaFile) rmSync(outputSchemaFile, { force: true });
       return {
         text: '',
         usage: { inputTokens: 0, outputTokens: 0 },
@@ -721,12 +718,14 @@ export class CodexCliLlmClient implements LlmClient {
       clearTimeout(timer);
       req.signal?.removeEventListener('abort', onAbort);
       rmSync(instructionsFile, { force: true });
+      if (outputSchemaFile) rmSync(outputSchemaFile, { force: true });
     }
 
-    if (timedOut) {
-      throw new CodexTransportError('timeout');
+    if (timedOut || req.signal?.aborted) {
+      const failure = timedOut ? new CodexTransportError('timeout') : req.signal?.reason ?? new Error('aborted');
+      try { failure.partialUsage = foldCodexEvents(lines).usage; } catch { /* Frozen abort reason. */ }
+      throw failure;
     }
-    if (req.signal?.aborted) throw req.signal.reason ?? new Error('aborted');
 
     if (spawnFailed) {
       return {

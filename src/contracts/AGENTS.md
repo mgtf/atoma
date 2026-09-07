@@ -111,7 +111,7 @@ Neighbours:
 - Subscription selectors are ADMISSIBLE BY CHAIN LEVEL, not by spelling: the
   coordinator honours `sub:`/`own:` from an account pin after re-asking the
   authority, and refuses them from the org and host levels; both ChatGPT
-  families are L2/L3-only (`selectorAdmitsTools`).
+  families admit all three tiers through Atoma's host-side tool loop.
 - Nothing here carries a secret: a payer names a KIND and a transport. This
   detail is journaled beside `project_runs.error`, which is served to tenants.
 - Summary helpers distinguish host and requester subscription spend; both use

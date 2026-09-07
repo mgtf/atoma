@@ -392,51 +392,19 @@ describe('isCodexTransientError', () => {
   });
 });
 
-describe('CodexCliLlmClient — L1 is refused STRUCTURALLY', () => {
-  it('cannot be unlocked by an ambient workspace variable', async () => {
-    const before = process.env['ATOMA_CODEX_L1_WORKSPACE'];
-    process.env['ATOMA_CODEX_L1_WORKSPACE'] = '/tmp/unsafe-codex-l1';
-    let spawns = 0;
-    const client = new CodexCliLlmClient({
-      spawnFn: () => {
-        spawns++;
-        return fakeChild({ lines: OK_LINES });
-      },
-    });
-    try {
-      await expect(client.complete(req({ tools: makeTools(['write_file']) }))).rejects.toThrow(
-        /tiers 2 and 3 only/
-      );
-      expect(spawns).toBe(0);
-    } finally {
-      if (before === undefined) delete process.env['ATOMA_CODEX_L1_WORKSPACE'];
-      else process.env['ATOMA_CODEX_L1_WORKSPACE'] = before;
-    }
+describe('CodexCliLlmClient — tool request preconditions', () => {
+  it('refuses declarations without an executor before spawning', async () => {
+    const spawnFn = vi.fn();
+    const client = new CodexCliLlmClient({ spawnFn });
+    await expect(client.complete(req({ tools: makeTools(['write_file']) }))).rejects.toThrow(/both declared tools and an executor/);
+    expect(spawnFn).not.toHaveBeenCalled();
   });
-
-  it('throws when handed tools: Codex cannot expose only Atoma tools', async () => {
-    // The refusal is the whole safety story of this provider. Silently
-    // serving a tool-bearing request would let the model act on the
-    // filesystem OUTSIDE ToolSandbox: no jail, no #8a scope gate, no
-    // record_probe, no VizToolEvents. A wrong tier pin must fail LOUDLY at
-    // the first call, not produce an unobservable run.
-    const client = new CodexCliLlmClient({ spawnFn: () => fakeChild({ lines: OK_LINES }) });
-    await expect(client.complete(req({ tools: makeTools(['write_file']) }))).rejects.toThrow(
-      /tiers 2 and 3 only/
-    );
-  });
-
-  it('throws when handed an executor even with no declared tools', async () => {
+  it('refuses an executor without declarations before spawning', async () => {
     const executor: ToolExecutor = { execute: async () => undefined, has: () => true };
-    const client = new CodexCliLlmClient({ spawnFn: () => fakeChild({ lines: OK_LINES }) });
-    await expect(client.complete(req({ executor }))).rejects.toThrow(/openai\/codex#8161/);
-  });
-
-  it('names a working alternative in the error, not just the problem', async () => {
-    const client = new CodexCliLlmClient({ spawnFn: () => fakeChild({ lines: OK_LINES }) });
-    await expect(client.complete(req({ tools: makeTools(['read_file']) }))).rejects.toThrow(
-      /ATOMA_MODEL_L1=/
-    );
+    const spawnFn = vi.fn();
+    const client = new CodexCliLlmClient({ spawnFn });
+    await expect(client.complete(req({ executor }))).rejects.toThrow(/both declared tools and an executor/);
+    expect(spawnFn).not.toHaveBeenCalled();
   });
 });
 
@@ -896,5 +864,69 @@ describe('pricing — a Codex call must never read as free', () => {
     expect(pricesFor('claude-opus-5')).toEqual({ input: 5, output: 25, cachedInput: 0.5 });
     expect(pricesFor('claude-sonnet-5').output).toBe(15);
     expect(pricesFor('api:zai:glm-4.5-air').input).toBe(0.6);
+  });
+});
+
+
+describe('Codex L1 host-side action loop', () => {
+  function messages(action: unknown): string[] {
+    const value = action as { type: string; name?: string; arguments?: unknown; text?: string };
+    action = { type: value.type, name: value.name ?? '', argumentsJson: JSON.stringify(value.arguments ?? {}), text: value.text ?? '' };
+    return [JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: JSON.stringify(action) } }),
+      JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 10, output_tokens: 3, cached_input_tokens: 2 } })];
+  }
+  it('keeps each subprocess isolated, refuses off-scope tools, and feeds observed results back', async () => {
+    const execute = vi.fn(async () => 'observed-' + 'x'.repeat(25000));
+    const observe = vi.fn();
+    const inputs: string[] = [];
+    const actions = [
+      { type: 'tool', name: 'run_shell', arguments: { cmd: 'no' } },
+      { type: 'tool', name: 'read_file', arguments: { path: 'answer.txt' } },
+      { type: 'final', text: '{"output":"done","summary":"read"}' },
+    ];
+    const client = new CodexCliLlmClient({ env: {}, spawnFn: (args, input, _env, cwd) => {
+      expect(args).toContain('--ignore-user-config');
+      expect(args).toContain('permissions.atoma-text-only.network.enabled=false');
+      expect(readdirSync(cwd)).toEqual([]);
+      inputs.push(input);
+      return fakeChild({ lines: messages(actions.shift()) });
+    } });
+    const result = await client.complete(req({ tools: makeTools(['read_file']), executor: { execute, has: () => true }, onToolInvocation: observe }));
+    expect(execute).toHaveBeenCalledExactlyOnceWith('read_file', { path: 'answer.txt' });
+    expect(observe).toHaveBeenCalledTimes(2);
+    expect(observe.mock.calls[0]?.[0]).toMatchObject({ name: 'run_shell', error: expect.any(String) });
+    expect(observe.mock.calls[1]?.[0].result.length).toBe(25009);
+    expect(inputs[1]).toContain('run_shell');
+    expect(inputs[2]!.length).toBeLessThan(22000);
+    expect(result.text).toBe('{"output":"done","summary":"read"}');
+    expect(result.usage).toMatchObject({ inputTokens: 24, outputTokens: 9, cacheReadInputTokens: 6 });
+  });
+  it('finalizes once at budget and never executes a finalization tool request', async () => {
+    const execute = vi.fn(async () => 'ok');
+    let calls = 0;
+    const client = new CodexCliLlmClient({ env: {}, spawnFn: () => {
+      calls++;
+      return fakeChild({ lines: messages({ type: 'tool', name: 'write_file', arguments: {} }) });
+    } });
+    await expect(client.complete(req({ tools: makeTools(['write_file']), executor: { execute, has: () => true }, maxToolIterations: 1 })))
+      .rejects.toMatchObject({ message: expect.stringContaining('budget was exhausted'), partialUsage: { inputTokens: 16, outputTokens: 6 } });
+    expect(calls).toBe(2);
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+  it('rejects malformed actions without execution and retains their usage', async () => {
+    const execute = vi.fn();
+    const client = new CodexCliLlmClient({ env: {}, spawnFn: () => fakeChild({ lines: messages({ type: 'tool', name: 'write_file', arguments: 'bad' }) }) });
+    await expect(client.complete(req({ tools: makeTools(['write_file']), executor: { execute, has: () => true } })))
+      .rejects.toMatchObject({ message: expect.stringContaining('invalid Atoma'), partialUsage: { inputTokens: 8, outputTokens: 3 } });
+    expect(execute).not.toHaveBeenCalled();
+  });
+  it('does not issue another model call after cancellation during an action', async () => {
+    const controller = new AbortController();
+    const spawnFn = vi.fn(() => fakeChild({ lines: messages({ type: 'tool', name: 'read_file', arguments: {} }) }));
+    const client = new CodexCliLlmClient({ env: {}, spawnFn });
+    await expect(client.complete(req({ signal: controller.signal, tools: makeTools(['read_file']), executor: {
+      has: () => true, execute: async () => { controller.abort(new Error('stop')); return 'read'; },
+    } }))).rejects.toMatchObject({ message: 'stop', partialUsage: { outputTokens: 3 } });
+    expect(spawnFn).toHaveBeenCalledTimes(1);
   });
 });

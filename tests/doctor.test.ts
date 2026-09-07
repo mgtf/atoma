@@ -513,7 +513,7 @@ describe('atoma doctor', () => {
     expect(commands.some((command) => command.startsWith('codex login status'))).toBe(true);
   });
 
-  it('rejects Codex on tier 1 before a run reaches the tool loop', async () => {
+  it('accepts Codex on tier 1 with its host-side tool loop', async () => {
     const report = await diagnoseDoctor({
       mode: { container: false, egress: false },
       env: {
@@ -523,11 +523,8 @@ describe('atoma doctor', () => {
       dependencies: dependencies(),
     });
 
-    expect(report.ready).toBe(false);
-    expect(report.checks.find((check) => check.id === 'provider-config')).toMatchObject({
-      status: 'fail',
-      detail: expect.stringContaining('Codex cannot expose tools'),
-    });
+    expect(report.ready).toBe(true);
+    expect(report.providers).toContain('codex-cli');
   });
 
   it('warns when the Claude debug override flattens the tier gradient', async () => {

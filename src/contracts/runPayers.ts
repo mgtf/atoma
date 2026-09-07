@@ -42,9 +42,8 @@ export const HOST_SUBSCRIPTION_ALIASES = ['opus', 'sonnet', 'haiku'] as const;
 export type HostSubscriptionAlias = (typeof HOST_SUBSCRIPTION_ALIASES)[number];
 
 /**
- * Exact Codex slugs a ChatGPT subscription serves. Codex remains a supervisor
- * transport: these selections are valid on L2/L3 only because L1 owns the
- * tool loop and Codex cannot expose that loop through ToolSandbox.
+ * Exact Codex slugs a ChatGPT subscription serves on all three tiers.
+ * L1 uses Atoma's host-side tool loop through ToolSandbox.
  */
 export const CHATGPT_SUBSCRIPTION_MODELS = [
   'gpt-5.6-sol',

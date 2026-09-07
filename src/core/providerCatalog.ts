@@ -89,7 +89,7 @@ const ANTHROPIC_MODELS: readonly ProviderModelEntry[] = [
 /**
  * The OpenAI API serves the same slugs a ChatGPT subscription does, with
  * tools — so by API every tier is admissible, L1 included. Only the CLI
- * transport is supervisor-only (see `selectorAdmitsTools`).
+ * transport may restrict tier availability in its catalogue.
  */
 const OPENAI_MODELS: readonly ProviderModelEntry[] = CHATGPT_SUBSCRIPTION_MODELS.map((model) => ({
   id: model,
@@ -192,7 +192,7 @@ export const CHATGPT_SUBSCRIPTION_FAMILY: SubscriptionFamily = {
   models: CHATGPT_SUBSCRIPTION_MODELS.map((model) => ({
     id: model,
     label: modelLabel(model),
-    tiers: [2, 3],
+    tiers: [1, 2, 3],
   })),
 };
 
@@ -206,7 +206,7 @@ export const PRINCIPAL_CHATGPT_SUBSCRIPTION_FAMILY: SubscriptionFamily = {
   models: CHATGPT_SUBSCRIPTION_MODELS.map((model) => ({
     id: model,
     label: modelLabel(model),
-    tiers: [2, 3],
+    tiers: [1, 2, 3],
   })),
 };
 

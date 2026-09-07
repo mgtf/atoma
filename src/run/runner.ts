@@ -441,8 +441,7 @@ export async function startTask(
   // THE THREE SELECTORS, read AFTER applyTierPins so a snapshot-only pin is
   // what the run sees and an ambient pin omitted from the snapshot is not.
   // Every tier is required and every value is a full `<mode>:<vendor>:<model>`
-  // selector (contracts/modelSelector.ts); a missing or malformed pin, or a
-  // Codex selector on L1 (no tool loop through ToolSandbox), is a CONFIG
+  // selector (contracts/modelSelector.ts); a missing or malformed pin is a CONFIG
   // error at launch — before spend, not inside an optional diagnostic
   // (review §3.9). `own:` is admissible only in a tenant child, whose parent
   // then has to have authorised the tier (`assertTransportHonoursCredentials`).

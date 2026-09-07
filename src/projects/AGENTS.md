@@ -54,8 +54,8 @@ Neighbours:
   own issuer, the host's gateway applies to the host's own credential only.
 - `api:openai` is OpenAI's API with function tools, admissible on every tier
   from the org's or the host's `OPENAI_API_KEY`. `sub:openai`/`own:openai`
-  are the Codex CLI on a ChatGPT login and are refused on L1 (no tool loop
-  through ToolSandbox).
+  are the Codex CLI on a ChatGPT login; L1 actions pass through Atoma's
+  host-side tool loop and ToolSandbox.
 
 ## Subscription selectors
 
@@ -101,7 +101,7 @@ Neighbours:
 
 ## Per-tier personal Codex subscription
 
-- `own:openai:<model>` is an ACCOUNT-only, L2/L3-only selector. The
+- `own:openai:<model>` is an ACCOUNT-only selector on any tier. The
   coordinator resolves it from the requesting principal's exact private Codex
   generation at launch, records payer `principal-subscription`, and injects
   only that generation's `CODEX_HOME`/`CODEX_SQLITE_HOME`. `own:anthropic` has

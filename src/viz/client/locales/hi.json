@@ -1001,7 +1001,7 @@
   "settings.subscriptionClaude": "Claude",
   "settings.subscriptionClaudeApproval": "Atoma द्वारा इसे यहाँ उपलब्ध कराने से पहले व्यक्तिगत Claude सदस्यता लॉगिन के लिए प्रदाता की स्वीकृति आवश्यक है।",
   "settings.subscriptionCodex": "Codex · ChatGPT",
-  "settings.subscriptionCodexHint": "सुपरवाइज़र tiers के लिए अपनी ChatGPT सदस्यता का उपयोग करने हेतु एक बार इस्तेमाल होने वाले डिवाइस कोड से कनेक्ट करें। Codex आपके Atoma खाते की निजी प्रोफ़ाइल में क्रेडेंशियल रखता है; वे अन्य सदस्यों को कभी नहीं मिलते।",
+  "settings.subscriptionCodexHint": "",
   "settings.subscriptionState.loading": "लोड हो रहा है…",
   "settings.subscriptionState.disconnected": "कनेक्ट नहीं है",
   "settings.subscriptionState.connecting": "कनेक्ट हो रहा है",

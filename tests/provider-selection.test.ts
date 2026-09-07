@@ -73,10 +73,8 @@ describe('tierSelectors — the three required pins, parsed once', () => {
     });
   });
 
-  it('refuses a Codex selector on L1 before any client is built', () => {
-    expect(() => tierSelectors({ ...KEYED, ATOMA_MODEL_L1: 'sub:openai:gpt-5.4-mini' })).toThrow(
-      /ATOMA_MODEL_L1=sub:openai:gpt-5.4-mini: Codex cannot expose tools/
-    );
+  it('accepts Codex on L1 for its host-side tool loop', () => {
+    expect(tierSelectors({ ...KEYED, ATOMA_MODEL_L1: 'sub:openai:gpt-5.4-mini' })[1]).toEqual({ mode: 'sub', vendor: 'openai', model: 'gpt-5.4-mini' });
   });
 
   it('describes the gradient for the run banner', () => {

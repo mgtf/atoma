@@ -29,7 +29,6 @@ import {
 import {
   MODEL_SELECTOR_GRAMMAR,
   parseModelSelector,
-  selectorAdmitsTools,
   tierPinVariable,
   TIERS,
   tryParseModelSelector,
@@ -482,11 +481,6 @@ export function projectRunEnvironment(input: {
           throw new ProjectRunConfigurationError(
             `${variable}=${candidate.value} (${candidate.level} level) is not a model selector; ` +
               `expected ${MODEL_SELECTOR_GRAMMAR}`
-          );
-        }
-        if (tier === 1 && !selectorAdmitsTools(selector)) {
-          throw new ProjectRunConfigurationError(
-            `${variable} cannot use Codex because it cannot expose the L1 tool loop through ToolSandbox`
           );
         }
         if (selector.mode === 'own') {

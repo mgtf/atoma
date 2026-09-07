@@ -78,9 +78,9 @@ describe('modelForTier — three required selectors, no default', () => {
     expect(modelForTier(3)).toBe('api:openai:gpt-5.6-sol');
   });
 
-  it('refuses a Codex selector on L1, the tier that owns the tool loop', () => {
+  it('accepts a Codex selector on L1 through the Atoma action loop', () => {
     Object.assign(process.env, ANTHROPIC_PINS, { ATOMA_MODEL_L1: 'sub:openai:gpt-5.4-mini' });
-    expect(() => modelForTier(1)).toThrow(/L1 cannot use it/);
+    expect(modelForTier(1)).toBe('sub:openai:gpt-5.4-mini');
     // By API, OpenAI hosts the tool loop and is admissible on L1.
     process.env['ATOMA_MODEL_L1'] = 'api:openai:gpt-5.4-mini';
     expect(modelForTier(1)).toBe('api:openai:gpt-5.4-mini');

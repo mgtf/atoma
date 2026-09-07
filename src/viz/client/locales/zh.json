@@ -1001,7 +1001,7 @@
   "settings.subscriptionClaude": "Claude",
   "settings.subscriptionClaudeApproval": "个人Claude订阅登录需获得提供商批准，Atoma才能在此提供此功能。",
   "settings.subscriptionCodex": "Codex · ChatGPT",
-  "settings.subscriptionCodexHint": "使用一次性设备代码连接，即可将你的ChatGPT订阅用于supervisor tier。Codex会将凭据保存在与你的Atoma账户关联的私有配置文件中；其他成员绝不会收到这些凭据。",
+  "settings.subscriptionCodexHint": "",
   "settings.subscriptionState.loading": "正在加载…",
   "settings.subscriptionState.disconnected": "未连接",
   "settings.subscriptionState.connecting": "正在连接",

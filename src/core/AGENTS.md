@@ -29,7 +29,12 @@ Neighbours:
   follows the actual transport.
 - `OpenAiLlmClient` (`api:openai`) is the Responses API with function tools:
   the same loop contract as the Anthropic client, admissible on every tier.
-  `sub:openai`/`own:openai` stay on the Codex CLI and off L1.
+  `sub:openai`/`own:openai` stay on the Codex CLI on all three tiers.
+  Tool-bearing requests use `codexToolLoop`: a strict JSON action protocol
+  over isolated text completions. Only declared names reach `req.executor`;
+  results are observed before model-facing truncation. A finite tool budget
+  permits one finalization, which cannot execute tools. Abort and partial
+  usage propagate across the complete loop. No Codex-native tools are enabled.
 - Effort settings belong on strategy calls only. Validators and prefilters are
   deterministic and cheap.
 - A transport cannot outlive its deadline. Keep both per-call abort and outer

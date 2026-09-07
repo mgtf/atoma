@@ -143,7 +143,7 @@ describe('the subscriptions are neighbours, not catalogue members', () => {
     expect(isValidTierModelSelection('sub:anthropic:opus')).toBe(false);
     expect(isAccountTierSelection('sub:anthropic:opus')).toBe(true);
     expect(isAccountTierSelection('sub:openai:gpt-5.6-sol', 2)).toBe(true);
-    expect(isAccountTierSelection('sub:openai:gpt-5.6-sol', 1)).toBe(false);
+    expect(isAccountTierSelection('sub:openai:gpt-5.6-sol', 1)).toBe(true);
     // The pre-2026-09-07 spellings are not selectors at all.
     expect(isAccountTierSelection('claude-cli:opus')).toBe(false);
     expect(isAccountTierSelection('host-subscription:opus')).toBe(false);
@@ -203,7 +203,7 @@ describe('the subscriptions are neighbours, not catalogue members', () => {
       model.tiers?.includes(3)
     )).toBe(true);
     expect(isAccountTierSelection('own:openai:gpt-5.6-sol', 2)).toBe(true);
-    expect(isAccountTierSelection('own:openai:gpt-5.6-sol', 1)).toBe(false);
+    expect(isAccountTierSelection('own:openai:gpt-5.6-sol', 1)).toBe(true);
     expect(principalChatGptSubscriptionModel('own:openai:gpt-5.6-terra')).toBe('gpt-5.6-terra');
     expect(transportOf(parseModelSelector('own:openai:gpt-5.6-sol'))).toBe('codex-cli');
     expect(tierModelSelectionLabel('own:openai:gpt-5.6-sol')).toBe(

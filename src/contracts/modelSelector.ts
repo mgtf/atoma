@@ -162,16 +162,6 @@ export function transportOf(selector: Pick<ModelSelector, 'mode' | 'vendor'>): M
   return selector.vendor === 'anthropic' ? 'claude-cli' : 'codex-cli';
 }
 
-/**
- * The Codex CLI cannot host a tool loop: it cannot expose only atoma's tools
- * while disabling every built-in, so calls would bypass ToolSandbox and the
- * declared-tools scope gate. L1 is the tier that owns tools, so a Codex
- * selector is refused there — at the settings write, at doctor, and at launch.
- */
-export function selectorAdmitsTools(selector: Pick<ModelSelector, 'mode' | 'vendor'>): boolean {
-  return transportOf(selector) !== 'codex-cli';
-}
-
 export function selectorSpendsSubscription(selector: Pick<ModelSelector, 'mode'>): boolean {
   return selector.mode !== 'api';
 }
@@ -221,13 +211,6 @@ export function readTierSelectors(
       throw new ModelSelectorError(
         `${variable}=${env[variable]!.trim()}: a personal subscription (own:) is an account ` +
           'setting, not a host environment value; use sub: for the host login or api: for a key'
-      );
-    }
-    if (tier === 1 && !selectorAdmitsTools(selector)) {
-      throw new ModelSelectorError(
-        `${variable}=${env[variable]!.trim()}: Codex cannot expose tools through ToolSandbox, so ` +
-          'L1 cannot use it; pin L1 to a tool-capable selector (for example api:openai:gpt-5.4-mini ' +
-          'or api:anthropic:claude-haiku-4-5-20251001) and keep sub:openai on L2/L3'
       );
     }
     out[tier] = selector;

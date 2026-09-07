@@ -1,6 +1,5 @@
 import {
   parseModelSelector,
-  selectorAdmitsTools,
   tierPinVariable,
   TIERS,
   type ModelSelector,
@@ -52,12 +51,6 @@ function formatOrThrow(
     );
   }
   const selector = parseModelSelector(value, variable);
-  if (tier === 1 && !selectorAdmitsTools(selector)) {
-    throw new ModelSelectorError(
-      `${variable}=${value}: Codex cannot expose tools through ToolSandbox, so L1 cannot use it; ` +
-        'pin L1 to a tool-capable selector and keep sub:openai on L2/L3'
-    );
-  }
   return { raw: value, selector };
 }
 

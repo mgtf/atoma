@@ -127,6 +127,22 @@ ATOMA_MCP_RUN_LOCK=/home/atoma/state/mcp-run-lock.db
 ATOMA_DEPLOY_LOCK_PATH=/home/atoma/state/deploy.lock
 ```
 
+### ChatGPT subscription on all three tiers
+
+After installing and signing in to Codex under the service account (below),
+set `ATOMA_HOST_SUBSCRIPTION_ORG` to the operator's active organisation id and
+include Codex's executable directory in the service `PATH`. In Settings → LLM
+models, choose the **ChatGPT (host subscription)** family for all three personal
+account pins. `sub:openai` remains forbidden in organisation defaults and host
+model environment variables: the account choice is the authorization to spend.
+No API credential is required when all three resolved pins use ChatGPT.
+
+L1's tool loop runs in Atoma: Codex emits a structured action, the host checks
+its declared scope and calls the existing sandbox executor, then sends the
+observed result back. Codex's native tools stay disabled. Each action is a
+separate isolated text completion; latency and subscription consumption should
+be measured for the workload rather than assumed equal to native function calls.
+
 ### Z.ai L1 with ChatGPT supervisors
 
 For the recommended production split, keep L1 on a credentialled Z.ai

@@ -1001,7 +1001,7 @@
   "settings.subscriptionClaude": "Claude",
   "settings.subscriptionClaudeApproval": "Die Anmeldung mit einem persönlichen Claude-Abonnement muss vom Anbieter genehmigt werden, bevor Atoma sie hier anbieten kann.",
   "settings.subscriptionCodex": "Codex · ChatGPT",
-  "settings.subscriptionCodexHint": "Verbinden Sie sich mit einem einmaligen Gerätecode, um Ihr ChatGPT-Abonnement für Supervisor-tiers zu verwenden. Codex speichert die Zugangsdaten in einem privaten Profil für Ihr Atoma-Konto; andere Mitglieder erhalten sie niemals.",
+  "settings.subscriptionCodexHint": "",
   "settings.subscriptionState.loading": "Wird geladen…",
   "settings.subscriptionState.disconnected": "Nicht verbunden",
   "settings.subscriptionState.connecting": "Verbindung wird hergestellt",

@@ -174,7 +174,7 @@
   "settings.subscriptionClaude": "Claude",
   "settings.subscriptionClaudeApproval": "Personal Claude subscription login needs provider approval before Atoma can offer it here.",
   "settings.subscriptionCodex": "Codex · ChatGPT",
-  "settings.subscriptionCodexHint": "Connect with a one-time device code to use your ChatGPT subscription for supervisor tiers. Codex keeps the credentials in a private profile for your Atoma account; other members never receive them.",
+  "settings.subscriptionCodexHint": "Connect with a one-time device code to use your ChatGPT subscription for all three tiers. Codex keeps the credentials in a private profile for your Atoma account; other members never receive them.",
   "settings.subscriptionState.loading": "Loading…",
   "settings.subscriptionState.disconnected": "Not connected",
   "settings.subscriptionState.connecting": "Connecting",

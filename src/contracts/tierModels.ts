@@ -50,9 +50,8 @@ export const tierModelPinsSchema = z.object({ l1: orgSelection, l2: orgSelection
 /**
  * The account level, which MAY name a subscription. Storage verifies shape;
  * the ROUTE verifies authority, and the coordinator re-asks it per run — a
- * stored selector is data, never permission. Codex cannot own L1's tool loop,
- * so the impossible choice is refused at the settings write, before it can
- * become a stored payer promise.
+ * stored selector is data, never permission. ChatGPT is available on all tiers;
+ * its tool-bearing calls are executed by Atoma's scoped host-side bridge.
  */
 function accountSelection(tier: TierNumber) {
   return selectionSchema(

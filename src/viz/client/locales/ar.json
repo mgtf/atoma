@@ -1001,7 +1001,7 @@
   "settings.subscriptionClaude": "Claude",
   "settings.subscriptionClaudeApproval": "يتطلب تسجيل الدخول إلى اشتراك Claude الشخصي موافقة المزوّد قبل أن تتمكن Atoma من إتاحته هنا.",
   "settings.subscriptionCodex": "Codex · ChatGPT",
-  "settings.subscriptionCodexHint": "اتصل باستخدام رمز جهاز صالح لمرة واحدة للاستفادة من اشتراكك في ChatGPT ضمن مستويات tier الخاصة بالمشرف. يحتفظ Codex ببيانات الاعتماد في ملف شخصي خاص بحسابك على Atoma؛ ولا يتلقاها الأعضاء الآخرون مطلقًا.",
+  "settings.subscriptionCodexHint": "",
   "settings.subscriptionState.loading": "جارٍ التحميل…",
   "settings.subscriptionState.disconnected": "غير متصل",
   "settings.subscriptionState.connecting": "جارٍ الاتصال",

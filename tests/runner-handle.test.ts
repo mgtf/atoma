@@ -114,17 +114,10 @@ describe('startTask — typed config errors before any side effect', () => {
     ).rejects.toThrow(/--seed: no such directory/);
   });
 
-  it('refuses a codex L1 tier pin at LAUNCH instead of mid-run (review §3.9)', async () => {
-    // Codex cannot expose tools through ToolSandbox: an L1 pin would serve
-    // every text-only prefilter/validator and detonate at the first
-    // tool-bearing execute, after real spend. Doctor has this check; the
-    // runner must too, because doctor is optional.
-    process.env[buildProfile.envVars.timeoutMs] = '60000';
+  it('accepts Codex L1 and reaches the next launch validation', async () => {
+    process.env[buildProfile.envVars.timeoutMs] = 'abc';
     process.env['ATOMA_MODEL_L1'] = 'sub:openai:gpt-5.4-mini';
-    await expect(startTask(buildProfile, ['goal'])).rejects.toThrow(RunnerConfigError);
-    await expect(startTask(buildProfile, ['goal'])).rejects.toThrow(
-      /ATOMA_MODEL_L1=sub:openai:gpt-5.4-mini: Codex cannot expose tools/
-    );
+    await expect(startTask(buildProfile, ['goal'])).rejects.toThrow(/expected positive integer/);
   });
 
   it('refuses claude-cli at LAUNCH when the caller supplied a credential snapshot', async () => {
@@ -187,14 +180,12 @@ describe('startTask — typed config errors before any side effect', () => {
     await expect(startTask(buildProfile, ['goal'])).rejects.toThrow(/expected positive integer/);
   });
 
-  it('refuses a codex L1 pin that lives ONLY in the snapshot (review 2026-08-18 §1.6)', async () => {
+  it('still requires parent authorization for a snapshot-only Codex L1 pin', async () => {
     process.env[buildProfile.envVars.timeoutMs] = '60000';
     delete process.env['ATOMA_MODEL_L1'];
-    await expect(
-      startTask(buildProfile, ['goal'], {
-        providerEnv: { ...OLLAMA_PINS, ATOMA_MODEL_L1: 'sub:openai:gpt-5.4-mini' },
-      })
-    ).rejects.toThrow(/ATOMA_MODEL_L1=sub:openai:gpt-5.4-mini: Codex cannot expose tools/);
+    await expect(startTask(buildProfile, ['goal'], {
+      providerEnv: { ...OLLAMA_PINS, ATOMA_MODEL_L1: 'sub:openai:gpt-5.4-mini' },
+    })).rejects.toThrow(/cannot honour a supplied credential snapshot/);
   });
 
   it('an ambient Codex L1 pin does not fire when the snapshot omits it', async () => {

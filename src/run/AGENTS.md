@@ -30,10 +30,9 @@ Neighbours:
 - The three `ATOMA_MODEL_L*` selectors are REQUIRED and parsed at LAUNCH
   (`tierSelectors`, a `RunnerConfigError` on a missing or malformed pin), AFTER
   `applyTierPins` so a snapshot-only pin is what the run sees and an ambient
-  pin omitted from the snapshot is not. A Codex selector (`sub:openai`,
-  `own:openai`) on L1 is refused there: it would serve every text-only
-  prefilter/validator and detonate at the first tool-bearing execute, mid-run
-  and mid-spend. `assertTransportHonoursCredentials` refuses every `sub:`/`own:`
+  pin omitted from the snapshot is not. Codex selectors (`sub:openai`,
+  `own:openai`) support all tiers through the host-side action loop.
+  `assertTransportHonoursCredentials` refuses every `sub:`/`own:`
   tier the parent did not authorise whenever a snapshot is supplied.
 - IT NOW FIRES ON PROJECT RUNS TOO, and that is the point. It never had:
   `runTask` passes no snapshot and `spawnRun` replaces the child env wholesale,
@@ -47,7 +46,7 @@ Neighbours:
   name reached the child another way and throws at launch, before spend. The list only ever NARROWS what is
   permitted: a forged one grants no credential, because the profile path is
   injected only by the coordinator after its host-authority or exact-principal
-  check. Codex remains structurally impossible on L1. See
+  check. The same authority applies to Codex L1. See
   [src/projects](../projects/AGENTS.md) for who may arm a tier, and
   `docs/subscription-per-tier-design-2026-08-28.md` for why.
 

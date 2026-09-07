@@ -178,7 +178,7 @@ describe('project run environment', () => {
     expect(env['ATOMA_PREFILTER_CACHE']).toBe('0');
   });
 
-  it('refuses host-level subscriptions, Codex on L1, the old spellings and bearer tokens', () => {
+  it('refuses host-level subscriptions, the old spellings and bearer tokens', () => {
     // A `sub:` selector in the HOST env is a payer-bearing default nobody
     // chose: refused whatever the requester's authority.
     expect(() => runEnv({ ...BASE, hostEnv: { ...CLAUDE_CLI_PINS } })).toThrow(
@@ -198,7 +198,7 @@ describe('project run environment', () => {
         ...BASE,
         hostEnv: { ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'key', ATOMA_MODEL_L1: 'sub:openai:gpt-5.4-mini' },
       })
-    ).toThrow(/cannot use Codex/);
+    ).toThrow(/from the host level/);
     // The pre-2026-09-07 spellings are refused with the grammar, not routed.
     expect(() =>
       runEnv({ ...BASE, hostEnv: { ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'key', ATOMA_MODEL_L2: 'codex:gpt-5' } })
@@ -380,7 +380,7 @@ describe('project run environment', () => {
     );
   });
 
-  it('routes ChatGPT host-subscription pins through Codex on L2/L3 only', () => {
+  it('routes ChatGPT host-subscription pins through Codex on every tier', () => {
     const base = {
       ...BASE,
       hostEnv: {
@@ -409,12 +409,15 @@ describe('project run environment', () => {
     expect(mixed.payers.l3).toMatchObject({ provider: 'codex-cli', payer: 'host-subscription' });
     expect(mixed.payers.l1).toMatchObject({ provider: 'zai-api', payer: 'host-key' });
 
-    expect(() =>
-      projectRunEnvironment({
-        ...base,
-        tierModels: { l1: 'sub:openai:gpt-5.4-mini', l2: null, l3: null },
-      })
-    ).toThrow(/ATOMA_MODEL_L1 cannot use Codex/);
+    const all = projectRunEnvironment({
+      ...base,
+      hostEnv: { ATOMA_HOST_SUBSCRIPTION_ORG: 'org-operator' },
+      tierModels: { l1: 'sub:openai:gpt-5.4-mini', l2: 'sub:openai:gpt-5.6-terra', l3: 'sub:openai:gpt-5.6-sol' },
+    });
+    expect(all.environment['ATOMA_SUBSCRIPTION_TIERS']).toBe('l1,l2,l3');
+    expect(all.payers.l1).toMatchObject({ provider: 'codex-cli', payer: 'host-subscription', source: 'account' });
+    expect(all.environment['ZAI_API_KEY']).toBeUndefined();
+
   });
 
   it("binds personal ChatGPT pins to the requesting principal's exact Codex profile", () => {
@@ -462,8 +465,7 @@ describe('project run environment', () => {
 
     // Revocation is a refusal, never a quiet fall-through to the host key.
     expect(() => projectRunEnvironment(base)).toThrow(/no longer connected/);
-    expect(() =>
-      projectRunEnvironment({
+    expect(projectRunEnvironment({
         ...base,
         tierModels: { l1: 'own:openai:gpt-5.4-mini', l2: null, l3: null },
         principalCodexProfile: {
@@ -471,8 +473,7 @@ describe('project run environment', () => {
           homePath: '/private/profile',
           profilesRoot: '/private',
         },
-      })
-    ).toThrow(/ATOMA_MODEL_L1 cannot use Codex/);
+      }).payers.l1).toMatchObject({ provider: 'codex-cli', payer: 'principal-subscription' });
     // A personal Claude login has no transport yet: refused, named.
     expect(() =>
       projectRunEnvironment({

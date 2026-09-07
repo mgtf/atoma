@@ -1001,7 +1001,7 @@
   "settings.subscriptionClaude": "Claude",
   "settings.subscriptionClaudeApproval": "La connexion à un abonnement Claude personnel nécessite l’approbation du fournisseur avant qu’atoma puisse la proposer ici.",
   "settings.subscriptionCodex": "Codex · ChatGPT",
-  "settings.subscriptionCodexHint": "Connecte-toi avec un code d’appareil à usage unique pour utiliser ton abonnement ChatGPT pour les tiers de supervision. Codex conserve les identifiants dans un profil privé associé à ton compte atoma ; les autres membres ne les reçoivent jamais.",
+  "settings.subscriptionCodexHint": "",
   "settings.subscriptionState.loading": "Chargement…",
   "settings.subscriptionState.disconnected": "Non connecté",
   "settings.subscriptionState.connecting": "Connexion en cours",

@@ -62,9 +62,8 @@ export function makeTransportClient(
     // parent did not authorise the tier.
     case 'claude-cli':
       return new ClaudeCliLlmClient();
-    // Local Codex CLI on a ChatGPT login — TIERS 2/3 ONLY, enforced at parse
-    // time (`selectorAdmitsTools`) and again by the client, which throws when
-    // handed tools rather than degrading silently. The client captures THIS
+    // Local Codex CLI on a ChatGPT login, with a scoped host-side tool loop
+    // for L1. Native Codex tools remain disabled. The client captures THIS
     // run's environment snapshot: CODEX_HOME selects the authorised principal
     // profile, while its subprocess allowlist strips every API/provider key.
     case 'codex-cli':
@@ -135,8 +134,7 @@ export function describeTierSelectors(selectors: Readonly<Record<TierNumber, Mod
  * docs/saas-architecture.md §1, serving another party's run through a
  * consumer subscription is also prohibited by the vendor.
  *
- * So the refusal is mechanical and at LAUNCH, matching how a Codex L1 pin
- * already fails before any spend. It triggers on the caller having supplied a
+ * So the payer refusal is mechanical and at LAUNCH, before any spend. It triggers on the caller having supplied a
  * snapshot at all — not on a notion of "tenant" — which keeps it correct under
  * every tenancy model the SaaS design might land on, and leaves the developer
  * path (no snapshot, inherit the process) untouched.

@@ -932,18 +932,11 @@ describe('auth store — per-tier model pins', () => {
     expect(store.modelPins(viewer.principalId)).toEqual({ l1: null, l2: null, l3: null });
   });
 
-  it('stores ChatGPT subscription pins for supervisors, never for L1', () => {
+  it('stores ChatGPT subscription pins on all three tiers', () => {
     const store = freshStore();
     const { viewer } = admit(store, identity('chatgpt-pins'), 'org:owner');
-    expect(() =>
-      store.setModelPins(viewer.principalId, {
-        l1: 'sub:openai:gpt-5.4-mini',
-        l2: null,
-        l3: null,
-      })
-    ).toThrow();
     const pins = store.setModelPins(viewer.principalId, {
-      l1: null,
+      l1: 'sub:openai:gpt-5.4-mini',
       l2: 'sub:openai:gpt-5.6-terra',
       l3: 'sub:openai:gpt-5.6-sol',
     });
