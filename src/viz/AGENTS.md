@@ -379,8 +379,8 @@ npm run viz:mark-turn:analyze
   closures holding the old ancestor — the tuning slider's drag then mapped the
   pointer against a track 208px from where it was drawn, and clamped to the
   range's end on first press. So views keep drawing from x = 0 and nothing
-  shifts them afterwards. The complete Pixi + visual DOM plane passes through ONE pinhole camera (`client-gl/scene-camera.ts`): overview is exact identity;
-  nav focuses content with the compact icon rail, and re-activation restores overview. `SceneCameraPlane`
+  shifts them afterwards. ONE face-on camera (`client-gl/scene-camera.ts`) drives Pixi's render transform and DOM's CSS matrix. The canvas cancels the outer CSS matrix: rasterise at final pixels, never upscale the bitmap or enlarge GPU targets. Scene/hit geometry stays in source space.
+  Overview is identity; nav zooms to the compact rail, re-activation restores overview. `SceneCameraPlane`
   rAF-interpolates ONE shared frame — NEVER a CSS transition — so CSS and inverse homography stay atomic. Pixi events, wheel routing, lights
   and diagnostics use that frame, not the transformed canvas' axis-aligned bounds. While it travels, author the view ONCE at maximum height and resize retained outer panels + mask from that frame; NEVER call `GpuRenderer.render()` per camera rAF — the one settle rebuild commits scroll layout at the already-matching height.
   `recordHitTarget` projects a target through its live parent with `toGlobal()` but

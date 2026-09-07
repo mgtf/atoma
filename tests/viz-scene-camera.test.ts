@@ -10,6 +10,7 @@ import {
   sceneCameraCssTransform,
   sceneCameraEase,
   sceneCameraForMode,
+  sceneCameraRenderTransform,
   unprojectScenePoint,
   visibleSceneLayoutHeight,
   type SceneCamera,
@@ -30,6 +31,39 @@ function matrix3dValues(transform: string): number[] {
 }
 
 describe('the global scene camera', () => {
+  it('rasterises the same affine projection used by DOM and clicks at every zoom step', () => {
+    for (const [width, height] of [[432, 720], [1280, 800], [2560, 1440]] as const) {
+      const from = sceneCameraForMode('overview', width, height);
+      const to = sceneCameraForMode('focus', width, height);
+      for (const progress of [0, 0.17, 0.5, 0.91, 1]) {
+        const camera = pinSceneCameraTopRight(
+          interpolateSceneCamera(from, to, progress), width, height
+        );
+        const frame = buildSceneCameraFrame(camera, width, height);
+        // Include unequal renderer/DOM sizes, not only the usual 1:1 case.
+        const rendererWidth = width * 1.5;
+        const rendererHeight = height * 2;
+        const m = sceneCameraRenderTransform(frame, rendererWidth, rendererHeight);
+        expect(frame.forward[6]).toBe(0);
+        expect(frame.forward[7]).toBe(0);
+        for (const point of [
+          { x: 0, y: 0 },
+          { x: rendererWidth / 2, y: rendererHeight / 2 },
+          { x: rendererWidth, y: rendererHeight },
+        ]) {
+          const client = rendererToClientPoint(point, rendererWidth, rendererHeight, frame);
+          expect((m.a * point.x + m.c * point.y + m.tx) * width / rendererWidth)
+            .toBeCloseTo(client.x, 9);
+          expect((m.b * point.x + m.d * point.y + m.ty) * height / rendererHeight)
+            .toBeCloseTo(client.y, 9);
+          const hit = clientToRendererPoint(client, rendererWidth, rendererHeight, frame);
+          expect(hit.x).toBeCloseTo(point.x, 9);
+          expect(hit.y).toBeCloseTo(point.y, 9);
+        }
+      }
+    }
+  });
+
   it('publishes the exact homography as one CSS matrix3d', () => {
     const width = 1_280;
     const height = 720;
@@ -102,7 +136,7 @@ describe('the global scene camera', () => {
     ).x;
     expect(focusContentWidth).toBeGreaterThan(overviewContentWidth * 1.015);
     expect(focus.sceneScale).toBeGreaterThan(1);
-    expect(focus.pitchDegrees).toBeGreaterThan(0);
+    expect(focus.pitchDegrees).toBe(0);
     expect(focus.yawDegrees).toBe(0);
   });
 
@@ -129,7 +163,7 @@ describe('the global scene camera', () => {
       expect(topRight.x, `${width}x${height} top right`).toBeCloseTo(width, 8);
       for (const y of [height / 2, height]) {
         const right = projectScenePoint({ x: width, y }, width, height, camera);
-        expect(right.x, `${width}x${height} right at y=${y}`).toBeGreaterThanOrEqual(width);
+        expect(right.x, `${width}x${height} right at y=${y}`).toBeCloseTo(width, 9);
       }
     }
   });

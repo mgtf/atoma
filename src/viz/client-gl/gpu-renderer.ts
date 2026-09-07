@@ -7,12 +7,14 @@ import {
   Container,
   Filter,
   Graphics,
+  Matrix,
   Rectangle,
   RendererType,
   Sprite,
   Text,
   TextStyle,
   Ticker,
+  type FederatedPointerEvent,
   type Texture,
   UPDATE_PRIORITY,
 } from 'pixi.js';
@@ -124,6 +126,7 @@ import {
   sceneCameraEase,
   sceneCameraIsMoving,
   sceneCameraForMode,
+  sceneCameraRenderTransform,
   sceneCameraTransitionDuration,
   sceneCameraViewport,
   subscribeSceneCameraFrames,
@@ -655,6 +658,7 @@ export class GpuRenderer {
   private cameraViewportMaskHeight = 0;
   private activeViewLayoutHeight: number | null = null;
   private cameraFrameUnsubscribe: (() => void) | null = null;
+  private readonly cameraRenderTransform = new Matrix();
   metrics: GpuRenderMetrics = emptyRenderMetrics();
 
   /** Client coordinates on the projected image -> the original Pixi plane. */
@@ -903,11 +907,14 @@ export class GpuRenderer {
 
     const local = this.clientToRendererPosition(pointer.clientX, pointer.clientY);
     const tuning = readTuning();
-    uniforms.uLightPx[0] = local.x;
-    uniforms.uLightPx[1] = local.y;
+    // The filter shades final renderer pixels; cards and shadows still use
+    // source-plane coordinates. Project only the screen-space light here.
+    const camera = this.cameraRenderTransform;
+    uniforms.uLightPx[0] = camera.a * local.x + camera.c * local.y + camera.tx;
+    uniforms.uLightPx[1] = camera.b * local.x + camera.d * local.y + camera.ty;
     uniforms.uStrength = this.pointerLightStrength * tuning.lightIntensity;
     this.timelineCardMaterial?.updateLight(local.x, local.y, uniforms.uStrength);
-    uniforms.uRadiusScale = tuning.lightHeight;
+    uniforms.uRadiusScale = tuning.lightHeight * this.cameraRenderTransform.a;
     uniforms.uHueShift = tuning.lightHue;
     filter.enabled = true;
     // Published for the shadow cast, which runs right after on the same
@@ -1021,6 +1028,11 @@ export class GpuRenderer {
     );
   };
 
+  private readonly renderCameraFrame = () => this.app.renderer.render({
+    container: this.app.stage,
+    transform: this.cameraRenderTransform,
+  });
+
   /**
    * Keep the visible column foot on the exact camera ray without rebuilding
    * the Pixi scene. A transition owns at most a few outer panels, so this is
@@ -1028,6 +1040,12 @@ export class GpuRenderer {
    * remain untouched.
    */
   private readonly updateCameraFrameGeometry = (frame: SceneCameraViewport) => {
+    const transform = sceneCameraRenderTransform(
+      frame, this.app.screen.width, this.app.screen.height
+    );
+    this.cameraRenderTransform.set(
+      transform.a, transform.b, transform.c, transform.d, transform.tx, transform.ty
+    );
     const rendererHeight = this.app.screen.height;
     const visibleHeight = visibleSceneLayoutHeight(frame) *
       rendererHeight / Math.max(1, frame.height);
@@ -1057,6 +1075,10 @@ export class GpuRenderer {
         panel.radius
       );
     }
+    // During travel, paint in the camera's rAF after its DOM frame is
+    // published. The ticker skips that draw, avoiding both a duplicate pass
+    // and a one-frame lag between the native canvas and HTML overlays.
+    if (sceneCameraIsMoving(this.app.canvas)) this.renderCameraFrame();
   };
 
   async init(host: HTMLElement) {
@@ -1113,15 +1135,9 @@ export class GpuRenderer {
     if (this.metrics.backend === 'webgpu') {
       this.app.renderer.gc.enabled = false;
     }
-    // Pixi's stock mapper treats the transformed canvas' axis-aligned
-    // bounding box as if it were still a rectangle. A perspective plane is a
-    // quadrilateral, so that approximation visibly misses controls. Feed the
-    // event boundary the camera-ray/plane intersection instead.
-    this.app.renderer.events.mapPositionToPoint = (point, clientX, clientY) => {
-      const mapped = this.clientToRendererPosition(clientX, clientY);
-      point.x = mapped.x;
-      point.y = mapped.y;
-    };
+    // The canvas now occupies the native viewport. Pixi's event boundary
+    // consumes screen coordinates and inverts the rendered world transforms;
+    // applying our source-plane inverse here would undo the camera twice.
     // The counter mutates glyph geometry only. Pre-install exactly the small
     // alphabet it can display so the first rate change cannot grow an atlas in
     // the middle of a frame.
@@ -1158,6 +1174,19 @@ export class GpuRenderer {
       this.app.canvas,
       this.updateCameraFrameGeometry
     );
+    const cameraFrame = sceneCameraViewport(this.app.canvas);
+    if (cameraFrame) this.updateCameraFrameGeometry(cameraFrame);
+    // Replace the application's one render callback, not its scene graph.
+    // Authored transforms and toGlobal() stay in source space; Pixi's cached
+    // worldTransform (used by its event boundary) includes the render camera.
+    // This adds no pass or target, and leaves the canvas pixel budget unchanged.
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- Pixi identifies the callback by function AND context.
+    this.app.ticker.remove(this.app.render, this.app);
+    this.app.render = () => {
+      if (!sceneCameraIsMoving(this.app.canvas)) this.renderCameraFrame();
+    };
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- The ticker supplies the Application context.
+    this.app.ticker.add(this.app.render, this.app, UPDATE_PRIORITY.LOW);
     this.app.canvas.addEventListener('wheel', this.wheel, { passive: false });
     // On window, not the canvas: a drag that wanders off the canvas must keep
     // tracking, and its release must disarm wherever it happens. Tuning and
@@ -1193,6 +1222,8 @@ export class GpuRenderer {
         movePointerLight,
         hidePointerLight,
         pointerLightFilter: () => this.pointerLightFilter,
+        // Cached by the LAST DRAW, not the next requested camera frame.
+        cameraRenderTransform: () => ({ ...this.app.stage.worldTransform }),
         // Where the controls are, and what the live tuning holds. A drag is
         // only observable on a real renderer — the mocked suite has no stage
         // to hit-test against — so the smoke needs both to prove a drag
@@ -2099,10 +2130,11 @@ export class GpuRenderer {
       const origin = parent.toGlobal({ x: trackLocalX, y });
       return { x: origin.x, width: trackWidth };
     };
-    hit.on('pointerdown', (event: { global: { x: number } }) => {
+    hit.on('pointerdown', (event: FederatedPointerEvent) => {
       const geometry = trackOrigin();
       this.tuningDrag = { key, trackX: geometry.x, trackWidth: geometry.width };
-      setTuningValue(key, tuningValueFromTrack(key, event.global.x, geometry.x, geometry.width));
+      const pointer = this.clientToRendererPosition(event.clientX, event.clientY);
+      setTuningValue(key, tuningValueFromTrack(key, pointer.x, geometry.x, geometry.width));
     });
     // Re-anchored on every render while a drag is live: the pane can scroll or
     // the window resize mid-drag, and a cached track origin would silently
@@ -2251,11 +2283,14 @@ export class GpuRenderer {
       const origin = parent.toGlobal({ x: trackLocalX, y });
       return { x: origin.x, width: trackWidth };
     };
-    hit.on('pointerdown', (event: { global: { x: number } }) => {
+    hit.on('pointerdown', (event: FederatedPointerEvent) => {
       const geometry = trackOrigin();
       this.turnDrag = { trackX: geometry.x, trackWidth: geometry.width };
       pinMarkTurnDegrees(
-        markTurnDegreeFromTrack(event.global.x, geometry.x, geometry.width)
+        markTurnDegreeFromTrack(
+          this.clientToRendererPosition(event.clientX, event.clientY).x,
+          geometry.x, geometry.width
+        )
       );
     });
     hit.on('pointertap', () => {

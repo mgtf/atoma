@@ -3,9 +3,9 @@ import { GPU_LAYOUT, sidebarWidthForViewport } from './theme.js';
 /**
  * The one camera for the complete visualizer scene.
  *
- * Pixi's display tree is two-dimensional, so the browser composites the final
- * scene plane through this pinhole camera. A pose names both the point on that
- * plane the lens looks at (`target`) and where the optical axis lands in the
+ * The product camera stays face-on: Pixi projects geometry before rasterising,
+ * while DOM overlays consume the same affine frame in CSS. A pose names both
+ * the point the lens looks at (`target`) and where the optical axis lands in the
  * viewport (`anchor`). Overview is the exact, undeformed authored plane;
  * navigation alone moves the camera to the compact rail + content column.
  */
@@ -128,36 +128,24 @@ export function sceneCameraForMode(
     FOCUS_MIN_DISTANCE_PX,
     longestSide * FOCUS_DISTANCE_VIEWPORT_RATIO
   );
-  const pitchDegrees = 1.25;
-  const pitch = degreesToRadians(pitchDegrees);
+  // A resting perspective resamples the completed canvas and blurs every
+  // glyph. Face-on poses keep the zoom, but let Pixi rasterise at final pixels.
+  const pitchDegrees = 0;
   const sourceTopRatio = Math.min(1, GPU_LAYOUT.focusTopInset / height);
-  const topPerspectiveFactor = Math.sin(pitch) *
-    (height / 2 - GPU_LAYOUT.focusTopInset) / perspectivePx;
   // Keep the source layout stable while the camera travels. The labelled
   // rail keeps its overview width on the plane, but focus draws its icon at
   // the trailing edge and projects that edge into a compact screen-space rail.
-  // Solve the top-edge scale from the requested guard. Pitch changes the
-  // apparent scale across the plane, so this uses the top edge rather than an
-  // affine approximation. The cap is a safety on degenerate aspect ratios,
-  // not a second crop: a low cap leaves the labelled rail's empty lead on
-  // screen and the compact menu reads as a wide gutter.
+  // Solve the scale from the requested guard. The cap bounds degenerate
+  // aspect ratios; a low cap leaves the labelled rail's empty lead on screen.
   const requestedTopScale = (width - guard) / Math.max(1, width - buttonLeft);
   const focusScale = Math.min(
     FOCUS_MAX_SCALE,
-    Math.max(
-      1,
-      requestedTopScale / Math.max(
-        Number.EPSILON,
-        1 - requestedTopScale * topPerspectiveFactor
-      )
-    )
+    Math.max(1, requestedTopScale)
   );
   return pinSceneCameraTopRight({
     perspectivePx,
     pitchDegrees,
-    // The vertical rail is the stable edge of the composition. Horizontal
-    // convergence would move it by a viewport-dependent amount; pitch keeps
-    // the requested depth without sacrificing that anchor.
+    // Keep both axes face-on so navigation remains an affine projection.
     yawDegrees: 0,
     sceneScale: focusScale,
     targetXRatio: contentCentreXRatio,
@@ -436,6 +424,25 @@ export function rendererToClientPoint(
   }, frame);
 }
 
+/** The product's affine camera in renderer coordinates, before rasterisation. */
+export function sceneCameraRenderTransform(
+  frame: SceneCameraViewport,
+  rendererWidth: number,
+  rendererHeight: number
+) {
+  const m = frame.forward;
+  const xRatio = rendererWidth / frame.width;
+  const yRatio = rendererHeight / frame.height;
+  return {
+    a: m[0] / m[8],
+    b: m[3] / m[8] * yRatio / xRatio,
+    c: m[1] / m[8] * xRatio / yRatio,
+    d: m[4] / m[8],
+    tx: m[2] / m[8] * xRatio,
+    ty: m[5] / m[8] * yRatio,
+  };
+}
+
 const cameraFrames = new WeakMap<HTMLElement, SceneCameraViewport>();
 const cameraPlaneCache = new WeakMap<Element, HTMLElement>();
 type SceneCameraFrameListener = (frame: SceneCameraViewport) => void;
@@ -523,6 +530,9 @@ export function applySceneCamera(
   );
   publishVisibleSceneCorners(element, frame);
   element.style.transform = frame.cssTransform;
+  // Only the canvas cancels this CSS projection: its vertices already pass
+  // through the same camera in Pixi. DOM inputs retain the outer transform.
+  element.style.setProperty('--gpu-camera-inverse', matrix3dCss(frame.inverse));
   for (const listener of [...(cameraFrameListeners.get(element) ?? [])]) {
     listener(frame);
   }

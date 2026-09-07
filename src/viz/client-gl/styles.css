@@ -40,7 +40,11 @@ button, input, textarea, select { font: inherit; }
   will-change: transform;
 }
 
-.gpu-ui-host { z-index: 1; }
+.gpu-ui-host {
+  z-index: 1;
+  transform-origin: 0 0;
+  transform: var(--gpu-camera-inverse, none);
+}
 .gpu-ui-canvas {
   display: block;
   width: 100%;

@@ -314,10 +314,18 @@ async function sampleMovingCameraAlignment(page) {
         ));
         const paintedX = painted.x / painted.w;
         const paintedY = painted.y / painted.w;
+        const native = handle.cameraRenderTransform();
+        const nativeX = (native.a * rendererPoint.x + native.c * rendererPoint.y + native.tx)
+          * plane.clientWidth / rendererWidth;
+        const nativeY = (native.b * rendererPoint.x + native.d * rendererPoint.y + native.ty)
+          * plane.clientHeight / rendererHeight;
         return {
           sampled: true,
           progress,
-          error: Math.hypot(projected.x - paintedX, projected.y - paintedY),
+          error: Math.max(
+            Math.hypot(projected.x - paintedX, projected.y - paintedY),
+            Math.hypot(projected.x - nativeX, projected.y - nativeY)
+          ),
         };
       }
       await new Promise((resolve) => requestAnimationFrame(resolve));
@@ -969,6 +977,25 @@ try {
     });
     if (!focusCamera || focusCamera.transform === arrivalCamera.transform) {
       throw new Error('camera focus did not change the scene projection');
+    }
+    const nativeCanvas = await page.evaluate(() => {
+      const { app } = globalThis.__ATOMA_GPU__;
+      const bounds = app.canvas.getBoundingClientRect();
+      const plane = document.querySelector('.gpu-scene-camera');
+      const camera = new DOMMatrixReadOnly(getComputedStyle(plane).transform);
+      return {
+        edgeError: Math.max(Math.abs(bounds.left), Math.abs(bounds.top),
+          Math.abs(bounds.right - window.innerWidth), Math.abs(bounds.bottom - window.innerHeight)),
+        width: app.canvas.width, height: app.canvas.height,
+        expectedWidth: Math.round(app.screen.width * app.renderer.resolution),
+        expectedHeight: Math.round(app.screen.height * app.renderer.resolution),
+        perspective: Math.abs(camera.m14) + Math.abs(camera.m24),
+      };
+    });
+    if (nativeCanvas.edgeError > 0.01 || nativeCanvas.perspective > 1e-9 ||
+      nativeCanvas.width !== nativeCanvas.expectedWidth ||
+      nativeCanvas.height !== nativeCanvas.expectedHeight) {
+      throw new Error(`camera must preserve native canvas pixels: ${JSON.stringify(nativeCanvas)}`);
     }
     const topEdgeError = Math.max(
       Math.abs(focusCamera.topLeft.y),

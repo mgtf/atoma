@@ -81,6 +81,11 @@ export function SceneCameraPlane({
       const tick = (now: number) => {
         if (disposed) return;
         const progress = Math.max(0, Math.min(1, (now - startedAt) / duration));
+        if (progress === 1) {
+          frameRequest = null;
+          settle();
+          return;
+        }
         const camera = pinSceneCameraTopRight(
           interpolateSceneCamera(
             current,
@@ -92,12 +97,7 @@ export function SceneCameraPlane({
         );
         applySceneCamera(plane, camera);
         plane.dataset['sceneCameraProgress'] = progress.toFixed(4);
-        if (progress < 1) {
-          frameRequest = requestAnimationFrame(tick);
-        } else {
-          frameRequest = null;
-          settle();
-        }
+        frameRequest = requestAnimationFrame(tick);
       };
       frameRequest = requestAnimationFrame(tick);
     }
