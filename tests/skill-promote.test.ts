@@ -27,11 +27,13 @@ import { compileEffortForModel } from '../src/skills/lifecycle.js';
 import { makeCtx, jsonText , nsOf} from './helpers.js';
 
 describe('compile effort routing', () => {
-  it('uses low only for provider-prefixed Codex compilation', () => {
-    expect(compileEffortForModel('codex:gpt-5.4-mini')).toBe('low');
-    expect(compileEffortForModel('CODEx:gpt-5.6-sol')).toBe('low');
-    expect(compileEffortForModel('claude-sonnet-5')).toBe('medium');
-    expect(compileEffortForModel('zai:glm-4.5-air')).toBe('medium');
+  it('uses low only for Codex-served compilation (sub:/own: openai)', () => {
+    expect(compileEffortForModel('sub:openai:gpt-5.4-mini')).toBe('low');
+    expect(compileEffortForModel('OWN:OPENAI:gpt-5.6-sol')).toBe('low');
+    // By API the same slug is served by OpenAI's API, not the Codex CLI.
+    expect(compileEffortForModel('api:openai:gpt-5.6-sol')).toBe('medium');
+    expect(compileEffortForModel('api:anthropic:claude-sonnet-5')).toBe('medium');
+    expect(compileEffortForModel('api:zai:glm-4.5-air')).toBe('medium');
   });
 });
 

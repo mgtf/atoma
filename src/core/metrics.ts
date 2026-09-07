@@ -62,9 +62,9 @@ export const DEFAULT_PRICES: PriceTable = [
   // model vary widely (Air/Flash tiers are far cheaper than flagships);
   // override with a custom PriceTable for billing-grade accounting.
   { match: /glm/i,    prices: { input: 0.6, output: 2.2, cachedInput: 0.11 } },
-  // OpenAI GPT-5.6 family, reached through the `codex:` provider prefix
-  // (e.g. "codex:gpt-5.6-sol") — matched WITH or WITHOUT the prefix, like
-  // the GLM row. API list prices as of 2026-08-11; cached input is 10% of
+  // OpenAI GPT-5.6 family, reached by API (`api:openai:gpt-5.6-sol`) or
+  // through the Codex CLI (`sub:openai:…`) — matched WITH or WITHOUT the
+  // selector, like the GLM row. API list prices as of 2026-08-11; cached input is 10% of
   // base across the family. Order matters: the specific slugs must precede
   // the generic /gpt-5/i fallback, since `pricesFor` takes the FIRST match.
   //

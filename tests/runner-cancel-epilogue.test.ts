@@ -108,7 +108,9 @@ describe('cancelled runs keep their economics', () => {
         stdio: ['ignore', 'pipe', 'pipe'],
         env: {
           ...process.env,
-          ATOMA_LLM: 'ollama',
+          ATOMA_MODEL_L1: 'api:ollama:stub-model',
+          ATOMA_MODEL_L2: 'api:ollama:stub-model',
+          ATOMA_MODEL_L3: 'api:ollama:stub-model',
           OLLAMA_BASE_URL: `http://127.0.0.1:${port}`,
           OLLAMA_MODEL: 'stub-model',
           ATOMA_DB_PATH: join(root, 'atoma.db'),

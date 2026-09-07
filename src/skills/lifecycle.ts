@@ -31,13 +31,16 @@ import { LEARNED_CONTENT_TRUST_BOUNDARY_LINES } from './events.js';
 import { REFUSAL_GENERATION, refusalStampIsCurrent } from './generations.js';
 import { undeclaredToolMentions } from '../atoms/verdict.js';
 import { type SkillNamespace } from './namespace.js';
+import { transportOf, tryParseModelSelector } from '../contracts/modelSelector.js';
 
 // Historical export home — the generation machinery lives in generations.ts
 // (stats/curriculum need the predicate without importing this whole engine).
 export { REFUSAL_GENERATION, refusalStampIsCurrent } from './generations.js';
 
+/** Codex-served tiers (`sub:openai:` / `own:openai:`) compile at low effort; every other transport at medium. */
 export function compileEffortForModel(model: string): 'low' | 'medium' {
-  return /^codex:/i.test(model.trim()) ? 'low' : 'medium';
+  const selector = tryParseModelSelector(model);
+  return selector !== null && transportOf(selector) === 'codex-cli' ? 'low' : 'medium';
 }
 
 /**

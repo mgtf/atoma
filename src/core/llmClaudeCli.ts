@@ -14,7 +14,7 @@ import type {
 /**
  * LlmClient backed by the LOCAL Claude Code installation via the Claude
  * Agent SDK (`@anthropic-ai/claude-agent-sdk`). Activate with
- * `ATOMA_LLM=claude-cli`.
+ * a `sub:anthropic:<alias>` tier selector.
  *
  * Auth: whatever the user's `claude` CLI is logged in with — typically a
  * Claude subscription (`claude /login`). NO ANTHROPIC_API_KEY needed; in

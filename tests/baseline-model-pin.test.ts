@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { baselineModel, runFrontierBaseline } from '../src/run/baseline.js';
-import { FALLBACK_OPUS, PIN_HAIKU, PIN_SONNET } from '../src/core/models.js';
+import { FALLBACK_OPUS, PIN_HAIKU, PIN_SONNET } from './tier-pins.js';
 import { makeCtx } from './helpers.js';
 import type { Task } from '../src/core/types.js';
 
@@ -14,7 +14,6 @@ import type { Task } from '../src/core/types.js';
  * this benchmark exists to avoid. Hence a behavioural assertion on `req.model`
  * rather than a source grep.
  */
-const ENV_KEYS = ['ATOMA_BASELINE_MODEL', 'ATOMA_MODEL_L3'] as const;
 const saved = new Map<string, string | undefined>();
 
 function setEnv(key: string, value: string | undefined): void {
@@ -35,13 +34,14 @@ const task = (): Task => ({ description: 'count the characters in sample.txt' })
 
 describe('baselineModel', () => {
   it('defaults to the top tier, so rounds 1-8 keep the meaning they were measured with', () => {
-    for (const key of ENV_KEYS) setEnv(key, undefined);
+    setEnv('ATOMA_BASELINE_MODEL', undefined);
+    setEnv('ATOMA_MODEL_L3', FALLBACK_OPUS);
     expect(baselineModel()).toBe(FALLBACK_OPUS);
   });
 
   it('still follows ATOMA_MODEL_L3 when no control-arm pin is set — both arms move together', () => {
     setEnv('ATOMA_BASELINE_MODEL', undefined);
-    setEnv('ATOMA_MODEL_L3', 'claude-sonnet-5');
+    setEnv('ATOMA_MODEL_L3', PIN_SONNET);
     expect(baselineModel()).toBe(PIN_SONNET);
   });
 
@@ -53,7 +53,7 @@ describe('baselineModel', () => {
   });
 
   it('treats blank as unset rather than as a model id', () => {
-    setEnv('ATOMA_MODEL_L3', undefined);
+    setEnv('ATOMA_MODEL_L3', FALLBACK_OPUS);
     setEnv('ATOMA_BASELINE_MODEL', '   ');
     expect(baselineModel()).toBe(FALLBACK_OPUS);
   });
@@ -73,8 +73,9 @@ describe('runFrontierBaseline', () => {
     expect(result.producedBy?.tier).toBe(3);
   });
 
-  it('sends tier 3 when nothing is pinned', async () => {
-    for (const key of ENV_KEYS) setEnv(key, undefined);
+  it('sends tier 3 when no control-arm model is pinned', async () => {
+    setEnv('ATOMA_BASELINE_MODEL', undefined);
+    setEnv('ATOMA_MODEL_L3', FALLBACK_OPUS);
     const ctx = makeCtx();
     ctx.llm.enqueueText('done');
 

@@ -27,13 +27,14 @@ Neighbours:
   (burn-in parses it) — the handle refactor kept it byte-identical. A
   `TaskProfile` contributes only family-specific workspace, seed, canonical
   catalog, constraints, and env names.
-- Codex tier pins are refused for L1 at LAUNCH (`RunnerConfigError`), not only
-  in doctor, and the check reads the pin AFTER `applyTierPins` so a
-  snapshot-only `codex:` L1 is caught and an ambient pin omitted from the
-  snapshot is not. A codex L1 would serve every text-only prefilter/validator
-  and detonate at the first tool-bearing execute, mid-run and mid-spend.
-  `assertTransportHonoursCredentials` refuses `claude-cli` / `codex` as the
-  base transport AND as a tier pin whenever a snapshot is supplied.
+- The three `ATOMA_MODEL_L*` selectors are REQUIRED and parsed at LAUNCH
+  (`tierSelectors`, a `RunnerConfigError` on a missing or malformed pin), AFTER
+  `applyTierPins` so a snapshot-only pin is what the run sees and an ambient
+  pin omitted from the snapshot is not. A Codex selector (`sub:openai`,
+  `own:openai`) on L1 is refused there: it would serve every text-only
+  prefilter/validator and detonate at the first tool-bearing execute, mid-run
+  and mid-spend. `assertTransportHonoursCredentials` refuses every `sub:`/`own:`
+  tier the parent did not authorise whenever a snapshot is supplied.
 - IT NOW FIRES ON PROJECT RUNS TOO, and that is the point. It never had:
   `runTask` passes no snapshot and `spawnRun` replaces the child env wholesale,
   so on the ONE path where a payer decision crosses a process boundary the
@@ -42,9 +43,8 @@ Neighbours:
   developer path, which sets no such marker, is untouched.
 - The refusal reads `ATOMA_SUBSCRIPTION_TIERS`, the list of tiers the PARENT
   authorised for either the host or requesting principal's subscription
-  (`base`, `l1`, `l2`, `l3`). A
-  `claude-cli:` or `codex:` pin on a tier that list does not name reached the
-  child another way and throws at launch, before spend. The list only ever NARROWS what is
+  (`l1`, `l2`, `l3`). A `sub:`/`own:` selector on a tier that list does not
+  name reached the child another way and throws at launch, before spend. The list only ever NARROWS what is
   permitted: a forged one grants no credential, because the profile path is
   injected only by the coordinator after its host-authority or exact-principal
   check. Codex remains structurally impossible on L1. See
@@ -74,11 +74,13 @@ Neighbours:
 
 ## Provider construction
 
-- Provider construction has one switch: `makeBaseClient` in
-  `src/run/providers.ts`, consumed by runner and curriculum. Never hand-roll
-  the ollama/claude-cli/zai/anthropic switch again. A `providerEnv` snapshot
-  must also drive the three `ATOMA_MODEL_L*` pins (`applyTierPins`); do not
-  re-read `process.env` for pins the router already resolved from the snapshot.
+- Provider construction has one switch per TRANSPORT: `makeTransportClient`
+  in `src/run/providers.ts`, reached through `buildTierClients`, which builds
+  only the transports the three selectors name (`transportOf`) — consumed by
+  runner, curriculum and the viz announcement translator. There is no base
+  client and no `ATOMA_LLM`. A `providerEnv` snapshot must also drive the
+  three `ATOMA_MODEL_L*` pins (`applyTierPins`); do not re-read `process.env`
+  for pins the router already resolved from the snapshot.
 
 ## Run accounting
 

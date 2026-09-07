@@ -1,16 +1,21 @@
 import { dirname, resolve } from 'node:path';
 import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { setMaxListeners } from 'node:events';
-import { makeAnthropicClient } from './auth.js';
 import { RunnerConfigError } from '../core/errors.js';
-import { applyTierPins, modelForTier } from '../core/models.js';
+import { applyTierPins } from '../core/models.js';
+import {
+  ModelSelectorError,
+  selectorSpendsSubscription,
+  tryParseModelSelector,
+} from '../contracts/modelSelector.js';
 import { RoutingLlmClient } from '../core/llmRouting.js';
 import {
   assertTransportHonoursCredentials,
-  buildReferencedProviders,
-  makeBaseClient,
-  resolveBaseProviderKind,
+  buildTierClients,
+  describeTierSelectors,
+  tierSelectors,
 } from './providers.js';
+import { referencedTransports } from '../contracts/modelSelector.js';
 import { InMemoryMetrics, MetricsLlmClient, subscriptionCostUsd } from '../core/metrics.js';
 import { DEFAULT_LIMITS } from '../core/limits.js';
 import { openDb } from '../registry/db.js';
@@ -125,9 +130,10 @@ function machineRunStats(
   // as `servedModel`, so by the time pricing sees it the prefix is gone.
   // Filled on every epilogue path, cancelled and failed included, because a
   // run that died mid-flight still spent whatever it spent.
-  const subscriptionShare = subscriptionCostUsd(metrics.events, (requested) =>
-    requested.toLowerCase().startsWith('claude-cli:')
-  );
+  const subscriptionShare = subscriptionCostUsd(metrics.events, (requested) => {
+    const selector = tryParseModelSelector(requested);
+    return selector !== null && selectorSpendsSubscription(selector);
+  });
   return {
     outcome,
     costUsd: Number(summary.totals.costUsd.toFixed(4)),
@@ -401,33 +407,23 @@ export async function startTask(
       ATOMA_MODEL_L3: hostEnv.modelL3,
     }
   );
-  // Codex serves tiers 2/3 only — its transport cannot expose tools through
-  // ToolSandbox, so an L1 pin would happily serve every prefilter/validator
-  // (text-only) and detonate at the first tool-bearing execute, mid-run and
-  // mid-spend. Doctor has carried this check since v0.1.3; a wrong tier pin
-  // must fail at LAUNCH, not inside an optional diagnostic (review §3.9).
-  // Read AFTER applyTierPins so a snapshot-only pin is caught and an
-  // ambient pin omitted from the snapshot is not. Before the credential
-  // gate so the L1 tool-loop reason wins over the generic "cannot honour
-  // a snapshot" message a `codex:` pin would also trip.
-  const l1Pin = modelForTier(1).trim().toLowerCase();
-  if (l1Pin.startsWith('codex:')) {
-    throw new RunnerConfigError(
-      'ATOMA_MODEL_L1 cannot use codex because Codex cannot expose tools through ToolSandbox — pin L1 to a tool-capable provider (e.g. zai:glm-4.5-air) and keep codex on L2/L3'
-    );
+  // THE THREE SELECTORS, read AFTER applyTierPins so a snapshot-only pin is
+  // what the run sees and an ambient pin omitted from the snapshot is not.
+  // Every tier is required and every value is a full `<mode>:<vendor>:<model>`
+  // selector (contracts/modelSelector.ts); a missing or malformed pin, or a
+  // Codex selector on L1 (no tool loop through ToolSandbox), is a CONFIG
+  // error at launch — before spend, not inside an optional diagnostic
+  // (review §3.9). `own:` is admissible only in a tenant child, whose parent
+  // then has to have authorised the tier (`assertTransportHonoursCredentials`).
+  let selectors;
+  try {
+    selectors = tierSelectors(providerEnv, { allowOwn: suppliedProviderEnv !== undefined });
+    if (suppliedProviderEnv) assertTransportHonoursCredentials(suppliedProviderEnv);
+  } catch (error) {
+    if (error instanceof ModelSelectorError) throw new RunnerConfigError(error.message);
+    throw error;
   }
-
-  // Provider selection. Default is Anthropic; Z.ai is the compatible remote
-  // alternative and Ollama serves local/cloud tags. Non-Anthropic base paths
-  // skip the L3 Opus-discovery call — L3 falls back to its model id string,
-  // which each transport maps or serves according to its own contract.
-  const provider = resolveBaseProviderKind(providerEnv['ATOMA_LLM']);
-  if (suppliedProviderEnv) assertTransportHonoursCredentials(provider, suppliedProviderEnv);
-  const useOllama = provider === 'ollama';
-  const useZai = provider === 'zai';
-  // ATOMA_LLM=claude-cli routes every LLM call through the local Claude
-  // Code installation (Claude Agent SDK) — subscription auth, no API key.
-  const useClaudeCli = provider === 'claude-cli';
+  const useClaudeCli = referencedTransports(selectors).includes('claude-cli');
 
   const args = parseRunnerArgs(argv);
   const goal = args.goal ?? profile.defaultGoal;
@@ -475,7 +471,7 @@ export async function startTask(
   console.log(`run timeout: ${Math.round(timeoutMs / 1000)}s`);
   const signal = AbortSignal.timeout(timeoutMs);
   // Stamped HERE, at the same instant as the abort clock. Computing it after
-  // setup (workspace archive, store open, container boot, resolveLatestOpus)
+  // setup (workspace archive, store open, container boot)
   // overstated the deadline by the whole setup cost, and `capToolIterations`
   // then under-capped by exactly the drift the 2026-08-16 fan-in incident was
   // closing.
@@ -567,17 +563,6 @@ export async function startTask(
   const recorder = new TraceRecorder(runsDir);
   const db = openDb(dbPath);
   const registry = new RecordingRegistry(db, recorder);
-  // The Anthropic SDK client only exists on the direct-API path — it
-  // feeds L3.fromType's Opus-resolution step. On the ollama and
-  // claude-cli paths we pass `undefined` so we never touch the API
-  // (L3 falls back to FALLBACK_OPUS, which each provider then maps to
-  // its own model). Credential resolution reads the run's snapshot
-  // (API key → ANTHROPIC_AUTH_TOKEN → `ant auth login` CLI profile;
-  // ATOMA_AUTH=cli discounts a stale exported key so the profile wins).
-  // A missing credential is NOT detectable here — the SDK resolves on the
-  // first request — so this never fails the launch; `atoma doctor` is
-  // where credential presence is reported.
-  const anthropic = useOllama || useZai || useClaudeCli ? undefined : makeAnthropicClient(providerEnv);
   const metrics = new InMemoryMetrics();
   const runSignals: RunSignalCounts = {
     deterministic: 0,
@@ -591,46 +576,24 @@ export async function startTask(
     'dispatch-fallback': 0,
     'uncovered-obligation': 0,
   };
-  // ONE construction switch, shared with curriculum (review §3.9): the
-  // hand-rolled ternary here and its drifted copy over there were the exact
-  // two-copies-of-one-rule class the repo has paid for twice.
-  const baseClient = makeBaseClient(provider, { anthropic, env: providerEnv });
-  // Per-tier PROVIDER routing: tier pins may carry a `provider:` prefix
-  // (ATOMA_MODEL_L1=zai:glm-4.5-air → L1 on Z.ai, L2/L3 on the default
-  // provider). Only referenced providers are constructed; with none, the
-  // router is a transparent passthrough. Observability wraps the ROUTER,
-  // so calls are recorded once, with the vendor visible in the model id.
-  const providers = buildReferencedProviders(providerEnv);
-  const routedClient =
-    Object.keys(providers).length > 0
-      ? new RoutingLlmClient(baseClient, providers)
-      : baseClient;
-  if (Object.keys(providers).length > 0) {
-    console.log(`tier providers: ${Object.keys(providers).join(', ')} (routed by model prefix)`);
-  }
+  // ONE construction switch per transport, shared with curriculum and the viz
+  // server (review §3.9): only the transports the three selectors reach are
+  // built, each from the run's SNAPSHOT. Observability wraps the ROUTER, so
+  // calls are recorded once, with the payer and vendor visible in the model id.
+  const routedClient = new RoutingLlmClient(buildTierClients(providerEnv, {
+    allowOwn: suppliedProviderEnv !== undefined,
+  }));
   const llm = new MetricsLlmClient(
     new RecordingLlmClient(routedClient, recorder),
     metrics
   );
-  console.log(
-    useOllama
-      ? `llm provider: ollama — ${process.env['OLLAMA_MODEL'] ?? 'glm-5.1:cloud'} @ ${process.env['OLLAMA_BASE_URL'] ?? 'http://localhost:11434'}`
-      : useZai
-        ? `llm provider: zai — Anthropic-compatible endpoint @ ${providerEnv['ZAI_BASE_URL'] ?? 'https://api.z.ai/api/anthropic'}`
-      : useClaudeCli
-        ? `llm provider: claude-cli — local Claude Code auth; tiers map to haiku/sonnet/opus aliases${
-            process.env['ATOMA_CLAUDE_MODEL']
-              ? ` (⚠ DEBUG override, ALL tiers: ${process.env['ATOMA_CLAUDE_MODEL']} — cost gradient flattened)`
-              : ''
-          }`
-        : `llm provider: anthropic`
-  );
-  // Provider-agnostic per-tier model pins (ATOMA_MODEL_L1/L2/L3) — show
-  // the effective gradient whenever any tier deviates from its default.
-  const tierPins = ([1, 2, 3] as const)
-    .filter((t) => process.env[`ATOMA_MODEL_L${t}`])
-    .map((t) => `L${t}=${modelForTier(t)}`);
-  if (tierPins.length > 0) console.log(`tier models: ${tierPins.join('  ')}`);
+  console.log(`tier models: ${describeTierSelectors(selectors)}`);
+  console.log(`llm transports: ${referencedTransports(selectors).join(', ')}`);
+  if (useClaudeCli && process.env['ATOMA_CLAUDE_MODEL']) {
+    console.log(
+      `⚠ ATOMA_CLAUDE_MODEL DEBUG override, ALL claude-cli tiers: ${process.env['ATOMA_CLAUDE_MODEL']} — cost gradient flattened`
+    );
+  }
 
   // Runs BEFORE the sandbox is constructed: ToolSandbox realpath-resolves
   // its root at construction, so archiving the directory afterwards would
@@ -690,7 +653,7 @@ export async function startTask(
     const skillRegistry = new SkillRegistry(skillsDirPath());
     console.log(`skills root: ${skillRegistry.rootDir}`);
 
-    const l3 = await L3Atom.fromType(l3Type, registry, anthropic, skillRegistry);
+    const l3 = L3Atom.fromType(l3Type, registry, skillRegistry);
     console.log(`L3 ${l3.name} using model ${l3.model}`);
     handle = (t, c) => l3.handle(t, c);
   }

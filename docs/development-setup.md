@@ -157,9 +157,14 @@ npm run viz:dev                   # UI :5173, API :4111
 Then one real task. Pick the authentication you have:
 
 ```bash
-ANTHROPIC_API_KEY=... npm run run:build:dev -- "a Node CLI that converts CSV to JSON"
-ATOMA_LLM=claude-cli  npm run run:build:dev -- "…"    # Claude subscription, no API key
-ATOMA_LLM=ollama      npm run run:build:dev -- "…"    # local models
+# Every tier is REQUIRED and named as <api|sub>:<vendor>:<model>; there is no default.
+ANTHROPIC_API_KEY=... ATOMA_MODEL_L1=api:anthropic:claude-haiku-4-5-20251001 \
+  ATOMA_MODEL_L2=api:anthropic:claude-sonnet-5 ATOMA_MODEL_L3=api:anthropic:claude-opus-5 \
+  npm run run:build:dev -- "a Node CLI that converts CSV to JSON"
+ATOMA_MODEL_L1=sub:anthropic:haiku ATOMA_MODEL_L2=sub:anthropic:sonnet ATOMA_MODEL_L3=sub:anthropic:opus \
+  npm run run:build:dev -- "…"                       # Claude subscription, no API key
+ATOMA_MODEL_L1=api:ollama:qwen3:4b ATOMA_MODEL_L2=api:ollama:qwen3:14b ATOMA_MODEL_L3=api:ollama:qwen3:32b \
+  npm run run:build:dev -- "…"                       # local models
 ```
 
 Only one live run at a time on a machine: model quota is one account, and the MCP

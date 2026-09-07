@@ -12,7 +12,6 @@ import {
   type AccountSubscriptionProvider,
 } from '../contracts/accountSubscriptions.js';
 import { principalIdSchema } from '../contracts/projects.js';
-import { PRINCIPAL_CHATGPT_SUBSCRIPTION_PREFIX } from '../contracts/runPayers.js';
 import {
   isAccountTierSelection,
   isValidTierModelSelection,
@@ -37,10 +36,11 @@ const MAX_DISPLAY_NAME_LENGTH = 120;
 /** Provider API keys are bounded like the tokens they are (GitHub caps at 16 KiB). */
 const MAX_PROVIDER_KEY_CHARS = 16_384;
 
-export type ProviderKeyProvider = 'anthropic' | 'zai' | 'ollama';
+export type ProviderKeyProvider = 'anthropic' | 'openai' | 'zai' | 'ollama';
 
 export const PROVIDER_KEY_PROVIDERS: readonly ProviderKeyProvider[] = [
   'anthropic',
+  'openai',
   'zai',
   'ollama',
 ];
@@ -224,7 +224,7 @@ CREATE TABLE IF NOT EXISTS auth_org_tier_models (
 );
 CREATE TABLE IF NOT EXISTS auth_org_provider_keys (
   org_id       TEXT NOT NULL REFERENCES auth_organisations(org_id),
-  provider     TEXT NOT NULL CHECK (provider IN ('anthropic','zai','ollama')),
+  provider     TEXT NOT NULL CHECK (provider IN ('anthropic','openai','zai','ollama')),
   envelope     TEXT NOT NULL,
   updated_at   TEXT NOT NULL,
   PRIMARY KEY (org_id, provider)
@@ -1744,7 +1744,8 @@ export class AuthStore {
           .run(principalId, provider);
       }
       if (provider === 'codex') {
-        const prefix = `${PRINCIPAL_CHATGPT_SUBSCRIPTION_PREFIX}:%`;
+        // Every `own:openai:` selector this principal stored, whatever the model.
+        const prefix = 'own:openai:%';
         this.db
           .prepare(
             `UPDATE auth_principal_model_pins
@@ -1880,7 +1881,7 @@ export class AuthStore {
    */
   setOrgProviderKey(input: {
     readonly orgId: string;
-    readonly provider: 'anthropic' | 'zai' | 'ollama';
+    readonly provider: ProviderKeyProvider;
     /** Plaintext credential; must survive one printable-ASCII round-trip like any API key. */
     readonly plaintext: string;
     readonly encryption: SecretEncryptionContext;
@@ -1922,7 +1923,7 @@ export class AuthStore {
       );
   }
 
-  deleteOrgProviderKey(orgId: string, provider: 'anthropic' | 'zai' | 'ollama'): boolean {
+  deleteOrgProviderKey(orgId: string, provider: ProviderKeyProvider): boolean {
     return (
       this.db
         .prepare('DELETE FROM auth_org_provider_keys WHERE org_id = ? AND provider = ?')

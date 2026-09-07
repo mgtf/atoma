@@ -87,7 +87,7 @@ export function makeAnthropicClient(env: NodeJS.ProcessEnv = process.env): Anthr
         '  - a valid ANTHROPIC_API_KEY env var',
         '  - ANTHROPIC_AUTH_TOKEN (bearer)',
         '  - a CLI OAuth profile: `brew install anthropics/tap/ant && ant auth login`',
-        '  - or set ATOMA_LLM=ollama to run against a local model instead.',
+        '  - or pin the tiers to api:ollama:<model> to run against a local model instead.',
       ].join('\n')
     );
   }

@@ -4,7 +4,7 @@ import { openDb } from '../src/registry/db.js';
 import { L1Atom } from '../src/atoms/L1Atom.js';
 import { L2Atom, buildNarrowL1Prompt } from '../src/atoms/L2Atom.js';
 import { L3Atom, buildNarrowL2Prompt } from '../src/atoms/L3Atom.js';
-import { FALLBACK_OPUS } from '../src/core/models.js';
+import { FALLBACK_OPUS } from './tier-pins.js';
 import { superviseLoop, type SupervisionHooks } from '../src/core/supervisor.js';
 import { SMOKE_DESIGN_GUIDANCE } from '../src/atoms/prompts.js';
 import { EscalationSignal } from '../src/core/errors.js';

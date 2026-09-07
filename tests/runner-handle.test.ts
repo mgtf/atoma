@@ -7,6 +7,7 @@ import {
   resolveSkillLearning,
   startTask,
 } from '../src/run/runner.js';
+import { ANTHROPIC_PINS, CLAUDE_CLI_PINS, OLLAMA_PINS } from './tier-pins.js';
 import { buildProfile } from '../src/run/profiles/build.js';
 
 /**
@@ -72,7 +73,7 @@ describe('host lifecycle snapshot — the sticky-env fix', () => {
     delete process.env['ATOMA_MODEL_L1'];
     const first = hostLifecycleSnapshot();
     expect(first.modelL1).toBeUndefined();
-    process.env['ATOMA_MODEL_L1'] = 'zai:glm-4.5-air';
+    process.env['ATOMA_MODEL_L1'] = 'api:zai:glm-4.5-air';
     expect(hostLifecycleSnapshot().modelL1).toBeUndefined();
   });
 });
@@ -83,7 +84,6 @@ describe('startTask — typed config errors before any side effect', () => {
     'ATOMA_MODEL_L1',
     'ATOMA_MODEL_L2',
     'ATOMA_MODEL_L3',
-    'ATOMA_LLM',
     'ATOMA_REQUIRE_ISOLATION',
     'ATOMA_CONTAINER',
   ] as const;
@@ -120,10 +120,10 @@ describe('startTask — typed config errors before any side effect', () => {
     // tool-bearing execute, after real spend. Doctor has this check; the
     // runner must too, because doctor is optional.
     process.env[buildProfile.envVars.timeoutMs] = '60000';
-    process.env['ATOMA_MODEL_L1'] = 'codex:gpt-5.4-mini';
+    process.env['ATOMA_MODEL_L1'] = 'sub:openai:gpt-5.4-mini';
     await expect(startTask(buildProfile, ['goal'])).rejects.toThrow(RunnerConfigError);
     await expect(startTask(buildProfile, ['goal'])).rejects.toThrow(
-      /ATOMA_MODEL_L1 cannot use codex/
+      /ATOMA_MODEL_L1=sub:openai:gpt-5.4-mini: Codex cannot expose tools/
     );
   });
 
@@ -134,7 +134,7 @@ describe('startTask — typed config errors before any side effect', () => {
     // same shape as the codex L1 refusal above.
     process.env[buildProfile.envVars.timeoutMs] = '60000';
     const snapshot: NodeJS.ProcessEnv = {
-      ATOMA_LLM: 'claude-cli',
+      ...CLAUDE_CLI_PINS,
       ANTHROPIC_API_KEY: 'sk-ant-tenant-key',
     };
     await expect(
@@ -161,7 +161,7 @@ describe('startTask — typed config errors before any side effect', () => {
     process.env['ATOMA_REQUIRE_ISOLATION'] = '1';
     await expect(
       startTask(buildProfile, ['goal'], {
-        providerEnv: { ATOMA_LLM: 'ollama', ATOMA_REQUIRE_ISOLATION: '0' },
+        providerEnv: { ...OLLAMA_PINS, ATOMA_REQUIRE_ISOLATION: '0' },
       })
     ).rejects.toThrow(/not a boundary/);
   });
@@ -178,11 +178,11 @@ describe('startTask — typed config errors before any side effect', () => {
 
   it('leaves the developer path alone: claude-cli with NO snapshot is accepted', async () => {
     // The guard triggers on the caller having supplied an environment, not on
-    // the transport itself. A developer running `ATOMA_LLM=claude-cli` against
+    // the transport itself. A developer running `sub:anthropic:` tiers against
     // their own subscription supplies nothing, so selection proceeds and the
     // run fails later — here on the deliberately invalid timeout, which only
     // gets evaluated once the transport has been accepted.
-    process.env['ATOMA_LLM'] = 'claude-cli';
+    Object.assign(process.env, CLAUDE_CLI_PINS);
     process.env[buildProfile.envVars.timeoutMs] = 'abc';
     await expect(startTask(buildProfile, ['goal'])).rejects.toThrow(/expected positive integer/);
   });
@@ -192,19 +192,19 @@ describe('startTask — typed config errors before any side effect', () => {
     delete process.env['ATOMA_MODEL_L1'];
     await expect(
       startTask(buildProfile, ['goal'], {
-        providerEnv: { ATOMA_LLM: 'ollama', ATOMA_MODEL_L1: 'codex:gpt-5.4-mini' },
+        providerEnv: { ...OLLAMA_PINS, ATOMA_MODEL_L1: 'sub:openai:gpt-5.4-mini' },
       })
-    ).rejects.toThrow(/ATOMA_MODEL_L1 cannot use codex/);
+    ).rejects.toThrow(/ATOMA_MODEL_L1=sub:openai:gpt-5.4-mini: Codex cannot expose tools/);
   });
 
   it('an ambient Codex L1 pin does not fire when the snapshot omits it', async () => {
     // Inverse: the host has a leftover pin; the run was handed its own
     // environment without one and must serve the default, not inherit the
     // ambient detonation.
-    process.env['ATOMA_MODEL_L1'] = 'codex:gpt-5.4-mini';
+    process.env['ATOMA_MODEL_L1'] = 'sub:openai:gpt-5.4-mini';
     process.env[buildProfile.envVars.timeoutMs] = 'abc';
     await expect(
-      startTask(buildProfile, ['goal'], { providerEnv: { ATOMA_LLM: 'ollama' } })
+      startTask(buildProfile, ['goal'], { providerEnv: { ...OLLAMA_PINS } })
     ).rejects.toThrow(/expected positive integer/);
   });
 
@@ -213,24 +213,24 @@ describe('startTask — typed config errors before any side effect', () => {
     await expect(
       startTask(buildProfile, ['goal'], {
         providerEnv: {
-          ATOMA_LLM: 'anthropic',
+          ...ANTHROPIC_PINS,
           ANTHROPIC_API_KEY: 'sk-ant-tenant',
-          ATOMA_MODEL_L2: 'claude-cli:sonnet',
+          ATOMA_MODEL_L2: 'sub:anthropic:sonnet',
         },
       })
-    ).rejects.toThrow(/tier pin "claude-cli:"/);
+    ).rejects.toThrow(/ATOMA_MODEL_L2=sub:anthropic:sonnet cannot honour a supplied credential snapshot/);
   });
 
   it('reads the transport from the SNAPSHOT, not from process.env', async () => {
-    // The inverse of the guard: process.env says claude-cli, but the run was
+    // The inverse of the guard: process.env pins sub:anthropic, but the run was
     // handed its own environment and must obey that one. It gets past the
     // transport guard and fails later on the invalid timeout IN THE SNAPSHOT's
     // absence — proving the snapshot, not the ambient value, drove selection.
-    process.env['ATOMA_LLM'] = 'claude-cli';
+    Object.assign(process.env, CLAUDE_CLI_PINS);
     process.env[buildProfile.envVars.timeoutMs] = 'abc';
     await expect(
       startTask(buildProfile, ['goal'], {
-        providerEnv: { ATOMA_LLM: 'ollama' },
+        providerEnv: { ...OLLAMA_PINS },
       })
     ).rejects.toThrow(/expected positive integer/);
   });

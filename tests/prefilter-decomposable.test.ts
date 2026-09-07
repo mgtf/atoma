@@ -4,7 +4,7 @@ import { openDb } from '../src/registry/db.js';
 import { L2Atom } from '../src/atoms/L2Atom.js';
 import { L3Atom } from '../src/atoms/L3Atom.js';
 import { STRATEGY_MAX_TOKENS } from '../src/atoms/cost.js';
-import { FALLBACK_OPUS } from '../src/core/models.js';
+import { FALLBACK_OPUS } from './tier-pins.js';
 import { makeCtx, jsonText, jsonTextPair } from './helpers.js';
 
 const seed = {

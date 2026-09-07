@@ -35,7 +35,7 @@ export interface VizLlmEvent {
   model: string;
   /**
    * The model the transport ACTUALLY invoked when it differs from the pin
-   * (`model` above stays the routing identity — `codex:claude-opus-5` —
+   * (`model` above stays the routing identity — `sub:openai:gpt-5.6-sol` —
    * while a transport may serve `gpt-5.6-sol`). Optional and additive:
    * events recorded before 2026-08-15, and events from transports that
    * serve the pin verbatim, simply lack it. `costUsd` is priced on this

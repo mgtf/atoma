@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseRunnerArgs } from '../src/run/runner.js';
+import { CLAUDE_CLI_PINS } from './tier-pins.js';
 import { localToolBackend } from '../src/run/toolBackend.js';
 
 /**
@@ -99,7 +100,7 @@ describe('runner preflight precedes destructive setup', () => {
     const child = runBuild(['a goal'], {
       ATOMA_BUILD_TIMEOUT_MS: 'not-a-number',
       ATOMA_EGRESS: '1',
-      ATOMA_LLM: 'claude-cli',
+      ...CLAUDE_CLI_PINS,
     });
     expect(child.status, String(child.stderr)).toBe(2);
     expect(String(child.stderr)).toMatch(/invalid ATOMA_BUILD_TIMEOUT_MS/);
@@ -115,7 +116,7 @@ describe('runner preflight precedes destructive setup', () => {
       ['--clean-workspace', '--seed', missingSeed, 'maintain the seeded artefact'],
       {
         ATOMA_BUILD_WORKSPACE: workspace,
-        ATOMA_LLM: 'claude-cli',
+        ...CLAUDE_CLI_PINS,
       }
     );
 

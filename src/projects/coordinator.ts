@@ -13,20 +13,29 @@ import type {
 } from '../contracts/projects.js';
 import type { TierModelPins } from '../contracts/tierModels.js';
 import { PERSONAL_CODEX_PROFILE_ROOT_ENV } from '../core/codexHomeLease.js';
-import { LLM_PROVIDER_CATALOG } from '../core/providerCatalog.js';
+import { LLM_PROVIDER_CATALOG, findProvider } from '../core/providerCatalog.js';
 import {
-  HOST_SUBSCRIPTION_PREFIX,
-  hostSubscriptionRoute,
   ledgerTouchesAnySubscription,
   ledgerTouchesSubscription,
-  principalSubscriptionRoute,
   principalSubscriptionTiers,
   runPayerLedgerSchema,
   subscriptionTiers,
+  subscriptionTransports,
+  tierPayerRow,
   type PayerKind,
   type RunPayerLedger,
   type TierPayer,
 } from '../contracts/runPayers.js';
+import {
+  MODEL_SELECTOR_GRAMMAR,
+  parseModelSelector,
+  selectorAdmitsTools,
+  tierPinVariable,
+  TIERS,
+  tryParseModelSelector,
+  type ModelSelector,
+  type TierNumber,
+} from '../contracts/modelSelector.js';
 import {
   resolveTierChain,
   tierChainCandidates,
@@ -181,7 +190,7 @@ export interface SubscriptionTransportUse {
   readonly projectId: string;
   readonly projectRunId: string;
   readonly principalId: string;
-  /** The `ATOMA_LLM` value the host configured, e.g. `claude-cli`. */
+  /** The subscription transports this run spends, comma-joined (`claude-cli`, `codex-cli`). */
   readonly transport: string;
   /**
    * WHICH TIERS, PAID BY WHOM. A whole-run fact is no longer enough: a run may
@@ -242,125 +251,46 @@ const FORWARDED_HOST_ENV = [
 ] as const;
 
 /**
- * Transports that bind to a machine-local login session rather than to a
- * credential the caller can supply. `claude` is the bare alias
- * `resolveBaseProviderKind` accepts for `claude-cli`; both spellings must be
- * recognised here or the door would have a hole in it.
+ * The `sub:` selectors a host environment pins, as `VAR=value` strings, for
+ * the CLI guard that refuses them to anyone but a platform admin. Malformed
+ * values are not this function's business: the run's own launch refuses them
+ * with the grammar.
  */
-export function isSubscriptionTransport(value: string | undefined): boolean {
-  const kind = (value ?? '').trim().toLowerCase();
-  return kind === 'claude-cli' || kind === 'claude';
+export function hostSubscriptionPinsOf(env: NodeJS.ProcessEnv): string[] {
+  return TIERS.flatMap((tier) => {
+    const value = env[tierPinVariable(tier)]?.trim();
+    const selector = value ? tryParseModelSelector(value) : null;
+    return selector && selector.mode !== 'api' ? [`${tierPinVariable(tier)}=${value}`] : [];
+  });
 }
 
-/**
- * Is this tier value routable for a tenant run? The catalogue shape is the
- * contract — bare historical ids pass (the router treats them as default-
- * provider models), catalogue selectors pass, and anything else with a
- * colon (an unknown provider, `claude-cli:*`, a shell fragment) refuses.
- * Mirrors the write-side validator; kept locally so a drift between them
- * fails loudly in tests rather than silently at routing time.
- */
-function isCatalogueSelection(value: string): boolean {
-  const providerId = selectorProvider(value);
-  if (providerId === null) return true;
-  return LLM_PROVIDER_CATALOG.some((provider) => provider.id === providerId);
-}
+/** Where an `api:` vendor's credential comes from for this run, if anywhere. */
+type VendorCredentialSource = 'org' | 'host' | 'selfhosted' | null;
 
 /**
- * The provider a selection names, or null for a bare model id (which routes
- * through the default transport). ONE reading of the prefix: three call sites
- * used to split on the first colon themselves, and an ollama tag carries its
- * own colons, so the rule that only the FIRST one separates is not a detail
- * any of them may restate differently.
+ * ONE ANSWER PER VENDOR, not per tier: a vendor's credential is one
+ * environment variable, so every tier on `api:<vendor>` shares it. The org's
+ * OWN key wins over the host's — "the org brought its own key" is BYO-key's
+ * entire point — and Ollama needs no secret but does need the operator to have
+ * DECLARED an endpoint: assuming the default localhost is exactly what
+ * detonates on a host without one, so no declaration means the pin falls
+ * through like any vendor whose credential nobody brought. The endpoint is the
+ * OPERATOR's infrastructure: an org picks ollama models, never an ollama
+ * destination (a tenant-supplied URL would be SSRF from the platform).
  */
-function selectorProvider(value: string): string | null {
-  const colonIndex = value.indexOf(':');
-  return colonIndex === -1 ? null : value.slice(0, colonIndex);
-}
-
-/**
- * Can THIS run honour a selection? A bare model id routes through the
- * default transport whose credential the base environment already carries.
- * A `provider:model` selector needs that provider's credential.
- *
- * `childEnv` is the environment BEING BUILT, never the host's: what decides
- * whether a pin can be honoured is what the child will actually receive. On
- * a subscription run that is nothing at all, so an anthropic pin falls
- * through here instead of detonating on the first call — the host's exported
- * key is irrelevant to a child that is not given it.
- */
-function providerCredentialAvailable(
-  value: string,
+function vendorCredentialSource(
+  vendor: ModelSelector['vendor'],
   keys: Partial<Record<ProviderKeyProvider, string>>,
-  childEnv: NodeJS.ProcessEnv
-): boolean {
-  const providerId = selectorProvider(value);
-  if (providerId === null) return true;
-  if (providerId === 'ollama') {
-    // Self-hosted, so no secret — but "the deployment HAS an Ollama" is
-    // still a fact only the operator can assert, by exporting
-    // OLLAMA_BASE_URL. Assuming the default localhost endpoint is exactly
-    // what detonates on a host without one, so no declaration means the pin
-    // falls through like any provider whose credential nobody brought. The
-    // endpoint is the OPERATOR's infrastructure: an org picks ollama models,
-    // never an ollama destination (a tenant-supplied URL would be SSRF from
-    // the platform's own process).
-    return Boolean(childEnv['OLLAMA_BASE_URL']);
+  hostEnv: NodeJS.ProcessEnv
+): VendorCredentialSource {
+  const entry = findProvider(vendor);
+  if (!entry) return null;
+  if (entry.credentialEnvVar === null) {
+    return hostEnv['OLLAMA_BASE_URL']?.trim() ? 'selfhosted' : null;
   }
-  const provider = LLM_PROVIDER_CATALOG.find((entry) => entry.id === providerId);
-  if (!provider?.credentialEnvVar) return false;
-  return Boolean(
-    keys[providerId as ProviderKeyProvider] || childEnv[provider.credentialEnvVar]
-  );
-}
-
-/**
- * FORWARD ONLY WHAT THE ORG BROUGHT, AND ONLY WHAT THIS RUN REFERENCES. Each
- * forwarded credential rides the same environment snapshot as its tier pins,
- * so the child's lazy provider factories can build exactly the referenced
- * clients. Host values are NOT overridden by absent org keys — but an
- * explicitly configured org key wins over a host variable of the same name,
- * because "the org brought its own key" is BYO-key's entire point.
- *
- * `referenced` narrows it further (2026-08-27, 3.1): an org with three stored
- * keys used to hand all three to every run, including the two no tier asked
- * for. `CHILD_ENV_ALLOWLIST` (`src/tools/sandbox.ts`) already keeps them out
- * of tool subprocesses, so this is not a hole being closed — it is the
- * runner's own memory and `/proc` surface being no wider than the run needs.
- */
-function injectOrgProviderKeys(
-  environment: NodeJS.ProcessEnv,
-  keys: Partial<Record<ProviderKeyProvider, string>>,
-  referenced: ReadonlySet<string>
-): void {
-  for (const provider of LLM_PROVIDER_CATALOG) {
-    if (provider.credentialEnvVar === null) continue;
-    if (!referenced.has(provider.id)) continue;
-    const orgKey = keys[provider.id];
-    const trimmed = orgKey?.trim();
-    if (!trimmed) continue;
-    environment[provider.credentialEnvVar] = trimmed;
-    // Optional tuning variables stay HOST-owned: an org never sets base
-    // URLs through this path.
-    void provider.configurableEnvVars;
-  }
-}
-
-/**
- * WHO PAYS FOR A CATALOGUE SELECTION. Ollama is the operator's own hardware
- * (priced at zero, billed to nobody) and is a different fact from "the
- * operator's API key"; a provider whose key the ORG brought bills the org; a
- * bare model id inherits whoever pays for the base transport.
- */
-function payerForProvider(
-  providerId: string | null,
-  base: TierPayer,
-  keys: Partial<Record<ProviderKeyProvider, string>>
-): PayerKind {
-  if (providerId === null) return base.payer;
-  if (providerId === 'ollama') return 'host-selfhosted';
-  if (providerId === base.provider) return base.payer;
-  return keys[providerId as ProviderKeyProvider] ? 'org-key' : base.payer;
+  if (keys[vendor]?.trim()) return 'org';
+  if (hostEnv[entry.credentialEnvVar]?.trim()) return 'host';
+  return null;
 }
 
 /**
@@ -375,17 +305,17 @@ function payerForProvider(
  * storable.
  */
 function assertSubscriptionPinIsHonourable(input: {
-  readonly tier: 1 | 2 | 3;
+  readonly tier: TierNumber;
   readonly level: TierChainLevel;
   readonly grant: { readonly principalId: string } | undefined;
   readonly declaredOrg: string | undefined;
   readonly orgId: string | undefined;
 }): void {
-  const where = `ATOMA_MODEL_L${input.tier}`;
+  const where = tierPinVariable(input.tier);
   if (input.level !== 'account') {
     // An org default is inherited by every member by construction, and the
-    // host env is the third candidate for EVERY tier: a sentinel at either
-    // level would be a payer-bearing default nobody chose (design D2/D3).
+    // host env is the third candidate for EVERY tier: a `sub:` selector at
+    // either level would be a payer-bearing default nobody chose (D2/D3).
     throw new ProjectRunConfigurationError(
       `${where} names the host subscription from the ${input.level} level; only a platform ` +
         "admin's own account pin may spend the operator's login"
@@ -418,15 +348,23 @@ function assertSubscriptionPinIsHonourable(input: {
  * would make both the bill and the audit row false.
  */
 function assertPrincipalSubscriptionPinIsHonourable(input: {
-  readonly tier: 1 | 2 | 3;
+  readonly tier: TierNumber;
   readonly level: TierChainLevel;
+  readonly vendor: ModelSelector['vendor'];
   readonly profile: PrincipalCodexProfile | undefined;
 }): void {
-  const where = `ATOMA_MODEL_L${input.tier}`;
+  const where = tierPinVariable(input.tier);
   if (input.level !== 'account') {
     throw new ProjectRunConfigurationError(
       `${where} names a personal subscription from the ${input.level} level; only the ` +
         "requesting member's own account pin may spend their subscription"
+    );
+  }
+  if (input.vendor !== 'openai') {
+    // Anthropic requires prior approval before a third-party product may
+    // offer claude.ai login; until then `own:anthropic` has no transport.
+    throw new ProjectRunConfigurationError(
+      `${where} names a personal Claude subscription, which this deployment cannot offer yet`
     );
   }
   if (!input.profile) {
@@ -439,7 +377,7 @@ function assertPrincipalSubscriptionPinIsHonourable(input: {
 
 export interface ProjectRunEnvironment {
   readonly environment: NodeJS.ProcessEnv;
-  /** Who paid for what, per tier plus the base transport. */
+  /** Who paid for what, per tier. */
   readonly payers: RunPayerLedger;
 }
 
@@ -453,19 +391,15 @@ export function projectRunEnvironment(input: {
   readonly artifactManifestPath: string;
   /**
    * The requesting account's per-tier choices, and the organisation's
-   * defaults beneath them: `effectiveTierSelection` resolves the chain
-   * account pin > org default > null, and a null tier inherits the
-   * operator's host pin inside the loop below.
+   * defaults beneath them. `resolveTierChain` walks account pin > org default
+   * > host pin per tier, and EVERY tier must resolve: there is no base
+   * transport and no built-in default to fall back on (2026-09-07).
    *
-   * A selection MAY now be a `provider:model` selector. That is safe by
-   * construction: the values come from `contracts/tierModels.ts`, whose
-   * catalogue admits exactly the credential-honouring providers of
-   * `core/providerCatalog.ts` (raw claude-cli/codex routes cannot appear), and each
-   * referenced provider's credential is injected alongside the pin from the
-   * org's own key store — a pin without its key is dropped before it can
-   * reach the router and detonate mid-run. The historical bare-`:`
-   * REFUSAL narrows to what it always defended: any provider prefix that
-   * is not in the catalogue.
+   * Every value is a full selector (`contracts/modelSelector.ts`). An `api:`
+   * selector is honoured when its vendor's credential is available to this
+   * run — the org's own key, or the host's — and falls through otherwise; a
+   * `sub:`/`own:` selector is honoured after its authority is re-asked here
+   * and refused, never skipped, when it is not.
    */
   readonly tierModels?: TierModelPins;
   /** The org-level defaults under `tierModels`. See its doc above. */
@@ -480,210 +414,91 @@ export function projectRunEnvironment(input: {
    */
   readonly orgId?: string;
   /**
-   * Credentials the org configured, by catalogue provider id. Present keys
-   * are forwarded into the run child; absent ones are not.
+   * Credentials the org configured, by vendor id. Present keys are forwarded
+   * into the run child for the vendors its tiers reference; absent ones are
+   * not.
    */
   readonly orgProviderKeys?: Partial<Record<ProviderKeyProvider, string>>;
   /**
    * THE SUBSCRIPTION-TRANSPORT DOOR. Present only when the coordinator has
    * verified that the REQUESTING principal holds the platform-admin flag.
    *
-   * What it permits and what it costs, stated plainly because the whole point
-   * is that this is not silent: a machine-bound transport such as
-   * `claude-cli` binds to the host's own `claude /login` session, so the run
-   * spends THAT subscription and cannot honour a per-run credential. For a
-   * tenant that would be one account billing another, which is why the
-   * default is still refusal. For a platform admin on their own instance the
-   * host subscription IS their subscription, so the objection does not apply
-   * — and the platform-admin flag is the right authority precisely because it
-   * is never derived from an OAuth claim: only the operator CLI, run against
-   * the store on disk, can mint it.
+   * A `sub:` selector binds to the host's own `claude /login` or `codex login`
+   * session, so the run spends THAT subscription and cannot honour a per-run
+   * credential. For a tenant that would be one account billing another, which
+   * is why the default is refusal. For a platform admin on their own instance
+   * the host subscription IS their subscription, so the objection does not
+   * apply — and the platform-admin flag is the right authority precisely
+   * because it is never derived from an OAuth claim: only the operator CLI,
+   * run against the store on disk, can mint it.
    */
   readonly subscriptionTransport?: { readonly principalId: string };
   /** Exact personal Codex generation resolved for the requesting principal. */
   readonly principalCodexProfile?: PrincipalCodexProfile;
 }): ProjectRunEnvironment {
-  const selected = input.hostEnv['ATOMA_LLM']?.trim() || 'anthropic';
-  const subscriptionRequested = isSubscriptionTransport(selected);
-  if (subscriptionRequested && !input.subscriptionTransport) {
-    throw new ProjectRunConfigurationError(
-      `project runs cannot use ATOMA_LLM=${selected}: a subscription CLI transport binds to this ` +
-        'machine\'s own login session, so the run would spend the HOST subscription and ignore ' +
-        'per-run credentials. Set ATOMA_LLM=anthropic with a per-run credential, or have a ' +
-        'platform admin request the run — that is the one identity allowed through this door.'
-    );
-  }
-  const baseProvider = selected.toLowerCase();
-  if (!subscriptionRequested && baseProvider !== 'anthropic' && baseProvider !== 'zai') {
-    throw new ProjectRunConfigurationError(
-      `project runs do not support ATOMA_LLM=${selected}; use anthropic or zai with a per-run credential`
-    );
-  }
-  const baseEntry = LLM_PROVIDER_CATALOG.find((provider) => provider.id === baseProvider);
-  const credentialEnvVar = baseEntry?.credentialEnvVar;
-  const hostBaseKey = credentialEnvVar ? input.hostEnv[credentialEnvVar]?.trim() : undefined;
-  const orgBaseKey =
-    baseProvider === 'anthropic' || baseProvider === 'zai'
-      ? input.orgProviderKeys?.[baseProvider]?.trim()
-      : undefined;
-  // NO BEARER TOKEN ON THIS PATH. `ANTHROPIC_AUTH_TOKEN` is the SDK's other
-  // credential slot, and a tenant has nowhere to supply one: the org key
-  // store is keyed by catalogue provider, and anthropic's credential
-  // variable is `ANTHROPIC_API_KEY`. It could therefore only ever come from
-  // the host env, where it is also the wrong shape — a bearer is short-lived
-  // and refreshed from a login profile on disk, while a run child receives a
-  // frozen env snapshot it cannot refresh, so a long run would simply expire
-  // mid-flight. The operator's own LOCAL runs keep it (`src/run/auth.ts`),
-  // where the SDK reads the live profile.
-  // The org's OWN anthropic key is a per-run credential too — it is what
-  // makes a BYO-ONLY deployment possible, one that carries no platform key at
-  // all. Reading it here rather than only at injection time below is the
-  // difference between that deployment working and every one of its runs
-  // being refused while the encrypted key sits in the store.
-  // Refused rather than dropped: an operator who exported a bearer expecting
-  // it to be spent must be told it is not, not watch runs bill a different
-  // credential — or fail for "no credential" while a token sits in the shell.
-  if (
-    !subscriptionRequested &&
-    baseProvider === 'anthropic' &&
-    input.hostEnv['ANTHROPIC_AUTH_TOKEN']?.trim()
-  ) {
-    throw new ProjectRunConfigurationError(
-      'project runs do not accept ANTHROPIC_AUTH_TOKEN: a bearer token is refreshed from a login ' +
-        'profile the run child cannot read, so it would expire mid-run. Use ANTHROPIC_API_KEY on ' +
-        "the host, or the organisation's own anthropic provider key"
-    );
-  }
-  // The credential rule applies to the credentialled transport only. A
-  // subscription run has no per-run credential BY DEFINITION, and demanding
-  // one here would refuse exactly the case the door just allowed.
-  if (!subscriptionRequested && !hostBaseKey && !orgBaseKey) {
-    throw new ProjectRunConfigurationError(
-      `project runs require a ${baseProvider} credential: ${credentialEnvVar} on the host, or ` +
-        `this organisation's own ${baseProvider} provider key`
-    );
-  }
   const environment: NodeJS.ProcessEnv = {};
   for (const key of FORWARDED_HOST_ENV) {
     const value = input.hostEnv[key];
     if (value !== undefined) environment[key] = value;
   }
   environment['NODE_ENV'] = 'production';
-  if (subscriptionRequested) {
-    // Canonical spelling, so a run's env says which transport it used even
-    // when the host wrote the bare `claude` alias.
-    environment['ATOMA_LLM'] = 'claude-cli';
-    // NO credential is forwarded. The transport cannot honour one, and a
-    // stale exported key reaching the subprocess would only confuse the
-    // provider's own precedence rules. `usableOrgKeys` below is what makes
-    // that true of the ORG's keys as well as the host's.
-  } else {
-    environment['ATOMA_LLM'] = baseProvider;
-    if (orgBaseKey && credentialEnvVar) {
-      // BYO wins over the host: an org that brought its own key pays with it.
-      // `injectOrgProviderKeys` writes the same value below; the branch here
-      // is what keeps the host's gateway URL out of the child.
-      environment[credentialEnvVar] = orgBaseKey;
-      // A BYO KEY GOES TO ITS OWN ISSUER. `ANTHROPIC_BASE_URL` is how a host
-      // points the anthropic transport at a gateway (Z.ai's own Claude Code
-      // instructions are exactly this variable plus a bearer token), and
-      // forwarding it here would send an ORGANISATION's key to a third party
-      // it never consented to — rejected at best, disclosed at worst. The
-      // host's gateway applies to the host's own credential, not to a
-      // tenant's, so the variable is dropped on this path.
-    } else {
-      if (hostBaseKey && credentialEnvVar) environment[credentialEnvVar] = hostBaseKey;
-      for (const variable of baseEntry?.configurableEnvVars ?? []) {
-        const value = input.hostEnv[variable]?.trim();
-        if (value) environment[variable] = value;
-      }
-    }
-  }
-  // THE BASE ROW OF THE PAYER LEDGER. The branch above just decided who pays
-  // for every call that carries no `provider:` prefix — an unpinned tier,
-  // `resolveLatestOpus` on the L3 path, anything reaching the default client.
-  // A ledger of three tier rows would say "L2 and L3 were on the subscription"
-  // and stay silent about the account that paid for everything else, which is
-  // the omission finding 2.2 punished (design 2026-08-28, D8).
-  const baseRow: TierPayer = subscriptionRequested
-    ? {
-        selection: null,
-        provider: HOST_SUBSCRIPTION_PREFIX,
-        payer: 'host-subscription',
-        source: 'host',
-      }
-    : {
-        selection: null,
-        provider: baseProvider,
-        payer: orgBaseKey ? 'org-key' : 'host-key',
-        source: orgBaseKey ? 'org' : 'host',
-      };
-  // THE HOST'S OLLAMA ENDPOINT crosses on every branch: it selects no payer
-  // (self-hosted, priced at zero), so unlike the anthropic gateway URL above
-  // it is safe beside a BYO key and on a subscription run alike. Forwarded
-  // BEFORE tier resolution because it is what makes an ollama pin honourable.
+  // THE HOST'S OLLAMA ENDPOINT crosses on every run: it selects no payer
+  // (self-hosted, priced at zero), so unlike a vendor gateway URL it is safe
+  // beside a BYO key and on a subscription run alike. Forwarded BEFORE tier
+  // resolution because it is what makes an ollama pin honourable.
   const ollamaBaseUrl = input.hostEnv['OLLAMA_BASE_URL']?.trim();
   if (ollamaBaseUrl) environment['OLLAMA_BASE_URL'] = ollamaBaseUrl;
-  // A SUBSCRIPTION RUN SPENDS THE HOST SUBSCRIPTION, AND NOTHING ELSE. The
-  // org's keys are withheld from it entirely: injected, they would let a
-  // tier pinned to `anthropic:*` or `zai:*` bill the ORGANISATION while the
-  // journal records `run.host_subscription`, so the audit row would name the
-  // wrong payer. Withholding them here — rather than at injection only —
-  // also drops the pins those keys would have unlocked, which is what keeps
-  // a pin from reaching the router without its credential.
-  const usableOrgKeys = subscriptionRequested ? {} : (input.orgProviderKeys ?? {});
-  // CATALOGUE-GUARDED TIER RESOLUTION: account pin > org default > host env,
-  // resolved PER CANDIDATE so a preference pointing at a provider whose
-  // credential nobody configured falls through to the level beneath it
-  // instead of reaching the router and detonating mid-run. Non-catalogue
-  // provider prefixes refuse outright at every level.
+  const orgKeys = input.orgProviderKeys ?? {};
+  const subscriptionOrg = input.hostEnv['ATOMA_HOST_SUBSCRIPTION_ORG']?.trim();
+  const ledger: Partial<Record<'l1' | 'l2' | 'l3', TierPayer>> = {};
+  /** Vendors whose credential this run takes, and from where. */
+  const vendorSources = new Map<ModelSelector['vendor'], VendorCredentialSource>();
+
+  // TIER RESOLUTION: account pin > org default > host env, resolved PER
+  // CANDIDATE so a preference pointing at a vendor whose credential nobody
+  // configured falls through to the level beneath it instead of reaching the
+  // router and detonating mid-run.
   //
   // THE THREE ANSWERS ARE NOT INTERCHANGEABLE, and the rule generalises:
   // FALL-THROUGH IS PERMITTED WITHIN A PAYER, REFUSAL IS REQUIRED ACROSS
   // PAYERS. A credential nobody brought is a fall-through (the next level
-  // bills the same kind of account); a provider you may not use, or an
+  // bills the same kind of account); a selector you may not use, or an
   // authority you no longer hold, is a refusal — falling through there would
   // move the payer from the operator's subscription to a billed credential
   // with no event anywhere, which is the defect class finding 2.2 closed.
-  const subscriptionOrg = input.hostEnv['ATOMA_HOST_SUBSCRIPTION_ORG']?.trim();
-  const ledger: Record<'l1' | 'l2' | 'l3', TierPayer> = {
-    l1: baseRow,
-    l2: baseRow,
-    l3: baseRow,
-  };
-  for (const tier of [1, 2, 3] as const) {
+  for (const tier of TIERS) {
     const key = `l${tier}` as const;
+    const variable = tierPinVariable(tier);
     const chosen = resolveTierChain(
       tierChainCandidates({
         account: input.tierModels,
         org: input.orgTierModels,
-        host: input.hostEnv[`ATOMA_MODEL_L${tier}`],
+        host: input.hostEnv[variable],
         tier,
       }),
       (candidate) => {
-        const personalSubscription = principalSubscriptionRoute(candidate.value);
-        if (personalSubscription) {
-          if (tier === 1) {
-            throw new ProjectRunConfigurationError(
-              'ATOMA_MODEL_L1 cannot use the requester ChatGPT subscription because Codex ' +
-                'cannot expose the L1 tool loop through ToolSandbox'
-            );
-          }
+        const selector = tryParseModelSelector(candidate.value);
+        if (!selector) {
+          throw new ProjectRunConfigurationError(
+            `${variable}=${candidate.value} (${candidate.level} level) is not a model selector; ` +
+              `expected ${MODEL_SELECTOR_GRAMMAR}`
+          );
+        }
+        if (tier === 1 && !selectorAdmitsTools(selector)) {
+          throw new ProjectRunConfigurationError(
+            `${variable} cannot use Codex because it cannot expose the L1 tool loop through ToolSandbox`
+          );
+        }
+        if (selector.mode === 'own') {
           assertPrincipalSubscriptionPinIsHonourable({
             tier,
             level: candidate.level,
+            vendor: selector.vendor,
             profile: input.principalCodexProfile,
           });
           return 'take';
         }
-        const subscription = hostSubscriptionRoute(candidate.value);
-        if (subscription) {
-          if (tier === 1 && subscription.provider === 'codex') {
-            throw new ProjectRunConfigurationError(
-              'ATOMA_MODEL_L1 cannot use the ChatGPT host subscription because Codex cannot ' +
-                'expose the L1 tool loop through ToolSandbox'
-            );
-          }
+        if (selector.mode === 'sub') {
           assertSubscriptionPinIsHonourable({
             tier,
             level: candidate.level,
@@ -693,63 +508,74 @@ export function projectRunEnvironment(input: {
           });
           return 'take';
         }
-        if (!isCatalogueSelection(candidate.value)) {
-          throw new ProjectRunConfigurationError(
-            `ATOMA_MODEL_L${tier}=${candidate.value} names a provider project runs cannot be routed to`
-          );
-        }
-        // Fail-open: nobody brought this provider's credential, so the next
+        // Fail-open: nobody brought this vendor's credential, so the next
         // level of the chain decides instead.
-        return providerCredentialAvailable(candidate.value, usableOrgKeys, environment)
+        return vendorCredentialSource(selector.vendor, orgKeys, input.hostEnv) !== null
           ? 'take'
           : 'skip';
       }
     );
-    if (!chosen) continue;
-    const personalSubscription = principalSubscriptionRoute(chosen.value);
-    if (personalSubscription) {
-      // The persisted sentinel is deliberately not routable. Translation is
-      // downstream of the self-scoped profile check above, so no other caller
-      // can turn a string into access to a principal's credential generation.
-      environment[`ATOMA_MODEL_L${tier}`] =
-        `${personalSubscription.provider}:${personalSubscription.model}`;
-      ledger[key] = {
-        selection: chosen.value,
-        provider: personalSubscription.provider,
-        payer: 'principal-subscription',
-        source: chosen.level,
-      };
-      continue;
+    if (!chosen) {
+      throw new ProjectRunConfigurationError(
+        `${variable}: no level supplies a selection this run can honour. Pick a model for this ` +
+          'tier in Settings (account or organisation default) whose vendor key the organisation ' +
+          `has saved, or pin ${variable} on the host beside its credential`
+      );
     }
-    const subscription = hostSubscriptionRoute(chosen.value);
-    if (subscription) {
-      // TRANSLATED HERE AND NOWHERE ELSE, downstream of the authority check.
-      // The sentinel is what is STORED — non-routable on purpose, so no other
-      // code path that forwards a pin into an environment can become a
-      // subscription route by accident.
-      environment[`ATOMA_MODEL_L${tier}`] = `${subscription.provider}:${subscription.model}`;
-      ledger[key] = {
-        selection: chosen.value,
-        provider: subscription.provider,
-        payer: 'host-subscription',
-        source: chosen.level,
-      };
-      continue;
+    const selector = parseModelSelector(chosen.value, variable);
+    environment[variable] = chosen.value;
+    let payer: PayerKind;
+    if (selector.mode === 'sub') payer = 'host-subscription';
+    else if (selector.mode === 'own') payer = 'principal-subscription';
+    else {
+      const source = vendorCredentialSource(selector.vendor, orgKeys, input.hostEnv);
+      vendorSources.set(selector.vendor, source);
+      payer = source === 'selfhosted' ? 'host-selfhosted' : source === 'org' ? 'org-key' : 'host-key';
     }
-    environment[`ATOMA_MODEL_L${tier}`] = chosen.value;
-    ledger[key] = {
-      selection: chosen.value,
-      provider: selectorProvider(chosen.value) ?? baseRow.provider,
-      payer: payerForProvider(selectorProvider(chosen.value), baseRow, usableOrgKeys),
-      source: chosen.level,
-    };
+    ledger[key] = tierPayerRow({ selection: chosen.value, payer, source: chosen.level });
   }
-  const payers: RunPayerLedger = runPayerLedgerSchema.parse({
-    base: baseRow,
-    l1: ledger.l1,
-    l2: ledger.l2,
-    l3: ledger.l3,
-  });
+  const payers: RunPayerLedger = runPayerLedgerSchema.parse(ledger);
+
+  // CREDENTIALS, ONE PER VENDOR THIS RUN REFERENCES, AND NOTHING ELSE.
+  // `CHILD_ENV_ALLOWLIST` (`src/tools/sandbox.ts`) already keeps keys out of
+  // tool subprocesses, so this is not a hole being closed — it is the
+  // runner's own memory and `/proc` surface being no wider than the run needs
+  // (2026-08-27, 3.1).
+  for (const [vendor, source] of vendorSources) {
+    const entry = findProvider(vendor);
+    if (!entry?.credentialEnvVar) continue;
+    if (source === 'org') {
+      // BYO wins over the host: an org that brought its own key pays with it.
+      // A BYO KEY GOES TO ITS OWN ISSUER: the host's gateway URL
+      // (`ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, …) applies to the HOST's
+      // credential, not to a tenant's, and forwarding it would send an
+      // ORGANISATION's key to a third party it never consented to. So only
+      // the key crosses on this branch.
+      environment[entry.credentialEnvVar] = orgKeys[vendor]!.trim();
+      continue;
+    }
+    if (source === 'host') {
+      // NO BEARER TOKEN ON THIS PATH. `ANTHROPIC_AUTH_TOKEN` is the SDK's
+      // other credential slot; a bearer is short-lived and refreshed from a
+      // login profile on disk, while a run child receives a frozen env
+      // snapshot it cannot refresh, so a long run would simply expire
+      // mid-flight. Refused rather than dropped: an operator who exported a
+      // bearer expecting it to be spent must be told it is not.
+      if (vendor === 'anthropic' && input.hostEnv['ANTHROPIC_AUTH_TOKEN']?.trim()) {
+        throw new ProjectRunConfigurationError(
+          'project runs do not accept ANTHROPIC_AUTH_TOKEN: a bearer token is refreshed from a login ' +
+            'profile the run child cannot read, so it would expire mid-run. Use ANTHROPIC_API_KEY on ' +
+            "the host, or the organisation's own anthropic provider key"
+        );
+      }
+      environment[entry.credentialEnvVar] = input.hostEnv[entry.credentialEnvVar]!.trim();
+      for (const variableName of entry.configurableEnvVars) {
+        const value = input.hostEnv[variableName]?.trim();
+        if (value) environment[variableName] = value;
+      }
+    }
+  }
+
   if (principalSubscriptionTiers(payers).length > 0) {
     if (!input.principalCodexProfile) {
       // Kept next to the environment mutation as a defensive invariant even
@@ -758,10 +584,9 @@ export function projectRunEnvironment(input: {
         "the requester's Codex profile disappeared while constructing the run"
       );
     }
-    const rows = [payers.base, payers.l1, payers.l2, payers.l3];
     if (
-      rows.some(
-        (row) => row.provider === 'codex' && row.payer === 'host-subscription'
+      [payers.l1, payers.l2, payers.l3].some(
+        (row) => row.provider === 'codex-cli' && row.payer === 'host-subscription'
       )
     ) {
       throw new ProjectRunConfigurationError(
@@ -782,19 +607,6 @@ export function projectRunEnvironment(input: {
     // in the env would only mislead about where the OTHER tiers went.
     delete environment['ANTHROPIC_BASE_URL'];
   }
-  // WHICH PROVIDERS THIS RUN CAN ACTUALLY REACH. Read from the RESOLVED pins
-  // rather than from the preferences, because a pin whose credential nobody
-  // brought already fell through the loop above — forwarding a key for it
-  // would arm a provider no tier can name. The base transport is always
-  // referenced on the credentialled branch: an unpinned tier routes there.
-  const referencedProviders = new Set<string>();
-  if (!subscriptionRequested) referencedProviders.add(baseProvider);
-  for (const tier of [1, 2, 3] as const) {
-    const resolved = environment[`ATOMA_MODEL_L${tier}`];
-    const providerId = resolved ? selectorProvider(resolved) : null;
-    if (providerId) referencedProviders.add(providerId);
-  }
-  injectOrgProviderKeys(environment, usableOrgKeys, referencedProviders);
   Object.assign(environment, {
     ATOMA_REQUIRE_ISOLATION: '1',
     ATOMA_CONTAINER: '1',
@@ -833,12 +645,11 @@ export function projectRunEnvironment(input: {
     // readable to the next. Partitioning it is its own change.
     ATOMA_PREFILTER_CACHE: '0',
     // THE SECOND GATE'S INPUT. A tenant run's child re-checks, at launch,
-    // that every machine-bound transport it can see was authorised HERE —
-    // `assertTransportHonoursCredentials` in `src/run/providers.ts`, which
-    // never fired on a project run before because nothing supplied it a
-    // credential snapshot. `ATOMA_TENANT_RUN` is what arms it; the tier list
-    // is what keeps it from refusing the very pins this coordinator just
-    // authorised (design 2026-08-28, Q8).
+    // that every machine-bound selector it can see was authorised HERE —
+    // `assertTransportHonoursCredentials` in `src/run/providers.ts`.
+    // `ATOMA_TENANT_RUN` is what arms it; the tier list is what keeps it from
+    // refusing the very pins this coordinator just authorised (design
+    // 2026-08-28, Q8).
     ATOMA_TENANT_RUN: '1',
   });
   const authorisedTiers = [
@@ -1307,7 +1118,7 @@ export class ProjectRunCoordinator {
       // FIRED FROM THE LEDGER, not from the host env. A run may now spend the
       // subscription on some tiers and a key on others, so "did this run touch
       // a CLI login" is a question about what was RESOLVED — the old
-      // `isSubscriptionTransport(hostEnv.ATOMA_LLM)` test could only see the
+      // whole-deployment `ATOMA_LLM` test could only see the
       // whole-deployment regime and would stay silent on every mixed run.
       if (ledgerTouchesAnySubscription(built.payers)) {
         this.onSubscriptionTransport?.({
@@ -1315,7 +1126,7 @@ export class ProjectRunCoordinator {
           projectId: input.projectId,
           projectRunId: run.projectRunId,
           principalId: input.principalId,
-          transport: (this.hostEnv['ATOMA_LLM'] ?? '').trim() || 'claude-cli',
+          transport: subscriptionTransports(built.payers).join(','),
           payers: built.payers,
         });
       }

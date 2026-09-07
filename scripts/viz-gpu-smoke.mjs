@@ -1917,11 +1917,11 @@ try {
         '/api/account/models': {
           pins: { l1: null, l2: null, l3: null },
           defaults: {
-            l1: 'claude-haiku-4-5-20251001',
-            l2: 'claude-sonnet-5',
-            l3: 'claude-opus-5',
+            l1: 'api:anthropic:claude-haiku-4-5-20251001',
+            l2: 'api:anthropic:claude-sonnet-5',
+            l3: 'api:anthropic:claude-opus-5',
           },
-          choices: ['claude-haiku-4-5-20251001', 'claude-sonnet-5', 'claude-opus-5'],
+          catalog: [],
         },
         '/api/projects': [
           {
@@ -1982,6 +1982,7 @@ try {
             {
               id: 'anthropic',
               label: 'Anthropic',
+              selectorPrefix: 'api:anthropic',
               credentialEnvVar: 'ANTHROPIC_API_KEY',
               suggestive: false,
               models: [
@@ -1991,11 +1992,10 @@ try {
               ],
             },
           ],
-          choices: ['claude-haiku-4-5-20251001', 'claude-sonnet-5', 'claude-opus-5'],
           operatorDefaults: {
-            l1: 'claude-haiku-4-5-20251001',
-            l2: 'claude-sonnet-5',
-            l3: 'claude-opus-5',
+            l1: 'api:anthropic:claude-haiku-4-5-20251001',
+            l2: 'api:anthropic:claude-sonnet-5',
+            l3: 'api:anthropic:claude-opus-5',
           },
           ollamaAvailable: false,
         },

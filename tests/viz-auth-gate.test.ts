@@ -861,7 +861,7 @@ describe('viz auth gate (process level)', () => {
     expect(defaults.defaults['l3']).toContain('opus');
     expect(defaults).not.toHaveProperty('choices');
     const anthropic = defaults.catalog.find((entry) => entry.id === 'anthropic')!;
-    const catalogueChoice = anthropic.models[1]!.id;
+    const catalogueChoice = `api:anthropic:${anthropic.models[1]!.id}`;
     // This viewer is not a platform admin, so the operator's own login is not
     // named to them at all — an offer a viewer cannot use is a payer they
     // should never see.
@@ -913,7 +913,7 @@ describe('viz auth gate (process level)', () => {
       body: JSON.stringify({
         pins: {
           l1: null,
-          l2: 'principal-chatgpt-subscription:gpt-5.6-terra',
+          l2: 'own:openai:gpt-5.6-terra',
           l3: null,
         },
       }),
@@ -923,14 +923,14 @@ describe('viz auth gate (process level)', () => {
     const refusedSubscription = await fetch(`${base}/api/account/models`, {
       method: 'PUT',
       headers: { ...cookie, 'content-type': 'application/json', origin: base },
-      body: JSON.stringify({ pins: { l1: 'host-subscription:opus', l2: null, l3: null } }),
+      body: JSON.stringify({ pins: { l1: 'sub:anthropic:opus', l2: null, l3: null } }),
     });
     expect(refusedSubscription.status).toBe(403);
 
     const refusedPin = await fetch(`${base}/api/account/models`, {
       method: 'PUT',
       headers: { ...cookie, 'content-type': 'application/json', origin: base },
-      body: JSON.stringify({ pins: { l1: 'ollama:llama3', l2: null, l3: null } }),
+      body: JSON.stringify({ pins: { l1: 'api:ollama:llama3', l2: null, l3: null } }),
     });
     expect(refusedPin.status).toBe(400);
     const savedPin = await fetch(`${base}/api/account/models`, {
@@ -945,7 +945,7 @@ describe('viz auth gate (process level)', () => {
     const prefixedPin = await fetch(`${base}/api/account/models`, {
       method: 'PUT',
       headers: { ...cookie, 'content-type': 'application/json', origin: base },
-      body: JSON.stringify({ pins: { l1: 'anthropic:claude-sonnet-5', l2: null, l3: null } }),
+      body: JSON.stringify({ pins: { l1: 'api:anthropic:claude-sonnet-5', l2: null, l3: null } }),
     });
     expect(prefixedPin.status).toBe(200);
 
@@ -962,7 +962,7 @@ describe('viz auth gate (process level)', () => {
     const savedOrg = await fetch(`${base}/api/org/models`, {
       method: 'PUT',
       headers: { ...cookie, 'content-type': 'application/json', origin: base },
-      body: JSON.stringify({ models: { l1: 'anthropic:claude-haiku-4-5', l2: null, l3: null } }),
+      body: JSON.stringify({ models: { l1: 'api:anthropic:claude-haiku-4-5', l2: null, l3: null } }),
     });
     expect(savedOrg.status).toBe(200);
     const zaiMaterial = `sk-test-${'z'.repeat(24)}`;
@@ -1481,7 +1481,7 @@ describe('viz auth gate (process level)', () => {
     const savedModels = await fetch(`${base}/api/org/models`, {
       method: 'PUT',
       headers: json,
-      body: JSON.stringify({ models: { l1: 'anthropic:claude-haiku-4-5', l2: null, l3: null } }),
+      body: JSON.stringify({ models: { l1: 'api:anthropic:claude-haiku-4-5', l2: null, l3: null } }),
     });
     expect(savedModels.status).toBe(403);
     const savedKey = await fetch(`${base}/api/org/provider-keys/zai`, {

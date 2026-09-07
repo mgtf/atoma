@@ -884,32 +884,35 @@ describe('auth store — per-tier model pins', () => {
     expect(store.modelPins(viewer.principalId)).toEqual({ l1: null, l2: null, l3: null });
 
     const saved = store.setModelPins(viewer.principalId, {
-      l1: 'claude-haiku-4-5-20251001',
-      l2: 'claude-sonnet-5',
+      l1: 'api:anthropic:claude-haiku-4-5-20251001',
+      l2: 'api:anthropic:claude-sonnet-5',
       l3: null,
     });
     expect(saved).toEqual({
-      l1: 'claude-haiku-4-5-20251001',
-      l2: 'claude-sonnet-5',
+      l1: 'api:anthropic:claude-haiku-4-5-20251001',
+      l2: 'api:anthropic:claude-sonnet-5',
       l3: null,
     });
     expect(store.modelPins(viewer.principalId)).toEqual(saved);
 
     // An upsert, not an insert: a second write replaces the row.
-    store.setModelPins(viewer.principalId, { l1: null, l2: null, l3: 'claude-opus-5' });
+    store.setModelPins(viewer.principalId, { l1: null, l2: null, l3: 'api:anthropic:claude-opus-5' });
     expect(store.modelPins(viewer.principalId)).toEqual({
       l1: null,
       l2: null,
-      l3: 'claude-opus-5',
+      l3: 'api:anthropic:claude-opus-5',
     });
   });
 
-  it('refuses anything outside the closed choice list, including a selector', () => {
+  it('refuses anything outside the catalogue, including the pre-selector spellings', () => {
     const store = freshStore();
     const { viewer } = admit(store, identity('bad-pins'), 'org:owner');
     for (const pins of [
       { l1: 'gpt-5', l2: null, l3: null },
-      { l1: 'ollama:llama3', l2: null, l3: null },
+      { l1: 'claude-haiku-4-5-20251001', l2: null, l3: null },
+      { l1: 'anthropic:claude-sonnet-5', l2: null, l3: null },
+      { l1: 'api:ollama:llama3', l2: null, l3: null },
+      { l1: 'api:anthropic:not-a-model', l2: null, l3: null },
       { l1: '', l2: null, l3: null },
       { l2: null, l3: null },
     ]) {
@@ -921,11 +924,11 @@ describe('auth store — per-tier model pins', () => {
   it('degrades a retired model id to the operator default instead of throwing', () => {
     const store = freshStore();
     const { viewer } = admit(store, identity('retired'), 'org:owner');
-    store.setModelPins(viewer.principalId, { l1: 'claude-sonnet-5', l2: null, l3: null });
+    store.setModelPins(viewer.principalId, { l1: 'api:anthropic:claude-sonnet-5', l2: null, l3: null });
     // A model that existed when the pin was written and no longer does.
     rawDb(store)
       .prepare('UPDATE auth_principal_model_pins SET model_l1 = ? WHERE principal_id = ?')
-      .run('claude-sonnet-4', viewer.principalId);
+      .run('api:anthropic:claude-sonnet-4', viewer.principalId);
     expect(store.modelPins(viewer.principalId)).toEqual({ l1: null, l2: null, l3: null });
   });
 
@@ -934,15 +937,15 @@ describe('auth store — per-tier model pins', () => {
     const { viewer } = admit(store, identity('chatgpt-pins'), 'org:owner');
     expect(() =>
       store.setModelPins(viewer.principalId, {
-        l1: 'chatgpt-subscription:gpt-5.4-mini',
+        l1: 'sub:openai:gpt-5.4-mini',
         l2: null,
         l3: null,
       })
     ).toThrow();
     const pins = store.setModelPins(viewer.principalId, {
       l1: null,
-      l2: 'chatgpt-subscription:gpt-5.6-terra',
-      l3: 'chatgpt-subscription:gpt-5.6-sol',
+      l2: 'sub:openai:gpt-5.6-terra',
+      l3: 'sub:openai:gpt-5.6-sol',
     });
     expect(store.modelPins(viewer.principalId)).toEqual(pins);
   });

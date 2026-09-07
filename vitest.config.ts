@@ -54,6 +54,7 @@ export class DiscoveryReporter implements Reporter {
 export default defineConfig({
   test: {
     include: ['tests/**/*.test.ts'],
+    setupFiles: ['tests/setup-tier-pins.ts'],
     reporters: ['default', new DiscoveryReporter()],
     // Isolate the lifecycle ledger: without this, every registry-touching
     // test appends events to the developer's real ./atoma-ledger.jsonl

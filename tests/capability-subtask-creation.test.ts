@@ -103,7 +103,7 @@ describe('L3Atom.createSubtaskL2 — capability-first description', () => {
       params: {},
       createdBy: 'test',
     });
-    const l3 = await L3Atom.fromType(l3Type, reg, undefined);
+    const l3 = L3Atom.fromType(l3Type, reg, undefined);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const created = (l3 as any).createSubtaskL2(
       { description: 'minesweeper 10x10 with flag icons', preferredChild: undefined },
@@ -136,7 +136,7 @@ describe('L3Atom.createSubtaskL2 — capability-first description', () => {
       params: {},
       createdBy: 'test',
     });
-    const l3 = await L3Atom.fromType(l3Type, reg, undefined);
+    const l3 = L3Atom.fromType(l3Type, reg, undefined);
     const ctx = { logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} } };
     const strategy = {
       action: 'create',
@@ -184,7 +184,7 @@ describe('L3Atom.createSubtaskL2 — capability-first description', () => {
       params: {},
       createdBy: 'test',
     });
-    const l3 = await L3Atom.fromType(l3Type, reg, undefined);
+    const l3 = L3Atom.fromType(l3Type, reg, undefined);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const createdL2 = (l3 as any).createSubtaskL2(
       { description: 'anything', preferredChild: undefined },

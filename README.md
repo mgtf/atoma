@@ -141,12 +141,17 @@ npm ci
 npm run release:check             # checks + audit + build + compiled MCP/auth/doctor smokes
 npm run doctor                    # quota-free Node, provider and optional Docker preflight
 
-# one real task, pick your auth:
-ANTHROPIC_API_KEY=... npm run run:build -- "a Node CLI that converts CSV to JSON"
-ATOMA_LLM=claude-cli  npm run run:build -- "…"    # Claude subscription, no API key
-env -u OPENAI_API_KEY ZAI_API_KEY=... ATOMA_LLM=zai \
-  ATOMA_MODEL_L1=zai:glm-4.5-air \
-  ATOMA_MODEL_L2=codex:gpt-5.4-mini ATOMA_MODEL_L3=codex:gpt-5.6-sol \
+# one real task. Every tier names its model as <api|sub>:<vendor>:<model>;
+# `api` bills a key, `sub` spends this machine's Claude Code or Codex login.
+ANTHROPIC_API_KEY=... \
+  ATOMA_MODEL_L1=api:anthropic:claude-haiku-4-5-20251001 \
+  ATOMA_MODEL_L2=api:anthropic:claude-sonnet-5 ATOMA_MODEL_L3=api:anthropic:claude-opus-5 \
+  npm run run:build -- "a Node CLI that converts CSV to JSON"
+ATOMA_MODEL_L1=sub:anthropic:haiku ATOMA_MODEL_L2=sub:anthropic:sonnet \
+  ATOMA_MODEL_L3=sub:anthropic:opus \
+  npm run run:build -- "…"                      # Claude subscription, no API key
+ZAI_API_KEY=... ATOMA_MODEL_L1=api:zai:glm-4.5-air \
+  ATOMA_MODEL_L2=sub:openai:gpt-5.4-mini ATOMA_MODEL_L3=sub:openai:gpt-5.6-sol \
   npm run run:build -- "…"                      # ChatGPT supervisors + Z.ai executor
 
 npm run viz                       # HMR UI :5173; API :4111 redirects its root there
@@ -212,8 +217,9 @@ registry and optional GitHub App snapshot without contacting GitHub.
 Settings separates provider API keys, per-tier models, personal subscriptions and
 MCP access. Personal Codex login binds a private inference profile to the requesting
 principal; it is distinct from signing into the console. Personal Claude connection
-is currently unavailable pending provider approval. Operator-configured host
-subscriptions and the local `claude-cli` runner are separate paths.
+is currently unavailable pending provider approval. Every choice is one selector,
+`<api|sub|own>:<vendor>:<model>`: `api` bills a key, `sub` the host's own login,
+`own` the member's.
 
 The default visualizer is a full-GPU React 19 client: one PixiJS context
 renders the component system and ambient field through WebGPU with a

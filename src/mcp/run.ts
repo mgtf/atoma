@@ -200,14 +200,9 @@ export function buildRunArgs(input: StartRunInput): string[] {
 /** Environment overrides owned by the MCP launch surface. */
 export function buildRunEnvOverrides(
   input: StartRunInput,
-  hostEnv: NodeJS.ProcessEnv = process.env
+  _hostEnv: NodeJS.ProcessEnv = process.env
 ): Record<string, string> {
   return {
-    // The provider must be DECIDED, never inherited. The Claude Code
-    // environment carries an ANTHROPIC_API_KEY that `makeAnthropicClient`
-    // prefers FIRST (documented as the #1 auth trap), and in this project it
-    // is dead. An explicit host setting still wins.
-    ATOMA_LLM: hostEnv['ATOMA_LLM'] ?? 'claude-cli',
     // Promotion is now default-off on unseeded/from-scratch runs. MCP cannot
     // expose --seed, so `true` must become the same explicit opt-in as an
     // operator launching with ATOMA_SKILL_PROMOTE=1. `false` remains the CLI

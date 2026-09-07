@@ -7,7 +7,7 @@ import {
   cliThinkingFor,
   subscriptionTransportEnv,
 } from '../src/core/llmClaudeCli.js';
-import { PIN_HAIKU, PIN_SONNET, FALLBACK_OPUS } from '../src/core/models.js';
+import { PIN_HAIKU, PIN_SONNET, FALLBACK_OPUS } from './tier-pins.js';
 import type { LlmCompletionRequest } from '../src/core/types.js';
 
 describe('resolveCliModel — tier pins → Claude Code aliases', () => {

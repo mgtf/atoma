@@ -24,7 +24,7 @@ import {
   resolveSecretEncryption,
   SECRET_ENCRYPTION_ENV,
 } from '../auth/secretEncryption.js';
-import { isSubscriptionTransport, ProjectRunCoordinator } from '../projects/coordinator.js';
+import { hostSubscriptionPinsOf, ProjectRunCoordinator } from '../projects/coordinator.js';
 import { PreviewStore } from '../preview/store.js';
 import { recordDeliveredPreview } from '../preview/service.js';
 import { GitHubPublisher } from '../projects/publisher.js';
@@ -61,11 +61,11 @@ why not run:build:
   account that owns it. The two corpora are never mixed.
 
 subscription transport:
-  A project run normally requires ATOMA_LLM=anthropic plus a per-run
-  credential, because a machine-bound transport (claude-cli) spends the HOST
-  login session and cannot honour one. That is refused for a tenant and
-  allowed for a PLATFORM ADMIN, whose own instance's subscription it is. The
-  permission comes from the platform-admin flag, which only \`auth
+  A project run normally pins every tier to an api:<vendor>:<model> selector
+  with a per-run credential, because a sub: selector (claude-cli, codex)
+  spends the HOST login session and cannot honour one. That is refused for a
+  tenant and allowed for a PLATFORM ADMIN, whose own instance's subscription
+  it is. The permission comes from the platform-admin flag, which only \`auth
   grant-admin\` can mint, and every such run is journaled as
   \`run.host_subscription\`.
 
@@ -405,12 +405,12 @@ async function main(): Promise<void> {
   }
   const target = resolveProject(projects, auth, principal.principalId, projectRef);
   const admin = auth.isPlatformAdmin(principal.principalId);
-  const transport = process.env['ATOMA_LLM'];
-  if (isSubscriptionTransport(transport) && !admin) {
+  const hostSubscriptionPins = hostSubscriptionPinsOf(process.env);
+  if (hostSubscriptionPins.length > 0 && !admin) {
     fail(
-      `ATOMA_LLM=${String(transport)} spends this machine's own login session, and ` +
-        `${safeTerminal(principal.displayName)} is not a platform admin. Either set ` +
-        'ATOMA_LLM=anthropic with a per-run credential, or grant the flag: ' +
+      `${hostSubscriptionPins.join(', ')} spends this machine's own login session, and ` +
+        `${safeTerminal(principal.displayName)} is not a platform admin. Either pin the tier to ` +
+        'an api: selector with a per-run credential, or grant the flag: ' +
         'npm run auth -- grant-admin --principal <id-or-email>'
     );
   }

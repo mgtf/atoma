@@ -103,12 +103,10 @@ describe('analyse — the pre-registered metric', () => {
     // apart from the env that produced them.
     const report = formatAnalysis(analyse([0.5], [0.3, 0.25]), undefined, {
       controlModel: 'claude-sonnet-5',
-      provider: 'claude-cli',
       treatmentTiers: 'L1=claude-haiku-4-5 L2=claude-sonnet-5 L3=claude-opus-5',
     });
     expect(report).toContain('control  : one claude-sonnet-5 agent');
     expect(report).toContain('L3=claude-opus-5');
-    expect(report).toContain('provider : claude-cli');
   });
 
   it('omits the arms block entirely when no context is supplied', () => {

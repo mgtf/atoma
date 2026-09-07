@@ -137,18 +137,21 @@ admin will also use the machine's host Codex profile:
 
 ```dotenv
 PATH=/home/atoma/state/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ATOMA_LLM=zai
 ZAI_API_KEY=zai-...
 ZAI_BASE_URL=https://api.z.ai/api/anthropic
-ATOMA_MODEL_L1=zai:glm-4.5-air
+ATOMA_MODEL_L1=api:zai:glm-4.5-air
+ATOMA_MODEL_L2=api:zai:glm-4.5
+ATOMA_MODEL_L3=api:zai:glm-4.5
 ATOMA_HOST_SUBSCRIPTION_ORG=<organisation-id>
 ```
 
-The organisation id is shown in the Settings organisation card. Do not set
-`ATOMA_MODEL_L2` or `ATOMA_MODEL_L3` to `codex:` in this host file: hosted
-project runs accept Codex only from a guarded account choice. That choice is
-resolved again for every run as either the platform admin's host exception or
-the requesting member's exact personal profile.
+All three tiers are required on the host: they are the third level of the
+account > organisation > host chain, and a tier no level resolves refuses the
+run. The organisation id is shown in the Settings organisation card. Do not
+set any tier to `sub:` in this host file: hosted project runs accept a
+subscription only from a guarded account choice, resolved again for every run
+as either the platform admin's host login or the requesting member's exact
+personal profile.
 
 Install Codex under the service account's real home. This binary serves both
 the operator-only host profile and each member's isolated personal profile:

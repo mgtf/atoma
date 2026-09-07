@@ -8,11 +8,10 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 import {
   chatGptSubscriptionModel,
   hostSubscriptionAlias,
-  hostSubscriptionRoute,
   principalChatGptSubscriptionModel,
   selectionsMixCodexOwners,
-  principalSubscriptionRoute,
 } from '../src/contracts/runPayers.js';
+import { transportOf, parseModelSelector } from '../src/contracts/modelSelector.js';
 import {
   decryptBoundSecret,
   encryptBoundSecret,
@@ -122,38 +121,33 @@ describe('operator encryption-key parsing', () => {
   });
 });
 
-describe('the host subscription is a neighbour, not a catalogue member', () => {
+describe('the subscriptions are neighbours, not catalogue members', () => {
   // Design 2026-08-28, D4. Three mechanisms read LLM_PROVIDER_CATALOG as
-  // "things that may hold a key", and a fourth entry would break each
+  // "things that may hold a key", and a subscription entry would break each
   // differently — `orgProviderIsReady` would report it always-ready to every
   // viewer, `resolveOrgProviderKeys` would need a widened ProviderKeyProvider
   // mirrored by a SQL CHECK, and `injectOrgProviderKeys` iterates the same
   // array.
   it('stays out of the catalogue that decides what may hold a key', () => {
-    // The TYPE is the first proof: `LlmProviderEntry['id']` is a closed union
-    // of the three credential-honouring providers, so comparing an entry's id
-    // to the family's is a compile error, not a test. This guards the RUNTIME
-    // array against a future widening of that union — the moment someone adds
-    // a fourth id, `orgProviderIsReady` starts reporting it always-ready to
-    // every viewer and this fails.
     const ids: string[] = [...llmProviderIds()];
-    expect(ids).toEqual(['anthropic', 'zai', 'ollama']);
-    expect(ids).not.toContain(String(HOST_SUBSCRIPTION_FAMILY.id));
-    expect(LLM_PROVIDER_CATALOG.map((entry) => String(entry.id))).not.toContain(
-      String(HOST_SUBSCRIPTION_FAMILY.id)
-    );
+    expect(ids).toEqual(['anthropic', 'openai', 'zai', 'ollama']);
+    for (const family of [HOST_SUBSCRIPTION_FAMILY, CHATGPT_SUBSCRIPTION_FAMILY, PRINCIPAL_CHATGPT_SUBSCRIPTION_FAMILY]) {
+      expect(ids).not.toContain(String(family.id));
+      expect(LLM_PROVIDER_CATALOG.map((entry) => entry.selectorPrefix)).not.toContain(family.selectorPrefix);
+    }
   });
 
   it('is storable at the ACCOUNT level and nowhere else', () => {
-    // The org space is unchanged: a payer-bearing default inherited by every
+    // The org space is `api:` only: a payer-bearing default inherited by every
     // member is the thing this design refuses.
-    expect(isValidTierModelSelection('host-subscription:opus')).toBe(false);
-    expect(isAccountTierSelection('host-subscription:opus')).toBe(true);
-    expect(isAccountTierSelection('chatgpt-subscription:gpt-5.6-sol', 2)).toBe(true);
-    expect(isAccountTierSelection('chatgpt-subscription:gpt-5.6-sol', 1)).toBe(false);
-    // And it is not `claude-cli:` — the string two independent guards refuse.
+    expect(isValidTierModelSelection('sub:anthropic:opus')).toBe(false);
+    expect(isAccountTierSelection('sub:anthropic:opus')).toBe(true);
+    expect(isAccountTierSelection('sub:openai:gpt-5.6-sol', 2)).toBe(true);
+    expect(isAccountTierSelection('sub:openai:gpt-5.6-sol', 1)).toBe(false);
+    // The pre-2026-09-07 spellings are not selectors at all.
     expect(isAccountTierSelection('claude-cli:opus')).toBe(false);
-    expect(isAccountTierSelection('anthropic:claude-opus-5')).toBe(true);
+    expect(isAccountTierSelection('host-subscription:opus')).toBe(false);
+    expect(isAccountTierSelection('api:anthropic:claude-opus-5')).toBe(true);
   });
 
   it('names a family, never a dated generation', () => {
@@ -164,27 +158,24 @@ describe('the host subscription is a neighbour, not a catalogue member', () => {
       'sonnet',
       'haiku',
     ]);
-    expect(tierModelSelectionLabel('host-subscription:opus')).toBe(
+    expect(tierModelSelectionLabel('sub:anthropic:opus')).toBe(
       'Claude (host subscription) — Opus'
     );
-    expect(hostSubscriptionAlias('host-subscription:sonnet')).toBe('sonnet');
-    expect(hostSubscriptionAlias('host-subscription:gpt')).toBeNull();
-    expect(hostSubscriptionAlias('anthropic:claude-opus-5')).toBeNull();
+    expect(hostSubscriptionAlias('sub:anthropic:sonnet')).toBe('sonnet');
+    expect(hostSubscriptionAlias('sub:anthropic:gpt')).toBeNull();
+    expect(hostSubscriptionAlias('api:anthropic:claude-opus-5')).toBeNull();
   });
 
   it('offers ChatGPT as a distinct supervisor-only subscription family', () => {
     expect(HOST_SUBSCRIPTION_FAMILIES.map((family) => family.id)).toEqual([
-      'host-subscription',
-      'chatgpt-subscription',
+      'sub:anthropic',
+      'sub:openai',
     ]);
-    expect(CHATGPT_SUBSCRIPTION_FAMILY.models.every((model) => model.tiers.includes(2))).toBe(true);
-    expect(CHATGPT_SUBSCRIPTION_FAMILY.models.every((model) => model.tiers.includes(3))).toBe(true);
-    expect(chatGptSubscriptionModel('chatgpt-subscription:gpt-5.6-sol')).toBe('gpt-5.6-sol');
-    expect(hostSubscriptionRoute('chatgpt-subscription:gpt-5.6-terra')).toEqual({
-      provider: 'codex',
-      model: 'gpt-5.6-terra',
-    });
-    expect(tierModelSelectionLabel('chatgpt-subscription:gpt-5.6-sol')).toBe(
+    expect(CHATGPT_SUBSCRIPTION_FAMILY.models.every((model) => model.tiers?.includes(2))).toBe(true);
+    expect(CHATGPT_SUBSCRIPTION_FAMILY.models.every((model) => model.tiers?.includes(3))).toBe(true);
+    expect(chatGptSubscriptionModel('sub:openai:gpt-5.6-sol')).toBe('gpt-5.6-sol');
+    expect(transportOf(parseModelSelector('sub:openai:gpt-5.6-terra'))).toBe('codex-cli');
+    expect(tierModelSelectionLabel('sub:openai:gpt-5.6-sol')).toBe(
       'ChatGPT (host subscription) — GPT-5.6 Sol'
     );
     const family = CHATGPT_SUBSCRIPTION_FAMILY as unknown as VizLlmCatalogEntry;
@@ -206,60 +197,51 @@ describe('the host subscription is a neighbour, not a catalogue member', () => {
 
   it("keeps a requester's ChatGPT subscription distinct from the host payer", () => {
     expect(PRINCIPAL_CHATGPT_SUBSCRIPTION_FAMILY.models.every((model) =>
-      model.tiers.includes(2)
+      model.tiers?.includes(2)
     )).toBe(true);
     expect(PRINCIPAL_CHATGPT_SUBSCRIPTION_FAMILY.models.every((model) =>
-      model.tiers.includes(3)
+      model.tiers?.includes(3)
     )).toBe(true);
-    expect(
-      isAccountTierSelection('principal-chatgpt-subscription:gpt-5.6-sol', 2)
-    ).toBe(true);
-    expect(
-      isAccountTierSelection('principal-chatgpt-subscription:gpt-5.6-sol', 1)
-    ).toBe(false);
-    expect(
-      principalChatGptSubscriptionModel(
-        'principal-chatgpt-subscription:gpt-5.6-terra'
-      )
-    ).toBe('gpt-5.6-terra');
-    expect(
-      principalSubscriptionRoute('principal-chatgpt-subscription:gpt-5.6-sol')
-    ).toEqual({ provider: 'codex', model: 'gpt-5.6-sol' });
-    expect(
-      tierModelSelectionLabel('principal-chatgpt-subscription:gpt-5.6-sol')
-    ).toBe('ChatGPT (your subscription) — GPT-5.6 Sol');
-    expect(selectionsMixCodexOwners([
-      'chatgpt-subscription:gpt-5.6-sol',
-      'principal-chatgpt-subscription:gpt-5.6-terra',
-    ])).toBe(true);
-    expect(selectionsMixCodexOwners([
-      'host-subscription:sonnet',
-      'principal-chatgpt-subscription:gpt-5.6-terra',
-    ])).toBe(false);
+    expect(isAccountTierSelection('own:openai:gpt-5.6-sol', 2)).toBe(true);
+    expect(isAccountTierSelection('own:openai:gpt-5.6-sol', 1)).toBe(false);
+    expect(principalChatGptSubscriptionModel('own:openai:gpt-5.6-terra')).toBe('gpt-5.6-terra');
+    expect(transportOf(parseModelSelector('own:openai:gpt-5.6-sol'))).toBe('codex-cli');
+    expect(tierModelSelectionLabel('own:openai:gpt-5.6-sol')).toBe(
+      'ChatGPT (your subscription) — GPT-5.6 Sol'
+    );
+    expect(selectionsMixCodexOwners(['sub:openai:gpt-5.6-sol', 'own:openai:gpt-5.6-terra'])).toBe(true);
+    expect(selectionsMixCodexOwners(['sub:anthropic:sonnet', 'own:openai:gpt-5.6-terra'])).toBe(false);
   });
 });
 
 describe('provider catalogue', () => {
-  it('exposes exactly the credential-honouring providers', () => {
-    expect(llmProviderIds()).toEqual(['anthropic', 'zai', 'ollama']);
+  it('exposes exactly the API vendors, each with the selector prefix the picker prepends', () => {
+    expect(llmProviderIds()).toEqual(['anthropic', 'openai', 'zai', 'ollama']);
     for (const provider of LLM_PROVIDER_CATALOG) {
       expect(provider.models.length).toBeGreaterThan(0);
-      if (provider.suggestive) continue;
-      // Non-suggestive providers list their built-in pins somewhere.
+      expect(provider.selectorPrefix).toBe(`api:${provider.id}`);
     }
     const anthropic = LLM_PROVIDER_CATALOG.find((provider) => provider.id === 'anthropic')!;
     expect(anthropic.models.map((model) => model.id)).toContain('claude-opus-5');
+    // OpenAI by API hosts the tool loop, so its models carry no tier restriction.
+    const openai = LLM_PROVIDER_CATALOG.find((provider) => provider.id === 'openai')!;
+    expect(openai.credentialEnvVar).toBe('OPENAI_API_KEY');
+    expect(openai.models.every((model) => model.tiers === undefined)).toBe(true);
   });
 
-  it('validates bare historical ids and full selectors symmetrically', () => {
-    expect(isValidTierModelSelection('claude-haiku-4-5-20251001')).toBe(true);
-    expect(isValidTierModelSelection('anthropic:claude-sonnet-5')).toBe(true);
-    expect(isValidTierModelSelection('ollama:qwen3:8b')).toBe(true);
+  it('validates full api: selectors and nothing else', () => {
+    expect(isValidTierModelSelection('api:anthropic:claude-haiku-4-5-20251001')).toBe(true);
+    expect(isValidTierModelSelection('api:anthropic:claude-sonnet-5')).toBe(true);
+    expect(isValidTierModelSelection('api:openai:gpt-5.4-mini')).toBe(true);
+    expect(isValidTierModelSelection('api:ollama:qwen3:8b')).toBe(true);
+    // Bare ids and the old `vendor:model` spelling are not selectors.
+    expect(isValidTierModelSelection('claude-haiku-4-5-20251001')).toBe(false);
+    expect(isValidTierModelSelection('anthropic:claude-sonnet-5')).toBe(false);
     expect(isValidTierModelSelection('claude-cli:whatever')).toBe(false);
     expect(isValidTierModelSelection('codex:gpt-5')).toBe(false);
-    expect(isValidTierModelSelection('anthropic:not-a-model')).toBe(false);
+    expect(isValidTierModelSelection('api:anthropic:not-a-model')).toBe(false);
     expect(isValidTierModelSelection('totally-unknown-model')).toBe(false);
-    expect(tierModelSelectionLabel('zai:glm-4.5-air')).toContain('GLM');
+    expect(tierModelSelectionLabel('api:zai:glm-4.5-air')).toContain('GLM');
   });
 
   it('unlocks billed providers only with a stored key, and Ollama always', () => {

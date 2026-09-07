@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState, type KeyboardEvent, type ReactNode } from 'react';
 import {
+  CHATGPT_SUBSCRIPTION_FAMILY,
+  HOST_SUBSCRIPTION_FAMILY,
   orgHasBilledProviderKey,
   orgProviderIsReady,
   PRINCIPAL_CHATGPT_SUBSCRIPTION_FAMILY,
@@ -8,12 +10,15 @@ import {
 import { formatDate, formatDateTime } from '../client/date-format.js';
 import { api } from '../client/data-api.js';
 import {
-  CHATGPT_SUBSCRIPTION_PREFIX,
-  HOST_SUBSCRIPTION_PREFIX,
-  PRINCIPAL_CHATGPT_SUBSCRIPTION_PREFIX,
   chatGptSubscriptionModel,
   principalChatGptSubscriptionModel,
 } from '../../contracts/runPayers.js';
+
+// The selector prefixes of the three subscription families, as the catalogue
+// states them — the form never spells a selector by hand.
+const HOST_CLAUDE_ID = HOST_SUBSCRIPTION_FAMILY.id;
+const HOST_CHATGPT_ID = CHATGPT_SUBSCRIPTION_FAMILY.id;
+const PERSONAL_CHATGPT_ID = PRINCIPAL_CHATGPT_SUBSCRIPTION_FAMILY.id;
 import type {
   VizAccountModels,
   VizAccountSubscriptions,
@@ -43,8 +48,8 @@ export type SettingsTab = (typeof SETTINGS_TABS)[number];
  *
  * PLATFORM ADMINS ARE THE EXCEPTION, AND THE REASON WAS WRONG UNTIL
  * 2026-08-28. The unlock was justified by "their runs use the host CLI
- * subscription", which is false on any deployment whose `ATOMA_LLM` asks for
- * anthropic: there, an admin's unlocked pick of a billed model resolves
+ * subscription", which is false on any deployment whose tiers are pinned to an
+ * `api:` selector: there, an admin's unlocked pick of a billed model resolves
  * against the HOST's own API key and bills the operator's account, under a
  * comment claiming the subscription paid. The unlock now follows DECLARED
  * FACTS — a stored billed key, or an offered host subscription — and the
@@ -212,7 +217,7 @@ export function OrgModelsForm({
     account.personalSubscriptions?.codex === true && personalSubscriptionState === 'connected';
   const canPickAccountModels = canPickModels || personalSubscriptionUsable;
   const retainPersonalCodexFamily = Object.values(account.pins).some((selection) =>
-    selection?.startsWith(`${PRINCIPAL_CHATGPT_SUBSCRIPTION_PREFIX}:`)
+    selection?.startsWith(`${PERSONAL_CHATGPT_ID}:`)
   );
   const hostCodexSelected = Object.values(account.pins).some(
     (selection) => Boolean(selection && chatGptSubscriptionModel(selection))
@@ -730,8 +735,8 @@ export function providerIsUnlocked(
 ): boolean {
   if (provider.id === 'ollama') return opts.ollamaAvailable;
   if (
-    provider.id === HOST_SUBSCRIPTION_PREFIX ||
-    provider.id === CHATGPT_SUBSCRIPTION_PREFIX
+    provider.id === HOST_CLAUDE_ID ||
+    provider.id === HOST_CHATGPT_ID
   ) {
     return Boolean(
       opts.hostSubscriptions?.some(
@@ -739,7 +744,7 @@ export function providerIsUnlocked(
       )
     );
   }
-  if (provider.id === PRINCIPAL_CHATGPT_SUBSCRIPTION_PREFIX) {
+  if (provider.id === PERSONAL_CHATGPT_ID) {
     return (
       opts.personalSubscriptions?.codex === true && opts.personalSubscriptionState === 'connected'
     );
@@ -768,8 +773,8 @@ function catalogOptions(
     ...(opts.hostSubscriptions ?? []).map((subscription) => subscription.family),
     ...personalSubscriptionFamilies(opts),
   ].filter((provider) => {
-    if (provider.id === CHATGPT_SUBSCRIPTION_PREFIX && opts.personalCodexSelected) return false;
-    if (provider.id === PRINCIPAL_CHATGPT_SUBSCRIPTION_PREFIX && opts.hostCodexSelected) return false;
+    if (provider.id === HOST_CHATGPT_ID && opts.personalCodexSelected) return false;
+    if (provider.id === PERSONAL_CHATGPT_ID && opts.hostCodexSelected) return false;
     return true;
   });
   return families.map((provider) => {
@@ -778,8 +783,8 @@ function catalogOptions(
     // hiding it would make the operator's choice look like a client bug.
     const isOllama = provider.id === 'ollama';
     const isSubscription =
-      provider.id === HOST_SUBSCRIPTION_PREFIX || provider.id === CHATGPT_SUBSCRIPTION_PREFIX;
-    const isPersonalSubscription = provider.id === PRINCIPAL_CHATGPT_SUBSCRIPTION_PREFIX;
+      provider.id === HOST_CLAUDE_ID || provider.id === HOST_CHATGPT_ID;
+    const isPersonalSubscription = provider.id === PERSONAL_CHATGPT_ID;
     const unlocked = providerIsUnlocked(provider, configuredProviders, opts);
     const label = isOllama
       ? t(opts.ollamaAvailable ? 'settings.ollamaHosted' : 'settings.ollamaUnavailable', {
@@ -800,7 +805,7 @@ function catalogOptions(
     return (
       <optgroup key={provider.id} label={label}>
         {provider.models.filter((model) => !model.tiers || model.tiers.includes(tier)).map((model) => {
-          const value = `${provider.id}:${model.id}`;
+          const value = `${provider.selectorPrefix}:${model.id}`;
           return (
             <option
               key={model.id}

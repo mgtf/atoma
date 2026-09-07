@@ -29,7 +29,7 @@ export const MAX_TOOL_RESULT_CHARS = 20_000;
  * produce its final response as text now. Kept short so it doesn't steer the
  * content of the final answer beyond "stop calling tools".
  */
-const BUDGET_EXHAUSTED_HINT =
+export const BUDGET_EXHAUSTED_HINT =
   'TOOL BUDGET EXHAUSTED for this turn. You have no more tool access. ' +
   'Produce the final response now as plain text (or structured JSON if the task requires it). ' +
   'Do NOT attempt to call any more tools — tools are disabled for this message.';

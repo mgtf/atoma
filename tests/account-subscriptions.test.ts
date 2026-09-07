@@ -33,7 +33,7 @@ import type {
   CodexAppServerSpawn,
   CodexAppServerSpawnInput,
 } from '../src/auth/codexAppServer.js';
-import { principalChatGptSubscriptionSelection } from '../src/contracts/runPayers.js';
+import { principalChatGptSelection } from '../src/contracts/runPayers.js';
 
 interface FakeProcess {
   readonly child: ChildProcess;
@@ -245,7 +245,7 @@ describe('principal subscription receipts', () => {
       provider: 'codex',
       profileId: randomUUID(),
     });
-    const selection = principalChatGptSubscriptionSelection('gpt-5.6-sol');
+    const selection = principalChatGptSelection('gpt-5.6-sol');
     store.setModelPins(alice.principalId, { l1: null, l2: selection, l3: selection });
     db.exec(`
       CREATE TRIGGER refuse_pin_clear
@@ -631,7 +631,7 @@ describe.skipIf(process.platform === 'win32')('principal Codex profile service',
       'reauth_required',
       previous.profileId
     );
-    const selection = principalChatGptSubscriptionSelection('gpt-5.6-sol');
+    const selection = principalChatGptSelection('gpt-5.6-sol');
     store.setModelPins(alice.principalId, { l1: null, l2: selection, l3: null });
     await subscriptions.startCodexLogin(alice.principalId, alice.orgId);
 

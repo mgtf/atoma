@@ -3,7 +3,7 @@ import {
   prefilterStrategy,
   PREFILTER_SYSTEM_PROMPT,
 } from '../src/atoms/cost.js';
-import { PIN_HAIKU } from '../src/core/models.js';
+import { PIN_HAIKU } from './tier-pins.js';
 import { makeCtx, jsonText } from './helpers.js';
 
 describe('prefilterStrategy', () => {

@@ -4,7 +4,7 @@ import { openDb } from '../src/registry/db.js';
 import { L1Atom } from '../src/atoms/L1Atom.js';
 import { L2Atom } from '../src/atoms/L2Atom.js';
 import { L3Atom } from '../src/atoms/L3Atom.js';
-import { FALLBACK_OPUS } from '../src/core/models.js';
+import { FALLBACK_OPUS } from './tier-pins.js';
 import { superviseLoop, type SupervisionHooks } from '../src/core/supervisor.js';
 import { makeCtx, jsonText } from './helpers.js';
 import { makePlan } from './helpers/factories.js';

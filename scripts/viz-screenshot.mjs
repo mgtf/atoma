@@ -241,11 +241,10 @@ function gatedStubs() {
     '/api/account/models': {
       pins: { l1: null, l2: null, l3: null },
       defaults: {
-        l1: 'claude-haiku-4-5-20251001',
-        l2: 'claude-sonnet-5',
-        l3: 'claude-opus-5',
+        l1: 'api:anthropic:claude-haiku-4-5-20251001',
+        l2: 'api:anthropic:claude-sonnet-5',
+        l3: 'api:anthropic:claude-opus-5',
       },
-      choices: ['claude-haiku-4-5-20251001', 'claude-sonnet-5', 'claude-opus-5'],
       catalog: [],
     },
     // Settings body fetches this on mount. A 401 here reload-loops the page.
@@ -257,6 +256,7 @@ function gatedStubs() {
         {
           id: 'anthropic',
           label: 'Anthropic',
+          selectorPrefix: 'api:anthropic',
           credentialEnvVar: 'ANTHROPIC_API_KEY',
           suggestive: false,
           models: [
@@ -268,6 +268,7 @@ function gatedStubs() {
         {
           id: 'zai',
           label: 'Z.ai',
+          selectorPrefix: 'api:zai',
           credentialEnvVar: 'ZAI_API_KEY',
           suggestive: false,
           models: [{ id: 'glm-4.5', label: 'GLM-4.5' }],
@@ -275,16 +276,16 @@ function gatedStubs() {
         {
           id: 'ollama',
           label: 'Ollama',
+          selectorPrefix: 'api:ollama',
           credentialEnvVar: null,
           suggestive: true,
           models: [{ id: 'qwen3:8b', label: 'Qwen3 8B' }],
         },
       ],
-      choices: ['claude-haiku-4-5-20251001', 'claude-sonnet-5', 'claude-opus-5'],
       operatorDefaults: {
-        l1: 'claude-haiku-4-5-20251001',
-        l2: 'claude-sonnet-5',
-        l3: 'claude-opus-5',
+        l1: 'api:anthropic:claude-haiku-4-5-20251001',
+        l2: 'api:anthropic:claude-sonnet-5',
+        l3: 'api:anthropic:claude-opus-5',
       },
     },
     '/api/projects': [{

@@ -3,7 +3,7 @@ import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
 import { L2Atom, taskRequiresRealBrowser } from '../src/atoms/L2Atom.js';
 import { L3Atom, routeCrossBucketVerification } from '../src/atoms/L3Atom.js';
-import { FALLBACK_OPUS } from '../src/core/models.js';
+import { FALLBACK_OPUS } from './tier-pins.js';
 import { preservePlanLiteralContracts } from '../src/atoms/prompts.js';
 import { makeCtx, jsonText, jsonTextPair } from './helpers.js';
 import { makePlan } from './helpers/factories.js';

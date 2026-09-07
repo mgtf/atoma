@@ -1,168 +1,141 @@
 import { describe, it, expect } from 'vitest';
 import {
   assertTransportHonoursCredentials,
-  buildReferencedProviders,
-  makeBaseClient,
-  referencedProviderNames,
-  resolveBaseProviderKind,
+  buildTierClients,
+  describeTierSelectors,
+  makeTransportClient,
+  tierSelectors,
 } from '../src/run/providers.js';
 import { makeAnthropicClient } from '../src/run/auth.js';
 import { RunnerConfigError } from '../src/core/errors.js';
+import { ModelSelectorError } from '../src/contracts/modelSelector.js';
 import { AnthropicLlmClient } from '../src/core/llm.js';
 import { ClaudeCliLlmClient } from '../src/core/llmClaudeCli.js';
 import { CodexCliLlmClient } from '../src/core/llmCodexCli.js';
 import { OllamaLlmClient } from '../src/core/llmOllama.js';
-import type Anthropic from '@anthropic-ai/sdk';
+import { OpenAiLlmClient } from '../src/core/llmOpenAi.js';
+
+const KEYED = {
+  ATOMA_MODEL_L1: 'api:anthropic:claude-haiku-4-5-20251001',
+  ATOMA_MODEL_L2: 'api:anthropic:claude-sonnet-5',
+  ATOMA_MODEL_L3: 'api:anthropic:claude-opus-5',
+  ANTHROPIC_API_KEY: 'host-key',
+};
 
 describe('the child re-checks what the parent authorised', () => {
   // 2026-08-28, Q8. `assertTransportHonoursCredentials` had never fired on a
   // project run: `runTask` supplies no credential snapshot and `spawnRun`
   // replaces the child env wholesale, so the coordinator was the sole gate at
   // the boundary the payer decision crosses. It is armed for a tenant run now,
-  // and it has to permit exactly the pins the parent translated — a gate that
+  // and it has to permit exactly the tiers the parent authorised — a gate that
   // refuses the feature it protects is not a gate.
-  it('permits a claude-cli pin the parent named, and refuses one it did not', () => {
-    const authorised = {
-      ATOMA_MODEL_L2: 'claude-cli:sonnet',
-      ATOMA_SUBSCRIPTION_TIERS: 'l2',
-      ANTHROPIC_API_KEY: 'host-key',
-    };
-    expect(() => assertTransportHonoursCredentials('anthropic', authorised)).not.toThrow();
+  it('permits a sub: tier the parent named, and refuses one it did not', () => {
+    const authorised = { ...KEYED, ATOMA_MODEL_L2: 'sub:anthropic:sonnet', ATOMA_SUBSCRIPTION_TIERS: 'l2' };
+    expect(() => assertTransportHonoursCredentials(authorised)).not.toThrow();
     // Same pin, a tier the parent did not authorise.
     expect(() =>
-      assertTransportHonoursCredentials('anthropic', {
-        ...authorised,
-        ATOMA_MODEL_L3: 'claude-cli:opus',
-      })
-    ).toThrow(/cannot honour a supplied credential snapshot/);
+      assertTransportHonoursCredentials({ ...authorised, ATOMA_MODEL_L3: 'sub:anthropic:opus' })
+    ).toThrow(/ATOMA_MODEL_L3=sub:anthropic:opus cannot honour a supplied credential snapshot/);
     // No authorisation at all: the historical refusal, unchanged.
     expect(() =>
-      assertTransportHonoursCredentials('anthropic', { ATOMA_MODEL_L2: 'claude-cli:sonnet' })
+      assertTransportHonoursCredentials({ ...KEYED, ATOMA_MODEL_L2: 'sub:anthropic:sonnet' })
     ).toThrow(/cannot honour a supplied credential snapshot/);
-    // The parent may authorise the ChatGPT-backed Codex route on a supervisor tier.
+    // The parent may authorise the ChatGPT-backed Codex route on a supervisor
+    // tier, host login or the requester's own.
     expect(() =>
-      assertTransportHonoursCredentials('anthropic', {
-        ATOMA_MODEL_L3: 'codex:gpt-5.6-sol',
-        ATOMA_SUBSCRIPTION_TIERS: 'l3',
-      })
+      assertTransportHonoursCredentials({ ...KEYED, ATOMA_MODEL_L3: 'sub:openai:gpt-5.6-sol', ATOMA_SUBSCRIPTION_TIERS: 'l3' })
     ).not.toThrow();
     expect(() =>
-      assertTransportHonoursCredentials('anthropic', {
-        ATOMA_MODEL_L3: 'codex:gpt-5.6-sol',
-        ATOMA_SUBSCRIPTION_TIERS: 'l2',
-      })
+      assertTransportHonoursCredentials({ ...KEYED, ATOMA_MODEL_L3: 'own:openai:gpt-5.6-sol', ATOMA_SUBSCRIPTION_TIERS: 'l3' })
+    ).not.toThrow();
+    expect(() =>
+      assertTransportHonoursCredentials({ ...KEYED, ATOMA_MODEL_L3: 'sub:openai:gpt-5.6-sol', ATOMA_SUBSCRIPTION_TIERS: 'l2' })
     ).toThrow(/cannot honour a supplied credential snapshot/);
   });
+});
 
-  it('lets the whole-deployment regime through only when the parent said base', () => {
-    expect(() =>
-      assertTransportHonoursCredentials('claude-cli', { ATOMA_SUBSCRIPTION_TIERS: 'base' })
-    ).not.toThrow();
-    expect(() => assertTransportHonoursCredentials('claude-cli', {})).toThrow(
-      /binds to the machine/
+describe('tierSelectors — the three required pins, parsed once', () => {
+  it('names every missing variable at once, and says there is no default', () => {
+    expect(() => tierSelectors({})).toThrow(ModelSelectorError);
+    expect(() => tierSelectors({})).toThrow(
+      /ATOMA_MODEL_L1, ATOMA_MODEL_L2, ATOMA_MODEL_L3 are not set.*there is no default/
+    );
+    expect(() => tierSelectors({ ...KEYED, ATOMA_MODEL_L2: '' })).toThrow(/ATOMA_MODEL_L2 is not set/);
+  });
+
+  it('refuses own: from a host environment unless the caller admits it (a tenant child)', () => {
+    const own = { ...KEYED, ATOMA_MODEL_L3: 'own:openai:gpt-5.6-sol' };
+    expect(() => tierSelectors(own)).toThrow(/own:\) is an account setting/);
+    expect(tierSelectors(own, { allowOwn: true })[3]).toEqual({
+      mode: 'own',
+      vendor: 'openai',
+      model: 'gpt-5.6-sol',
+    });
+  });
+
+  it('refuses a Codex selector on L1 before any client is built', () => {
+    expect(() => tierSelectors({ ...KEYED, ATOMA_MODEL_L1: 'sub:openai:gpt-5.4-mini' })).toThrow(
+      /ATOMA_MODEL_L1=sub:openai:gpt-5.4-mini: Codex cannot expose tools/
+    );
+  });
+
+  it('describes the gradient for the run banner', () => {
+    expect(describeTierSelectors(tierSelectors(KEYED))).toBe(
+      'L1=api:anthropic:claude-haiku-4-5-20251001  L2=api:anthropic:claude-sonnet-5  L3=api:anthropic:claude-opus-5'
     );
   });
 });
 
-describe('base provider selection — one rule for runner and curriculum', () => {
-  it('defaults to Anthropic and recognises Z.ai and Ollama', () => {
-    expect(resolveBaseProviderKind()).toBe('anthropic');
-    expect(resolveBaseProviderKind('ANTHROPIC')).toBe('anthropic');
-    expect(resolveBaseProviderKind('ollama')).toBe('ollama');
-    expect(resolveBaseProviderKind('ZAI')).toBe('zai');
-  });
-
-  it('normalises both Claude subscription aliases', () => {
-    expect(resolveBaseProviderKind('claude-cli')).toBe('claude-cli');
-    expect(resolveBaseProviderKind('claude')).toBe('claude-cli');
-  });
-
-  it('rejects Codex as a base provider and names the safe tier-pin form', () => {
-    expect(() => resolveBaseProviderKind('codex')).toThrow(/structurally refused at L1/);
-    expect(() => resolveBaseProviderKind('codex')).toThrow(/ATOMA_MODEL_L3=codex:/);
-  });
-
-  it('rejects unknown values instead of silently billing Anthropic', () => {
-    expect(() => resolveBaseProviderKind('claud')).toThrow(/unknown ATOMA_LLM provider "claud"/);
-  });
-
-  it('lists only configured cross-provider tier prefixes in tier order', () => {
-    expect(
-      referencedProviderNames({
-        ATOMA_MODEL_L1: 'zai:glm-4.5-air',
-        ATOMA_MODEL_L2: 'codex:gpt-5.6-sol',
-        ATOMA_MODEL_L3: 'zai:glm-5',
-      })
-    ).toEqual(['zai', 'codex']);
-    // Ollama model tags legitimately contain colons; an unknown prefix stays
-    // a model id for the base provider.
-    expect(referencedProviderNames({ ATOMA_MODEL_L1: 'qwen3:8b' })).toEqual([]);
-  });
-
-  it('delegates the pin parse to splitProviderModel — an empty model rejects at scan time', () => {
-    // referencedProviderNames used to re-implement the first-colon walk
-    // byte-for-byte (the two-copies-of-one-rule drift class); delegation
-    // means the "zai:" typo now fails at provider construction with the
-    // env-var shape in the message, not at the first LLM call.
-    expect(() => referencedProviderNames({ ATOMA_MODEL_L2: 'zai:' })).toThrow(
-      /zai:<model-id>/
-    );
-  });
-});
-
-describe('makeBaseClient — ONE construction switch for runner and curriculum', () => {
-  it('builds the claude-cli client for both subscription aliases', () => {
-    // The bare `claude` alias is the one curriculum's hand-rolled copy of
-    // this switch historically missed (it silently fell into the Anthropic
-    // path); pin the full alias→construction chain.
-    expect(makeBaseClient(resolveBaseProviderKind('claude'))).toBeInstanceOf(ClaudeCliLlmClient);
-    expect(makeBaseClient('claude-cli')).toBeInstanceOf(ClaudeCliLlmClient);
+describe('makeTransportClient — ONE construction switch per transport', () => {
+  it('builds the Claude Code client for sub:anthropic', () => {
+    expect(makeTransportClient('claude-cli')).toBeInstanceOf(ClaudeCliLlmClient);
   });
 
   it('builds Ollama from the injected env (OLLAMA_BASE_URL / OLLAMA_MODEL)', async () => {
-    const client = makeBaseClient('ollama', {
-      env: { OLLAMA_BASE_URL: 'http://stub-host:1234', OLLAMA_MODEL: 'stub-model:tag' },
-    });
-    expect(client).toBeInstanceOf(OllamaLlmClient);
-    // Prove the env values reached the constructor rather than being
-    // re-read from process.env: one stubbed round-trip.
-    const seen: { url: string; model: string }[] = [];
-    const prevFetch = globalThis.fetch;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (globalThis as any).fetch = async (input: unknown, init?: { body?: string }) => {
-      seen.push({
-        url: String(input),
-        model: (JSON.parse(init?.body ?? '{}') as { model?: string }).model ?? '',
-      });
+    const calls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input: string | URL | Request) => {
+      calls.push(input instanceof Request ? input.url : input.toString());
       return new Response(
-        JSON.stringify({ model: 'stub-model:tag', message: { role: 'assistant', content: 'ok' }, done: true }),
+        JSON.stringify({
+          model: 'stub',
+          message: { role: 'assistant', content: 'ok' },
+          done: true,
+          prompt_eval_count: 1,
+          eval_count: 1,
+        }),
         { status: 200, headers: { 'content-type': 'application/json' } }
       );
     };
     try {
-      await client.complete({ model: 'claude-opus-5', systemPrompt: 's', userContent: 'u' });
+      const client = makeTransportClient('ollama', {
+        env: { OLLAMA_BASE_URL: 'http://ollama.test:11434/', OLLAMA_MODEL: 'stub' },
+      });
+      expect(client).toBeInstanceOf(OllamaLlmClient);
+      await client.complete({ model: 'qwen3:8b', systemPrompt: 's', userContent: 'u' });
+      expect(calls[0]).toMatch(/^http:\/\/ollama\.test:11434\/api\/chat/);
     } finally {
-      globalThis.fetch = prevFetch;
+      globalThis.fetch = originalFetch;
     }
-    expect(seen).toEqual([{ url: 'http://stub-host:1234/api/chat', model: 'stub-model:tag' }]);
   });
 
-  it('anthropic REQUIRES a constructed SDK client and throws a naming error without one', () => {
-    // The client carries a credential snapshot and only the caller knows
-    // whether an Anthropic credential should be demanded at all, so the
-    // switch never constructs one implicitly.
-    expect(() => makeBaseClient('anthropic')).toThrow(/opts\.anthropic/);
-    const fake = { messages: { create: async () => ({}) } } as unknown as Anthropic;
-    expect(makeBaseClient('anthropic', { anthropic: fake })).toBeInstanceOf(AnthropicLlmClient);
+  it('builds anthropic-api from a caller-supplied SDK client or from the snapshot', () => {
+    const supplied = makeAnthropicClient({ ANTHROPIC_API_KEY: 'sk-supplied' });
+    expect(makeTransportClient('anthropic-api', { anthropic: supplied })).toBeInstanceOf(AnthropicLlmClient);
+    expect(makeTransportClient('anthropic-api', { env: { ANTHROPIC_API_KEY: 'sk-snapshot' } })).toBeInstanceOf(
+      AnthropicLlmClient
+    );
   });
 
-  it('builds Z.ai as the base provider from the injected snapshot', () => {
-    expect(() => makeBaseClient('zai', { env: {} })).toThrow(/ZAI_API_KEY/);
-    expect(
-      makeBaseClient('zai', {
-        env: { ZAI_API_KEY: 'zai-key-from-snapshot' },
-      })
-    ).toBeInstanceOf(AnthropicLlmClient);
+  it('builds Z.ai and OpenAI from the injected snapshot, and names the missing key otherwise', () => {
+    expect(() => makeTransportClient('zai-api', { env: {} })).toThrow(/ZAI_API_KEY/);
+    expect(makeTransportClient('zai-api', { env: { ZAI_API_KEY: 'zai-key-from-snapshot' } })).toBeInstanceOf(
+      AnthropicLlmClient
+    );
+    expect(() => makeTransportClient('openai-api', { env: {} })).toThrow(/api:openai requires OPENAI_API_KEY/);
+    expect(makeTransportClient('openai-api', { env: { OPENAI_API_KEY: 'sk-openai' } })).toBeInstanceOf(
+      OpenAiLlmClient
+    );
   });
 });
 
@@ -202,50 +175,61 @@ describe('makeAnthropicClient — credentials are a per-run value, not process s
     expect(client.authToken).toBe('bearer-token');
   });
 
-  it('builds tier-pinned providers from the SNAPSHOT, not from process.env', () => {
+  it('builds tier clients from the SNAPSHOT, not from process.env', () => {
     const previous = process.env['ATOMA_MODEL_L1'];
-    process.env['ATOMA_MODEL_L1'] = 'zai:from-process-env';
+    process.env['ATOMA_MODEL_L1'] = 'api:zai:from-process-env';
     try {
-      // The snapshot pins no cross-provider tier, so nothing is built even
-      // though the ambient environment asks for Z.ai.
-      expect(buildReferencedProviders({})).toEqual({});
-      // …and a pin IN the snapshot is honoured, with its key read from the
-      // same snapshot rather than from the process.
-      const built = buildReferencedProviders({
-        ATOMA_MODEL_L1: 'zai:glm-4.5-air',
-        ZAI_API_KEY: 'zai-key-from-snapshot',
+      // Only the transports the SNAPSHOT's selectors reach are built, each
+      // from the snapshot's own credentials — the ambient Z.ai pin is ignored.
+      const built = buildTierClients({
+        ATOMA_MODEL_L1: 'api:anthropic:claude-haiku-4-5-20251001',
+        ATOMA_MODEL_L2: 'api:anthropic:claude-sonnet-5',
+        ATOMA_MODEL_L3: 'api:openai:gpt-5.6-sol',
+        ANTHROPIC_API_KEY: 'sk-from-snapshot',
+        OPENAI_API_KEY: 'sk-openai-from-snapshot',
       });
-      expect(Object.keys(built)).toEqual(['zai']);
-
+      expect(Object.keys(built).sort()).toEqual(['anthropic-api', 'openai-api']);
+      expect(built['openai-api']).toBeInstanceOf(OpenAiLlmClient);
       // Codex construction takes the same snapshot so CODEX_HOME can bind a
-      // run to one principal profile instead of the ambient host login.
-      const codex = buildReferencedProviders({
-        ATOMA_MODEL_L2: 'codex:gpt-5.6-terra',
-        CODEX_HOME: '/profiles/principal-a/codex',
-      });
-      expect(codex['codex']).toBeInstanceOf(CodexCliLlmClient);
+      // run to one principal profile instead of the ambient host login;
+      // `own:` is admissible only where the caller says so.
+      const codex = buildTierClients(
+        {
+          ATOMA_MODEL_L1: 'api:zai:glm-4.5-air',
+          ATOMA_MODEL_L2: 'own:openai:gpt-5.6-terra',
+          ATOMA_MODEL_L3: 'sub:anthropic:opus',
+          ZAI_API_KEY: 'zai-key-from-snapshot',
+          CODEX_HOME: '/profiles/principal-a/codex',
+        },
+        { allowOwn: true }
+      );
+      expect(Object.keys(codex).sort()).toEqual(['claude-cli', 'codex-cli', 'zai-api']);
+      expect(codex['codex-cli']).toBeInstanceOf(CodexCliLlmClient);
+      expect(codex['claude-cli']).toBeInstanceOf(ClaudeCliLlmClient);
+      expect(codex['zai-api']).toBeInstanceOf(AnthropicLlmClient);
     } finally {
       if (previous === undefined) delete process.env['ATOMA_MODEL_L1'];
       else process.env['ATOMA_MODEL_L1'] = previous;
     }
   });
 
-  it('refuses a transport that cannot read the snapshot it was handed', () => {
-    expect(() => assertTransportHonoursCredentials('claude-cli')).toThrow(RunnerConfigError);
-    expect(() => assertTransportHonoursCredentials('claude-cli')).toThrow(
-      /cannot honour a supplied credential snapshot/
-    );
-    // The transports that CAN read it are untouched.
-    expect(() => assertTransportHonoursCredentials('anthropic')).not.toThrow();
-    expect(() => assertTransportHonoursCredentials('ollama')).not.toThrow();
-    // A key-bearing base with a machine-bound TIER pin used to slip through
-    // (review 2026-08-18 §1.6): the gate only inspected ATOMA_LLM.
+  it('refuses a subscription selector that cannot read the snapshot it was handed', () => {
+    const keyed = {
+      ATOMA_MODEL_L1: 'api:anthropic:claude-haiku-4-5-20251001',
+      ATOMA_MODEL_L2: 'api:anthropic:claude-sonnet-5',
+      ATOMA_MODEL_L3: 'api:anthropic:claude-opus-5',
+      ANTHROPIC_API_KEY: 'sk-ant-tenant',
+    };
+    expect(() => assertTransportHonoursCredentials(keyed)).not.toThrow();
     expect(() =>
-      assertTransportHonoursCredentials('anthropic', { ATOMA_MODEL_L2: 'claude-cli:sonnet' })
-    ).toThrow(/tier pin "claude-cli:"/);
+      assertTransportHonoursCredentials({ ...keyed, ATOMA_MODEL_L2: 'sub:anthropic:sonnet' })
+    ).toThrow(RunnerConfigError);
     expect(() =>
-      assertTransportHonoursCredentials('anthropic', { ATOMA_MODEL_L3: 'codex:gpt-5.6-sol' })
-    ).toThrow(/tier pin "codex:"/);
+      assertTransportHonoursCredentials({ ...keyed, ATOMA_MODEL_L2: 'sub:anthropic:sonnet' })
+    ).toThrow(/ATOMA_MODEL_L2=sub:anthropic:sonnet cannot honour a supplied credential snapshot/);
+    expect(() =>
+      assertTransportHonoursCredentials({ ...keyed, ATOMA_MODEL_L3: 'sub:openai:gpt-5.6-sol' })
+    ).toThrow(/codex-cli selector binds to a machine-local login/);
   });
 
   it('returns a client with no credential rather than killing the process', () => {

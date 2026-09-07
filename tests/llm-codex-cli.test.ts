@@ -856,16 +856,17 @@ describe('ATOMA_CODEX_MODEL override banner (review 2026-08-14 §1.13)', () => {
 describe('pricing — a Codex call must never read as free', () => {
   it('a codex-PINNED call is priced end to end on the served GPT slug, not the /opus/i row', async () => {
     // Full chain: MetricsLlmClient wraps the ROUTER (where observability
-    // lives in production), the router strips `codex:` and dispatches, the
-    // transport resolves `claude-opus-5` → gpt-5.6-sol and reports it back.
+    // lives in production), the router strips the `sub:openai:` selector and
+    // dispatches, the transport resolves `claude-opus-5` → gpt-5.6-sol and
+    // reports it back.
     const codexClient = new CodexCliLlmClient({ spawnFn: () => fakeChild({ lines: OK_LINES }) });
     const metrics = new InMemoryMetrics();
     const client = new MetricsLlmClient(
-      new RoutingLlmClient(codexClient /* default unused */, { codex: codexClient }),
+      new RoutingLlmClient({ 'codex-cli': codexClient }),
       metrics
     );
     await client.complete({
-      model: 'codex:claude-opus-5',
+      model: 'sub:openai:claude-opus-5',
       systemPrompt: 's',
       userContent: 'u',
     });
@@ -877,23 +878,23 @@ describe('pricing — a Codex call must never read as free', () => {
     expect(metrics.summary().totals.costUsd).toBeCloseTo(0.018126, 5);
   });
 
-  it('prices the GPT-5.6 slugs, with or without the routing prefix', () => {
+  it('prices the GPT-5.6 slugs, with or without the selector', () => {
     // Unmatched models fall to 0/0/0, which would make every tiering
     // comparison flattering and false: the spend has moved to another
     // subscription, not vanished.
-    expect(pricesFor('codex:gpt-5.6-sol')).toEqual({ input: 5, output: 30, cachedInput: 0.5 });
+    expect(pricesFor('sub:openai:gpt-5.6-sol')).toEqual({ input: 5, output: 30, cachedInput: 0.5 });
     expect(pricesFor('gpt-5.6-terra')).toEqual({ input: 2, output: 12, cachedInput: 0.2 });
-    expect(pricesFor('codex:gpt-5.6-luna')).toEqual({ input: 0.2, output: 1.2, cachedInput: 0.02 });
+    expect(pricesFor('api:openai:gpt-5.6-luna')).toEqual({ input: 0.2, output: 1.2, cachedInput: 0.02 });
   });
 
   it('falls back for older slugs instead of pricing them at zero', () => {
-    expect(pricesFor('codex:gpt-5.4-mini').input).toBeGreaterThan(0);
+    expect(pricesFor('sub:openai:gpt-5.4-mini').input).toBeGreaterThan(0);
     expect(pricesFor('gpt-5.5').output).toBeGreaterThan(0);
   });
 
   it('does not disturb the Anthropic or GLM rows', () => {
     expect(pricesFor('claude-opus-5')).toEqual({ input: 5, output: 25, cachedInput: 0.5 });
     expect(pricesFor('claude-sonnet-5').output).toBe(15);
-    expect(pricesFor('zai:glm-4.5-air').input).toBe(0.6);
+    expect(pricesFor('api:zai:glm-4.5-air').input).toBe(0.6);
   });
 });

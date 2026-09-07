@@ -51,17 +51,17 @@ describe('organisation tier model defaults', () => {
     expect(store.orgTierModels(orgId)).toEqual({ l1: null, l2: null, l3: null });
 
     store.setOrgTierModels(orgId, {
-      l1: 'anthropic:claude-haiku-4-5',
-      l2: 'anthropic:claude-sonnet-5',
+      l1: 'api:anthropic:claude-haiku-4-5',
+      l2: 'api:anthropic:claude-sonnet-5',
       l3: null,
     });
     expect(store.orgTierModels(orgId)).toEqual({
-      l1: 'anthropic:claude-haiku-4-5',
-      l2: 'anthropic:claude-sonnet-5',
+      l1: 'api:anthropic:claude-haiku-4-5',
+      l2: 'api:anthropic:claude-sonnet-5',
       l3: null,
     });
 
-    expect(() => store.setOrgTierModels(orgId, { l1: 'codex:gpt-5', l2: null, l3: null })).toThrow();
+    expect(() => store.setOrgTierModels(orgId, { l1: 'sub:openai:gpt-5.6-sol', l2: null, l3: null })).toThrow();
     // A second org is untouched.
     const other = freshStore();
     const otherOrg = seedOrg(other);
@@ -71,7 +71,7 @@ describe('organisation tier model defaults', () => {
   it('degrades retired stored selections to null instead of throwing', () => {
     const store = freshStore();
     const orgId = seedOrg(store);
-    store.setOrgTierModels(orgId, { l1: 'zai:glm-4.5-air', l2: null, l3: null });
+    store.setOrgTierModels(orgId, { l1: 'api:zai:glm-4.5-air', l2: null, l3: null });
     const raw = (store as unknown as { db: Database.Database }).db;
     raw.prepare("UPDATE auth_org_tier_models SET model_l1 = 'retired:model-x'").run();
     expect(store.orgTierModels(orgId)).toEqual({ l1: null, l2: null, l3: null });

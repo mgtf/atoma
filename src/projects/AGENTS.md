@@ -21,106 +21,91 @@ Neighbours:
   with `ATOMA_PROJECTS_ROOT`, default `~/.atoma`). It does not mix the
   operator `./runs` corpus used by CLI, MCP and ungated viz.
 
-## The subscription-transport door
+## Tier selectors and credentials
 
-- A project run normally requires `ATOMA_LLM=anthropic` or `ATOMA_LLM=zai`
-  plus exactly one matching per-run credential: the host key, or the
-  organisation's OWN provider key. A BYO-only deployment carrying no platform
+- Every tier of a project run resolves to one full selector,
+  `<api|sub|own>:<vendor>:<model>` ([src/contracts](../contracts/AGENTS.md)
+  `modelSelector.ts`), by walking account pin > organisation default > host
+  `ATOMA_MODEL_L*`. ALL THREE TIERS MUST RESOLVE: there is no base transport,
+  no `ATOMA_LLM` and no built-in default since 2026-09-07; a tier no level
+  can honour refuses the run and names the two ways out (a Settings choice
+  whose vendor key the organisation saved, or a host pin beside its
+  credential).
+- An `api:` selector is honoured when its vendor's credential is available to
+  THIS run: the organisation's OWN key first, else the host's. One answer PER
+  VENDOR, because a vendor's credential is one environment variable and every
+  tier on that vendor shares it. A BYO-only deployment carrying no platform
   key at all is therefore a supported shape, and an org key WINS over a host one.
-- `ANTHROPIC_AUTH_TOKEN` is REFUSED here, not ignored. No tenant can supply
-  one (the org key store is keyed by catalogue provider, and anthropic's
-  credential variable is `ANTHROPIC_API_KEY`), and a bearer is refreshed from
-  a login profile the run child cannot read — a frozen env snapshot would
-  expire mid-run. Operator LOCAL runs keep it, where the SDK reads the live
-  profile ([src/run](../run/AGENTS.md)).
-- An `ollama:*` pin is honoured only where the HOST declared its endpoint:
-  `OLLAMA_BASE_URL` is forwarded on every branch (self-hosted selects no
-  payer), and without it the pin falls through like a keyless provider —
+- `ANTHROPIC_AUTH_TOKEN` is REFUSED, not ignored, when an `api:anthropic`
+  tier takes the host credential. No tenant can supply one (the org key store
+  is keyed by vendor, and anthropic's credential variable is
+  `ANTHROPIC_API_KEY`), and a bearer is refreshed from a login profile the
+  run child cannot read — a frozen env snapshot would expire mid-run.
+  Operator LOCAL runs keep it ([src/run](../run/AGENTS.md)).
+- An `api:ollama` selector is honoured only where the HOST declared its
+  endpoint: `OLLAMA_BASE_URL` is forwarded on every run (self-hosted selects
+  no payer), and without it the pin falls through like a keyless vendor —
   presuming localhost is exactly what detonates. The endpoint is the
   operator's infrastructure: an org picks ollama models, never an ollama
   destination (a tenant URL would be SSRF from the platform's own process).
-- A BYO key is forwarded WITHOUT the host's `ANTHROPIC_BASE_URL`. That
-  variable points the anthropic transport at a gateway, and a tenant's key
-  belongs to its own issuer — the host's gateway applies to the host's own
-  credential only. Z.ai is reached through `ZAI_API_KEY`/`ZAI_BASE_URL`
-  instead, which is also what lets one run split tiers across both
-  providers. A machine-bound transport (`claude-cli`, and its bare
-  `claude` alias) binds to the HOST's own login session, so it spends that
-  subscription and cannot honour a supplied credential — for a tenant that
-  would be one account billing another.
-- The ONE exception is a requester holding the platform-admin flag, whose own
-  instance's subscription it is. The flag is the right authority because it is
-  never derived from an OAuth claim: only `auth grant-admin`, run by the
-  operator against the store on disk, can mint it.
-- `platformAdmins` is passed to the coordinator as a QUESTION, never as an
-  answer: the coordinator asks it, so no route and no CLI can hand in a
-  pre-decided yes. It is FAIL-CLOSED — absent resolver, `false`, or a throwing
-  resolver all mean refusal. This is deliberately the opposite of
-  `tierModelsFor`, which is fail-open: a preferences lookup must not block a
-  run, an authority lookup must never be read as permission to spend.
-- A run that goes through the door forwards NO credential (the transport
-  cannot use one, and a stale exported key only confuses provider
-  precedence), normalises `ATOMA_LLM` to `claude-cli`, and does not relax
-  isolation: `ATOMA_CONTAINER` and `ATOMA_REQUIRE_ISOLATION` stay on.
-- NO credential includes the ORGANISATION's own keys. A subscription run
-  spends the host subscription and nothing else: injected, an org key would
-  let a tier pinned to `anthropic:*`/`zai:*` bill the organisation while the
-  journal records `run.host_subscription`, and the audit row would name the
-  wrong payer. The keys are withheld before tier resolution, not only at
-  injection, so the pins they would have unlocked are dropped with them
-  rather than reaching the router without a credential.
-- Every such run is journaled as `run.host_subscription` (severity
-  `security`, never pushed). The coordinator emits no audit row itself — it
-  calls `onSubscriptionTransport` and the caller journals, so there is one
-  delivery path, as with `onRunFinished`.
-## Per-tier host subscription
+- Only the credentials of vendors the RESOLVED tiers reference cross into the
+  child, and a BYO key crosses WITHOUT the host's gateway variables
+  (`ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, …): a tenant's key belongs to its
+  own issuer, the host's gateway applies to the host's own credential only.
+- `api:openai` is OpenAI's API with function tools, admissible on every tier
+  from the org's or the host's `OPENAI_API_KEY`. `sub:openai`/`own:openai`
+  are the Codex CLI on a ChatGPT login and are refused on L1 (no tool loop
+  through ToolSandbox).
 
-- TWO REGIMES, and they are not the same mechanism. **A** is the door above:
-  `ATOMA_LLM=claude-cli` on the host, decided at boot, whole deployment, no
-  credential forwarded at all. **B** is a platform admin's per-tier ACCOUNT
-  pin, decided per run. Both survive on purpose; the host env is read before
-  any preference, so A wins where it is set.
-- The stored values are NON-ROUTABLE sentinels: `host-subscription:<alias>`
-  for Claude and `chatgpt-subscription:<model>` for Codex. They are not
-  `claude-cli:` / `codex:` — the strings `isCatalogueSelection` here and
-  `assertTransportHonoursCredentials` in [src/run](../run/AGENTS.md) both
-  exist to refuse — and it becomes a transport only inside
-  `projectRunEnvironment`, downstream of the authority check.
-- ChatGPT/Codex is a supervisor subscription only: account storage, the UI,
-  the coordinator and the runner all refuse it on L1, whose tool loop must
-  remain inside ToolSandbox.
-- ADMISSIBLE BY CHAIN LEVEL, not merely by value: the ACCOUNT level only. An
-  org default is inherited by every member by construction, and the host env
-  is the third candidate for every tier; a sentinel at either level would be a
-  payer-bearing default nobody chose.
+## Subscription selectors
+
+- A `sub:` selector spends the HOST's own login session (Claude Code for
+  anthropic, Codex for openai) and cannot honour a supplied credential — for a
+  tenant that would be one account billing another. It is ADMISSIBLE BY CHAIN
+  LEVEL, not merely by value: the ACCOUNT level only. An org default is
+  inherited by every member by construction, and the host env is the third
+  candidate for every tier; a `sub:` at either level would be a payer-bearing
+  default nobody chose, and is refused whatever the requester's flag. The
+  former whole-deployment regime (`ATOMA_LLM=claude-cli`) no longer exists.
 - Authority is re-asked PER RUN and is never handed in: the platform-admin
   flag through the fail-closed `resolveSubscriptionGrant`, plus
   `ATOMA_HOST_SUBSCRIPTION_ORG` naming the ONE organisation where the
   operator's own login may be spent, plus a match against this run's org. A
-  stored pin is data; permission is not storable.
+  stored pin is data; permission is not storable. `platformAdmins` is passed
+  to the coordinator as a QUESTION, never as an answer — absent resolver,
+  `false`, or a throwing resolver all mean refusal — deliberately the opposite
+  of `tierModelsFor`, which is fail-open: a preferences lookup must not block
+  a run, an authority lookup must never be read as permission to spend.
 - FALL-THROUGH IS PERMITTED WITHIN A PAYER; REFUSAL IS REQUIRED ACROSS PAYERS.
-  The candidate loop already had two mechanisms with two meanings — a provider
-  you may not use THROWS, a credential nobody brought CONTINUES. A revoked
-  authority is the first kind: falling through would change the payer from a
-  subscription to a billed credential with no event anywhere, which is what
-  finding 2.2 closed.
-- A run that touches the subscription forwards no `ANTHROPIC_BASE_URL`, and
-  its `payers` ledger ([src/contracts](../contracts/AGENTS.md)) is what fires
-  `onSubscriptionTransport` — a mixed run is invisible to the old
-  whole-deployment test.
-- The whole-run withholding of org keys (`usableOrgKeys`) is REGIME A's rule
-  and stays exactly as finding 2.2 left it. Regime B is mixed by design: the
-  base transport keeps its own credential, and the ledger names both payers.
+  A vendor you may not use THROWS, a credential nobody brought CONTINUES. A
+  revoked authority is the first kind: falling through would change the payer
+  from a subscription to a billed credential with no event anywhere, which is
+  what finding 2.2 closed.
+- A run is MIXED by design: `sub:` tiers spend the login, `api:` tiers keep
+  their own credential, and the three-row `payers` ledger
+  ([src/contracts](../contracts/AGENTS.md) `runPayers.ts`) names each. The
+  ledger is what fires `onSubscriptionTransport`, journaled by the caller as
+  `run.host_subscription` (severity `security`, never pushed) — the
+  coordinator emits no audit row itself, so there is one delivery path, as
+  with `onRunFinished`. A run touching a subscription forwards no
+  `ANTHROPIC_BASE_URL`, and `ATOMA_SUBSCRIPTION_TIERS` names exactly the
+  authorised tiers for the child's own gate
+  (`assertTransportHonoursCredentials`, [src/run](../run/AGENTS.md)).
+- The selector travels into the child AS STORED — it is the routing identity —
+  and the child refuses any `sub:`/`own:` tier its parent did not list. The
+  stored value is data; the two authority checks are what make it a transport.
 - Design and the owner's decisions:
-  [docs/subscription-per-tier-design-2026-08-28.md](../../docs/subscription-per-tier-design-2026-08-28.md).
+  [docs/subscription-per-tier-design-2026-08-28.md](../../docs/subscription-per-tier-design-2026-08-28.md)
+  (its `host-subscription:` / `claude-cli:` spellings predate the selector
+  grammar of 2026-09-07).
 
 ## Per-tier personal Codex subscription
 
-- `principal-chatgpt-subscription:<model>` is an ACCOUNT-only, L2/L3-only
-  sentinel. The coordinator resolves it from the requesting principal's exact
-  private Codex generation at launch, translates it to `codex:<model>`, records
-  payer `principal-subscription`, and injects only that generation's
-  `CODEX_HOME`/`CODEX_SQLITE_HOME`.
+- `own:openai:<model>` is an ACCOUNT-only, L2/L3-only selector. The
+  coordinator resolves it from the requesting principal's exact private Codex
+  generation at launch, records payer `principal-subscription`, and injects
+  only that generation's `CODEX_HOME`/`CODEX_SQLITE_HOME`. `own:anthropic` has
+  no transport yet (provider approval pending) and is refused by name.
 - Missing, revoked, wrong-chain-level and mixed host/personal Codex profiles
   THROW. None may fall through to a host login, organisation key or lower
   preference level. Disconnect is refused while that principal has an active

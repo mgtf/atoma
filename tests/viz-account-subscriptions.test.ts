@@ -63,7 +63,7 @@ const DISCONNECTED: VizAccountSubscriptions = {
 
 const ACCOUNT_MODELS: VizAccountModels = {
   pins: { l1: null, l2: null, l3: null },
-  defaults: { l1: 'ollama:test', l2: 'ollama:test', l3: 'ollama:test' },
+  defaults: { l1: 'api:ollama:test', l2: 'api:ollama:test', l3: 'api:ollama:test' },
   catalog: [],
   personalSubscriptions: { claude: false, codex: false },
 };
@@ -76,12 +76,13 @@ const ORG_MODELS: VizOrgModels = {
     {
       id: 'openai',
       label: 'OpenAI',
+      selectorPrefix: 'api:openai',
       credentialEnvVar: 'OPENAI_API_KEY',
       suggestive: false,
       models: [{ id: 'gpt-test', label: 'GPT test' }],
     },
   ],
-  operatorDefaults: { l1: 'ollama:test', l2: 'ollama:test', l3: 'ollama:test' },
+  operatorDefaults: { l1: 'api:ollama:test', l2: 'api:ollama:test', l3: 'api:ollama:test' },
 };
 
 function organisation(viewerRole: string): VizOrganisation {
@@ -374,7 +375,7 @@ describe('personal subscription settings', () => {
         personalSubscriptions: { claude: false, codex: false },
         retainPersonalCodexFamily: true,
       }).map((entry) => entry.id)
-    ).toEqual(['principal-chatgpt-subscription']);
+    ).toEqual(['own:openai']);
     expect(
       personalSubscriptionFamilies({
         billedKeyReady: false,

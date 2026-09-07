@@ -5,7 +5,9 @@ export * from './core/taxonomy.js';
 export { Atom, Atom as Agent, type Peerable, type Supervisor } from './core/atom.js';
 export { superviseLoop, type SupervisionHooks, renderTraceForContext } from './core/supervisor.js';
 export { AnthropicLlmClient, MockLlmClient } from './core/llm.js';
-export { RoutingLlmClient, splitProviderModel } from './core/llmRouting.js';
+export { RoutingLlmClient } from './core/llmRouting.js';
+export * from './contracts/modelSelector.js';
+export { OpenAiLlmClient } from './core/llmOpenAi.js';
 export {
   InMemoryMetrics,
   MetricsLlmClient,
@@ -18,7 +20,7 @@ export {
   type ModelPrices,
   type PriceTable,
 } from './core/metrics.js';
-export { resolveLatestOpus, FALLBACK_OPUS, PIN_SONNET, PIN_HAIKU } from './core/models.js';
+export { modelForTier, selectorForTier, applyTierPins } from './core/models.js';
 
 export { openDb, type DB } from './registry/db.js';
 export {

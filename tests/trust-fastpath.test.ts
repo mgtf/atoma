@@ -5,7 +5,7 @@ import { L1Atom } from '../src/atoms/L1Atom.js';
 import { L2Atom } from '../src/atoms/L2Atom.js';
 import { L3Atom } from '../src/atoms/L3Atom.js';
 import { TRUST_THRESHOLD_SUCCESSES } from '../src/atoms/cost.js';
-import { FALLBACK_OPUS } from '../src/core/models.js';
+import { FALLBACK_OPUS } from './tier-pins.js';
 import { makeCtx } from './helpers.js';
 import { makePlan } from './helpers/factories.js';
 import type { TrustFastPathInfo } from '../src/core/types.js';

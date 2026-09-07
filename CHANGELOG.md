@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Changed
+
+- ONE model selector, `<api|sub|own>:<vendor>:<model>`, for every tier.
+  `ATOMA_MODEL_L1/L2/L3` are all REQUIRED and there is no default: a tier
+  nobody configured is a launch error naming the variable. `api` bills a key
+  (`anthropic`, `openai`, `zai`, or a self-hosted `ollama`), `sub` spends the
+  host's own Claude Code or Codex login, `own` a member's personal login
+  (Settings only). `ATOMA_LLM`, the base provider and the `provider:model`
+  prefixes are gone; so are the `host-subscription:` / `chatgpt-subscription:`
+  sentinels. Stored pins written under the old spellings are not migrated —
+  delete `atoma.db` and reconfigure Settings (the provider-key table's CHECK
+  constraint also changed).
+- doctor, burn-in, the benchmark, the MCP and the viz announcement translator
+  all derive their transports from the three selectors; the MCP no longer
+  imposes `claude-cli` on operator runs.
+
+### Added
+
+- `api:openai:<model>`: OpenAI by API (Responses API, function tools), so
+  GPT models can serve every tier, L1 included, from `OPENAI_API_KEY` or an
+  organisation key. The Codex CLI (`sub:openai`, `own:openai`) stays
+  supervisor-only.
+
 ## v0.2.0 — 2026-09-07
 
 The first public release: the repository is open on GitHub under the AGPL.

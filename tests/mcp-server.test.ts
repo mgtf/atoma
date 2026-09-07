@@ -100,17 +100,14 @@ describe('MCP run tool — argv assembly and validation', () => {
   });
 
   it('maps promoteSkills=true to the explicit environment opt-in', () => {
-    expect(buildRunEnvOverrides({ goal: 'x' }, {})).toEqual({
-      ATOMA_LLM: 'claude-cli',
-    });
+    // The MCP overrides no model selection: the three tier pins are the
+    // host's, and there is no default to impose (2026-09-07).
+    expect(buildRunEnvOverrides({ goal: 'x' }, {})).toEqual({});
     expect(buildRunEnvOverrides({ goal: 'x', promoteSkills: true }, {})).toEqual({
-      ATOMA_LLM: 'claude-cli',
       ATOMA_SKILL_PROMOTE: '1',
     });
     // False is deliberately represented by the higher-priority CLI veto.
-    expect(buildRunEnvOverrides({ goal: 'x', promoteSkills: false }, {})).toEqual({
-      ATOMA_LLM: 'claude-cli',
-    });
+    expect(buildRunEnvOverrides({ goal: 'x', promoteSkills: false }, {})).toEqual({});
     expect(buildRunArgs({ goal: 'x', promoteSkills: false })).toEqual([
       '--no-promote-skills',
     ]);
@@ -314,7 +311,7 @@ describe('MCP run tool — serialisation', () => {
     // closes the DB handle while leaving the row for stale recovery.
   });
 
-  it('pins the provider on the child rather than inheriting a dead API key', async () => {
+  it('imposes no transport of its own on the child — the host selectors are the run\'s', async () => {
     let env: Readonly<Record<string, string>> | undefined;
     let cwd: string | undefined;
     let npmScript: string | undefined;
@@ -327,10 +324,10 @@ describe('MCP run tool — serialisation', () => {
       return new Promise<string>(() => {});
     };
     await startTestRun({ goal: 'build a thing' }, capture);
-    // The host environment carries an ANTHROPIC_API_KEY that the auth chain
-    // prefers FIRST (the documented "#1 auth trap"); in this project it is
-    // dead, and a run reaching the direct-API path dies in ~15s.
-    expect(env?.['ATOMA_LLM']).toBe(process.env['ATOMA_LLM'] ?? 'claude-cli');
+    // The overrides carry no model selection: the run reads the host's own
+    // three tier selectors, and there is no `ATOMA_LLM` to pin any more.
+    expect(env?.['ATOMA_MODEL_L1']).toBeUndefined();
+    expect(env?.['ATOMA_LLM']).toBeUndefined();
     // cwd must be the repo, not whatever directory the host launched us in,
     // or `npm run run:build` fails with a missing-script error.
     expect(cwd).toBe(repoRoot());

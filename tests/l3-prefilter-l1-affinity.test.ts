@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
 import { L3Atom } from '../src/atoms/L3Atom.js';
-import { FALLBACK_OPUS } from '../src/core/models.js';
+import { FALLBACK_OPUS } from './tier-pins.js';
 import { makeCtx, jsonText, jsonTextPair } from './helpers.js';
 
 /**

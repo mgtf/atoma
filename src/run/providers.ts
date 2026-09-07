@@ -2,10 +2,22 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { LlmClient } from '../core/types.js';
 import { AnthropicLlmClient } from '../core/llm.js';
 import { OllamaLlmClient } from '../core/llmOllama.js';
+import { OpenAiLlmClient } from '../core/llmOpenAi.js';
 import { ClaudeCliLlmClient } from '../core/llmClaudeCli.js';
 import { CodexCliLlmClient } from '../core/llmCodexCli.js';
-import { splitProviderModel } from '../core/llmRouting.js';
 import { RunnerConfigError } from '../core/errors.js';
+import {
+  formatModelSelector,
+  readTierSelectors,
+  referencedTransports,
+  selectorSpendsSubscription,
+  tierPinVariable,
+  TIERS,
+  transportOf,
+  type ModelSelector,
+  type ModelTransport,
+  type TierNumber,
+} from '../contracts/modelSelector.js';
 import { makeAnthropicClient } from './auth.js';
 
 /**
@@ -17,67 +29,48 @@ import { makeAnthropicClient } from './auth.js';
  */
 export const ZAI_DEFAULT_BASE_URL = 'https://api.z.ai/api/anthropic';
 
-export type BaseProviderKind = 'anthropic' | 'zai' | 'ollama' | 'claude-cli';
-
 /**
- * One definition for the process-wide provider selector used by the runner
- * and curriculum CLI. Cross-vendor `provider:model` tier pins are separate.
- */
-export function resolveBaseProviderKind(raw?: string): BaseProviderKind {
-  const provider = (raw ?? 'anthropic').trim().toLowerCase();
-  if (provider === 'anthropic') return 'anthropic';
-  if (provider === 'zai') return 'zai';
-  if (provider === 'ollama') return 'ollama';
-  if (provider === 'claude-cli' || provider === 'claude') return 'claude-cli';
-  if (provider === 'codex') {
-    throw new Error(
-      'ATOMA_LLM=codex is not supported because Codex is structurally refused at L1; ' +
-        'pin supervisor tiers instead (for example ATOMA_MODEL_L3=codex:gpt-5.6-sol)'
-    );
-  }
-  throw new Error(
-    `unknown ATOMA_LLM provider "${raw}" (expected anthropic, zai, ollama, claude-cli, or claude)`
-  );
-}
-
-/**
- * ONE construction switch for the process-wide base provider. The runner
- * and the curriculum CLI both used to hand-roll this ternary, re-reading
- * OLLAMA_BASE_URL/OLLAMA_MODEL independently — the drift class this repo
- * has been bitten by twice (research-brief.ts lost every safety guarantee
- * the build path gained; curriculum's copy of the provider switch missed
- * the bare `claude` alias). Review 2026-08-14 §3.9.
+ * ONE construction switch per TRANSPORT (`contracts/modelSelector.ts`
+ * `transportOf`). The runner, the curriculum CLI and the viz server's
+ * announcement translator all build their clients here; nothing else may
+ * hand-roll an anthropic/openai/zai/ollama/claude-cli/codex switch — the
+ * drift class this repo has been bitten by twice (research-brief.ts lost every
+ * safety guarantee the build path gained; curriculum's copy of the provider
+ * switch missed an alias). Review 2026-08-14 §3.9.
  *
- * `anthropic` REQUIRES a constructed SDK client rather than building one:
- * only the caller knows whether an Anthropic credential should be demanded
- * at all, and the client carries a credential SNAPSHOT (`makeAnthropicClient(env)`)
- * that this switch has no business choosing on the caller's behalf. An
- * ollama/claude-cli session must never acquire an Anthropic credential it
- * will not use.
+ * `anthropic-api` takes the constructed SDK client when the caller has one,
+ * because the client carries a credential SNAPSHOT (`makeAnthropicClient(env)`)
+ * and only the caller knows which environment that snapshot must come from.
  */
-export function makeBaseClient(
-  kind: BaseProviderKind,
-  opts?: { anthropic?: Anthropic; env?: NodeJS.ProcessEnv }
+export function makeTransportClient(
+  transport: ModelTransport,
+  opts: { readonly env?: NodeJS.ProcessEnv; readonly anthropic?: Anthropic } = {}
 ): LlmClient {
-  const env = opts?.env ?? process.env;
-  switch (kind) {
+  const env = opts.env ?? process.env;
+  switch (transport) {
+    case 'anthropic-api':
+      return new AnthropicLlmClient(opts.anthropic ?? makeAnthropicClient(env));
+    case 'openai-api':
+      return new OpenAiLlmClient({ apiKey: env['OPENAI_API_KEY'], baseUrl: env['OPENAI_BASE_URL'] });
+    case 'zai-api':
+      return makeZaiClient(env);
     case 'ollama':
       return new OllamaLlmClient({
         baseUrl: env['OLLAMA_BASE_URL'],
         defaultModel: env['OLLAMA_MODEL'],
       });
+    // Takes no env: it binds to a machine-local `claude /login`, which is
+    // exactly why `assertTransportHonoursCredentials` refuses it whenever the
+    // parent did not authorise the tier.
     case 'claude-cli':
       return new ClaudeCliLlmClient();
-    case 'zai':
-      return makeZaiClient(env);
-    case 'anthropic':
-      if (!opts?.anthropic) {
-        throw new Error(
-          'makeBaseClient("anthropic") needs a constructed Anthropic SDK client — ' +
-            'call makeAnthropicClient() and pass it as opts.anthropic'
-        );
-      }
-      return new AnthropicLlmClient(opts.anthropic);
+    // Local Codex CLI on a ChatGPT login — TIERS 2/3 ONLY, enforced at parse
+    // time (`selectorAdmitsTools`) and again by the client, which throws when
+    // handed tools rather than degrading silently. The client captures THIS
+    // run's environment snapshot: CODEX_HOME selects the authorised principal
+    // profile, while its subprocess allowlist strips every API/provider key.
+    case 'codex-cli':
+      return new CodexCliLlmClient({ env });
   }
 }
 
@@ -86,7 +79,7 @@ function makeZaiClient(env: NodeJS.ProcessEnv): LlmClient {
   const apiKey = env['ZAI_API_KEY'];
   if (!apiKey || apiKey.trim().length === 0) {
     throw new Error(
-      'Z.ai requires ZAI_API_KEY — get a key at https://z.ai and export ZAI_API_KEY ' +
+      'api:zai requires ZAI_API_KEY — get a key at https://z.ai and export ZAI_API_KEY ' +
         `(optional: ZAI_BASE_URL, default ${ZAI_DEFAULT_BASE_URL})`
     );
   }
@@ -98,141 +91,88 @@ function makeZaiClient(env: NodeJS.ProcessEnv): LlmClient {
   );
 }
 
-/**
- * Providers that a `provider:model` tier pin can reference
- * (e.g. ATOMA_MODEL_L1=zai:glm-4.5-air). Each entry builds its client
- * lazily — only providers actually referenced by a tier var are
- * constructed, so a missing ZAI_API_KEY only matters if a tier asks
- * for Z.ai.
- */
-const PROVIDER_FACTORIES: Record<string, (env: NodeJS.ProcessEnv) => LlmClient> = {
-  zai: (env) => makeBaseClient('zai', { env }),
-  // The three base kinds route through the ONE construction switch above —
-  // a tier-pinned `anthropic:`/`ollama:`/`claude-cli:` client must be built
-  // exactly like the ATOMA_LLM base client, or the two paths drift.
-  anthropic: (env) => makeBaseClient('anthropic', { anthropic: makeAnthropicClient(env), env }),
-  ollama: (env) => makeBaseClient('ollama', { env }),
-  // Takes no env: it binds to a machine-local `claude /login`, which is
-  // exactly why `assertTransportHonoursCredentials` refuses it whenever the
-  // caller supplied a credential snapshot.
-  'claude-cli': () => makeBaseClient('claude-cli'),
-  // Local Codex CLI on a ChatGPT subscription (`codex login`) — TIERS 2/3
-  // ONLY. It cannot host a tool loop (Codex cannot expose only Atoma tools
-  // while disabling every built-in, so calls would bypass ToolSandbox and
-  // the #8a scope gate), and CodexCliLlmClient.complete throws when
-  // handed tools rather than degrading silently. The client captures THIS
-  // run's environment snapshot: CODEX_HOME selects the authorised principal
-  // profile, while its subprocess allowlist strips every API/provider key.
-  codex: (env) => new CodexCliLlmClient({ env }),
-};
-
-/** Provider names a tier pin may reference via the `provider:` prefix. */
-export const KNOWN_PROVIDER_PREFIXES = Object.keys(PROVIDER_FACTORIES);
-
-/**
- * Provider prefixes explicitly referenced by the three tier-model env vars.
- * Parsing DELEGATES to `splitProviderModel` — this function used to
- * re-implement the same first-colon/known-prefix walk byte-for-byte, which
- * is exactly the two-copies-of-one-rule drift that broke `storeDbPath` and
- * `usedOrdinals` (review 2026-08-14 §3.9). A known-provider pin with an
- * empty model (`zai:`) therefore throws HERE, at construction scan time,
- * with the env-var shape in the message — instead of the first LLM call.
- */
-export function referencedProviderNames(env: NodeJS.ProcessEnv = process.env): string[] {
-  const referenced = new Set<string>();
-  for (const tier of [1, 2, 3] as const) {
-    // Default tier models are unprefixed Anthropic ids. Only an explicit env
-    // value can add a cross-provider route.
-    const value = env[`ATOMA_MODEL_L${tier}`]?.trim();
-    if (!value) continue;
-    const { provider } = splitProviderModel(value, KNOWN_PROVIDER_PREFIXES);
-    if (provider !== null) referenced.add(provider);
-  }
-  return [...referenced];
+/** The three selectors of an environment, parsed; a missing or malformed pin throws. */
+export function tierSelectors(
+  env: NodeJS.ProcessEnv = process.env,
+  opts: { readonly allowOwn?: boolean } = {}
+): Record<TierNumber, ModelSelector> {
+  return readTierSelectors(env, opts);
 }
 
 /**
- * Scan the three tier pins for `provider:` prefixes and build ONLY the
- * referenced clients. Returns the map to hand to RoutingLlmClient (empty
- * when no tier crosses providers — the router then costs nothing).
+ * Build ONLY the transports the three tier selectors reach, each once, keyed
+ * for `RoutingLlmClient`. A transport is constructed lazily from the SNAPSHOT
+ * it is asked about, so a missing ZAI_API_KEY only matters if a tier asks for
+ * Z.ai, and a tenant run's clients read the tenant's environment.
  */
-export function buildReferencedProviders(
-  env: NodeJS.ProcessEnv = process.env
-): Record<string, LlmClient> {
-  const out: Record<string, LlmClient> = {};
-  for (const name of referencedProviderNames(env)) out[name] = PROVIDER_FACTORIES[name]!(env);
+export function buildTierClients(
+  env: NodeJS.ProcessEnv = process.env,
+  opts: { readonly allowOwn?: boolean; readonly anthropic?: Anthropic } = {}
+): Partial<Record<ModelTransport, LlmClient>> {
+  const selectors = tierSelectors(env, { allowOwn: opts.allowOwn ?? false });
+  const out: Partial<Record<ModelTransport, LlmClient>> = {};
+  for (const transport of referencedTransports(selectors)) {
+    out[transport] = makeTransportClient(transport, {
+      env,
+      ...(opts.anthropic ? { anthropic: opts.anthropic } : {}),
+    });
+  }
   return out;
+}
+
+/** `L1=… L2=… L3=…`, for the run banner and the burn-in label. */
+export function describeTierSelectors(selectors: Readonly<Record<TierNumber, ModelSelector>>): string {
+  return TIERS.map((tier) => `L${tier}=${formatModelSelector(selectors[tier])}`).join('  ');
 }
 
 /**
  * A supplied credential must be a USED credential.
  *
- * `claude-cli` drives the machine's `claude /login` session: it takes no key,
- * no bearer token and no base URL, so a caller-supplied credential snapshot
- * is silently ignored and the work bills the host machine's subscription
- * instead. For a single developer that is the point of the transport. For
- * anything hosting a second credential it is a correctness failure that is
- * invisible until the bill arrives — and, per docs/saas-architecture.md §1,
- * serving another party's run through a consumer subscription is also
- * prohibited by the vendor.
+ * `sub:` and `own:` selectors drive a machine-local login session (Claude
+ * Code or Codex): they take no key, no bearer token and no base URL, so a
+ * caller-supplied credential snapshot is silently ignored and the work bills
+ * that login instead. For a single developer that is the point of the
+ * transport. For anything hosting a second credential it is a correctness
+ * failure that is invisible until the bill arrives — and, per
+ * docs/saas-architecture.md §1, serving another party's run through a
+ * consumer subscription is also prohibited by the vendor.
  *
- * So the refusal is mechanical and at LAUNCH, matching how a codex L1 pin
- * already fails before any spend. It triggers on the caller having supplied
- * a snapshot at all — not on a notion of "tenant" — which keeps it correct
- * under every tenancy model the SaaS design might land on, and leaves the
- * developer path (no snapshot, inherit the process) untouched.
+ * So the refusal is mechanical and at LAUNCH, matching how a Codex L1 pin
+ * already fails before any spend. It triggers on the caller having supplied a
+ * snapshot at all — not on a notion of "tenant" — which keeps it correct under
+ * every tenancy model the SaaS design might land on, and leaves the developer
+ * path (no snapshot, inherit the process) untouched.
+ *
+ * WHAT THE PARENT AUTHORISED, named tier by tier. A project run may be MIXED:
+ * the coordinator admits a platform admin's per-tier `sub:` pin or a member's
+ * own `own:` pin after re-asking the authority, and records the result in
+ * `ATOMA_SUBSCRIPTION_TIERS` (`l1,l2,l3` subset). A machine-bound selector
+ * on a tier NOT in that list reached the child another way and is refused
+ * here, before spend (design 2026-08-28, Q8). The list is a CAPABILITY, not a
+ * claim: it only ever narrows what this assertion permits, and a child that
+ * forges it cannot grant itself a credential — the subscription subprocess
+ * authenticates from the host's own login session, which a tenant's run has
+ * no way to obtain.
  */
-export function assertTransportHonoursCredentials(
-  kind: BaseProviderKind,
-  env: NodeJS.ProcessEnv = {}
-): void {
-  // WHAT THE PARENT AUTHORISED, named tier by tier. A project run may now be
-  // MIXED: the coordinator translates a platform admin's per-tier pin into a
-  // `claude-cli:` selector, having re-asked the admin flag and matched the
-  // deployment's declared organisation, and records the result here. Anything
-  // machine-bound that is NOT in this list reached the child another way and
-  // is refused at launch, before spend — which is the whole point of a second
-  // gate at the boundary the payer decision crosses (design 2026-08-28, Q8).
-  //
-  // The list is a CAPABILITY, not a claim: it only ever narrows what this
-  // assertion permits, and a child that forges it cannot grant itself a
-  // credential — the subscription subprocess authenticates from the host's own
-  // login session, which a tenant's run has no way to obtain.
+export function assertTransportHonoursCredentials(env: NodeJS.ProcessEnv): void {
   const authorised = new Set(
     (env['ATOMA_SUBSCRIPTION_TIERS'] ?? '')
       .split(',')
       .map((entry) => entry.trim())
       .filter(Boolean)
   );
-  if (kind === 'claude-cli' && authorised.has('base')) return;
-  if (kind === 'claude-cli') {
-    throw new RunnerConfigError(
-      'ATOMA_LLM=claude-cli cannot honour a supplied credential snapshot: it binds to the ' +
-        "machine's `claude /login` session, so the run would bill that subscription and ignore " +
-        'the credential passed to startTask. Use ATOMA_LLM=anthropic with ANTHROPIC_API_KEY ' +
-        '(or ANTHROPIC_AUTH_TOKEN) in the snapshot, or omit the snapshot to inherit the process.'
-    );
-  }
-  // Tier pins can name the same machine-bound transports. The base-kind
-  // check above used to be the whole gate, so
-  // `{ ATOMA_LLM: 'anthropic', ATOMA_MODEL_L2: 'claude-cli:sonnet' }`
-  // constructed a CLI client that ignored the snapshot (review 2026-08-18 §1.6).
-  const pinned = referencedProviderNames(env).filter(
-    (name) => name === 'claude-cli' || name === 'codex'
+  const selectors = readTierSelectors(env, { allowOwn: true });
+  const unauthorised = TIERS.filter(
+    (tier) => selectorSpendsSubscription(selectors[tier]) && !authorised.has(`l${tier}`)
   );
-  if (pinned.length === 0) return;
-  // Every machine-bound pin the parent authorised, by tier. A CLI pin on a
-  // tier the parent did NOT name still throws below.
-  const unauthorised = ([1, 2, 3] as const).filter((tier) => {
-    const value = env[`ATOMA_MODEL_L${tier}`]?.trim().toLowerCase();
-    if (!value) return false;
-    if (!value.startsWith('claude-cli:') && !value.startsWith('codex:')) return false;
-    return !authorised.has(`l${tier}`);
-  });
   if (unauthorised.length === 0) return;
   throw new RunnerConfigError(
-    `tier pin ${pinned.map((name) => `"${name}:"`).join(', ')} cannot honour a supplied credential snapshot: ` +
-      'those transports bind to a machine-local login and ignore the credential passed to startTask. ' +
-      'Pin L2/L3 to a key-bearing provider (anthropic / zai / ollama) or omit the snapshot to inherit the process.'
+    `${unauthorised
+      .map((tier) => `${tierPinVariable(tier)}=${formatModelSelector(selectors[tier])}`)
+      .join(', ')} cannot honour a supplied credential snapshot: a ${unauthorised
+      .map((tier) => transportOf(selectors[tier]))
+      .filter((value, index, all) => all.indexOf(value) === index)
+      .join('/')} selector binds to a machine-local login and ignores the credential passed to ` +
+      'startTask. Pin the tier to an api: selector, or omit the snapshot to inherit the process.'
   );
 }

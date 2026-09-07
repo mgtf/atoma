@@ -28,10 +28,8 @@
 import { spawn } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
-import {
-  referencedProviderNames,
-  resolveBaseProviderKind,
-} from '../run/providers.js';
+import { tierSelectors } from '../run/providers.js';
+import { referencedTransports } from '../contracts/modelSelector.js';
 import { runHostSupported, unsupportedRunHostMessage } from '../run/platform.js';
 import {
   parseRunStatsEpilogue,
@@ -48,17 +46,15 @@ export interface BurninTask {
 
 export function burninProviderInfo(
   env: NodeJS.ProcessEnv = process.env
-): { base: string; routes: string[]; label: string; estimatedCost: boolean } {
-  const base = resolveBaseProviderKind(env['ATOMA_LLM']);
-  const routes = referencedProviderNames(env).filter((provider) => provider !== base);
+): { transports: string[]; label: string; estimatedCost: boolean } {
+  const transports = referencedTransports(tierSelectors(env));
   return {
-    base,
-    routes,
-    label: [base, ...routes].join('+'),
+    transports,
+    label: transports.join('+'),
     // Direct Anthropic-only is the one configuration whose estimated API
     // pricing roughly matches the billing path. Subscription/local/routed
-    // providers need the explicit equivalence caveat.
-    estimatedCost: base !== 'anthropic' || routes.length > 0,
+    // transports need the explicit equivalence caveat.
+    estimatedCost: transports.length !== 1 || transports[0] !== 'anthropic-api',
   };
 }
 
@@ -249,7 +245,7 @@ export function ensureBurninCsvHeader(outAbsPath: string): void {
  * Signature of a MISCONFIGURED launch, not a task failure: the run died
  * almost instantly and spent nothing (dead API key → 401 on the first
  * call, wrong provider env, missing login…). Observed live: `npm run
- * burnin` without ATOMA_LLM=claude-cli marched through the task list at
+ * burnin` against a dead key marched through the task list at
  * two phantom failed rows per minute against a revoked key. One config
  * failure should abort the batch, not pollute the curve N times.
  */
@@ -827,7 +823,7 @@ async function main(): Promise<void> {
     if (consecutiveConfigFailures >= abortThreshold && !argv.includes('--force')) {
       console.error(
         `\n✗ ${consecutiveConfigFailures} task(s) failed almost instantly with zero spend — the signature of a\n` +
-          `  misconfigured or expired provider (dead ANTHROPIC_API_KEY? missing ATOMA_LLM=claude-cli?\n` +
+          `  misconfigured or expired provider (dead ANTHROPIC_API_KEY? a sub: tier without its login?\n` +
           `  exhausted quota mid-batch?), not of a hard task. Batch ABORTED after ${summaryRows.length}/${tasks.length}\n` +
           `  task(s) to avoid filling the curve with phantom rows.\n` +
           `  Check the last log under burnin/logs/, fix the env, and re-run (--force to override).`

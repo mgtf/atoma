@@ -14,7 +14,7 @@ import {
   type AtomRegistry,
   type AtomType,
 } from '../registry/atomRegistry.js';
-import { modelForTier, resolveLatestOpus, FALLBACK_OPUS, type ModelListingClient } from '../core/models.js';
+import { modelForTier } from '../core/models.js';
 import { capToolIterations } from '../core/limits.js';
 import { dispatchWithAggregation } from './dispatch.js';
 import { acceptL3RootPlan } from './l3RootPlan.js';
@@ -232,17 +232,15 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     this.skillRegistry = args.skillRegistry ?? null;
   }
 
-  static async fromType(
+  static fromType(
     type: AtomType,
     registry: AtomRegistry,
-    client?: ModelListingClient,
     skillRegistry: SkillRegistry | null = null
-  ): Promise<L3Atom> {
+  ): L3Atom {
     if (type.tier !== 3) throw new Error(`L3Atom.fromType requires tier=3`);
-    // An explicit ATOMA_MODEL_L3 pins the tier and SKIPS the network
-    // resolution — provider-agnostic override beats live Opus discovery.
-    const pinned = modelForTier(3);
-    const model = pinned !== FALLBACK_OPUS ? pinned : client ? await resolveLatestOpus(client) : FALLBACK_OPUS;
+    // ATOMA_MODEL_L3 is required and names the tier's model in full; there is
+    // no live Opus discovery any more (2026-09-07).
+    const model = modelForTier(3);
     return new L3Atom({
       atomId: type.atomId,
       name: type.name,

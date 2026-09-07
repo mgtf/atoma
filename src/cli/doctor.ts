@@ -2,7 +2,7 @@
  * Quota-free preflight for the exact runtime mode a build run will use.
  *
  *   npm run doctor
- *   ATOMA_LLM=claude-cli npm run doctor
+ *   ATOMA_MODEL_L1=sub:anthropic:haiku ATOMA_MODEL_L2=sub:anthropic:sonnet ATOMA_MODEL_L3=sub:anthropic:opus npm run doctor
  *   npm run doctor -- --container
  *   npm run doctor -- --egress
  *
@@ -17,11 +17,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { OLLAMA_DEFAULT_BASE_URL } from '../core/llmOllama.js';
+import { tierSelectors, ZAI_DEFAULT_BASE_URL } from '../run/providers.js';
 import {
-  referencedProviderNames,
-  resolveBaseProviderKind,
-  ZAI_DEFAULT_BASE_URL,
-} from '../run/providers.js';
+  referencedTransports,
+  type ModelTransport,
+} from '../contracts/modelSelector.js';
 import {
   resolveIsolationRequirement,
   resolveToolBackendMode,
@@ -87,7 +87,6 @@ export interface ParsedDoctorOptions {
   readonly error?: string;
 }
 
-type ProviderName = 'anthropic' | 'ollama' | 'claude-cli' | 'zai' | 'codex';
 
 function printHelp(): void {
   console.log(`atoma doctor — quota-free runtime preflight
@@ -104,8 +103,8 @@ flags:
   --preview                      add the result-preview preconditions
   --help                         show this help
 
-The same ATOMA_LLM, ATOMA_MODEL_L1/L2/L3, ATOMA_CONTAINER and ATOMA_EGRESS
-variables used by run:build determine what doctor checks. When visualizer auth
+The same ATOMA_MODEL_L1/L2/L3 (<api|sub|own>:<vendor>:<model>), ATOMA_CONTAINER
+and ATOMA_EGRESS variables used by run:build determine what doctor checks. When visualizer auth
 is enabled, its public origin and provider registry are checked offline too.`);
 }
 
@@ -146,10 +145,6 @@ export function dockerVersionSupportsIsolatedGateway(version: string): boolean {
 
 function nonEmpty(value: string | undefined): boolean {
   return value !== undefined && value.trim().length > 0;
-}
-
-function providerName(value: string): value is ProviderName {
-  return ['anthropic', 'ollama', 'claude-cli', 'zai', 'codex'].includes(value);
 }
 
 function modeName(mode: ToolBackendMode): DoctorReport['mode'] {
@@ -347,14 +342,25 @@ async function checkPython(deps: DoctorDependencies): Promise<DoctorCheck> {
 }
 
 async function checkProvider(
-  provider: ProviderName,
+  provider: ModelTransport,
   env: NodeJS.ProcessEnv,
   deps: DoctorDependencies
 ): Promise<DoctorCheck> {
-  const label = `Provider ${provider}`;
+  const label = `Transport ${provider}`;
   const timeoutMs = 5_000;
   try {
-    if (provider === 'zai') {
+    if (provider === 'openai-api') {
+      if (!nonEmpty(env['OPENAI_API_KEY'])) throw new Error('OPENAI_API_KEY is not set');
+      const baseUrl = env['OPENAI_BASE_URL']?.trim();
+      return {
+        id: 'provider:openai-api',
+        label,
+        status: 'pass',
+        detail: `credential configured${baseUrl ? ` · ${safeUrlLabel(baseUrl)}` : ''}`,
+      };
+    }
+
+    if (provider === 'zai-api') {
       if (!nonEmpty(env['ZAI_API_KEY'])) {
         throw new Error('ZAI_API_KEY is not set');
       }
@@ -364,7 +370,7 @@ async function checkProvider(
         throw new Error('ZAI_BASE_URL must use http or https');
       }
       return {
-        id: 'provider:zai',
+        id: 'provider:zai-api',
         label,
         status: 'pass',
         detail: `credential configured · ${safeUrlLabel(baseUrl)}`,
@@ -409,18 +415,15 @@ async function checkProvider(
       };
     }
 
-    if (provider === 'codex') {
-      const hasApiCredential =
-        nonEmpty(env['OPENAI_API_KEY']) || nonEmpty(env['CODEX_API_KEY']);
-      await deps.runCommand('codex', hasApiCredential ? ['--version'] : ['login', 'status'], {
-        env,
-        timeoutMs,
-      });
+    if (provider === 'codex-cli') {
+      // `sub:openai` / `own:openai` spend a ChatGPT LOGIN; the API key path is
+      // `api:openai`, checked above, so the CLI is asked about its login only.
+      await deps.runCommand('codex', ['login', 'status'], { env, timeoutMs });
       return {
-        id: 'provider:codex',
+        id: 'provider:codex-cli',
         label,
         status: 'pass',
-        detail: hasApiCredential ? 'CLI available · API credential configured' : 'ChatGPT login available',
+        detail: 'ChatGPT login available',
       };
     }
 
@@ -446,7 +449,7 @@ async function checkProvider(
         : null;
     if (source === null) {
       return {
-        id: 'provider:anthropic',
+        id: 'provider:anthropic-api',
         label,
         status: 'warn',
         detail: forceCli
@@ -457,7 +460,7 @@ async function checkProvider(
       };
     }
     return {
-      id: 'provider:anthropic',
+      id: 'provider:anthropic-api',
       label,
       status: 'pass',
       detail: `credential source available · ${source}`,
@@ -465,14 +468,16 @@ async function checkProvider(
   } catch {
     const remedy =
       provider === 'claude-cli'
-        ? 'Run `claude /login`, then retry with ATOMA_LLM=claude-cli.'
-        : provider === 'codex'
-          ? 'Run `codex login` or configure OPENAI_API_KEY/CODEX_API_KEY.'
-          : provider === 'ollama'
-            ? 'Start Ollama and verify OLLAMA_BASE_URL (default http://localhost:11434).'
-            : provider === 'zai'
-              ? 'Export ZAI_API_KEY and verify ZAI_BASE_URL.'
-              : 'Export ANTHROPIC_API_KEY/ANTHROPIC_AUTH_TOKEN or run `ant auth login`.';
+        ? 'Run `claude /login`, then retry.'
+        : provider === 'codex-cli'
+          ? 'Run `codex login`, or pin the tier to api:openai:<model> with OPENAI_API_KEY.'
+          : provider === 'openai-api'
+            ? 'Export OPENAI_API_KEY (optional: OPENAI_BASE_URL).'
+            : provider === 'ollama'
+              ? 'Start Ollama and verify OLLAMA_BASE_URL (default http://localhost:11434).'
+              : provider === 'zai-api'
+                ? 'Export ZAI_API_KEY and verify ZAI_BASE_URL.'
+                : 'Export ANTHROPIC_API_KEY/ANTHROPIC_AUTH_TOKEN or run `ant auth login`.';
     return {
       id: `provider:${provider}`,
       label,
@@ -628,41 +633,32 @@ export async function diagnoseDoctor(args: {
         }
   );
 
-  let baseProvider: ProviderName | undefined;
+  // THE THREE SELECTORS decide which transports doctor checks: a tier nobody
+  // configured, a spelling outside the grammar, or a Codex selector on L1 is
+  // a configuration failure here, exactly as it is at launch.
   const configProblems: string[] = [];
+  let providers: ModelTransport[] = [];
   try {
-    baseProvider = resolveBaseProviderKind(env['ATOMA_LLM']);
+    providers = referencedTransports(tierSelectors(env));
   } catch (error) {
     configProblems.push(failureDetail(error));
   }
-  const l1Model = env['ATOMA_MODEL_L1']?.trim().toLowerCase();
-  if (l1Model?.startsWith('codex:')) {
-    configProblems.push(
-      'ATOMA_MODEL_L1 cannot use codex because Codex cannot expose tools through ToolSandbox'
-    );
-  }
-
-  const providers: ProviderName[] = [];
-  const addProvider = (name: string | undefined): void => {
-    if (name && providerName(name) && !providers.includes(name)) providers.push(name);
-  };
-  addProvider(baseProvider);
-  for (const name of referencedProviderNames(env)) addProvider(name);
 
   checks.push(
     configProblems.length === 0
       ? {
           id: 'provider-config',
-          label: 'Provider routing',
+          label: 'Model selectors',
           status: 'pass',
-          detail: providers.join(', ') || 'no provider selected',
+          detail: providers.join(', '),
         }
       : {
           id: 'provider-config',
-          label: 'Provider routing',
+          label: 'Model selectors',
           status: 'fail',
           detail: configProblems.join('; '),
-          remedy: 'Correct ATOMA_LLM and the ATOMA_MODEL_L1/L2/L3 tier pins.',
+          remedy:
+            'Set ATOMA_MODEL_L1, ATOMA_MODEL_L2 and ATOMA_MODEL_L3 to <api|sub>:<vendor>:<model> selectors.',
         }
   );
 
@@ -672,7 +668,7 @@ export async function diagnoseDoctor(args: {
   const anthropicKeyIgnored =
     nonEmpty(env['ANTHROPIC_API_KEY']) &&
     (providers.includes('claude-cli') ||
-      (providers.includes('anthropic') &&
+      (providers.includes('anthropic-api') &&
         (env['ATOMA_AUTH'] ?? '').trim().toLowerCase() === 'cli'));
   if (anthropicKeyIgnored) {
     checks.push({

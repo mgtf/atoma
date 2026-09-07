@@ -15,14 +15,21 @@ Neighbours:
 ## LLM interaction conventions
 
 - Every call goes through `LlmClient`; never call a provider SDK from atoms.
-- Model IDs and tier defaults live in `src/core/models.ts`. `modelForTier`
-  accepts an optional env; `applyTierPins` is how a snapshot reaches the
-  default (`process.env`) call sites. A missing pin is deleted on the
-  target, not left as leftover ambient state.
-- `parseLlmSelector` is the only parser for provider/model selectors. Preserve
-  Ollama tags containing colons.
-- `RoutingLlmClient` owns cross-vendor tier routing. Record both requested and
-  served model so cost attribution follows the actual transport.
+- A model is always a full selector `<api|sub|own>:<vendor>:<model>`
+  (`src/contracts/modelSelector.ts`, the ONLY parser; the third segment keeps
+  its colons for Ollama tags). `modelForTier` in `src/core/models.ts` reads the
+  three REQUIRED `ATOMA_MODEL_L*` pins — there is no default and no base
+  provider since 2026-09-07 — accepts an optional env, and throws
+  `ModelSelectorError` naming the variable. `applyTierPins` is how a snapshot
+  reaches the default (`process.env`) call sites; a missing pin is deleted on
+  the target, not left as leftover ambient state.
+- `RoutingLlmClient` maps a selector's TRANSPORT (`transportOf`) to the one
+  client built for it and hands the transport the bare model id; it has no
+  default client. Record both requested and served model so cost attribution
+  follows the actual transport.
+- `OpenAiLlmClient` (`api:openai`) is the Responses API with function tools:
+  the same loop contract as the Anthropic client, admissible on every tier.
+  `sub:openai`/`own:openai` stay on the Codex CLI and off L1.
 - Effort settings belong on strategy calls only. Validators and prefilters are
   deterministic and cheap.
 - A transport cannot outlive its deadline. Keep both per-call abort and outer

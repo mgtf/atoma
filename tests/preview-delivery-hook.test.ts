@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ANTHROPIC_PINS } from './tier-pins.js';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -162,7 +163,7 @@ function coordinatorFor(
     store: f.store,
     dbPath: f.dbPath,
     projectsRoot: f.root,
-    hostEnv: { PATH: process.env['PATH'], ANTHROPIC_API_KEY: 'model-key' },
+    hostEnv: { PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
     driver: driver as unknown as ProjectRunDriver,
     acquireLease: async () => lease(),
     ...(options.describeDeliveredPreview

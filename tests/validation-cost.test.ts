@@ -5,7 +5,7 @@ import { L2Atom } from '../src/atoms/L2Atom.js';
 import { L3Atom } from '../src/atoms/L3Atom.js';
 import { L1Atom } from '../src/atoms/L1Atom.js';
 import { VALIDATION_SYSTEM_PROMPT } from '../src/atoms/L2Atom.js';
-import { PIN_HAIKU, PIN_SONNET, FALLBACK_OPUS } from '../src/core/models.js';
+import { PIN_HAIKU, PIN_SONNET, FALLBACK_OPUS } from './tier-pins.js';
 import { makeCtx, jsonText } from './helpers.js';
 import { makePlan } from './helpers/factories.js';
 

@@ -335,8 +335,8 @@ export interface VizPersonalSubscriptionCapabilities {
 /** Per-tier model pins plus the labels the account page needs to show. */
 export interface VizAccountModels {
   pins: { l1: string | null; l2: string | null; l3: string | null };
-  /** What "operator default" resolves to today, per tier. */
-  defaults: { l1: string; l2: string; l3: string };
+  /** The host's own selector per tier, or null where the host pinned none. */
+  defaults: { l1: string | null; l2: string | null; l3: string | null };
   catalog: VizLlmCatalogEntry[];
   /**
    * Legacy singular offer for the operator's Claude login. ABSENT MEANS NOT
@@ -379,6 +379,8 @@ export type VizAccountSubscriptions = AccountSubscriptionsResponse;
 export interface VizLlmCatalogEntry {
   id: string;
   label: string;
+  /** What the picker prepends to a model id to form the stored selector, e.g. `api:anthropic`. */
+  selectorPrefix: string;
   /** Null when self-hosted; otherwise the env var whose absence degrades the provider. */
   credentialEnvVar: string | null;
   /** True when the model list reflects an inventory we cannot enumerate statically. */
@@ -418,7 +420,7 @@ export interface VizOrgModels {
   /** False when the deployment lacks ATOMA_SECRET_ENCRYPTION_KEY: key management is refused server-side. */
   encryptionReady: boolean;
   catalog: VizLlmCatalogEntry[];
-  operatorDefaults: { l1: string; l2: string; l3: string };
+  operatorDefaults: { l1: string | null; l2: string | null; l3: string | null };
   /** See VizAccountModels.ollamaAvailable. */
   ollamaAvailable?: boolean;
 }

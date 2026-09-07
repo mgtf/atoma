@@ -134,8 +134,8 @@ import {
 } from '../contracts/announcements.js';
 import { DEFAULT_LOCALE, SUPPORTED_LOCALES } from '../contracts/locales.js';
 import { PLATFORM_EVENT_DETAIL_MAX_CHARS } from '../contracts/platformEvents.js';
-import { makeAnthropicClient } from '../run/auth.js';
-import { makeBaseClient, resolveBaseProviderKind } from '../run/providers.js';
+import { buildTierClients } from '../run/providers.js';
+import { RoutingLlmClient } from '../core/llmRouting.js';
 import type { LlmClient } from '../core/types.js';
 import { PlatformEventLog } from '../platform/events.js';
 import { eventLabel } from '../contracts/platformEvents.js';
@@ -560,16 +560,14 @@ let announcementLlm: LlmClient | null | undefined;
 function announcementTranslator(): LlmClient | null {
   if (announcementLlm !== undefined) return announcementLlm;
   try {
-    const kind = resolveBaseProviderKind(process.env['ATOMA_LLM']);
-    announcementLlm = makeBaseClient(
-      kind,
-      kind === 'anthropic' ? { anthropic: makeAnthropicClient() } : {}
-    );
+    // The translation rides the L1 selector (`translate.ts` asks
+    // `modelForTier(1)`), so the same tier clients the runner would build serve
+    // it — one construction switch, no second copy.
+    announcementLlm = new RoutingLlmClient(buildTierClients(process.env));
   } catch (error) {
     // No provider configured here is a normal deployment, not a fault: the
     // form falls back to the admin writing every language by hand. But the
-    // REASON is written down. Swallowing it made an unset `ATOMA_LLM` — which
-    // defaults to `anthropic` and then demands a credential — indistinguishable
+    // REASON is written down: an unset tier pin used to be indistinguishable
     // on screen from a deployment that deliberately has no provider, with
     // nothing anywhere to tell the two apart (measured 2026-08-23).
     process.stderr.write(
@@ -3347,7 +3345,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           // not "something broke". But WHICH of the two is said out loud —
           // "nothing is configured" and "the configured provider refused" ask
           // the operator for different actions, and they reached the screen as
-          // one sentence until an unset ATOMA_LLM was mistaken for the first.
+          // one sentence until an unset tier pin was mistaken for the first.
           // The reason itself stays on stderr: a provider's error text is not
           // for a broadcast form.
           sendJson(res, 200, {

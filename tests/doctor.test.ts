@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { inspectAtomStoreSchema } from '../src/registry/db.js';
+import { ANTHROPIC_PINS, CLAUDE_CLI_PINS, OLLAMA_PINS } from './tier-pins.js';
 import {
   diagnoseDoctor,
   dockerVersionSupportsIsolatedGateway,
@@ -100,7 +101,7 @@ describe('atoma doctor', () => {
     const report = await diagnoseDoctor({
       mode: { container: false, egress: false },
       env: {
-        ATOMA_LLM: 'anthropic',
+        ...ANTHROPIC_PINS,
         ANTHROPIC_API_KEY: 'configured',
         ATOMA_VIZ_AUTH: '1',
         ATOMA_VIZ_PUBLIC_ORIGIN: 'https://viz.example',
@@ -128,7 +129,7 @@ describe('atoma doctor', () => {
     const configured = await diagnoseDoctor({
       mode: { container: false, egress: false },
       env: {
-        ATOMA_LLM: 'anthropic',
+        ...ANTHROPIC_PINS,
         ANTHROPIC_API_KEY: 'configured',
         ATOMA_VIZ_AUTH: '1',
         ATOMA_VIZ_PUBLIC_ORIGIN: 'https://viz.example',
@@ -151,7 +152,7 @@ describe('atoma doctor', () => {
     const half = await diagnoseDoctor({
       mode: { container: false, egress: false },
       env: {
-        ATOMA_LLM: 'anthropic',
+        ...ANTHROPIC_PINS,
         ANTHROPIC_API_KEY: 'configured',
         ATOMA_GITHUB_APP_ID: '123456',
       },
@@ -172,7 +173,7 @@ describe('atoma doctor', () => {
     ]) {
       const stale = await diagnoseDoctor({
         mode: { container: false, egress: false },
-        env: { ATOMA_LLM: 'anthropic', ANTHROPIC_API_KEY: 'configured', ...leftover },
+        env: { ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'configured', ...leftover },
         dependencies: dependencies(),
       });
       expect(stale.checks.find((check) => check.id === 'github-app')?.status).toBe('fail');
@@ -215,7 +216,7 @@ describe('atoma doctor', () => {
   ])('fails closed on invalid visualizer auth configuration', async (authEnv, pattern) => {
     const report = await diagnoseDoctor({
       mode: { container: false, egress: false },
-      env: { ATOMA_LLM: 'anthropic', ANTHROPIC_API_KEY: 'configured', ...authEnv },
+      env: { ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'configured', ...authEnv },
       dependencies: dependencies(),
     });
 
@@ -247,7 +248,7 @@ describe('atoma doctor', () => {
     };
     const report = await diagnoseDoctor({
       mode: { container: false, egress: false },
-      env: { ATOMA_LLM: 'claude-cli', ANTHROPIC_API_KEY: 'stale-key' },
+      env: { ...CLAUDE_CLI_PINS, ANTHROPIC_API_KEY: 'stale-key' },
       dependencies: dependencies({ runCommand }),
     });
 
@@ -263,7 +264,7 @@ describe('atoma doctor', () => {
     const report = await diagnoseDoctor({
       mode: { container: false, egress: false },
       env: {
-        ATOMA_LLM: 'anthropic',
+        ...ANTHROPIC_PINS,
         ATOMA_AUTH: 'cli',
         ANTHROPIC_API_KEY: 'shadowing-key',
       },
@@ -274,7 +275,7 @@ describe('atoma doctor', () => {
     // doctor must not count it as the credential source. What remains is an
     // ant OAuth profile, which resolves on the first REQUEST and therefore
     // cannot be proven by a quota-free check.
-    const check = report.checks.find((c) => c.id === 'provider:anthropic');
+    const check = report.checks.find((c) => c.id === 'provider:anthropic-api');
     expect(check?.status).toBe('warn');
     expect(check?.detail).toContain('ATOMA_AUTH=cli');
     expect(check?.remedy).toContain('ant auth status');
@@ -287,11 +288,11 @@ describe('atoma doctor', () => {
     // `pass · credential source available · ant OAuth profile`.
     const report = await diagnoseDoctor({
       mode: { container: false, egress: false },
-      env: { ATOMA_LLM: 'anthropic' },
+      env: { ...ANTHROPIC_PINS },
       dependencies: dependencies(),
     });
 
-    const check = report.checks.find((c) => c.id === 'provider:anthropic');
+    const check = report.checks.find((c) => c.id === 'provider:anthropic-api');
     expect(check?.status).toBe('warn');
     expect(check?.detail).not.toContain('credential source available');
   });
@@ -299,19 +300,19 @@ describe('atoma doctor', () => {
   it('passes and names the source when the environment actually carries one', async () => {
     const withKey = await diagnoseDoctor({
       mode: { container: false, egress: false },
-      env: { ATOMA_LLM: 'anthropic', ANTHROPIC_API_KEY: 'configured' },
+      env: { ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'configured' },
       dependencies: dependencies(),
     });
-    expect(withKey.checks.find((c) => c.id === 'provider:anthropic')?.detail).toBe(
+    expect(withKey.checks.find((c) => c.id === 'provider:anthropic-api')?.detail).toBe(
       'credential source available · ANTHROPIC_API_KEY'
     );
 
     const withToken = await diagnoseDoctor({
       mode: { container: false, egress: false },
-      env: { ATOMA_LLM: 'anthropic', ANTHROPIC_AUTH_TOKEN: 'bearer' },
+      env: { ...ANTHROPIC_PINS, ANTHROPIC_AUTH_TOKEN: 'bearer' },
       dependencies: dependencies(),
     });
-    expect(withToken.checks.find((c) => c.id === 'provider:anthropic')?.detail).toBe(
+    expect(withToken.checks.find((c) => c.id === 'provider:anthropic-api')?.detail).toBe(
       'credential source available · ANTHROPIC_AUTH_TOKEN'
     );
   });
@@ -323,7 +324,7 @@ describe('atoma doctor', () => {
     const report = await diagnoseDoctor({
       mode: { container: false, egress: false },
       env: {
-        ATOMA_LLM: 'anthropic',
+        ...ANTHROPIC_PINS,
         ANTHROPIC_API_KEY: 'configured',
         ATOMA_REQUIRE_ISOLATION: '1',
       },
@@ -337,7 +338,7 @@ describe('atoma doctor', () => {
   it('raises no isolation check when the deployment does not require one', async () => {
     const report = await diagnoseDoctor({
       mode: { container: false, egress: false },
-      env: { ATOMA_LLM: 'anthropic', ANTHROPIC_API_KEY: 'configured' },
+      env: { ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'configured' },
       dependencies: dependencies(),
     });
 
@@ -354,7 +355,7 @@ describe('atoma doctor', () => {
     // processes deep, and must say it for a platform this suite is not on.
     const report = await diagnoseDoctor({
       mode: { container: false, egress: false },
-      env: { ATOMA_LLM: 'anthropic', ANTHROPIC_API_KEY: 'configured' },
+      env: { ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'configured' },
       dependencies: dependencies({ platform }),
     });
 
@@ -380,7 +381,7 @@ describe('atoma doctor', () => {
     };
     const missing = await diagnoseDoctor({
       mode: { container: false, egress: false },
-      env: { ATOMA_LLM: 'anthropic', ANTHROPIC_API_KEY: 'configured' },
+      env: { ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'configured' },
       dependencies: dependencies({ runCommand }),
     });
     const check = missing.checks.find((c) => c.id === 'python');
@@ -392,7 +393,7 @@ describe('atoma doctor', () => {
     // Present is a pass…
     const present = await diagnoseDoctor({
       mode: { container: false, egress: false },
-      env: { ATOMA_LLM: 'anthropic', ANTHROPIC_API_KEY: 'configured' },
+      env: { ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'configured' },
       dependencies: dependencies(),
     });
     expect(present.checks.find((c) => c.id === 'python')?.status).toBe('pass');
@@ -401,7 +402,7 @@ describe('atoma doctor', () => {
     // shim answering nothing at all is the Windows Store stub's behaviour).
     const stub = await diagnoseDoctor({
       mode: { container: false, egress: false },
-      env: { ATOMA_LLM: 'anthropic', ANTHROPIC_API_KEY: 'configured' },
+      env: { ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'configured' },
       dependencies: dependencies({ runCommand: async () => ({ stdout: '', stderr: '' }) }),
     });
     expect(stub.checks.find((c) => c.id === 'python')?.status).toBe('warn');
@@ -409,7 +410,7 @@ describe('atoma doctor', () => {
     // The host's python is irrelevant in container mode: the worker ships one.
     const containerised = await diagnoseDoctor({
       mode: { container: true, egress: false },
-      env: { ATOMA_LLM: 'anthropic', ANTHROPIC_API_KEY: 'configured' },
+      env: { ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'configured' },
       dependencies: dependencies({ runCommand }),
     });
     expect(containerised.checks.find((c) => c.id === 'python')).toBeUndefined();
@@ -424,12 +425,12 @@ describe('atoma doctor', () => {
     };
     const report = await diagnoseDoctor({
       mode: { container: true, egress: false },
-      env: { ATOMA_LLM: 'anthropic', ANTHROPIC_API_KEY: 'configured' },
+      env: { ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'configured' },
       dependencies: dependencies({ runCommand }),
     });
 
     expect(report.ready).toBe(false);
-    expect(report.checks.find((check) => check.id === 'provider:anthropic')?.status).toBe('pass');
+    expect(report.checks.find((check) => check.id === 'provider:anthropic-api')?.status).toBe('pass');
     expect(report.checks.find((check) => check.id === 'docker')?.status).toBe('fail');
     expect(report.checks.find((check) => check.id === 'worker')?.status).toBe('fail');
   });
@@ -437,7 +438,7 @@ describe('atoma doctor', () => {
   it('boots the worker and reports its announced tool count', async () => {
     const report = await diagnoseDoctor({
       mode: { container: true, egress: true },
-      env: { ATOMA_LLM: 'anthropic', ANTHROPIC_API_KEY: 'configured' },
+      env: { ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'configured' },
       dependencies: dependencies(),
     });
 
@@ -464,12 +465,12 @@ describe('atoma doctor', () => {
     });
     const egress = await diagnoseDoctor({
       mode: { container: true, egress: true },
-      env: { ATOMA_LLM: 'anthropic', ANTHROPIC_API_KEY: 'configured' },
+      env: { ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'configured' },
       dependencies: oldDocker,
     });
     const isolated = await diagnoseDoctor({
       mode: { container: true, egress: false },
-      env: { ATOMA_LLM: 'anthropic', ANTHROPIC_API_KEY: 'configured' },
+      env: { ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'configured' },
       dependencies: oldDocker,
     });
 
@@ -499,15 +500,15 @@ describe('atoma doctor', () => {
     const report = await diagnoseDoctor({
       mode: { container: false, egress: false },
       env: {
-        ATOMA_LLM: 'claude-cli',
-        ATOMA_MODEL_L2: 'zai:glm-5',
-        ATOMA_MODEL_L3: 'codex:gpt-5.6-sol',
+        ATOMA_MODEL_L1: 'sub:anthropic:haiku',
+        ATOMA_MODEL_L2: 'api:zai:glm-5',
+        ATOMA_MODEL_L3: 'sub:openai:gpt-5.6-sol',
         ZAI_API_KEY: 'configured',
       },
       dependencies: dependencies({ runCommand }),
     });
 
-    expect(report.providers).toEqual(['claude-cli', 'zai', 'codex']);
+    expect(report.providers).toEqual(['claude-cli', 'zai-api', 'codex-cli']);
     expect(report.ready).toBe(true);
     expect(commands.some((command) => command.startsWith('codex login status'))).toBe(true);
   });
@@ -516,8 +517,8 @@ describe('atoma doctor', () => {
     const report = await diagnoseDoctor({
       mode: { container: false, egress: false },
       env: {
-        ATOMA_LLM: 'claude-cli',
-        ATOMA_MODEL_L1: 'codex:gpt-5.6-sol',
+        ...CLAUDE_CLI_PINS,
+        ATOMA_MODEL_L1: 'sub:openai:gpt-5.6-sol',
       },
       dependencies: dependencies(),
     });
@@ -525,7 +526,7 @@ describe('atoma doctor', () => {
     expect(report.ready).toBe(false);
     expect(report.checks.find((check) => check.id === 'provider-config')).toMatchObject({
       status: 'fail',
-      detail: expect.stringContaining('cannot use codex'),
+      detail: expect.stringContaining('Codex cannot expose tools'),
     });
   });
 
@@ -533,7 +534,7 @@ describe('atoma doctor', () => {
     const report = await diagnoseDoctor({
       mode: { container: false, egress: false },
       env: {
-        ATOMA_LLM: 'claude-cli',
+        ...CLAUDE_CLI_PINS,
         ATOMA_CLAUDE_MODEL: 'sonnet',
       },
       dependencies: dependencies(),
@@ -551,7 +552,7 @@ describe('atoma doctor', () => {
     const report = await diagnoseDoctor({
       mode: { container: false, egress: false },
       env: {
-        ATOMA_LLM: 'ollama',
+        ...OLLAMA_PINS,
         OLLAMA_BASE_URL: 'http://ollama.example:11434/',
       },
       dependencies: dependencies({
@@ -586,7 +587,7 @@ describe('atoma doctor', () => {
       const report = await diagnoseDoctor({
         mode: { container: false, egress: false },
         env: {
-          ATOMA_LLM: 'anthropic',
+          ...ANTHROPIC_PINS,
           ANTHROPIC_API_KEY: 'configured',
           ATOMA_DB_PATH: dbPath,
         },

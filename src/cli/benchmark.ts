@@ -35,6 +35,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { dirname, join, resolve } from 'node:path';
 import { modelForTier } from '../core/models.js';
 import { baselineModel } from '../run/baseline.js';
+import { tierSelectors } from '../run/providers.js';
 import {
   looksLikeConfigFailure,
   newestTraceDuration,
@@ -254,7 +255,6 @@ const usd = (n: number | null): string => (n === null ? '—' : `$${n.toFixed(4)
  */
 export interface ArmsContext {
   readonly controlModel: string;
-  readonly provider: string;
   /** `L1=… L2=… L3=…`, the treatment arm's gradient. */
   readonly treatmentTiers: string;
 }
@@ -268,7 +268,6 @@ export function formatAnalysis(
   L.push('== PRE-REGISTERED RESULT ==');
   L.push('');
   if (arms) {
-    L.push(`provider : ${arms.provider}`);
     L.push(`control  : one ${arms.controlModel} agent, plain tool loop, self-certifying`);
     L.push(`treatment: atoma, ${arms.treatmentTiers}`);
     L.push('');
@@ -366,7 +365,6 @@ function costsOf(rows: readonly BenchmarkRow[], arm: Arm, taskId: string): numbe
 function armsContext(): ArmsContext {
   return {
     controlModel: baselineModel(),
-    provider: process.env['ATOMA_LLM'] ?? 'anthropic (default)',
     treatmentTiers: ([1, 2, 3] as const).map((t) => `L${t}=${modelForTier(t)}`).join(' '),
   };
 }
@@ -401,7 +399,6 @@ async function main(): Promise<void> {
     cfg.baselineRuns + cfg.atomaRuns + cfg.heldOutBaselineRuns + cfg.heldOutAtomaRuns;
   const arms = armsContext();
   console.log('== atoma cost-amortisation benchmark ==\n');
-  console.log(`provider     : ${arms.provider}`);
   // Printed on the dry run too: a mis-set ATOMA_BASELINE_MODEL must be
   // visible BEFORE the round spends, not inferred from the report after it.
   console.log(`control arm  : ${arms.controlModel}`);
@@ -424,10 +421,13 @@ async function main(): Promise<void> {
     return;
   }
 
-  if ((process.env['ATOMA_LLM'] ?? '') === '') {
-    console.error('✖ ATOMA_LLM is unset and the API key in .env is dead — every run would 401.');
+  try {
+    tierSelectors(process.env);
+  } catch (error) {
+    console.error(`✖ ${error instanceof Error ? error.message : String(error)}`);
     console.error(
-      '  Launch with fresh artefacts: ATOMA_LLM=claude-cli npm run benchmark -- ' +
+      '  Launch with the three tiers pinned, for example ATOMA_MODEL_L1=sub:anthropic:haiku ' +
+        'ATOMA_MODEL_L2=sub:anthropic:sonnet ATOMA_MODEL_L3=sub:anthropic:opus npm run benchmark -- ' +
         '--out benchmark/results-round<N>.csv --result benchmark/ROUND<N>.md'
     );
     process.exit(2);

@@ -40,12 +40,7 @@ import { refusalStampIsCurrent } from '../skills/generations.js';
 import { extractJson } from '../atoms/json.js';
 import { modelForTier } from '../core/models.js';
 import { RoutingLlmClient } from '../core/llmRouting.js';
-import { makeAnthropicClient } from '../run/auth.js';
-import {
-  buildReferencedProviders,
-  makeBaseClient,
-  resolveBaseProviderKind,
-} from '../run/providers.js';
+import { buildTierClients } from '../run/providers.js';
 import type { LlmClient } from '../core/types.js';
 import type { Skill } from '../skills/types.js';
 import type { BurninTask } from './burnin.js';
@@ -278,22 +273,14 @@ export function parseCurriculumTasks(text: string, families: readonly string[]):
 }
 
 /**
- * Same provider switch as the runner (ATOMA_LLM), + cross-vendor routing
- * parity. Construction lives in `makeBaseClient` — this file's hand-rolled
- * copy is the one that historically missed the bare `claude` alias and
- * silently fell into the Anthropic path (see providers.ts).
- * `makeAnthropicClient()` is called ONLY for the anthropic kind: it exits
- * the process when no credential resolves, and an ollama/claude-cli
- * session must not die on a missing Anthropic key.
+ * The same per-transport construction as the runner (`buildTierClients`):
+ * this file's hand-rolled copy of the provider switch is the one that
+ * historically missed an alias and silently fell into the Anthropic path
+ * (see providers.ts). Only the transports the three selectors reach are
+ * built, so an ollama/claude-cli session never demands an Anthropic key.
  */
 function makeClient(): LlmClient {
-  const provider = resolveBaseProviderKind(process.env['ATOMA_LLM']);
-  const base: LlmClient = makeBaseClient(
-    provider,
-    provider === 'anthropic' ? { anthropic: makeAnthropicClient() } : {}
-  );
-  const providers = buildReferencedProviders();
-  return Object.keys(providers).length > 0 ? new RoutingLlmClient(base, providers) : base;
+  return new RoutingLlmClient(buildTierClients(process.env));
 }
 
 function knownFamilies(csvPath: string, defaultTasksPath: string): string[] {

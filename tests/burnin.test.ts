@@ -20,6 +20,7 @@ import {
   spawnRun,
   CSV_HEADER,
 } from '../src/cli/burnin.js';
+import { ANTHROPIC_PINS } from './tier-pins.js';
 import { formatRunStatsEpilogue } from '../src/contracts/runStats.js';
 
 // Trimmed from a real delivered run (colstat, run 9): the exact formatSummary
@@ -241,23 +242,21 @@ describe('burnin looksLikeConfigFailure — abort-the-batch guard', () => {
 });
 
 describe('burnin provider attribution', () => {
-  it('canonicalizes aliases and includes routed providers', () => {
-    expect(burninProviderInfo({ ATOMA_LLM: 'ANTHROPIC' })).toEqual({
-      base: 'anthropic',
-      routes: [],
-      label: 'anthropic',
+  it('names the transports the three selectors reach, in tier order', () => {
+    expect(burninProviderInfo({ ...ANTHROPIC_PINS })).toEqual({
+      transports: ['anthropic-api'],
+      label: 'anthropic-api',
       estimatedCost: false,
     });
     expect(
       burninProviderInfo({
-        ATOMA_LLM: 'claude',
-        ATOMA_MODEL_L2: 'codex:gpt-5.4-mini',
-        ATOMA_MODEL_L3: 'codex:gpt-5.6-sol',
+        ATOMA_MODEL_L1: 'sub:anthropic:haiku',
+        ATOMA_MODEL_L2: 'sub:openai:gpt-5.4-mini',
+        ATOMA_MODEL_L3: 'sub:openai:gpt-5.6-sol',
       })
     ).toEqual({
-      base: 'claude-cli',
-      routes: ['codex'],
-      label: 'claude-cli+codex',
+      transports: ['claude-cli', 'codex-cli'],
+      label: 'claude-cli+codex-cli',
       estimatedCost: true,
     });
   });

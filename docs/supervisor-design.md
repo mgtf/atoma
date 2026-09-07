@@ -47,7 +47,7 @@ A Claude agent polling events continuously during runs is the obvious shape
 and the wrong one here:
 
 - **Quota contention.** Runs execute over the same Claude subscription
-  (`ATOMA_LLM=claude-cli`). Measured operational rule: never fan out
+  (`sub:anthropic:` tier selectors). Measured operational rule: never fan out
   subagents while a batch is running — a resident watcher would violate it
   permanently.
 - **Attribution.** The journal design requires every actor and action to be
