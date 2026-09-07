@@ -168,7 +168,7 @@
   "docs.theme.admin.title": "Admin",
   "docs.theme.admin.body": "Lima layar di balik penanda admin platform: organisasi beserta anggota dan undangan sekali pakai, jurnal audit platform (satu-satunya sumber informasi tentang apa yang terjadi pada deployment ini), buku besar katalog tentang hal yang dipelajari katalog agen, sentinel — pemantau langsung mekanis atas run yang sedang berlangsung — dan pengumuman, satu-satunya kiriman yang ditulis manusia dan ditinjau dalam setiap bahasa yang didukung sebelum dikirim. Undangan tidak pernah memberikan akses tingkat operator.",
   "docs.theme.mcp.title": "MCP",
-  "docs.theme.mcp.body": "",
+  "docs.theme.mcp.body": "Satu bidang kontrol HTTP Streamable di /mcp untuk aplikasi host seperti Claude Code atau Codex, yang menampilkan alat atoma_* yang diizinkan oleh peran setiap pemanggil. Ini adalah API baca beserta pemicu run yang dijalankan sebagai tugas MCP, bukan elemen agen — hanya satu run yang berlangsung pada satu waktu, diserialkan melalui lease bersama.",
   "nav.admin": "Organisasi",
   "nav.journal": "Jurnal",
   "nav.ledger": "Buku Besar",
@@ -1070,7 +1070,7 @@
   "settings.mcpUnavailable": "Permintaan tidak dapat diselesaikan. Periksa koneksi Anda dan coba lagi. Jika masalah berlanjut, minta administrator deployment memeriksa layanan API.",
   "settings.mcpChangedRefreshFailed": "Perubahan telah disimpan, tetapi daftar token tidak dapat dimuat ulang. Salin token baru sekarang, lalu coba muat kembali daftar tersebut.",
   "settings.mcpCheckTitle": "Verifikasi koneksi dan atasi masalah",
-  "settings.mcpCheckSteps": "",
+  "settings.mcpCheckSteps": "Di Claude Code atau Codex, jalankan /mcp dan pastikan atoma terhubung, lalu minta agen mencantumkan proyek Atoma Anda. Di klien lain, muat ulang alat MCP-nya dan coba tindakan baca. Membuat token saja tidak akan membentuk koneksi.",
   "settings.mcpCheckUsage": "Tanggal terakhir digunakan di bawah diperbarui setelah klien memberikan token yang valid; muat ulang Pengaturan untuk menyegarkannya. Ini tidak membuktikan bahwa panggilan alat berhasil. Jika atoma sudah terdaftar, edit atau hapus entri klien yang ada sebelum menambahkannya lagi.",
   "settings.mcpTroubleshootAuth": "401: periksa token Bearer; jika hilang atau dicabut, buat pengganti dan perbarui klien. 403: periksa izin organisasi dan alamat MCP. Pencabutan token menghentikan aksesnya pada permintaan berikutnya.",
   "settings.mcpTroubleshoot404": "404 pada koneksi pertama: periksa alamat lengkap /mcp dan minta administrator deployment memeriksa peruteannya. 404 setelah sesi yang sebelumnya berfungsi: hubungkan kembali klien agar memulai sesi MCP baru; ini dapat terjadi setelah server dimulai ulang. Kesalahan penemuan OAuth memerlukan klien yang dikonfigurasi untuk token Bearer.",
@@ -1081,5 +1081,7 @@
   "settings.tab.mcp": "MCP Atoma",
   "settings.tabs": "Bagian pengaturan",
   "settings.orgDefaultsReadOnly": "Hanya pemilik dan admin organisasi yang dapat mengubah nilai default ini; sematan Anda sendiri di atas akan menggantikannya.",
-  "settings.orgKeysReadOnly": "Kunci penyedia dikelola oleh pemilik dan admin organisasi. Minta mereka menambahkan atau mengganti kunci."
+  "settings.orgKeysReadOnly": "Kunci penyedia dikelola oleh pemilik dan admin organisasi. Minta mereka menambahkan atau mengganti kunci.",
+  "settings.mcpCodexHint": "Codex CLI (OpenAI) — tambahkan tabel ini ke ~/.codex/config.toml di mesin Anda, atau jalankan: codex mcp add atoma --url <alamat MCP> --bearer-token-env-var ATOMA_MCP_TOKEN. Lalu mulai Codex dan jalankan /mcp untuk memastikan atoma tercantum:",
+  "settings.mcpCodexEnvHint": "Codex membaca token dari variabel lingkungan {{env}}, sehingga rahasia tidak pernah masuk ke config.toml. Tambahkan baris ini ke profil shell yang digunakan untuk memulai Codex (~/.zshrc, ~/.bashrc), lalu buka terminal baru:"
 }

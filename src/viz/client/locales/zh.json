@@ -168,7 +168,7 @@
   "docs.theme.admin.title": "管理",
   "docs.theme.admin.body": "平台管理员标志后有五个页面：包含成员和一次性邀请的组织、平台审计日志（此部署所发生事件的唯一来源）、记录智能体目录所学内容的目录账本、哨兵（对进行中 run 的机械式实时监视），以及公告（由人工撰写的一次推送，发出前会以所有受支持语言审核）。邀请绝不会授予操作员级访问权限。",
   "docs.theme.mcp.title": "MCP",
-  "docs.theme.mcp.body": "",
+  "docs.theme.mcp.body": "在 /mcp 上为 Claude Code 或 Codex 等宿主应用提供一个可流式传输的 HTTP 控制平面，并向每个调用方显示其角色获准使用的 atoma_* 工具。这些是读取 API 以及以 MCP 任务方式驱动的 run 启动器，并非智能体元素——同一时间仅执行一个 run，并通过共享租约将其串行化。",
   "nav.admin": "组织",
   "nav.journal": "日志",
   "nav.ledger": "账本",
@@ -1070,7 +1070,7 @@
   "settings.mcpUnavailable": "无法完成请求。请检查连接并重试。如果问题持续存在，请让部署管理员检查 API 服务。",
   "settings.mcpChangedRefreshFailed": "更改已保存，但无法刷新令牌列表。请立即复制所有新令牌，然后重试加载列表。",
   "settings.mcpCheckTitle": "验证连接并排查问题",
-  "settings.mcpCheckSteps": "",
+  "settings.mcpCheckSteps": "在 Claude Code 或 Codex 中运行 /mcp，检查 atoma 是否已连接，然后让智能体列出你的 Atoma 项目。在其他客户端中，刷新其 MCP 工具并尝试执行读取操作。仅创建令牌并不会建立连接。",
   "settings.mcpCheckUsage": "客户端提交有效令牌后，下面的上次使用日期会更新；请重新加载“设置”以刷新该日期。这并不能证明工具调用成功。如果已注册 atoma，请先编辑或移除现有客户端条目，再重新添加。",
   "settings.mcpTroubleshootAuth": "401：检查 Bearer 令牌；如果令牌已丢失或撤销，请创建替代令牌并更新客户端。403：检查组织权限和 MCP 地址。撤销令牌后，其访问权限将在下次请求时终止。",
   "settings.mcpTroubleshoot404": "首次连接时出现 404：请检查完整的 /mcp 地址，并让部署管理员检查其路由。之前正常工作的会话出现 404：请重新连接客户端，使其启动新的 MCP 会话；服务器重启后可能会发生这种情况。OAuth 发现错误表示需要使用配置为 Bearer 令牌的客户端。",
@@ -1081,5 +1081,7 @@
   "settings.tab.mcp": "Atoma MCP",
   "settings.tabs": "设置部分",
   "settings.orgDefaultsReadOnly": "只有组织所有者和管理员可以更改这些默认设置；您在上方自行固定的设置优先于这些默认设置。",
-  "settings.orgKeysReadOnly": "提供商密钥由组织所有者和管理员管理。请联系他们添加或替换密钥。"
+  "settings.orgKeysReadOnly": "提供商密钥由组织所有者和管理员管理。请联系他们添加或替换密钥。",
+  "settings.mcpCodexHint": "Codex CLI（OpenAI）— 将此表添加到本机的 ~/.codex/config.toml，或运行：codex mcp add atoma --url <MCP 地址> --bearer-token-env-var ATOMA_MCP_TOKEN。然后启动 Codex 并运行 /mcp，检查是否列出了 atoma：",
+  "settings.mcpCodexEnvHint": "Codex 从 {{env}} 环境变量读取令牌，因此密钥绝不会写入 config.toml。将以下行添加到 Codex 启动时使用的 shell 配置文件（~/.zshrc、~/.bashrc），然后打开新终端："
 }

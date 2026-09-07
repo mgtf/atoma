@@ -168,7 +168,7 @@
   "docs.theme.admin.title": "Administration",
   "docs.theme.admin.body": "Fünf Ansichten hinter dem Plattformadministrator-Flag: Organisationen mit ihren Mitgliedern und einmalig verwendbaren Einladungen, das Plattform-Auditjournal als einzige Quelle dafür, was in dieser Bereitstellung geschehen ist, das Kataloghauptbuch über die Erkenntnisse des Agentenkatalogs, Sentinel als mechanische Liveüberwachung laufender Runs sowie Ankündigungen – die eine von einem Menschen verfasste Mitteilung, die vor dem Versand in jeder unterstützten Sprache geprüft wird. Eine Einladung gewährt niemals Zugriff auf Betreiberebene.",
   "docs.theme.mcp.title": "MCP",
-  "docs.theme.mcp.body": "",
+  "docs.theme.mcp.body": "Eine Streamable-HTTP-Steuerungsebene unter /mcp für Hostanwendungen wie Claude Code oder Codex, die jedem Aufrufer die für seine Rolle zugelassenen atoma_*-Tools anzeigt. Dies sind Lese-APIs sowie run-Starter, die als MCP-Aufgaben ausgeführt werden, keine Agentenelemente — es findet immer nur ein run statt, serialisiert durch ein gemeinsames Lease.",
   "nav.admin": "Organisationen",
   "nav.journal": "Journal",
   "nav.ledger": "Hauptbuch",
@@ -1070,7 +1070,7 @@
   "settings.mcpUnavailable": "Die Anfrage konnte nicht abgeschlossen werden. Prüfen Sie Ihre Verbindung und versuchen Sie es erneut. Wenn das Problem weiterhin besteht, bitten Sie den Bereitstellungsadministrator, den API-Dienst zu prüfen.",
   "settings.mcpChangedRefreshFailed": "Die Änderung wurde gespeichert, aber die Token-Liste konnte nicht aktualisiert werden. Kopieren Sie jetzt einen etwaigen neuen Token und versuchen Sie anschließend erneut, die Liste zu laden.",
   "settings.mcpCheckTitle": "Verbindung überprüfen und Fehler beheben",
-  "settings.mcpCheckSteps": "",
+  "settings.mcpCheckSteps": "Führen Sie in Claude Code oder Codex /mcp aus und prüfen Sie, ob atoma verbunden ist. Bitten Sie dann den Agenten, Ihre Atoma-Projekte aufzulisten. Aktualisieren Sie in einem anderen Client dessen MCP-Tools und testen Sie eine Leseaktion. Das bloße Erstellen eines Tokens stellt noch keine Verbindung her.",
   "settings.mcpCheckUsage": "Das unten angegebene Datum der letzten Verwendung wird aktualisiert, nachdem der Client einen gültigen Token übermittelt hat; laden Sie die Einstellungen neu, um es zu aktualisieren. Es belegt nicht, dass ein Tool-Aufruf erfolgreich war. Wenn atoma bereits registriert ist, bearbeiten oder entfernen Sie diesen vorhandenen Client-Eintrag, bevor Sie ihn erneut hinzufügen.",
   "settings.mcpTroubleshootAuth": "401: Prüfen Sie den Bearer-Token. Falls er verloren ging oder widerrufen wurde, erstellen Sie einen Ersatz und aktualisieren Sie den Client. 403: Prüfen Sie die Organisationsberechtigungen und die MCP-Adresse. Der Widerruf eines Tokens beendet dessen Zugriff bei der nächsten Anfrage.",
   "settings.mcpTroubleshoot404": "404 bei der ersten Verbindung: Prüfen Sie die vollständige /mcp-Adresse und bitten Sie den Bereitstellungsadministrator, deren Routing zu prüfen. 404 nach einer zuvor funktionierenden Sitzung: Verbinden Sie den Client erneut, damit er eine neue MCP-Sitzung startet. Dies kann nach einem Serverneustart auftreten. Ein OAuth-Discovery-Fehler erfordert einen für Bearer-Token konfigurierten Client.",
@@ -1081,5 +1081,7 @@
   "settings.tab.mcp": "Atoma MCP",
   "settings.tabs": "Einstellungsbereiche",
   "settings.orgDefaultsReadOnly": "Nur Eigentümer und Administratoren der Organisation können diese Standardwerte ändern; Ihre eigenen obigen Pins haben Vorrang.",
-  "settings.orgKeysReadOnly": "Anbieterschlüssel werden von Eigentümern und Administratoren der Organisation verwaltet. Bitten Sie eine dieser Personen, einen Schlüssel hinzuzufügen oder zu ersetzen."
+  "settings.orgKeysReadOnly": "Anbieterschlüssel werden von Eigentümern und Administratoren der Organisation verwaltet. Bitten Sie eine dieser Personen, einen Schlüssel hinzuzufügen oder zu ersetzen.",
+  "settings.mcpCodexHint": "Codex CLI (OpenAI) — fügen Sie diese Tabelle auf Ihrem Rechner zu ~/.codex/config.toml hinzu oder führen Sie Folgendes aus: codex mcp add atoma --url <MCP-Adresse> --bearer-token-env-var ATOMA_MCP_TOKEN. Starten Sie dann Codex und führen Sie /mcp aus, um zu prüfen, ob atoma aufgeführt ist:",
+  "settings.mcpCodexEnvHint": "Codex liest das Token aus der Umgebungsvariablen {{env}}, sodass das Geheimnis nie in config.toml gelangt. Fügen Sie diese Zeile dem Shell-Profil hinzu, aus dem Codex gestartet wird (~/.zshrc, ~/.bashrc), und öffnen Sie dann ein neues Terminal:"
 }
