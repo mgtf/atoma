@@ -19,6 +19,7 @@ import { capToolIterations } from '../core/limits.js';
 import { dispatchWithAggregation } from './dispatch.js';
 import { acceptL3RootPlan } from './l3RootPlan.js';
 import { L2Atom } from './L2Atom.js';
+import { buildResultGateEnv, runResultGates } from './resultGates.js';
 import {
   buildTargetContext,
   checkGroundTruth,
@@ -55,6 +56,7 @@ import {
 } from './capability.js';
 import {
   HTTP_PORTABLE_DOC_GUIDANCE,
+  FALLBACK_VERIFICATION_GUIDANCE,
   LITERAL_CONTRACT_PRESERVATION_GUIDANCE,
   MUTATING_SUBTASK_FILE_GUIDANCE,
   PROOF_OBLIGATION_GUIDANCE,
@@ -143,13 +145,17 @@ export function routeCrossBucketVerification(plan: Plan, registry: AtomRegistry)
   const fallbackShellL2 = l2Types.find((type) => supportsShellHarness(type.name));
   let changed = false;
   const subtasks = plan.subtasks.flatMap((subtask) => {
+    // No preferred child is the planner's request for a fresh cell, which
+    // inherits the tissue's tools. Replacing it with the first web cell
+    // discards the server capability needed by a combined proof phase.
+    if (!subtask.preferredChild) return [subtask];
     const browser = taskRequiresRealBrowser(subtask.description);
     const commands = requiredPassingCommands(subtask.description);
     const webL2 = supportsBrowser(subtask.preferredChild)
-      ? registry.getByName(subtask.preferredChild!)
+      ? registry.getByName(subtask.preferredChild)
       : fallbackWebL2;
     const shellL2 = supportsShellHarness(subtask.preferredChild)
-      ? registry.getByName(subtask.preferredChild!)
+      ? registry.getByName(subtask.preferredChild)
       : fallbackShellL2;
     if (browser && commands.length > 0 && webL2 && shellL2) {
       changed = true;
@@ -561,10 +567,31 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       `  - If none of the existing L2s fit a subtask, OMIT "preferredChild" and set`,
       `    strategy="create" so the supervisor auto-spawns a fresh L2.`,
       ``,
-      `L2 catalog (molecules):`,
+      // Each cell is listed WITH the tools its L1s can hold: a cell cannot
+      // grant a tool it lacks, so a phase needing start_node_server routed
+      // to a validate_html-only cell is doomed at plan time (notes-app runs
+      // 2026-09-07: two runs, two rewritten server.js, one fabricated
+      // static api/notes — the browser-verification phase went to the web
+      // cell both times, and nothing in this catalog said it could not
+      // boot a server).
+      `L2 catalog (cells, each with the tools its L1s can hold):`,
       catalog.length === 0
         ? '  (empty — you must create)'
-        : catalog.map((t) => `  - ${t.name}: ${t.description}`).join('\n'),
+        : catalog
+            .map(
+              (t) =>
+                `  - ${t.name}: ${t.description}\n` +
+                `      tools: ${t.tools.map((tool) => tool.name).join(', ') || '(none)'}`
+            )
+            .join('\n'),
+      `A phase only succeeds on a cell whose tools can perform AND prove it;`,
+      `do not route a phase to a cell that lacks the tool its proof needs.`,
+      `If a phase combines a server and browser proof and no listed cell holds`,
+      `both capabilities, omit preferredChild and use strategy="create". A new`,
+      `cell inherits YOUR tools listed below; an existing narrow cell cannot`,
+      `gain missing tools by creating a molecule. Keep verification on the`,
+      `actual server that serves the page and API together.`,
+      `Tools a newly created cell inherits: ${this.toolNames().join(', ') || '(none)'}.`,
       ``,
       // Prefilter hint — never a hard route, just a strong default.
       // L3 always runs this Opus plan; the prefilter just narrows the
@@ -1091,9 +1118,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       `Task: ${task.description}`,
       task.inputs ? `Inputs: ${JSON.stringify(task.inputs)}` : '',
       `Plan: ${JSON.stringify(plan)}`,
-      hasValidator
-        ? 'If the task produces a web artefact, call validate_html on the returned URL after write_file + start_static_server, and iterate (read_file → fix → write_file → re-validate) until ok:true. Only then return success.'
-        : '',
+      FALLBACK_VERIFICATION_GUIDANCE,
       `Return JSON: {"output", "summary"} once the work is done.`,
     ]
       .filter((l): l is string => typeof l === 'string' && l.length > 0)
@@ -1165,6 +1190,25 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
   }
 
   async validateResult(child: L2Atom, result: Result, task: Task, ctx: RunContext): Promise<Verdict> {
+    // A cell's fallback uses the same result parser as a molecule. Its
+    // declared failures must reach the existing gates before earned trust.
+    // Leaf-only action, disk and proof checks stay with the L2 supervisor.
+    const gates = await runResultGates(
+      buildResultGateEnv({ task, result, childName: child.name, childToolNames: child.toolNames(), ctx }),
+      undefined,
+      'delegated'
+    );
+    if (gates.rejection) {
+      ctx.logger.warn(
+        `[${this.name}] result from ${child.name} mechanically rejected by the ${gates.rejection.gateId} gate (before trust/LLM validation): ${gates.rejection.reasoning}`
+      );
+      return {
+        approved: false,
+        reasoning: gates.rejection.reasoning,
+        scope: 'ephemeral',
+        modifications: { additionalContext: gates.rejection.coaching },
+      };
+    }
     const type = this.registry.getByName(child.name);
     // Mirror of L2.validateResult: the trust fast-path skips the LLM
     // validator but NOT the ground-truth probe — it costs no tokens, and a

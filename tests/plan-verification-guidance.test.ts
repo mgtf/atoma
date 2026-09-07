@@ -136,6 +136,50 @@ describe('preservePlanLiteralContracts', () => {
 });
 
 describe('cross-bucket browser routing', () => {
+  it('shows the validator the toolset inherited by a planned new molecule', async () => {
+    const registry = new AtomRegistry(openDb(':memory:'));
+    const tools = ['write_file', 'start_node_server', 'fetch_url', 'validate_html'].map(name => ({ name, description: name, inputSchema: { type: 'object' } }));
+    const cellType = registry.create(2, { ...seed, tools });
+    const tissueType = registry.create(3, { ...seed, tools });
+    const cell = L2Atom.fromType(cellType, registry);
+    const tissue = L3Atom.buildWithModel(tissueType, registry, FALLBACK_OPUS);
+    const ctx = makeCtx();
+    const task = { description: 'Verify the existing Node app in a real browser' };
+    ctx.llm.enqueueText(jsonTextPair(
+      { strategy: 'create', seed: { description: 'server and browser verifier', systemPrompt: 'verify', tools: [], params: {} }, reasoning: 'needs both capabilities' },
+      { reasoning: 'one live server', subtasks: [{ description: 'Boot the server, probe its API and drive the page against the same URL' }], aggregation: { mode: 'concat' }, expectedOutput: 'verified app' }
+    ));
+    const plan = await cell.plan(task, ctx);
+    ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'new child inherits required tools' }));
+    await tissue.validatePlan(cell, plan, task, ctx);
+    const request = ctx.llm.calls.at(-1)!;
+    expect(request.userContent).toContain('Tools inherited by NEW children created by this delegator: write_file, start_node_server, fetch_url, validate_html');
+    expect(request.systemPrompt).toContain('A newly created child has no registry name yet');
+    expect(request.systemPrompt).toContain('Ordered tool calls WITHIN one leaf task are not parallel subtasks');
+  });
+
+  it.each([undefined, null])('preserves a planned new cell for combined server/browser proof (%s)', async (preferredChild) => {
+    const registry = new AtomRegistry(openDb(':memory:'));
+    const tool = (name: string) => ({ name, description: name, inputSchema: { type: 'object' } });
+    registry.create(2, { ...seed, tools: [tool('write_file'), tool('validate_html')] });
+    const http = registry.create(2, { ...seed, tools: [tool('write_file'), tool('start_node_server'), tool('run_shell')] });
+    const type = registry.create(3, { ...seed, tools: [tool('write_file'), tool('validate_html'), tool('start_node_server'), tool('run_shell')] });
+    const l3 = L3Atom.buildWithModel(type, registry, FALLBACK_OPUS);
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'combined capability' }));
+    ctx.llm.enqueueText(jsonTextPair(
+      { strategy: 'reuse', target: http.name, reasoning: 'build with HTTP cell, create a combined verifier' },
+      { reasoning: 'phased', subtasks: [
+        { description: 'Build the Node server and page', preferredChild: http.name },
+        { description: 'Boot the existing server and validate the UI in a real browser with selector-based interactions. Run node test-api.js and require it to pass.', preferredChild },
+      ], aggregation: { mode: 'sequential' }, expectedOutput: 'verified app' }
+    ));
+    const plan = await l3.plan({ description: 'Build a server with a page' }, ctx);
+    expect(plan.subtasks).toHaveLength(2);
+    expect(plan.subtasks[1]!.preferredChild).toBeUndefined();
+    expect(plan.subtasks[1]!.description).toContain('Boot the existing server');
+  });
+
   it('splits a mixed final checkpoint and routes browser/shell phases separately', () => {
     const registry = new AtomRegistry(openDb(':memory:'));
     registry.create(2, {

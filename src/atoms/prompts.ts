@@ -7,6 +7,14 @@
  */
 import type { Plan } from '../core/types.js';
 
+/** Recovery must preserve the deliverable and verify its actual runtime. */
+export const FALLBACK_VERIFICATION_GUIDANCE = [
+  'Read existing files and previous phase evidence before changing anything. A verification task starts with read-only probes; preserve already verified behaviour.',
+  'Verify the actual deliverable with the tools you hold. A page backed by a Node API must be checked against that Node server, not a replacement static server. Never fabricate static API responses to make a browser probe pass.',
+  'If your tools cannot run or verify the existing artefact, preserve it and report the missing capability and unverified behaviour in the final JSON. Do not rewrite it into a different kind of artefact to fit your tools.',
+  'When browser validation is available and required, validate the actual served URL and report its observed result. Repair an observed defect only when you can re-run the relevant checks.',
+].join('\n');
+
 /**
  * Shared smoke-test design guidance. Appended to every L1 system
  * prompt that the supervisor controls — both the one `createSubtaskL1`

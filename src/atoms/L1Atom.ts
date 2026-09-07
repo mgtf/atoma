@@ -82,6 +82,28 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/**
+ * The obligations a phase declared, rendered where the WORKER can act on
+ * them. `Task.proofObligations` reached the L1 task since the A1 work but
+ * was never shown to the model: the pomodoro run of 2026-09-07 declared
+ * `dom-interaction`, the L1 drove the page through its own `window.__test`
+ * hooks inside a smoke script, the coverage check (transport record only)
+ * found no executed interaction, and every credit for a correct page was
+ * withheld. The supervisor's rule is unchanged; the worker now hears it.
+ */
+export function proofObligationLines(task: Task): string[] {
+  if (!task.proofObligations?.includes('dom-interaction')) return [];
+  return [
+    `PROOF OBLIGATION "dom-interaction": this phase must prove REAL user input`,
+    `reaches the page. The supervisor reads the browser tool's own transport`,
+    `record, so drive every affordance through validate_html's "interactions"`,
+    `array (click/type by selector). A smoke expression that clicks elements`,
+    `itself or drives state through window.* hooks does NOT count, and when the`,
+    `smoke drives its own state the runtime discards the external interactions`,
+    `too — keep the smoke to ASSERTIONS about the state the interactions produced.`,
+  ];
+}
+
 export class L1Atom extends Atom {
   readonly tier: Tier = 1;
   readonly model: string;
@@ -221,6 +243,7 @@ export class L1Atom extends Atom {
       ``,
       `Task: ${task.description}`,
       task.inputs ? `Inputs: ${JSON.stringify(task.inputs)}` : '',
+      ...proofObligationLines(task),
       task.constraints?.length ? `Constraints:\n${task.constraints.map((c) => `- ${c}`).join('\n')}` : '',
       ``,
       `Tools available at execute time:`,
@@ -269,6 +292,7 @@ export class L1Atom extends Atom {
       ``,
       `Task: ${task.description}`,
       task.inputs ? `Inputs: ${JSON.stringify(task.inputs)}` : '',
+      ...proofObligationLines(task),
       ``,
       `Approved plan:`,
       JSON.stringify(plan, null, 2),

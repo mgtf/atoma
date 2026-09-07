@@ -83,6 +83,8 @@ export interface ResultGateEnv {
 interface ResultGate {
   readonly id: string;
   readonly disposition: ResultGateDisposition;
+  /** Envelope failures apply to delegated results as well as leaf results. */
+  readonly appliesToDelegatedResult?: boolean;
   readonly check: (
     env: ResultGateEnv
   ) => Promise<Pick<ResultGateFinding, 'reasoning' | 'coaching'> | null>;
@@ -368,12 +370,13 @@ const RESULT_GATES: readonly ResultGate[] = [
     // The result itself says it never produced the final JSON envelope.
     id: 'non-json-envelope',
     disposition: 'reject',
+    appliesToDelegatedResult: true,
     check: (env) =>
       Promise.resolve(
         env.result.summary.startsWith(NON_JSON_PAYLOAD_SUMMARY_PREFIX)
           ? {
               reasoning:
-                'the L1 completed tool work but did not emit the required final {"output","summary"} JSON envelope',
+                'the executor did not emit the required final {"output","summary"} JSON envelope',
               coaching:
                 'Your tool work may already be complete. Do not call a return/output tool and do not narrate the result as prose. Emit one final JSON object directly as assistant text: {"output": <actual result>, "summary": "<evidence-backed summary>"}.',
             }
@@ -384,12 +387,13 @@ const RESULT_GATES: readonly ResultGate[] = [
     // The result itself reports its final browser validation failed.
     id: 'internal-validation-failed',
     disposition: 'reject',
+    appliesToDelegatedResult: true,
     check: (env) =>
       Promise.resolve(
         env.result.summary.startsWith(INTERNAL_VALIDATION_FAILED_PREFIX)
           ? {
               reasoning:
-                'the L1 result explicitly reports that its final validate_html call failed',
+                'the result explicitly reports that its final validate_html call failed',
               coaching:
                 'Your last validate_html result was not ok. Read its exact errors/smokeResult, fix the artefact or the assertion, and re-run validation until ok:true before returning the final JSON.',
             }
@@ -454,10 +458,12 @@ export const RESULT_GATE_IDS: readonly string[] = RESULT_GATES.map((g) => g.id);
 
 export async function runResultGates(
   env: ResultGateEnv,
-  memo?: Set<string>
+  memo?: Set<string>,
+  scope: 'leaf' | 'delegated' = 'leaf'
 ): Promise<ResultGateOutcome> {
   const reviewFindings: ResultGateFinding[] = [];
   for (const gate of RESULT_GATES) {
+    if (scope === 'delegated' && !gate.appliesToDelegatedResult) continue;
     const hit = await gate.check(env);
     if (!hit) continue;
     const finding: ResultGateFinding = { gateId: gate.id, disposition: gate.disposition, ...hit };

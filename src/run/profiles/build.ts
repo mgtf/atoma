@@ -73,7 +73,8 @@ export const MERISTEM_DESCRIPTION =
 export const BUILD_TASK_CONSTRAINTS: readonly string[] = [
   'The L1 worker must actually create the files on disk via the write_file tool.',
   'The deliverable must be VERIFIED with the probe matching its nature: ' +
-    'browser-rendered pages via start_static_server + validate_html, iterating ' +
+    'static browser pages via start_static_server + validate_html; pages backed by a Node API ' +
+    'via start_node_server + fetch_url + validate_html against the SAME Node server, iterating ' +
     '(read + rewrite) until zero console.error messages and zero failed requests; ' +
     'HTTP servers/APIs via start_node_server + fetch_url probes; ' +
     'CLI tools, scripts and configs via run_shell executing the artefact and checking its output.',

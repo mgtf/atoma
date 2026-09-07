@@ -78,6 +78,7 @@ export {
 } from '../skills/lifecycle.js';
 import {
   HTTP_PORTABLE_DOC_GUIDANCE,
+  FALLBACK_VERIFICATION_GUIDANCE,
   LITERAL_CONTRACT_PRESERVATION_GUIDANCE,
   MUTATING_SUBTASK_FILE_GUIDANCE,
   PROOF_OBLIGATION_GUIDANCE,
@@ -400,7 +401,17 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       }
     }
 
-    const peerCatalog = this.peers.map((p) => ({ name: p.name, ordinal: p.ordinal }));
+    // Peers are listed WITH their toolsets: "mutualize" is the only way a
+    // subtask reaches a tool this cell does not hold, so the planner needs
+    // to see who holds it (notes-app run 2026-09-07: a web cell "created" an
+    // L1 for a Node-server subtask, the seed's start_node_server/fetch_url
+    // were dropped, and three escalations later the fallback rewrote a
+    // validated server.js with a python static server as its only probe).
+    const peerCatalog = this.peers.map((p) => ({
+      name: p.name,
+      ordinal: p.ordinal,
+      tools: p.toolNames(),
+    }));
 
     const userContent = [
       `You are cell "${this.name}" (tier 2 / cell).`,
@@ -514,16 +525,22 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
             ``,
           ].join('\n')
         : '',
-      `Peer L2 catalog (molecules you can mutualize with):`,
+      `Peer L2 catalog (cells you can mutualize with, each with the tools its L1s hold):`,
       peerCatalog.length === 0
         ? '  (no peers available)'
-        : peerCatalog.map((p) => `  - ${p.name}`).join('\n'),
+        : peerCatalog
+            .map((p) => `  - ${p.name} — tools: ${p.tools.join(', ') || '(none)'}`)
+            .join('\n'),
       ``,
-      `Tools the L1 you spawn will inherit automatically (for context only — do`,
-      `NOT call them yourself):`,
+      `Tools the L1 you spawn will inherit — this is its COMPLETE toolset (for`,
+      `context only — do NOT call them yourself):`,
       this.tools.length === 0
         ? '  (none)'
         : this.tools.map((t) => `  - ${t.name}: ${t.description}`).join('\n'),
+      `A "create" seed CANNOT add tools: names listed in seed.tools that are not`,
+      `above are dropped, and a plan relying on them is rejected. When a subtask`,
+      `needs a tool you do not hold, "mutualize" to the peer that lists it, or`,
+      `scope the subtask to what your tools can prove and state the limit.`,
       ``,
       `Task: ${task.description}`,
       task.inputs ? `Inputs: ${JSON.stringify(task.inputs)}` : '',
@@ -555,8 +572,31 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
 
     const pair = parseTwoJson(resp.text);
     this.pendingStrategy = l2StrategySchema.parse(pair[0]);
+    this.warnOnUngrantableSeedTools(pair[0], ctx);
     const plan = planSchema.parse(pair[1]);
     return preservePlanLiteralContracts(plan, task.description);
+  }
+
+  /**
+   * A "create" seed's `tools` are names only; the schema drops them and the
+   * created L1 inherits exactly this cell's toolset. Say so in the log when
+   * the planner asked for more, so a doomed create is visible at plan time
+   * instead of three escalations later.
+   */
+  private warnOnUngrantableSeedTools(rawStrategy: unknown, ctx: RunContext): void {
+    if (!rawStrategy || typeof rawStrategy !== 'object') return;
+    const strategy = rawStrategy as { strategy?: unknown; seed?: { tools?: unknown } };
+    if (strategy.strategy !== 'create' || !Array.isArray(strategy.seed?.tools)) return;
+    const held = new Set(this.toolNames());
+    const requested = strategy.seed.tools
+      .map((t) => (typeof t === 'string' ? t : (t as { name?: unknown } | null)?.name))
+      .filter((name): name is string => typeof name === 'string');
+    const ungrantable = requested.filter((name) => !held.has(name));
+    if (ungrantable.length === 0) return;
+    ctx.logger.warn(
+      `[${this.name}] create seed asked for tool(s) this cell does not hold: ${ungrantable.join(', ')} — ` +
+        `a created L1 inherits only ${[...held].join(', ') || '(none)'}; the extra names are dropped`
+    );
   }
 
   async execute(task: Task, plan: Plan, ctx: RunContext): Promise<Result> {
@@ -1883,9 +1923,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       task.inputs ? `Inputs: ${JSON.stringify(task.inputs)}` : '',
       ``,
       `Plan: ${JSON.stringify(plan)}`,
-      hasValidator
-        ? 'If the task produces a web artefact, call validate_html on the returned URL after write_file + start_static_server, and iterate (read_file → fix → write_file → re-validate) until ok:true. Only then return success.'
-        : '',
+      FALLBACK_VERIFICATION_GUIDANCE,
       ``,
       `Return JSON: {"output", "summary"} once the work is done.`,
     ]

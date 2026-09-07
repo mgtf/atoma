@@ -56,6 +56,34 @@ describe('L1Atom', () => {
     expect(userContent).not.toMatch(/"toolCalls":/);
   });
 
+  it('shows a declared dom-interaction obligation to the worker in BOTH the plan and execute prompts', async () => {
+    // The obligation reached Task.proofObligations but the L1 prompt never
+    // rendered it: the 2026-09-07 pomodoro run drove the page through
+    // window.__test hooks in a smoke script, the transport-record coverage
+    // check saw no executed interaction, and every credit was withheld on a
+    // correct page. The rule is the supervisor's; the worker must hear it.
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    ctx.llm.enqueueText(jsonText({ output: 'ok', summary: 's' }));
+    const atom = new L1Atom(base);
+    const task = { description: 'click start and prove the countdown moves', proofObligations: ['dom-interaction' as const] };
+    const plan = await atom.plan(task, ctx);
+    await atom.execute(task, plan, ctx);
+    for (const call of ctx.llm.calls) {
+      expect(call.userContent).toContain('PROOF OBLIGATION "dom-interaction"');
+      expect(call.userContent).toMatch(/"interactions"\s+array/);
+      expect(call.userContent).toContain('does NOT count');
+    }
+  });
+
+  it('says nothing about obligations when the task declares none', async () => {
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    const atom = new L1Atom(base);
+    await atom.plan({ description: 'write a README' }, ctx);
+    expect(ctx.llm.calls[0]!.userContent).not.toContain('PROOF OBLIGATION');
+  });
+
   it('still accepts a Plan whose JSON omits proposedAction / expectedOutput gracefully — schema has defaults', async () => {
     // Sanity: the schema is liberal at parse time; a lean plan still works.
     const ctx = makeCtx();

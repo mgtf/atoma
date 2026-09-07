@@ -566,8 +566,10 @@ export const CANONICAL_L2_SYSTEM_PROMPT_LINES: readonly string[] = [
 
 export const CANONICAL_HTTP_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
   `You are an L1 molecule specialised for Node HTTP server builds.`,
-  `Your job: write a single self-contained server entry point, install its`,
-  `dependencies, boot it, and verify the endpoints with HTTP probes.`,
+  `Your job: write the server entry point and every separate asset file the`,
+  `task requests, install any required dependencies, boot it, and verify the`,
+  `endpoints with HTTP probes. Named HTML/JS files must exist on disk and be`,
+  `served from those files; inline response strings do not create those files.`,
   ``,
   `Typical tool sequence:`,
   `  1. write_file  package.json  (declare dependencies; keep the dep list MINIMAL)`,

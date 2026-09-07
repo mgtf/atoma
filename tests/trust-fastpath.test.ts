@@ -5,6 +5,7 @@ import { L1Atom } from '../src/atoms/L1Atom.js';
 import { L2Atom } from '../src/atoms/L2Atom.js';
 import { L3Atom } from '../src/atoms/L3Atom.js';
 import { TRUST_THRESHOLD_SUCCESSES } from '../src/atoms/cost.js';
+import { INTERNAL_VALIDATION_FAILED_PREFIX } from '../src/atoms/L1Atom.js';
 import { FALLBACK_OPUS } from './tier-pins.js';
 import { makeCtx } from './helpers.js';
 import { makePlan } from './helpers/factories.js';
@@ -19,6 +20,65 @@ const seed = {
 };
 
 describe('trust fast-path in validators', () => {
+  it.each([false, true])('L3 rejects a malformed real L2 fallback before trust (trusted=%s)', async (trusted) => {
+    const reg = new AtomRegistry(openDb(':memory:'));
+    const l3Type = reg.create(3, seed);
+    const l2Type = reg.create(2, seed);
+    if (trusted) {
+      for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) reg.recordSuccess(l2Type.name);
+    }
+    const l3 = L3Atom.buildWithModel(l3Type, reg, FALLBACK_OPUS);
+    const l2 = L2Atom.fromType(l2Type, reg);
+    l2.setFallbackMode(true);
+    const events: TrustFastPathInfo[] = [];
+    const ctx = { ...makeCtx(), recordTrust: (event: TrustFastPathInfo) => events.push(event) };
+    const task = { description: 'verify the existing notes server' };
+    ctx.llm.enqueueText(JSON.stringify({ reasoning: 'inspect', proposedAction: 'inspect', expectedOutput: 'proof' }));
+    const plan = await l2.plan(task, ctx);
+    ctx.llm.enqueueText('Now let me write the api/notes file with seed data:');
+    const result = await l2.execute(task, plan, ctx);
+    const callsBefore = ctx.llm.calls.length;
+    const verdict = await l3.validateResult(l2, result, task, ctx);
+    expect(verdict.approved).toBe(false);
+    expect(verdict.reasoning).toContain('JSON envelope');
+    expect(ctx.llm.calls).toHaveLength(callsBefore);
+    expect(events).toHaveLength(0);
+  });
+
+  it('L3 rejects an explicit failed browser result even for a trusted cell', async () => {
+    const reg = new AtomRegistry(openDb(':memory:'));
+    const l3Type = reg.create(3, seed);
+    const l2Type = reg.create(2, seed);
+    for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) reg.recordSuccess(l2Type.name);
+    const l3 = L3Atom.buildWithModel(l3Type, reg, FALLBACK_OPUS);
+    const l2 = L2Atom.fromType(l2Type, reg);
+    const ctx = makeCtx();
+    const verdict = await l3.validateResult(l2, {
+      output: null,
+      summary: `${INTERNAL_VALIDATION_FAILED_PREFIX}: API request failed`,
+      trace: [],
+      producedBy: { tier: 2, name: l2.name, viaFallback: true },
+    }, { description: 'verify the page' }, ctx);
+    expect(verdict.approved).toBe(false);
+    expect(ctx.llm.calls).toHaveLength(0);
+  });
+
+  it('L3 leaves leaf-only action gates with L2 for successful delegated results', async () => {
+    const reg = new AtomRegistry(openDb(':memory:'));
+    const l3Type = reg.create(3, seed);
+    const l2Type = reg.create(2, seed);
+    for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) reg.recordSuccess(l2Type.name);
+    const l3 = L3Atom.buildWithModel(l3Type, reg, FALLBACK_OPUS);
+    const l2 = L2Atom.fromType(l2Type, reg);
+    const ctx = { ...makeCtx(), requireObservedToolAction: true };
+    const verdict = await l3.validateResult(l2, {
+      output: 'child completed the work', summary: 'verified', trace: [], toolCallResults: [],
+      producedBy: { tier: 2, name: l2.name, viaFallback: false },
+    }, { description: 'build an artefact' }, ctx);
+    expect(verdict.approved).toBe(true);
+    expect(ctx.llm.calls).toHaveLength(0);
+  });
+
   it('L2.validatePlan skips the LLM call when the child type is trusted', async () => {
     const reg = new AtomRegistry(openDb(':memory:'));
     reg.create(2, seed);                 // Tracheid (L2 itself)
