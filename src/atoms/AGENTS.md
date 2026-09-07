@@ -170,6 +170,9 @@ Read the archived sections before changing something that merely looks odd.
 - Context injection appends and is composed later; do not mutate base prompts.
 - `Atom.toolNames()` is public while tool objects remain protected by design.
 - Capability bucket order is semantic; HTTP precedes web when signatures overlap.
+- The full-stack canonical pairs Node-server and browser tools without a static
+  server. It precedes HTTP in bucket selection; HTTP-only and static-web
+  canonicals retain their narrower scopes and identities.
 - Do not restore the L3 skeletal prefilter shortcut. Decomposition quality was
   worth the one top-tier strategy call.
 - Do not add semantic prefilter caching. It removes exactness directly below an

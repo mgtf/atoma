@@ -174,3 +174,42 @@ failed finalization cannot recurse. Mocked transport tests cover the session
 identity, disabled capabilities, combined usage and bounded failure. A real
 SDK smoke with a one-turn budget returned an unpredictable value supplied by
 exactly one tool invocation, in the requested final JSON, with `end_turn`.
+
+A fourth fresh attempt still failed after 46 calls and four escalations:
+the planner selected a narrow web cell for the final proof, which selected
+HTTP-only descendants. L3's envelope gate did reject a malformed fallback in
+this real run. This establishes that the information fixes alone do not make
+the combined workflow reliably routable.
+
+The follow-up therefore adds a canonical full-stack L1/L2 pair, with its own
+bootstrap marker and the scoped toolset HTTP + browser, WITHOUT
+`start_static_server`. It is seeded only when the executor supports the
+required combined capability. Existing HTTP/web identities and toolsets are
+unchanged. The new bucket precedes HTTP in capability selection, and existing
+general-purpose descriptions remain general-purpose. This is the explicit
+catalog decision left open in the initial report, not a new validation gate.
+Its tests cover required tools, exclusion of the static server, idempotence,
+trust preservation on a no-op refresh, unavailable capabilities, and existing
+narrow-scope preservation. The full source check passes 3,512 tests (4 skipped).
+
+The fifth attempt, `2026-09-07T12-31-58-411-f34c5e8e`, started with a fresh
+registry and selected the full-stack cell and molecule directly. It delivered
+after 16 LLM calls with zero escalations and zero uncovered obligations. The
+independent scorer then passed all nine checks in a new, network-disabled
+container with the deliverable mounted read-only: dynamic port, GET, POST
+persistence, rendering an API-created note, a real browser click writing to
+the API, reload retention, no page errors, no static API substitute, and all
+three required files existing and matching their HTTP responses. Evidence:
+`fullstack/runs/`, `fullstack/notes-5/`, and `notes-5-score.log` under the
+evidence directory above. This is one end-to-end regression success, not a
+general reliability or cost claim.
+
+A sixth attempt, `2026-09-07T12-36-59-037-e459fd63`, repeated the unchanged
+goal and code with another fresh registry and skills directory. It also
+delivered after 16 calls, with zero escalations and zero uncovered obligations.
+The same independent scorer passed all nine checks on this second deliverable
+(`repeat/runs/`, `repeat/notes-6/`, `notes-6-score.log`). These two consecutive
+successes cover this Notes workflow; broader workload reliability remains
+unmeasured. Final verification also passed the dependency audit, production
+build, compiled MCP smoke, compiled authentication smoke, and worker network
+isolation smoke. No production store was used for these trials.

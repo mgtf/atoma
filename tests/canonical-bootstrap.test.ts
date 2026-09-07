@@ -8,6 +8,9 @@ import {
   capabilityDescription,
   ensureCanonicalL1,
   ensureCanonicalL2,
+  ensureCanonicalFullStack,
+  ensureCanonicalHttpL1,
+  bucketIdForTools,
 } from '../src/atoms/capability.js';
 import {
   REPORTED_WEB_PROBE_ALIASES,
@@ -24,6 +27,33 @@ const WEB_TOOLS = makeTools([
 ]);
 
 const SMOKE = '== SMOKE-TEST DESIGN ==\ntest block';
+
+describe('canonical full-stack capability', () => {
+  const allTools = makeTools(['write_file', 'edit_file', 'read_file', 'list_files', 'run_shell', 'start_node_server', 'fetch_url', 'validate_html', 'start_static_server']);
+  it('creates an idempotent scoped pair and leaves narrow canonicals unchanged', () => {
+    const reg = new AtomRegistry(openDb(':memory:'));
+    const web = ensureCanonicalL1(reg, allTools, SMOKE);
+    const http = ensureCanonicalHttpL1(reg, allTools);
+    for (const tier of [1, 2] as const) {
+      const combined = ensureCanonicalFullStack(reg, allTools, tier)!;
+      expect(bucketIdForTools(combined.tools)).toBe('full-stack-build+probe');
+      expect(combined.tools.map(tool => tool.name)).toEqual(expect.arrayContaining(['start_node_server', 'fetch_url', 'validate_html']));
+      expect(combined.tools.some(tool => tool.name === 'start_static_server')).toBe(false);
+      reg.recordSuccess(combined.name);
+      const again = ensureCanonicalFullStack(reg, allTools, tier)!;
+      expect(again.atomId).toBe(combined.atomId);
+      expect(again.version).toBe(combined.version);
+      expect(again.successes).toBe(1);
+    }
+    expect(reg.getByName(web.name)!.tools.some(tool => tool.name === 'start_node_server')).toBe(false);
+    expect(reg.getByName(http.name)!.tools.some(tool => tool.name === 'validate_html')).toBe(false);
+  });
+  it('does not advertise combined verification when the executor lacks the browser tool', () => {
+    const reg = new AtomRegistry(openDb(':memory:'));
+    expect(ensureCanonicalFullStack(reg, allTools.filter(tool => tool.name !== 'validate_html'), 1)).toBeUndefined();
+    expect(reg.listByTier(1)).toHaveLength(0);
+  });
+});
 
 describe('ensureCanonicalL1 / ensureCanonicalL2 — idempotent bootstrap', () => {
   it('creates canonical L1 on first call with capability-derived description + bootstrap marker', () => {

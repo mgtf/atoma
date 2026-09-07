@@ -1,7 +1,7 @@
 import type { Tier, Tool } from '../core/types.js';
 import { manifestWriterLines, WEB_PROBE_DISCRIMINANT } from '../contracts/probeManifest.js';
 import type { AtomRegistry, AtomType } from '../registry/atomRegistry.js';
-import { HTTP_PORTABLE_DOC_GUIDANCE } from './prompts.js';
+import { HTTP_PORTABLE_DOC_GUIDANCE, SMOKE_DESIGN_GUIDANCE } from './prompts.js';
 
 /**
  * CAPABILITY-FIRST DESCRIPTIONS
@@ -61,6 +61,12 @@ interface CapabilityBucket {
 }
 
 const CAPABILITY_BUCKETS: readonly CapabilityBucket[] = [
+  {
+    id: 'full-stack-build+probe',
+    required: ['write_file', 'run_shell', 'start_node_server', 'fetch_url', 'validate_html'],
+    leafLabel: 'Node full-stack app builder and verifier: writes server code plus HTML/JavaScript files, serves them from the same Node process, probes its API, and verifies the page with real browser interactions',
+    orchestratorLabel: 'Node full-stack app orchestrator: routes coupled server, API and HTML/JavaScript work to a molecule with both Node-server and browser tools, including verification against the same live server',
+  },
   {
     id: 'http-server-build+probe',
     // Listed BEFORE the web-artefact bucket so a toolset that has BOTH
@@ -329,6 +335,47 @@ const HTTP_L1_TOOL_SCOPE: readonly string[] = [
   'fetch_url',
   'start_node_server',
 ];
+
+const FULL_STACK_TOOL_SCOPE = [...HTTP_L1_TOOL_SCOPE, 'validate_html'];
+export const CANONICAL_FULL_STACK_BOOTSTRAP_MARKER = 'bootstrap-canonical-full-stack';
+
+/** The combined capability has its own identity; narrow HTTP/web rows stay scoped. */
+export function ensureCanonicalFullStack(
+  registry: AtomRegistry,
+  tools: readonly Tool[],
+  tier: 1 | 2
+): AtomType | undefined {
+  const names = new Set(tools.map(tool => tool.name));
+  if (!bucketRequiredToolNames('full-stack-build+probe')!.every(name => names.has(name))) return undefined;
+  const scoped = pickTools(tools, FULL_STACK_TOOL_SCOPE);
+  const systemPrompt = (tier === 1 ? [
+    'You build and verify Node applications whose API and HTML/JavaScript front-end are served by the SAME Node process.',
+    'Create each file the task names on disk. Serve the HTML and JavaScript from those files; inline response strings do not create files.',
+    'For a verification or maintenance phase, read existing files and probe them FIRST. Preserve verified behaviour and repair only observed defects; do not rebuild an already working app.',
+    'Use start_node_server for the real server, then fetch_url for API probes and validate_html for browser interactions on that SAME returned URL. There is no static-server substitute for an API-backed page.',
+    'The entry point must read process.env.PORT and print LISTENING_ON_PORT=<actual bound port> after listening. Keep dependencies minimal; if the task says no dependencies, use Node builtins and skip installation.',
+    'Probe the requested API behaviour, including an invalid payload when validation is required. For browser proof, type and click through validate_html interactions and use smoke to assert the resulting DOM. Reuse the live server URL across checks.',
+    'After the required checks pass, stop probing and return the final JSON directly: {"output": <short structured result>, "summary": "<headline>\\n== GROUND TRUTH ==\\n<observed HTTP statuses and browser ok/interactions/smoke results>"}. Report actual tool bytes and any unverified requirement; never invent evidence.',
+    HTTP_PORTABLE_DOC_GUIDANCE,
+    SMOKE_DESIGN_GUIDANCE,
+  ] : [
+    'You are a cell for Node full-stack apps: a Node API and separate HTML/JavaScript files served by that same process.',
+    'You NEVER invoke elements yourself. Delegate to the full-stack molecule whose tools include start_node_server, fetch_url and validate_html together.',
+    'A coupled build or verification against one live server may be ONE leaf task. Its ordered tool calls are not parallel branches. Reuse the existing full-stack molecule when suitable; do not route combined verification to the narrower HTTP-only or static-web molecule.',
+    'For verification of an existing app, require read-only probes first and repairs only for observed defects. Preserve task constraints and files from prior phases.',
+  ]).join('\n');
+  const existing = registry.listByTier(tier).find(type => type.createdBy === CANONICAL_FULL_STACK_BOOTSTRAP_MARKER);
+  if (existing) {
+    return registry.patch(existing.name, {
+      addTools: scoped,
+      ...(existing.systemPrompt !== systemPrompt ? { systemPromptReplace: systemPrompt } : {}),
+    }, 'build-app-bootstrap', 'refresh canonical full-stack tools + seed prompt');
+  }
+  return registry.create(tier, {
+    description: capabilityDescription(scoped, tier), systemPrompt, tools: scoped,
+    params: {}, createdBy: CANONICAL_FULL_STACK_BOOTSTRAP_MARKER,
+  });
+}
 
 const FILESCRIBE_L1_TOOL_SCOPE: readonly string[] = [
   // A minimal file-authoring toolkit: write / read / list workspace files,

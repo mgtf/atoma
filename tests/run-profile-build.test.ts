@@ -83,7 +83,7 @@ describe('build profile — the seeds survived the move byte-for-byte', () => {
     expect(versionsAfterSecond).toEqual(versionsAfterFirst);
   });
 
-  it('seeds the three L1 buckets and the two L2 orchestrators', () => {
+  it('seeds four L1 buckets and three L2 orchestrators', () => {
     const reg = new AtomRegistry(openDb(':memory:'));
     const tools = defaultBuiltinTools({ sandbox: new ToolSandbox('/tmp') }).map(
       (t) => t.declaration
@@ -91,8 +91,8 @@ describe('build profile — the seeds survived the move byte-for-byte', () => {
     const ctx = { registry: reg, toolDecls: tools, log: (): void => undefined };
     buildProfile.seedL3(ctx);
     buildProfile.seedCatalog(ctx);
-    expect(reg.listByTier(1)).toHaveLength(3);
-    expect(reg.listByTier(2)).toHaveLength(2);
+    expect(reg.listByTier(1)).toHaveLength(4);
+    expect(reg.listByTier(2)).toHaveLength(3);
     expect(reg.listByTier(3)).toHaveLength(1);
   });
 

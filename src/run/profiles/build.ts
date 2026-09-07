@@ -5,6 +5,7 @@ import {
   ensureCanonicalHttpL1,
   ensureCanonicalHttpL2,
   ensureCanonicalFileScribeL1,
+  ensureCanonicalFullStack,
 } from '../../atoms/capability.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -221,6 +222,10 @@ export const buildProfile: TaskProfile = {
     log(
       `canonical L1 (file-scribe): ${canonicalL1FileScribe.name} (v${canonicalL1FileScribe.version}) — ${canonicalL1FileScribe.description.slice(0, 70)}…`
     );
+    for (const tier of [1, 2] as const) {
+      const fullStack = ensureCanonicalFullStack(registry, toolDecls, tier);
+      if (fullStack) log(`canonical L${tier} (full-stack): ${fullStack.name} (v${fullStack.version}) — ${fullStack.description}`);
+    }
   },
 
   buildTask(goal: string): Task {
