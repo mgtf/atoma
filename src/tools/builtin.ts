@@ -1665,9 +1665,10 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
               if (it.text === undefined) throw new Error('type requires "text"');
               const coords = await resolveInteractionCoords(page, it);
               await page.mouse.click(coords.x, coords.y);
-              await page.keyboard.press(
-                (process.platform === 'darwin' ? 'Meta+A' : 'Control+A') as import('puppeteer').KeyInput
-              );
+              // Puppeteer accepts individual key names, not "Control+A".
+              // Use Chromium's editing command so selection also works in
+              // headless macOS, where Meta+A does not select the input.
+              await page.keyboard.press('A', { commands: ['selectAll'], text: '' });
               await page.keyboard.press('Backspace');
               await page.keyboard.type(it.text);
               if (coords.resolvedSelector && coords.resolvedSelector !== it.selector) {

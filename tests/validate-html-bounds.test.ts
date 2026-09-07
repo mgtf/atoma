@@ -58,6 +58,29 @@ async function serve(sandbox: ToolSandbox): Promise<string> {
   return res.url;
 }
 
+describe('validate_html form input', () => {
+  it('replaces existing text before submitting through the page control', async () => {
+    const sandbox = makeWorkspace({
+      'index.html': '<input id="note" value="old text"><button id="add" onclick="document.getElementById(\'result\').textContent=document.getElementById(\'note\').value">Add</button><p id="result"></p>',
+    });
+    const url = await serve(sandbox);
+    const result = await validateHtmlTool({ sandbox }).execute({
+      url,
+      interactions: [
+        { type: 'type', selector: '#note', text: 'new note' },
+        { type: 'click', selector: '#add' },
+      ],
+      smoke: '(() => ({ok: document.getElementById("result").textContent === "new note", value: document.getElementById("note").value}))()',
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      errors: [],
+      requestedInteractions: 2,
+      smokeResult: { ok: true, value: 'new note' },
+    });
+  });
+});
+
 describe('isSpeculativeFaviconRequest — narrow by construction', () => {
   const page = 'http://localhost:8123/index.html';
 
