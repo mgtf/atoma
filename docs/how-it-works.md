@@ -575,7 +575,7 @@ Recorded so nobody has to discover it in a demo:
 | What was tried and rejected? | `docs/incidents/engineering-record-2026-08-14.md` § *Considered and rejected* |
 | What would multi-tenancy require? | [`saas-architecture.md`](saas-architecture.md) Layer 2 invariants and Layer 3 Track A/Track B roadmap |
 | What does a real run look like? | `npm run viz` for existing traces; `npm run viz:demo` writes a mocked run, and `npm run preview:demo` opens a seeded authenticated preview without paid inference |
-| How does another agent drive atoma? | `claude mcp add atoma --transport http <origin>/mcp --header "Authorization: Bearer <token>"` — one MCP, the tools your role admits, plus a goal-template prompt per task family at the platform tier |
+| How does another agent drive atoma? | Claude Code: `claude mcp add atoma --transport http <origin>/mcp --header "Authorization: Bearer <token>"`. Codex CLI: an `[mcp_servers.atoma]` table in `~/.codex/config.toml` with `url` and `bearer_token_env_var = "ATOMA_MCP_TOKEN"`. One MCP, the tools your role admits, plus a goal-template prompt per task family at the platform tier |
 | Are the economics real? | `npm run burnin` measures a new corpus using model quota; historical CSVs were archived at the 2026-08-18 reset |
 | …under a control? | `benchmark/PROTOCOL.md` — every round registered before it ran — and `benchmark/ROUND8.md` |
 | Do the deliverables actually work? | `benchmark/results-round8-scores.json` is the committed historical 7-check output; `verify-maint.mjs` now has 10 checks, but the round workspaces needed to regenerate it are not committed. Rounds 4-7 have no committed scorer output |

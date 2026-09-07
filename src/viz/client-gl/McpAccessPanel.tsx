@@ -6,8 +6,8 @@ import type { VizApiToken, VizApiTokens } from '../client/types.js';
 /**
  * CONNECT YOUR AGENT — the Settings panel that turns "atoma has an MCP" into a
  * procedure a signed-in member can follow in a minute: what the MCP is, the
- * address, a token created here and shown ONCE, and the exact line to paste
- * into Claude Code. The panel is the client half of `/api/tokens`
+ * address, a token created here and shown ONCE, the exact line to paste into
+ * Claude Code and the exact table to paste into Codex's config.toml. The panel is the client half of `/api/tokens`
  * (`src/viz/AGENTS.md`); the tiering — what the agent will actually see — is
  * decided server-side from the role and never described here as a promise.
  *
@@ -45,6 +45,26 @@ export function claudeMcpCommand(mcpUrl: string, token?: string): string {
   return token ? `${command} --header ${shellQuote(`Authorization: Bearer ${token}`)}` : command;
 }
 
+/** The environment variable Codex reads the bearer from; the token itself never enters config.toml. */
+export const CODEX_TOKEN_ENV = 'ATOMA_MCP_TOKEN';
+
+/**
+ * Codex CLI registers MCP servers in `~/.codex/config.toml`. Streamable HTTP
+ * is a `url`; the bearer is read from an environment variable named in the
+ * table, which keeps the secret out of a file that is easy to share. The
+ * ungated operator instance needs no bearer line.
+ */
+export function codexMcpConfig(mcpUrl: string, withToken: boolean): string {
+  const lines = ['[mcp_servers.atoma]', `url = ${JSON.stringify(mcpUrl)}`];
+  if (withToken) lines.push(`bearer_token_env_var = "${CODEX_TOKEN_ENV}"`);
+  return lines.join('\n');
+}
+
+/** The shell line that hands Codex the token, for the same terminal profile the CLI starts from. */
+export function codexTokenExport(token: string): string {
+  return `export ${CODEX_TOKEN_ENV}=${shellQuote(token)}`;
+}
+
 function errorMessage(failure: unknown, t: McpAccessPanelProps['t']): string {
   if (failure instanceof ApiHttpError) {
     if (failure.status === 404) return t('settings.mcpApiMissing');
@@ -77,6 +97,7 @@ export function McpAccessPanel({
   const live = tokens.filter((token) => token.revokedAt === null);
   const command = mcpUrl && (minted || operator)
     ? claudeMcpCommand(mcpUrl, operator ? undefined : minted?.token) : null;
+  const codexConfig = mcpUrl && (minted || operator) ? codexMcpConfig(mcpUrl, !operator) : null;
 
   return (
     <section className="gpu-mcp-access" aria-labelledby="mcp-access-title">
@@ -146,6 +167,28 @@ export function McpAccessPanel({
                   {t('settings.mcpCopy')}
                 </button>
               </div>
+              {codexConfig ? (
+                <>
+                  <p>{t('settings.mcpCodexHint')}</p>
+                  <div className="gpu-subscription-code-row">
+                    <code className="gpu-mcp-command" data-testid="mcp-codex-config">{codexConfig}</code>
+                    <button type="button" disabled={busy} onClick={() => void onCopy(codexConfig)}>
+                      {t('settings.mcpCopy')}
+                    </button>
+                  </div>
+                  {minted ? (
+                    <>
+                      <p>{t('settings.mcpCodexEnvHint', { env: CODEX_TOKEN_ENV })}</p>
+                      <div className="gpu-subscription-code-row">
+                        <code className="gpu-mcp-command" data-testid="mcp-codex-export">{codexTokenExport(minted.token)}</code>
+                        <button type="button" disabled={busy} onClick={() => void onCopy(codexTokenExport(minted.token))}>
+                          {t('settings.mcpCopy')}
+                        </button>
+                      </div>
+                    </>
+                  ) : null}
+                </>
+              ) : null}
               {!operator ? <p>{t('settings.mcpOtherClientsHint')}</p> : null}
             </>
           ) : null}

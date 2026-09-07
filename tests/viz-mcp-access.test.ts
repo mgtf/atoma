@@ -5,7 +5,7 @@ import { userEvent } from '@testing-library/user-event';
 import { createElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { translate } from '../src/viz/client/i18n-catalog.js';
-import { claudeMcpCommand, McpAccess, McpAccessPanel, type McpAccessPanelProps } from '../src/viz/client-gl/McpAccessPanel.js';
+import { claudeMcpCommand, codexMcpConfig, codexTokenExport, McpAccess, McpAccessPanel, type McpAccessPanelProps } from '../src/viz/client-gl/McpAccessPanel.js';
 
 /**
  * The Settings panel that turns "atoma has an MCP" into a procedure. What it
@@ -67,10 +67,17 @@ describe('McpAccessPanel', () => {
     const command = screen.getByTestId('mcp-claude-command');
     expect(command).toHaveTextContent(claudeMcpCommand('https://atoma.example.com/mcp', 'atoma_secret'));
     expect(command).toHaveTextContent("--transport http --scope user atoma 'https://atoma.example.com/mcp' --header 'Authorization: Bearer atoma_secret'");
+    // Codex: the config.toml table names the env var, and the export line carries the secret — never the table.
+    const codex = screen.getByTestId('mcp-codex-config');
+    expect(codex.textContent).toBe(codexMcpConfig('https://atoma.example.com/mcp', true));
+    expect(codex.textContent).toBe('[mcp_servers.atoma]\nurl = "https://atoma.example.com/mcp"\nbearer_token_env_var = "ATOMA_MCP_TOKEN"');
+    expect(screen.getByTestId('mcp-codex-export').textContent).toBe(codexTokenExport('atoma_secret'));
+    expect(screen.getByTestId('mcp-codex-export')).toHaveTextContent("export ATOMA_MCP_TOKEN='atoma_secret'");
     // No creation form while the secret is on screen: one token at a time.
     expect(screen.queryByRole('button', { name: 'Create token' })).toBeNull();
     const copies = screen.getAllByRole('button', { name: 'Copy' });
-    await userEvent.click(copies[2]!); // the command's copy
+    expect(copies).toHaveLength(5); // address, token, Claude line, Codex table, Codex export
+    await userEvent.click(copies[2]!); // the Claude command's copy
     expect(onCopy).toHaveBeenCalledWith(expect.stringContaining('claude mcp add --transport http'));
     await userEvent.click(screen.getByRole('button', { name: 'Done, I copied it' }));
     expect(onDismissMinted).toHaveBeenCalled();
@@ -114,6 +121,9 @@ describe('McpAccessPanel', () => {
     expect(screen.queryByRole('button', { name: 'Create token' })).toBeNull();
     expect(screen.queryByText('No token yet.')).toBeNull();
     expect(screen.getByTestId('mcp-claude-command')).not.toHaveTextContent('--header');
+    // The operator instance needs no bearer: the Codex table has no env-var line and no export line is shown.
+    expect(screen.getByTestId('mcp-codex-config').textContent).toBe('[mcp_servers.atoma]\nurl = "http://127.0.0.1:4111/mcp"');
+    expect(screen.queryByTestId('mcp-codex-export')).toBeNull();
     expect(screen.getByText(/A remote or cloud client cannot reach this loopback address/)).toBeInTheDocument();
   });
 });

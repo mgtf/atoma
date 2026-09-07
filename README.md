@@ -308,6 +308,23 @@ claude mcp add atoma --transport http https://<your-instance>/mcp \
 # locally, ungated: npm run viz, then http://127.0.0.1:4111/mcp with no token
 ```
 
+Codex CLI (OpenAI) reads the same URL from `~/.codex/config.toml` and the bearer from an
+environment variable, so the secret never enters the file:
+
+```toml
+[mcp_servers.atoma]
+url = "https://<your-instance>/mcp"
+bearer_token_env_var = "ATOMA_MCP_TOKEN"   # omit on the local ungated instance
+```
+
+```bash
+export ATOMA_MCP_TOKEN='<token>'   # in the shell profile Codex starts from
+# or, in one line: codex mcp add atoma --url https://<your-instance>/mcp --bearer-token-env-var ATOMA_MCP_TOKEN
+```
+
+Settings shows both snippets, filled in, when a token is created. Either client then lists the
+`atoma_*` tools your role admits under `/mcp`.
+
 **Thirty-seven tools.** ONE MCP for everyone, and what you see depends on who you are. An organisation member
 sees its projects and runs — start one as an MCP task and drive it through `tasks/get`, `tasks/result`
 and `tasks/cancel`, cancel, retry a

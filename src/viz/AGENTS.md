@@ -521,8 +521,8 @@ npm run viz:mark-turn:analyze
   `token.created`), lists (GET, secret-free) and revokes (DELETE, journaled
   `token.revoked`) the SESSION's principal's tokens for its ACTIVE
   organisation; the plaintext leaves the server once, in the POST response.
-  The Settings panel `McpAccessPanel` is that route's client: address,
-  procedure, token shown once with the Claude Code line, list and revoke.
+  `McpAccessPanel` is that route's client: address, steps, token shown once with
+  the Claude Code line and the Codex table (bearer via env var), list, revoke.
   It never re-reads a secret and resets when the active identity/org changes.
   GET also describes ungated operator access (no token); token mutations there
   return 409. A failed refresh preserves a newly minted secret for copying.

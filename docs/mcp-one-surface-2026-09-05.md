@@ -81,10 +81,16 @@ it while shown, and configure the public `/mcp` URL in the client.
 The Claude Code command is for a bash/zsh/WSL terminal on the user's machine,
 uses private user scope, and quotes the URL and Authorization header as shell
 arguments. Verify with `/mcp`, then ask for a read action such as listing
-projects. Other clients need Streamable HTTP plus either an Authorization
-header (`Bearer <token>`) or a dedicated Bearer field (token only). Never
-commit the secret to shared client configuration. The command and verification
-steps follow the [Claude Code MCP reference](https://code.claude.com/docs/en/mcp).
+projects. Codex CLI (OpenAI) takes an `[mcp_servers.atoma]` table in
+`~/.codex/config.toml` — `url` for the Streamable HTTP address and
+`bearer_token_env_var = "ATOMA_MCP_TOKEN"` so the secret lives in the shell
+environment, never in the file — and Settings shows that table and the
+matching `export` line beside the Claude Code command. Other clients need
+Streamable HTTP plus either an Authorization header (`Bearer <token>`) or a
+dedicated Bearer field (token only). Never commit the secret to shared client
+configuration. The command and verification steps follow the
+[Claude Code MCP reference](https://code.claude.com/docs/en/mcp) and the
+[Codex MCP reference](https://developers.openai.com/codex/mcp).
 
 Failure cases have different remedies:
 
