@@ -1001,7 +1001,7 @@
   "settings.subscriptionClaude": "Claude",
   "settings.subscriptionClaudeApproval": "Login langganan Claude pribadi memerlukan persetujuan penyedia sebelum Atoma dapat menawarkannya di sini.",
   "settings.subscriptionCodex": "Codex · ChatGPT",
-  "settings.subscriptionCodexHint": "",
+  "settings.subscriptionCodexHint": "Hubungkan dengan kode perangkat sekali pakai untuk menggunakan langganan ChatGPT Anda di ketiga tier. Codex menyimpan kredensial tersebut di profil pribadi untuk akun Atoma Anda; anggota lain tidak pernah menerimanya.",
   "settings.subscriptionState.loading": "Memuat…",
   "settings.subscriptionState.disconnected": "Tidak terhubung",
   "settings.subscriptionState.connecting": "Menghubungkan",

@@ -1001,7 +1001,7 @@
   "settings.subscriptionClaude": "Claude",
   "settings.subscriptionClaudeApproval": "Atomaで個人用Claudeサブスクリプションへのログインを利用できるようにするには、事前にプロバイダーの承認が必要です。",
   "settings.subscriptionCodex": "Codex · ChatGPT",
-  "settings.subscriptionCodexHint": "",
+  "settings.subscriptionCodexHint": "1回限りのデバイスコードで接続すると、ChatGPTサブスクリプションを3つのtierすべてで利用できます。Codexは認証情報をAtomaアカウント用の非公開プロフィールに保存するため、他のメンバーに共有されることはありません。",
   "settings.subscriptionState.loading": "読み込み中…",
   "settings.subscriptionState.disconnected": "未接続",
   "settings.subscriptionState.connecting": "接続中",

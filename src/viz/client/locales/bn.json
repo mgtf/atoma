@@ -1001,7 +1001,7 @@
   "settings.subscriptionClaude": "Claude",
   "settings.subscriptionClaudeApproval": "Atoma এখানে ব্যক্তিগত Claude সাবস্ক্রিপশনের লগইন সুবিধা দেওয়ার আগে প্রদানকারীর অনুমোদন প্রয়োজন।",
   "settings.subscriptionCodex": "Codex · ChatGPT",
-  "settings.subscriptionCodexHint": "",
+  "settings.subscriptionCodexHint": "তিনটি tier-এই আপনার ChatGPT সাবস্ক্রিপশন ব্যবহার করতে এককালীন ডিভাইস কোড দিয়ে সংযোগ করুন। Codex আপনার Atoma অ্যাকাউন্টের জন্য একটি ব্যক্তিগত প্রোফাইলে শংসাপত্রগুলো সংরক্ষণ করে; অন্য সদস্যরা এগুলো কখনোই পান না।",
   "settings.subscriptionState.loading": "লোড হচ্ছে…",
   "settings.subscriptionState.disconnected": "সংযুক্ত নয়",
   "settings.subscriptionState.connecting": "সংযুক্ত হচ্ছে",

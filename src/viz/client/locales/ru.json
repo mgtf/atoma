@@ -1001,7 +1001,7 @@
   "settings.subscriptionClaude": "Claude",
   "settings.subscriptionClaudeApproval": "Для входа в личную подписку Claude требуется одобрение провайдера, прежде чем Atoma сможет предложить её здесь.",
   "settings.subscriptionCodex": "Codex · ChatGPT",
-  "settings.subscriptionCodexHint": "",
+  "settings.subscriptionCodexHint": "Подключитесь с помощью одноразового кода устройства, чтобы использовать подписку ChatGPT для всех трёх tier. Codex хранит учётные данные в закрытом профиле вашей учётной записи Atoma; другим участникам они никогда не передаются.",
   "settings.subscriptionState.loading": "Загрузка…",
   "settings.subscriptionState.disconnected": "Не подключено",
   "settings.subscriptionState.connecting": "Подключение",
