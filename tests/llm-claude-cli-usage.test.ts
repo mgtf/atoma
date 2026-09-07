@@ -13,7 +13,11 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
  */
 
 const queryMock = vi.hoisted(() => vi.fn());
-vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ query: queryMock }));
+vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
+  query: queryMock,
+  tool: (name: string) => ({ name }),
+  createSdkMcpServer: (options: unknown) => options,
+}));
 
 const { ClaudeCliLlmClient } = await import('../src/core/llmClaudeCli.js');
 
@@ -34,6 +38,56 @@ function resultOnlyStream(msg: Record<string, unknown>) {
 beforeEach(() => {
   queryMock.mockReset();
   delete process.env['ATOMA_CLAUDE_MODEL'];
+});
+
+describe('tool-budget finalization', () => {
+  const request = () => ({
+    ...REQ,
+    maxToolIterations: 1,
+    tools: [{ name: 'read_file', description: 'read', inputSchema: { type: 'object' } }],
+    executor: { has: () => true, execute: vi.fn(async () => 'observed bytes') },
+  });
+  const exhausted = () => resultOnlyStream({
+    type: 'result', subtype: 'error_max_turns', session_id: 'this-query-session',
+    usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 100 },
+  });
+
+  it('resumes only the exhausted session without any tools and sums both usages', async () => {
+    queryMock.mockImplementationOnce(exhausted()).mockImplementationOnce(resultOnlyStream({
+      type: 'result', subtype: 'success', result: '{"output":"observed bytes","summary":"done"}',
+      usage: { input_tokens: 3, output_tokens: 4, cache_read_input_tokens: 50 },
+    }));
+    const response = await new ClaudeCliLlmClient().complete(request());
+    expect(response.text).toContain('"summary":"done"');
+    expect(response).not.toHaveProperty('resumeSessionId');
+    expect(response.usage).toEqual({ inputTokens: 13, outputTokens: 9, cacheReadInputTokens: 150, cacheCreationInputTokens: 0 });
+    expect(queryMock).toHaveBeenCalledTimes(2);
+    expect(queryMock.mock.calls[1]![0].options).toMatchObject({
+      resume: 'this-query-session', model: 'haiku', maxTurns: 1,
+      tools: [], mcpServers: {}, allowedTools: [], strictMcpConfig: true,
+      settingSources: [],
+    });
+  });
+
+  it('keeps the original and finalization usage when finalization fails', async () => {
+    queryMock.mockImplementationOnce(exhausted()).mockImplementationOnce(resultOnlyStream({
+      type: 'result', subtype: 'error_during_execution',
+      usage: { input_tokens: 3, output_tokens: 4 },
+    }));
+    await expect(new ClaudeCliLlmClient().complete(request())).rejects.toMatchObject({
+      partialUsage: { inputTokens: 13, outputTokens: 9, cacheReadInputTokens: 100, cacheCreationInputTokens: 0 },
+    });
+    expect(queryMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not recursively retry a failed tools-disabled finalization', async () => {
+    queryMock.mockImplementationOnce(exhausted()).mockImplementationOnce(resultOnlyStream({
+      type: 'result', subtype: 'error_max_turns', session_id: 'this-query-session',
+      usage: { input_tokens: 3, output_tokens: 4 },
+    }));
+    await expect(new ClaudeCliLlmClient().complete(request())).rejects.toThrow('error_max_turns');
+    expect(queryMock).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('servedModel — the CLI alias actually invoked, not the pin', () => {

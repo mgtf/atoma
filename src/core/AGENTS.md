@@ -38,6 +38,9 @@ Neighbours:
   remaining wall clock via `capToolIterations` / `ctx.deadlineAt` (26 s
   floor from the 2026-08-16 fan-in measurement) so one phase cannot
   *plan* more iterations than the run can still pay.
+- A Claude CLI tool-budget exhaustion gets one finalization in that query's
+  own session, with tools and MCP servers disabled. Both queries' usage is
+  retained, including when finalization fails; finalization never recurses.
 - Claude CLI and Codex CLI transports run with user tools/config isolated.
   Project `.claude/settings.json` never grants shell permission; personal grants
   belong in ignored local settings. Codex MCP registration is local too. A

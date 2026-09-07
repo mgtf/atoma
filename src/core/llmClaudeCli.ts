@@ -189,7 +189,7 @@ export class ClaudeCliLlmClient implements LlmClient {
     // a condition that is transient BY DEFINITION. One retry after a short
     // pause; a second occurrence throws a real transport error so metrics
     // record an error call instead of a parser crash far from the cause.
-    const first = await this.completeOnce(req);
+    const first = await this.finalizeAfterBudget(req, await this.completeOnce(req));
     // THE ACCOUNT REFUSED, which is not a transport blip. Checked before the
     // retry below, because a limit that resets in hours is not waited out in
     // three seconds; and before the caller's parser, because the refusal is
@@ -204,7 +204,7 @@ export class ClaudeCliLlmClient implements LlmClient {
     }
     if (!isCliTransportErrorText(first.text)) return first;
     await new Promise((r) => setTimeout(r, 3000));
-    const second = await this.completeOnce(req);
+    const second = await this.finalizeAfterBudget(req, await this.completeOnce(req));
     if (!isCliTransportErrorText(second.text)) return second;
     // Both attempts returned usage before being judged transport errors —
     // those tokens were paid; attach them (review 2026-08-14 §1.13).
@@ -214,7 +214,33 @@ export class ClaudeCliLlmClient implements LlmClient {
     );
   }
 
-  private async completeOnce(req: LlmCompletionRequest): Promise<LlmCompletionResponse> {
+  private async finalizeAfterBudget(
+    req: LlmCompletionRequest,
+    response: LlmCompletionResponse & { resumeSessionId?: string }
+  ): Promise<LlmCompletionResponse> {
+    if (!response.resumeSessionId) return response;
+    try {
+      // Resume only this query's session so the final answer retains the
+      // actual tool observations. No executor or MCP server is reattached.
+      const final = await this.completeOnce({
+        ...req,
+        tools: undefined,
+        executor: undefined,
+        onToolInvocation: undefined,
+        userContent: 'The tool iteration budget is exhausted. Tools are disabled. Return the final answer in the format required by the original request, using only the work and observations already recorded in this session. State any unfinished work accurately; do not claim unobserved success or request more tools.',
+      }, response.resumeSessionId);
+      return { ...final, usage: sumUsage([response.usage, final.usage]) };
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      const partial = (err as Error & { partialUsage?: LlmCompletionResponse['usage'] }).partialUsage;
+      throw attachPartialUsage(err, [response.usage, ...(partial ? [partial] : [])]);
+    }
+  }
+
+  private async completeOnce(
+    req: LlmCompletionRequest,
+    resumeSessionId?: string
+  ): Promise<LlmCompletionResponse & { resumeSessionId?: string }> {
     const hasTools = req.executor !== undefined && (req.tools?.length ?? 0) > 0;
     const budget = Math.max(1, req.maxToolIterations ?? this.maxIter);
 
@@ -270,7 +296,8 @@ export class ClaudeCliLlmClient implements LlmClient {
           allowDangerouslySkipPermissions: true,
           ...(cliEffortFor(req) ? { effort: cliEffortFor(req) } : {}),
           ...(cliThinkingFor(req) ? { thinking: cliThinkingFor(req) } : {}),
-          maxTurns: hasTools ? budget : 2,
+          ...(resumeSessionId ? { resume: resumeSessionId, strictMcpConfig: true, mcpServers: {}, allowedTools: [] } : {}),
+          maxTurns: resumeSessionId ? 1 : hasTools ? budget : 2,
           abortController: abort,
           // THE LOGIN SESSION, AND NOTHING ELSE. Dropping a stale
           // `ANTHROPIC_API_KEY` used to be tidiness — one variable, so the
@@ -315,7 +342,16 @@ export class ClaudeCliLlmClient implements LlmClient {
               servedModel: served,
             };
           }
-          // Non-success result (error_max_turns, error_during_execution, ...):
+          if (hasTools && msg.subtype === 'error_max_turns' && msg.session_id) {
+            return {
+              text: lastAssistantText,
+              stopReason: msg.subtype,
+              usage: mapped,
+              servedModel: served,
+              resumeSessionId: msg.session_id,
+            };
+          }
+          // Other non-success results (error_during_execution, ...):
           // salvage the last assistant text when there is one — the callers'
           // JSON parsers are tolerant and a truncated-but-present payload
           // beats a hard throw (mirrors the Anthropic client's graceful
@@ -369,7 +405,15 @@ function attachPartialUsage(
   usages: readonly LlmCompletionResponse['usage'][]
 ): Error {
   try {
-    (err as Error & { partialUsage?: object }).partialUsage = usages.reduce<{
+    (err as Error & { partialUsage?: object }).partialUsage = sumUsage(usages);
+  } catch {
+    // frozen/exotic errors can't carry properties — fine.
+  }
+  return err;
+}
+
+function sumUsage(usages: readonly LlmCompletionResponse['usage'][]): LlmCompletionResponse['usage'] {
+  return usages.reduce<{
       inputTokens: number;
       outputTokens: number;
       cacheCreationInputTokens: number;
@@ -383,10 +427,6 @@ function attachPartialUsage(
       }),
       { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 }
     );
-  } catch {
-    // frozen/exotic errors can't carry properties — fine.
-  }
-  return err;
 }
 
 /**
