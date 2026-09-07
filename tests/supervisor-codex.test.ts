@@ -20,11 +20,29 @@ function fixture() {
   return root;
 }
 
-it('selects Codex as a complete subscription provider set, never borrowing API credentials', () => {
-  expect(analystProvider({ ATOMA_ANALYST_TRANSPORT: 'codex' })).toMatchObject({ transport: 'codex', model: 'gpt-5.6-sol', authToken: null });
-  expect(menderProvider({ ATOMA_ANALYST_TRANSPORT: 'codex', ATOMA_MENDER_TRANSPORT: 'codex', ATOMA_MENDER_CODEX_HOME: '/private' })).toMatchObject({ source: 'mender', codexHome: '/private' });
-  expect(() => analystProvider({ ATOMA_ANALYST_TRANSPORT: 'codex', ATOMA_ANALYST_AUTH_TOKEN: 'api' })).toThrow('remove');
-  expect(() => analystProvider({ ATOMA_ANALYST_TRANSPORT: 'typo' })).toThrow('must be');
+it('resolves one selector per stage onto a session, and refuses what no CLI can serve', () => {
+  expect(analystProvider({ ATOMA_ANALYST_MODEL: 'sub:openai:gpt-5.6-sol' })).toMatchObject({
+    selector: 'sub:openai:gpt-5.6-sol', transport: 'codex', model: 'gpt-5.6-sol', authToken: null, baseUrl: null,
+  });
+  expect(menderProvider({ ATOMA_ANALYST_MODEL: 'sub:openai:gpt-5.6-sol', ATOMA_MENDER_MODEL: 'sub:openai:gpt-5.6-terra', ATOMA_MENDER_CODEX_HOME: '/private' }))
+    .toMatchObject({ source: 'mender', model: 'gpt-5.6-terra', codexHome: '/private' });
+  // The mender borrows the analyst's WHOLE selector, never a mix.
+  expect(menderProvider({ ATOMA_ANALYST_MODEL: 'sub:anthropic:sonnet' })).toMatchObject({ source: 'analyst', transport: 'claude', model: 'sonnet' });
+  expect(analystProvider({ ATOMA_ANALYST_MODEL: 'api:zai:glm-5.3', ZAI_API_KEY: 'zai-key' })).toMatchObject({
+    transport: 'claude', model: 'glm-5.3', authToken: 'zai-key', baseUrl: 'https://api.z.ai/api/anthropic',
+  });
+  expect(analystProvider({ ATOMA_ANALYST_MODEL: 'api:anthropic:claude-sonnet-5', ANTHROPIC_API_KEY: 'sk-ant-x', ANTHROPIC_BASE_URL: 'https://gw.example' }))
+    .toMatchObject({ transport: 'claude', authToken: 'sk-ant-x', baseUrl: 'https://gw.example' });
+  // No default, no key borrowed, no legacy variable honoured.
+  expect(() => analystProvider({})).toThrow(/ATOMA_ANALYST_MODEL is not set/);
+  expect(() => menderProvider({})).toThrow(/ATOMA_MENDER_MODEL \(or ATOMA_ANALYST_MODEL\) is not set/);
+  expect(() => analystProvider({ ATOMA_ANALYST_MODEL: 'api:zai:glm-5.3' })).toThrow(/needs ZAI_API_KEY/);
+  expect(() => analystProvider({ ATOMA_ANALYST_MODEL: 'api:openai:gpt-5.6-sol', OPENAI_API_KEY: 'sk' })).toThrow(/requires a ChatGPT login/);
+  expect(() => analystProvider({ ATOMA_ANALYST_MODEL: 'own:openai:gpt-5.6-sol' })).toThrow(/own: has no login/);
+  expect(() => analystProvider({ ATOMA_ANALYST_MODEL: 'api:ollama:qwen3:8b' })).toThrow(/no supervisor CLI/);
+  expect(() => analystProvider({ ATOMA_ANALYST_MODEL: 'gpt-5.6-sol' })).toThrow(/is not a model selector/);
+  expect(() => analystProvider({ ATOMA_ANALYST_MODEL: 'sub:openai:gpt-5.6-sol', ATOMA_ANALYST_TRANSPORT: 'codex' })).toThrow(/ATOMA_ANALYST_TRANSPORT was retired/);
+  expect(() => menderProvider({ ATOMA_MENDER_MODEL: 'sub:anthropic:opus', ATOMA_MENDER_AUTH_TOKEN: 'x' })).toThrow(/ATOMA_MENDER_AUTH_TOKEN was retired/);
 });
 
 it('derives required nullable optional fields and restores the original strict contract', () => {
@@ -57,7 +75,7 @@ describe.skipIf(process.platform === 'win32')('Codex supervisor process boundari
       rpcError: { method, code: -32600, message: 'HTTP 401 Unauthorized private@example.test refresh_token=secret-value /private/profile' },
     });
     const result = await runCodexSupervisor({ command: stub,
-      provider: { transport: 'codex', codexHome: join(root, 'auth'), model: 'gpt-5.6-sol', source: 'mender', baseUrl: null, authToken: null },
+      provider: { selector: 'sub:openai:gpt-5.6-sol', transport: 'codex', codexHome: join(root, 'auth'), model: 'gpt-5.6-sol', source: 'mender', baseUrl: null, authToken: null },
       cwd: root, prompt: 'x', hardening: 'x', schema: SUPERVISOR_VERDICT_JSON_SCHEMA, timeoutMs: 5000,
     });
     expect(result.code).toBe(1);
@@ -70,7 +88,7 @@ describe.skipIf(process.platform === 'win32')('Codex supervisor process boundari
     const root = fixture(); const stub = join(root, 'failed.mjs');
     writeCodexStub(stub, { report: {}, log: join(root, 'failed.jsonl'), fail: true });
     const result = await runCodexSupervisor({ command: stub,
-      provider: { transport: 'codex', codexHome: join(root, 'auth'), model: 'gpt-5.6-sol', source: 'analyst', baseUrl: null, authToken: null },
+      provider: { selector: 'sub:openai:gpt-5.6-sol', transport: 'codex', codexHome: join(root, 'auth'), model: 'gpt-5.6-sol', source: 'analyst', baseUrl: null, authToken: null },
       cwd: root, prompt: 'x', hardening: 'x', schema: SUPERVISOR_VERDICT_JSON_SCHEMA,
       timeoutMs: 5000, readEvidence: createEvidenceReader(root, {}),
     });
@@ -85,7 +103,7 @@ describe.skipIf(process.platform === 'win32')('Codex supervisor process boundari
     const reader = createEvidenceReader(root, {});
     expect(() => reader({ path: 'src/secret.ts', query: '', offset: 0, limit: 10 })).toThrow();
     writeFileSync(join(root, 'auth/auth.json'), JSON.stringify({ OPENAI_API_KEY: 'test' }));
-    await expect(runCodexSupervisor({ command: 'never-executed', provider: { transport: 'codex', codexHome: join(root, 'auth'), model: 'gpt-5.6-sol', source: 'analyst', baseUrl: null, authToken: null }, cwd: root,
+    await expect(runCodexSupervisor({ command: 'never-executed', provider: { selector: 'sub:openai:gpt-5.6-sol', transport: 'codex', codexHome: join(root, 'auth'), model: 'gpt-5.6-sol', source: 'analyst', baseUrl: null, authToken: null }, cwd: root,
       prompt: 'x', hardening: 'x', schema: SUPERVISOR_VERDICT_JSON_SCHEMA, timeoutMs: 1000, readEvidence: reader })).rejects.toThrow('ChatGPT subscription');
   });
 
@@ -98,7 +116,7 @@ describe.skipIf(process.platform === 'win32')('Codex supervisor process boundari
     const dispatched: string[] = [];
     const result = await analyseRun(runId, {
       repoRoot: root, runsDir: join(root, 'runs'), supervisorDir: join(root, 'supervisor'), leasePath: join(root, 'lease.db'),
-      provider: { transport: 'codex', codexHome: join(root, 'auth'), model: 'gpt-5.6-sol', source: 'analyst', baseUrl: null, authToken: null },
+      provider: { selector: 'sub:openai:gpt-5.6-sol', transport: 'codex', codexHome: join(root, 'auth'), model: 'gpt-5.6-sol', source: 'analyst', baseUrl: null, authToken: null },
       claudeCommand: 'never-claude', codexCommand: stub, budgetUsd: 2, timeoutMs: 10_000, dryRun: false, force: false,
       journal: () => {}, log: () => {}, warn: () => {},
       dispatch: { repo: 'owner/repo', token: 'test', eventType: 'atoma-mend', minConfidence: 'high', instance: null, apiBase: 'https://example.invalid' },

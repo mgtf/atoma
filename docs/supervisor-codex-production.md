@@ -10,15 +10,16 @@ Keep these in `/home/atoma/config/atoma.env`:
 
 ```dotenv
 ATOMA_VIZ_ANALYST=1
-ATOMA_ANALYST_TRANSPORT=codex
-ATOMA_ANALYST_MODEL=gpt-5.6-sol
+ATOMA_ANALYST_MODEL=sub:openai:gpt-5.6-sol
 ATOMA_ANALYST_CODEX_HOME=/home/atoma/state/codex/analyst
 ATOMA_SUPERVISOR_CMD_CODEX=/home/atoma/state/.local/bin/codex
 ATOMA_SUPERVISOR_DIR=/home/atoma/state/supervisor
 ```
 
-The profile and its parent must be writable by atoma. Remove analyst API token
-and base URL overrides when using Codex. Keep supervisor state outside releases.
+The profile and its parent must be writable by atoma. `ATOMA_ANALYST_MODEL` is
+one selector, `<api|sub>:<vendor>:<model>`, and is required once the analyst is
+on; the retired `_TRANSPORT`, `_BASE_URL` and `_AUTH_TOKEN` variables are
+refused by name. Keep supervisor state outside releases.
 
 ## Install the separate mender
 
@@ -79,8 +80,9 @@ stop backstop reaps containers labeled atoma.role=mender after process death.
 
 After local publisher authentication is installed, delete the repository secrets
 ATOMA_MENDER_CODEX_AUTH_JSON and ATOMA_MENDER_GITHUB_TOKEN. Delete obsolete
-ATOMA_MENDER_MODEL, ATOMA_MENDER_BASE_URL and ATOMA_MENDER_AUTH_TOKEN variables
-or secrets if present. The Mender Actions workflow is retired.
+ATOMA_MENDER_MODEL, ATOMA_MENDER_BASE_URL and ATOMA_MENDER_AUTH_TOKEN repository
+variables or secrets if present (the mender service reads its selector from
+its own env file). The Mender Actions workflow is retired.
 
 Keep OPENAI_API_KEY while the i18n CI job still uses it. Keep ATOMA_DEPLOY_ENABLED
 and all production environment deployment variables and SSH secrets. Revoke the

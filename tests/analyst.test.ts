@@ -84,7 +84,7 @@ process.stdout.write(JSON.stringify({ type: 'result', structured_output: verdict
     runsDir,
     supervisorDir,
     leasePath: join(root, 'no-lease.db'),
-    provider: { model: 'glm-5.3', baseUrl: 'https://z.example', authToken: 't', source: 'analyst' },
+    provider: { selector: 'api:zai:glm-5.3', transport: 'claude', model: 'glm-5.3', baseUrl: 'https://z.example', authToken: 't', source: 'analyst' },
     claudeCommand: stub,
     budgetUsd: 2,
     timeoutMs: 60_000,
@@ -161,7 +161,7 @@ describe('analyseRun', () => {
     const stored = JSON.parse(readFileSync(result.verdictPath!, 'utf8')) as Record<string, unknown>;
     expect(stored['runId']).toBe(RUN_ID); // never trusted to echo
     expect(stored['_meta']).toMatchObject({
-      modelRequested: 'glm-5.3',
+      modelRequested: 'api:zai:glm-5.3',
       providerBaseUrl: 'https://z.example',
       worstFindingKind: 'security_incident',
       analysisCostUsd: 0.7,

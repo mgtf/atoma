@@ -17,6 +17,13 @@
 - doctor, burn-in, the benchmark, the MCP and the viz announcement translator
   all derive their transports from the three selectors; the MCP no longer
   imposes `claude-cli` on operator runs.
+- The supervisor follows the same grammar: `ATOMA_ANALYST_MODEL` and
+  `ATOMA_MENDER_MODEL` hold one full selector each (`sub:anthropic:sonnet`,
+  `api:zai:glm-5.3`, `sub:openai:gpt-5.6-sol`), REQUIRED once the stage is
+  enabled and with no default. `ATOMA_ANALYST_TRANSPORT`, `_BASE_URL`,
+  `_AUTH_TOKEN` and their mender twins are retired and refused by name; the
+  key comes from `ANTHROPIC_API_KEY` or `ZAI_API_KEY`. `api:openai` is refused
+  for supervisor sessions, which require a ChatGPT login.
 
 ### Added
 

@@ -184,7 +184,7 @@ process.exit(2);
       runsDir: runs,
       supervisorDir: supervisor,
       leasePath: join(root, 'no-such-lease.db'),
-      provider: { model: 'claude-sonnet-5', baseUrl: null, authToken: null, source: 'mender' },
+      provider: { selector: 'api:anthropic:claude-sonnet-5', transport: 'claude', model: 'claude-sonnet-5', baseUrl: null, authToken: 'sk-ant-test', source: 'mender' },
       commands: {
         claude: join(stubs, 'claude.mjs'),
         gh: join(stubs, 'gh.mjs'),
@@ -253,7 +253,7 @@ describe('the mender, end to end against a real repository', () => {
     } });
     const options = f.options();
     const result = await mendPending(f, { ...options,
-      provider: { transport: 'codex', codexHome: home, model: 'gpt-5.6-sol', source: 'mender', baseUrl: null, authToken: null },
+      provider: { selector: 'sub:openai:gpt-5.6-sol', transport: 'codex', codexHome: home, model: 'gpt-5.6-sol', source: 'mender', baseUrl: null, authToken: null },
       commands: { ...options.commands, codex: stub },
     });
     expect(result.failures).toBe(0);

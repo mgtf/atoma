@@ -4179,7 +4179,7 @@ server.listen(cli.port, cli.host, () => {
     const analyst = ANALYST.health();
     console.log(
       `analyst: on (quiet ${Math.round(analyst.quietMs / 1000)}s, ${analyst.queued} finished run(s) queued; ` +
-        `spends ${analystProvider().model} — see src/supervisor/AGENTS.md)`
+        `spends ${analystProvider().selector} — see src/supervisor/AGENTS.md)`
     );
   } else if (EVENTS && PROJECTS_RUNTIME) {
     console.log('analyst: off (ATOMA_VIZ_ANALYST=1 to analyse finished runs on this host)');

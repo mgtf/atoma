@@ -1,3 +1,9 @@
+import {
+  MODEL_SELECTOR_GRAMMAR,
+  ModelSelectorError,
+  parseModelSelector,
+  ZAI_DEFAULT_BASE_URL,
+} from '../contracts/modelSelector.js';
 import { terminateRunProcessGroup } from '../cli/burnin.js';
 import { spawn } from 'node:child_process';
 import type { ServedModelUsage } from '../contracts/supervisorVerdict.js';
@@ -149,22 +155,38 @@ export function runCommand(
 
 /* ────────────────────────────── providers ────────────────────────────── */
 
-export type ProviderSource = 'mender' | 'analyst' | 'default';
+export type ProviderSource = 'mender' | 'analyst';
 
+/**
+ * WHICH SESSION THE SUPERVISOR STAGE RUNS, resolved from ONE selector per
+ * stage: `ATOMA_ANALYST_MODEL` and `ATOMA_MENDER_MODEL` hold a full
+ * `<api|sub>:<vendor>:<model>` (`contracts/modelSelector.ts`), the same
+ * grammar as the run tiers, and there is no default — a stage that is enabled
+ * without its selector refuses to start, naming the variable.
+ *
+ * The supervisor drives a headless CLI, not an `LlmClient`, so the selector
+ * maps onto a SESSION rather than a transport client:
+ *   sub:anthropic:<alias>  → Claude Code on the machine's own login
+ *   api:anthropic:<model>  → Claude Code with ANTHROPIC_API_KEY (+ ANTHROPIC_BASE_URL)
+ *   api:zai:<model>        → Claude Code pointed at Z.ai with ZAI_API_KEY / ZAI_BASE_URL
+ *   sub:openai:<model>     → Codex on a ChatGPT login (`<PREFIX>_CODEX_HOME` picks the profile)
+ * `api:openai` is refused: the Codex supervisor session requires a ChatGPT
+ * login and rejects API-key profiles by design (`codexSession.ts`). `own:` and
+ * `api:ollama` have no CLI to run and are refused too. The pre-2026-09-07
+ * variables (`_TRANSPORT`, `_BASE_URL`, `_AUTH_TOKEN`) are refused by name so
+ * a stale unit file fails loudly instead of silently changing payer.
+ */
 export interface SupervisorProvider {
-  readonly transport?: 'claude' | 'codex';
+  /** The selector as configured — the requested identity records carry. */
+  readonly selector: string;
+  readonly transport: 'claude' | 'codex';
   readonly codexHome?: string;
+  /** The bare model id or alias the CLI receives. */
   readonly model: string;
   readonly baseUrl: string | null;
   readonly authToken: string | null;
   readonly source: ProviderSource;
 }
-
-/** Pinned because an alias drifts under the measurement (see module doc). */
-export const DEFAULT_SUPERVISOR_MODEL = 'claude-sonnet-5';
-
-const ANALYST_VARS = ['ATOMA_ANALYST_MODEL', 'ATOMA_ANALYST_BASE_URL', 'ATOMA_ANALYST_AUTH_TOKEN'] as const;
-const MENDER_VARS = ['ATOMA_MENDER_MODEL', 'ATOMA_MENDER_BASE_URL', 'ATOMA_MENDER_AUTH_TOKEN'] as const;
 
 /** A CI runner hands an unset repository variable over as an EMPTY string; that is "unset". */
 function present(value: string | undefined): string | null {
@@ -172,71 +194,94 @@ function present(value: string | undefined): string | null {
   return trimmed ? trimmed : null;
 }
 
-function providerSet(
-  env: NodeJS.ProcessEnv,
-  names: readonly [string, string, string],
-  source: ProviderSource
-): SupervisorProvider | null {
-  const prefix = source === 'mender' ? 'ATOMA_MENDER' : 'ATOMA_ANALYST';
-  const transport = present(env[`${prefix}_TRANSPORT`]);
-  if (transport && transport !== 'claude' && transport !== 'codex') throw new Error(`${prefix}_TRANSPORT must be claude or codex`);
-  if (!transport && !names.some((name) => present(env[name]) !== null)) return null;
-  if (transport === 'codex') {
-    if (present(env[names[1]]) || present(env[names[2]])) throw new Error(`${prefix}: Codex uses ChatGPT login; remove BASE_URL and AUTH_TOKEN`);
-    return { transport, model: present(env[names[0]]) ?? 'gpt-5.6-sol', baseUrl: null, authToken: null, source,
-      ...(present(env[`${prefix}_CODEX_HOME`]) ? { codexHome: present(env[`${prefix}_CODEX_HOME`])! } : {}) };
-  }
-  return {
-    model: present(env[names[0]]) ?? DEFAULT_SUPERVISOR_MODEL,
-    baseUrl: present(env[names[1]]),
-    authToken: present(env[names[2]]),
-    source,
-  };
-}
+const RETIRED_SUFFIXES = ['_TRANSPORT', '_BASE_URL', '_AUTH_TOKEN'] as const;
 
-const DEFAULT_PROVIDER: SupervisorProvider = {
-  model: DEFAULT_SUPERVISOR_MODEL,
-  baseUrl: null,
-  authToken: null,
-  source: 'default',
-};
+function providerSet(env: NodeJS.ProcessEnv, source: ProviderSource): SupervisorProvider | null {
+  const prefix = source === 'mender' ? 'ATOMA_MENDER' : 'ATOMA_ANALYST';
+  for (const suffix of RETIRED_SUFFIXES) {
+    if (present(env[`${prefix}${suffix}`])) {
+      throw new ModelSelectorError(
+        `${prefix}${suffix} was retired on 2026-09-07: ${prefix}_MODEL now carries the whole selector ` +
+          `(${MODEL_SELECTOR_GRAMMAR}) and credentials come from ANTHROPIC_API_KEY / ZAI_API_KEY`
+      );
+    }
+  }
+  const variable = `${prefix}_MODEL`;
+  const raw = present(env[variable]);
+  if (!raw) return null;
+  const selector = parseModelSelector(raw, variable);
+  const codexHome = present(env[`${prefix}_CODEX_HOME`]);
+  if (selector.mode === 'own') {
+    throw new ModelSelectorError(`${variable}=${raw}: a supervisor stage runs on the host, so own: has no login to bind to; use sub: or api:`);
+  }
+  if (selector.mode === 'sub') {
+    if (selector.vendor === 'anthropic') {
+      return { selector: raw, transport: 'claude', model: selector.model, baseUrl: null, authToken: null, source };
+    }
+    return {
+      selector: raw, transport: 'codex', model: selector.model, baseUrl: null, authToken: null, source,
+      ...(codexHome ? { codexHome } : {}),
+    };
+  }
+  switch (selector.vendor) {
+    case 'anthropic': {
+      const key = present(env['ANTHROPIC_API_KEY']);
+      if (!key) throw new ModelSelectorError(`${variable}=${raw} needs ANTHROPIC_API_KEY`);
+      return { selector: raw, transport: 'claude', model: selector.model, baseUrl: present(env['ANTHROPIC_BASE_URL']), authToken: key, source };
+    }
+    case 'zai': {
+      const key = present(env['ZAI_API_KEY']);
+      if (!key) throw new ModelSelectorError(`${variable}=${raw} needs ZAI_API_KEY`);
+      return { selector: raw, transport: 'claude', model: selector.model, baseUrl: present(env['ZAI_BASE_URL']) ?? ZAI_DEFAULT_BASE_URL, authToken: key, source };
+    }
+    case 'openai':
+      throw new ModelSelectorError(
+        `${variable}=${raw}: the Codex supervisor session requires a ChatGPT login and rejects API keys; use sub:openai:${selector.model}`
+      );
+    case 'ollama':
+      throw new ModelSelectorError(`${variable}=${raw}: no supervisor CLI can run against Ollama; use sub:anthropic, api:anthropic, api:zai or sub:openai`);
+  }
+}
 
 export function analystProvider(env: NodeJS.ProcessEnv = process.env): SupervisorProvider {
-  return providerSet(env, ANALYST_VARS, 'analyst') ?? DEFAULT_PROVIDER;
+  const provider = providerSet(env, 'analyst');
+  if (!provider) {
+    throw new ModelSelectorError(`ATOMA_ANALYST_MODEL is not set; the analyst names its session as ${MODEL_SELECTOR_GRAMMAR} and has no default`);
+  }
+  return provider;
 }
 
-/** The mender's own set, else the analyst's set, else the default — never a mix. */
+/** The mender's own selector, else the analyst's — never a mix, never a default. */
 export function menderProvider(env: NodeJS.ProcessEnv = process.env): SupervisorProvider {
-  return providerSet(env, MENDER_VARS, 'mender') ?? providerSet(env, ANALYST_VARS, 'analyst') ?? DEFAULT_PROVIDER;
+  const provider = providerSet(env, 'mender') ?? providerSet(env, 'analyst');
+  if (!provider) {
+    throw new ModelSelectorError(`ATOMA_MENDER_MODEL (or ATOMA_ANALYST_MODEL) is not set; the mender names its session as ${MODEL_SELECTOR_GRAMMAR} and has no default`);
+  }
+  return provider;
 }
 
 /**
- * The child session's environment. A provider override is scoped HERE and
+ * The child session's environment. The stage's credential is scoped HERE and
  * never exported at platform launch: raw `ANTHROPIC_*` in the process env
- * would reroute the runs' claude-cli transport along with the supervisor.
+ * would reroute the runs' own Claude transport along with the supervisor. The
+ * host's `ANTHROPIC_*` / Bedrock / Vertex variables are stripped first, then
+ * exactly what the selector needs is set.
  */
 export function providerChildEnv(
   provider: SupervisorProvider,
   env: NodeJS.ProcessEnv = process.env
 ): NodeJS.ProcessEnv {
   const child: NodeJS.ProcessEnv = { ...env };
-  if (provider.source !== 'default') {
-    for (const key of Object.keys(child)) {
-      if (key.startsWith('ANTHROPIC_') || key.startsWith('CLAUDE_CODE_USE_')) delete child[key];
-    }
+  for (const key of Object.keys(child)) {
+    if (key.startsWith('ANTHROPIC_') || key.startsWith('CLAUDE_CODE_USE_')) delete child[key];
   }
   if (provider.baseUrl) child['ANTHROPIC_BASE_URL'] = provider.baseUrl;
   if (provider.authToken) {
     // An Anthropic API key (`sk-ant-…`) travels as the API key the CLI reads
     // natively; anything else is a gateway bearer (Z.ai, a proxy). Either way
-    // the OTHER variable is dropped so a stale one cannot shadow this one.
-    if (/^sk-ant-/.test(provider.authToken)) {
-      child['ANTHROPIC_API_KEY'] = provider.authToken;
-      delete child['ANTHROPIC_AUTH_TOKEN'];
-    } else {
-      child['ANTHROPIC_AUTH_TOKEN'] = provider.authToken;
-      delete child['ANTHROPIC_API_KEY'];
-    }
+    // only ONE of the two variables is set, so nothing stale can shadow it.
+    if (/^sk-ant-/.test(provider.authToken)) child['ANTHROPIC_API_KEY'] = provider.authToken;
+    else child['ANTHROPIC_AUTH_TOKEN'] = provider.authToken;
   }
   return child;
 }

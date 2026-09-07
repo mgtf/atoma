@@ -458,7 +458,7 @@ async function mendFindingReserved(input: MendInput, options: MenderOptions): Pr
   let keepWorktree = options.keepWorktree;
   const provider = options.provider;
   const executeUntrusted = options.executeUntrusted ?? runIsolatedMenderCommand;
-  const providerFacts = { model: provider.model, source: provider.source, baseUrl: provider.baseUrl };
+  const providerFacts = { model: provider.selector, source: provider.source, baseUrl: provider.baseUrl };
   try {
     if (!(await requireIdle(options, 'prepare a worktree'))) return null;
 
@@ -490,7 +490,7 @@ async function mendFindingReserved(input: MendInput, options: MenderOptions): Pr
     });
     const args = menderSessionArgs(prompt, provider, options.budgetUsd);
     if (options.dryRun) {
-      options.log(`dry-run: provider ${provider.model} via ${provider.source}${provider.baseUrl ? ` (${provider.baseUrl})` : ''}`);
+      options.log(`dry-run: provider ${provider.selector} via ${provider.source}${provider.baseUrl ? ` (${provider.baseUrl})` : ''}`);
       options.log(provider.transport === 'codex' ? 'dry-run: would start a container-isolated Codex ChatGPT session' : `dry-run: would spawn ${options.commands.claude} ${args.slice(0, -1).join(' ')}`);
       options.log(`dry-run: prompt is ${prompt.length} chars; worktree ${worktree}`);
       return record({ outcome: 'dry-run', baseSha, provider: providerFacts });
@@ -500,7 +500,7 @@ async function mendFindingReserved(input: MendInput, options: MenderOptions): Pr
       keepWorktree = false;
       return null;
     }
-    journal(mendEvent({ runId, findingIndex: index, key, branch, outcome: 'started', modelRequested: provider.model })!);
+    journal(mendEvent({ runId, findingIndex: index, key, branch, outcome: 'started', modelRequested: provider.selector })!);
     options.log(`mending ${runId}#${index} "${truncate(finding.title, 80)}" with ${provider.model} (${provider.source} provider)`);
     const startedAt = Date.now();
     const session = provider.transport === 'codex' ? await runCodexSupervisor({

@@ -125,31 +125,28 @@ describe('checkDiffPolicy', () => {
 });
 
 describe('menderProvider', () => {
-  it('reads the mender set, then the analyst set, then the default — never a mix', () => {
-    expect(menderProvider({})).toMatchObject({ model: 'claude-sonnet-5', baseUrl: null, source: 'default' });
+  it('reads the mender selector, else the analyst selector — never a mix, never a default', () => {
+    expect(() => menderProvider({})).toThrow(/ATOMA_MENDER_MODEL \(or ATOMA_ANALYST_MODEL\) is not set/);
     expect(
-      menderProvider({ ATOMA_ANALYST_MODEL: 'glm-5.3', ATOMA_ANALYST_BASE_URL: 'https://z', ATOMA_ANALYST_AUTH_TOKEN: 't' })
-    ).toMatchObject({ model: 'glm-5.3', baseUrl: 'https://z', authToken: 't', source: 'analyst' });
+      menderProvider({ ATOMA_ANALYST_MODEL: 'api:zai:glm-5.3', ZAI_API_KEY: 't', ZAI_BASE_URL: 'https://z' })
+    ).toMatchObject({ selector: 'api:zai:glm-5.3', transport: 'claude', model: 'glm-5.3', baseUrl: 'https://z', authToken: 't', source: 'analyst' });
+    // The mender's own selector wins whole: the analyst's Z.ai endpoint does
+    // not leak under an Anthropic model id.
     expect(
-      menderProvider({ ATOMA_MENDER_MODEL: 'claude-opus-5', ATOMA_ANALYST_BASE_URL: 'https://z', ATOMA_ANALYST_AUTH_TOKEN: 't' })
-    ).toMatchObject({ model: 'claude-opus-5', baseUrl: null, authToken: null, source: 'mender' });
+      menderProvider({ ATOMA_MENDER_MODEL: 'api:anthropic:claude-opus-5', ANTHROPIC_API_KEY: 'sk-ant-k', ATOMA_ANALYST_MODEL: 'api:zai:glm-5.3', ZAI_API_KEY: 't' })
+    ).toMatchObject({ model: 'claude-opus-5', baseUrl: null, authToken: 'sk-ant-k', source: 'mender' });
   });
 
   it('treats an empty variable as unset — a CI runner hands absent repository variables over as empty strings', () => {
-    expect(menderProvider({ ATOMA_MENDER_MODEL: '', ATOMA_MENDER_BASE_URL: '', ATOMA_MENDER_AUTH_TOKEN: '' })).toMatchObject({ source: 'default' });
-    expect(menderProvider({ ATOMA_MENDER_MODEL: '', ATOMA_MENDER_BASE_URL: '', ATOMA_MENDER_AUTH_TOKEN: 'sk-ant-x' })).toMatchObject({
-      model: 'claude-sonnet-5',
-      baseUrl: null,
-      authToken: 'sk-ant-x',
-      source: 'mender',
-    });
+    expect(menderProvider({ ATOMA_MENDER_MODEL: '', ATOMA_ANALYST_MODEL: 'sub:anthropic:sonnet' })).toMatchObject({ source: 'analyst', transport: 'claude', model: 'sonnet' });
+    expect(() => menderProvider({ ATOMA_MENDER_MODEL: '', ATOMA_ANALYST_MODEL: '' })).toThrow(/is not set/);
   });
 
   it('hands an Anthropic key to the CLI as its API key and a gateway token as a bearer', () => {
-    const anthropic = providerChildEnv({ model: 'claude-sonnet-5', baseUrl: null, authToken: 'sk-ant-abc', source: 'mender' }, { ANTHROPIC_AUTH_TOKEN: 'stale' });
+    const anthropic = providerChildEnv({ selector: 'api:anthropic:claude-sonnet-5', transport: 'claude', model: 'claude-sonnet-5', baseUrl: null, authToken: 'sk-ant-abc', source: 'mender' }, { ANTHROPIC_AUTH_TOKEN: 'stale' });
     expect(anthropic['ANTHROPIC_API_KEY']).toBe('sk-ant-abc');
     expect(anthropic['ANTHROPIC_AUTH_TOKEN']).toBeUndefined();
-    const gateway = providerChildEnv({ model: 'glm-5.3', baseUrl: 'https://z', authToken: 'zai-abc', source: 'analyst' }, { ANTHROPIC_API_KEY: 'stale' });
+    const gateway = providerChildEnv({ selector: 'api:zai:glm-5.3', transport: 'claude', model: 'glm-5.3', baseUrl: 'https://z', authToken: 'zai-abc', source: 'analyst' }, { ANTHROPIC_API_KEY: 'stale' });
     expect(gateway['ANTHROPIC_AUTH_TOKEN']).toBe('zai-abc');
     expect(gateway['ANTHROPIC_BASE_URL']).toBe('https://z');
     expect(gateway['ANTHROPIC_API_KEY']).toBeUndefined();
@@ -170,7 +167,7 @@ describe('pullRequestBody', () => {
       runId: 'run-1',
       key: 'abc123abc123',
       verification: { testFailedBefore: true, checkPassed: true, testFiles: ['tests/x.test.ts'], checkCommand: 'npm run check' },
-      provider: { model: 'glm-5.3', source: 'analyst', baseUrl: 'https://z', authToken: 't' },
+      provider: { selector: 'api:zai:glm-5.3', transport: 'claude', model: 'glm-5.3', source: 'analyst', baseUrl: 'https://z', authToken: 't' },
       served: [{ model: 'glm-5.3', costUsd: 0.5, inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 }],
       costUsd: 0.5,
       diffStat: { files: 2, added: 23, deleted: 1 },
@@ -185,7 +182,7 @@ describe('pullRequestBody', () => {
 
 describe('review regressions: provider and governing code', () => {
   it('does not send a new provider key to an inherited gateway', () => {
-    const env = providerChildEnv({ model: 'claude-sonnet-5', baseUrl: null, authToken: 'sk-ant-new', source: 'mender' }, {
+    const env = providerChildEnv({ selector: 'api:anthropic:claude-sonnet-5', transport: 'claude', model: 'claude-sonnet-5', baseUrl: null, authToken: 'sk-ant-new', source: 'mender' }, {
       ANTHROPIC_BASE_URL: 'https://stale.invalid', ANTHROPIC_AUTH_TOKEN: 'old',
       ANTHROPIC_CUSTOM_HEADERS: 'Authorization: old', CLAUDE_CODE_USE_BEDROCK: '1',
     });

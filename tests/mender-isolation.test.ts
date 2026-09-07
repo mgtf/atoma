@@ -107,7 +107,7 @@ describe.skipIf(process.env['ATOMA_MENDER_CONTAINER_TESTS'] !== '1')('mender con
     const log = join(root, 'codex.jsonl');
     writeCodexStub(stub, { log, report: {}, command: `node -e '${command.replaceAll("'", "'\\''")}'` });
     const sandboxed = await runCodexSupervisor({ command: stub, cwd: work,
-      provider: { transport: 'codex', codexHome: auth, model: 'gpt-5.6-sol', source: 'mender', baseUrl: null, authToken: null },
+      provider: { selector: 'sub:openai:gpt-5.6-sol', transport: 'codex', codexHome: auth, model: 'gpt-5.6-sol', source: 'mender', baseUrl: null, authToken: null },
       prompt: 'exercise the isolated worktree command', hardening: '', schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
       execute: runIsolatedMenderCommand, timeoutMs: 60_000,
     });

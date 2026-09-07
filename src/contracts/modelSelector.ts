@@ -36,6 +36,13 @@ import { z } from 'zod';
  * the store is reset (owner decision, 2026-09-07).
  */
 
+/**
+ * Default base URL of Z.ai's ANTHROPIC-COMPATIBLE endpoint — the same one
+ * Claude Code users point ANTHROPIC_BASE_URL at to run GLM models. A vendor
+ * fact, stated once for the run transports and the supervisor sessions alike.
+ */
+export const ZAI_DEFAULT_BASE_URL = 'https://api.z.ai/api/anthropic';
+
 export const MODEL_SELECTOR_MODES = ['api', 'sub', 'own'] as const;
 export type ModelSelectorMode = (typeof MODEL_SELECTOR_MODES)[number];
 

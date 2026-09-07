@@ -17,17 +17,15 @@ import {
   type ModelSelector,
   type ModelTransport,
   type TierNumber,
+  ZAI_DEFAULT_BASE_URL,
 } from '../contracts/modelSelector.js';
 import { makeAnthropicClient } from './auth.js';
 
-/**
- * Default base URL of Z.ai's ANTHROPIC-COMPATIBLE endpoint — the same one
- * Claude Code users point ANTHROPIC_BASE_URL at to run GLM models. Because
- * it speaks the Messages API, the existing AnthropicLlmClient (tool loop,
- * cache_control, truncation) serves it unchanged; Z.ai simply ignores the
- * knobs it doesn't support.
- */
-export const ZAI_DEFAULT_BASE_URL = 'https://api.z.ai/api/anthropic';
+// Z.ai speaks the Messages API, so the existing AnthropicLlmClient (tool
+// loop, cache_control, truncation) serves it unchanged; Z.ai simply ignores
+// the knobs it doesn't support. The endpoint itself is a vendor fact in the
+// selector contract.
+export { ZAI_DEFAULT_BASE_URL };
 
 /**
  * ONE construction switch per TRANSPORT (`contracts/modelSelector.ts`

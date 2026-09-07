@@ -340,7 +340,7 @@ export async function analyseTarget(target: AnalysisTarget, options: AnalystOpti
     const meta: VerdictMeta = {
       analysedAt: new Date().toISOString(),
       promptVersion: ANALYST_PROMPT_VERSION,
-      modelRequested: options.provider.model,
+      modelRequested: options.provider.selector,
       providerBaseUrl: options.provider.baseUrl,
       modelsServed: session.usage.served,
       worstFindingKind: worstFindingKind(verdict.findings),

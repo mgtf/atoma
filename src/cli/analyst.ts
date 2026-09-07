@@ -60,12 +60,13 @@ what it does NOT do:
   Run beside a run, write anything but its own outputs, or follow trace text.
 
 provider:
-  ATOMA_ANALYST_MODEL / ATOMA_ANALYST_BASE_URL / ATOMA_ANALYST_AUTH_TOKEN, read
-  as a set and forwarded to the child session only. Default: the login
-  subscription with a pinned claude-sonnet-5.
-  ATOMA_ANALYST_TRANSPORT=codex selects ChatGPT subscription auth instead,
-  with ATOMA_ANALYST_MODEL (default gpt-5.6-sol), ATOMA_ANALYST_CODEX_HOME,
-  and ATOMA_SUPERVISOR_CMD_CODEX for the binary. No API token or base URL.
+  ATOMA_ANALYST_MODEL=<api|sub>:<vendor>:<model>, REQUIRED, no default.
+  sub:anthropic:<alias> runs Claude Code on this machine's login;
+  api:anthropic:<model> and api:zai:<model> run Claude Code with
+  ANTHROPIC_API_KEY or ZAI_API_KEY (+ ZAI_BASE_URL), forwarded to the child
+  session only; sub:openai:<model> runs Codex on a ChatGPT login from
+  ATOMA_ANALYST_CODEX_HOME, with ATOMA_SUPERVISOR_CMD_CODEX for the binary.
+  api:openai is refused: the Codex session accepts no API key.
 
 flags:
   --once                 analyse pending runs (see --backfill), then exit
@@ -119,14 +120,16 @@ async function main(): Promise<void> {
   const runsDir = resolve(args.flags['runs'] || process.env['ATOMA_RUNS_DIR'] || './runs');
   const supervisorDir = resolve(args.flags['supervisor-dir'] || './supervisor');
   const dbPath = args.flags['db'] || storeDbPath();
-  const provider = analystProvider();
+  let provider;
+  try {
+    provider = analystProvider();
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+  }
   if (!looksPinned(provider.model)) {
     process.stderr.write(
       `atoma analyst: "${provider.model}" is an alias, not a pinned model id — verdicts recorded under it are not comparable over time\n`
     );
-  }
-  if (provider.baseUrl && !provider.authToken) {
-    process.stderr.write('atoma analyst: a base URL is set without an auth token — the endpoint will likely refuse\n');
   }
 
   // Journal only into a store that EXISTS: `PlatformEventLog.open` applies its
@@ -172,7 +175,7 @@ async function main(): Promise<void> {
       `  verdicts   ${supervisorDir}/verdicts\n` +
       `  projects   ${projectReader ? 'on (finished project_runs)' : args.flags['operator-only'] === 'true' ? 'off (--operator-only)' : 'off (no project control plane in this store)'}\n` +
       `  journal    ${journal ? dbPath : 'none (no product store at ' + dbPath + ')'}\n` +
-      `  provider   ${provider.model} (${provider.source}${provider.baseUrl ? `, ${provider.baseUrl}` : ''})\n` +
+      `  provider   ${provider.selector} (${provider.source}${provider.baseUrl ? `, ${provider.baseUrl}` : ''})\n` +
       `  dispatch   ${dispatch ? `${dispatch.repo} (${dispatch.eventType}, confidence ≥ ${dispatch.minConfidence})` : 'off (ATOMA_MENDER_DISPATCH_REPO / _TOKEN unset)'}\n`
   );
 

@@ -38,20 +38,25 @@ Neighbours:
   any zod node it cannot express — so a contract that outgrows the converter
   fails the suite rather than shipping a schema the model was never held to.
   Never hand-write the JSON twin.
-- PROVIDERS ARE READ AS SETS (`session.ts`): the three `ATOMA_ANALYST_*`
-  variables together, the three `ATOMA_MENDER_*` together, the analyst set as
-  the mender's fallback, and a PINNED default id. A model id paired with the
-  other stage's base URL would send a Claude id to a GLM endpoint; an alias
-  resolves to another model next month and the recorded cost stops meaning
-  what it said. The override is scoped to the child session's environment and
-  never exported at platform launch, which would reroute the runs' own
-  claude-cli transport.
+- ONE SELECTOR PER STAGE (`session.ts`): `ATOMA_ANALYST_MODEL` and
+  `ATOMA_MENDER_MODEL` hold a full `<api|sub>:<vendor>:<model>`
+  ([src/contracts](../contracts/AGENTS.md) `modelSelector.ts`), the mender
+  borrowing the analyst's WHOLE selector when it has none, and neither has a
+  default. The selector names the session: `sub:anthropic` and `api:*` run
+  Claude Code (login, or `ANTHROPIC_API_KEY` / `ZAI_API_KEY` scoped to the
+  child), `sub:openai` runs Codex. A model id can no longer be paired with the
+  other stage's endpoint, because there is no separate endpoint variable; the
+  retired `_TRANSPORT` / `_BASE_URL` / `_AUTH_TOKEN` are refused by name. An
+  alias resolves to another model next month and the recorded cost stops
+  meaning what it said, so aliases are warned about. The credential is scoped
+  to the child session's environment and never exported at platform launch,
+  which would reroute the runs' own Claude transport.
 - COST IS RECORDED FROM WHAT WAS SERVED (`modelUsage`), never from the
   requested id — the same lie `servedModel` prevents in the product's traces.
   A pin absent from what was served is warned about as "not comparable".
-- CODEX IS EXPLICIT (`ATOMA_ANALYST_TRANSPORT=codex`, likewise MENDER).
-  It requires ChatGPT subscription auth and rejects API-key profiles and
-  provider token/endpoint overrides. Each session gets a fresh auth-only
+- CODEX IS EXPLICIT (`sub:openai:<model>`, likewise MENDER). It requires
+  ChatGPT subscription auth and rejects API-key profiles: `api:openai` is
+  refused at resolution. Each session gets a fresh auth-only
   profile under the shared Codex HOME lease; rotated credentials are copied
   back atomically after the process/container has been reaped, on errors too.
   Codex reports tokens and the model resolved by thread/start, but no price:

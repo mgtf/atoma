@@ -63,12 +63,13 @@ what it never does:
   merge, or run beside a live run. Refusals keep the worktree for inspection.
 
 provider:
-  ATOMA_MENDER_MODEL / _BASE_URL / _AUTH_TOKEN as a set, else the ATOMA_ANALYST_*
-  set, else pinned claude-sonnet-5 with explicit ANTHROPIC_API_KEY / AUTH_TOKEN.
-  Host login files are not exposed to the execution container.
-  ATOMA_MENDER_TRANSPORT=codex selects a dedicated ChatGPT subscription login
-  from ATOMA_MENDER_CODEX_HOME. Its temporary auth-only copy stays outside
-  command containers; refreshes are preserved. No OpenAI API billing.
+  ATOMA_MENDER_MODEL=<api|sub>:<vendor>:<model>, else ATOMA_ANALYST_MODEL;
+  REQUIRED, no default. sub:openai:<model> runs Codex on the dedicated ChatGPT
+  login in ATOMA_MENDER_CODEX_HOME — its temporary auth-only copy stays outside
+  command containers and refreshes are preserved; api:openai is refused.
+  sub:anthropic / api:anthropic / api:zai run Claude Code, with the key from
+  ANTHROPIC_API_KEY or ZAI_API_KEY. Host login files are never exposed to the
+  execution container.
 
 execution host:
   Linux / WSL2 with Docker; build the disposable image before the first mend:
@@ -148,12 +149,14 @@ async function main(): Promise<void> {
 
   const repo = resolve(args.flags['repo'] || process.cwd());
   const dbPath = args.flags['db'] || storeDbPath();
-  const provider = menderProvider();
+  let provider;
+  try {
+    provider = menderProvider();
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+  }
   if (!looksPinned(provider.model)) {
     process.stderr.write(`atoma mender: "${provider.model}" is an alias, not a pinned model id — records made under it are not comparable over time\n`);
-  }
-  if (provider.baseUrl && !provider.authToken) {
-    process.stderr.write(`atoma mender: a base URL is set for the ${provider.source} provider without an auth token — the endpoint will likely refuse\n`);
   }
   // Journal only into a store that EXISTS (see the analyst for why).
   const journal = existsSync(dbPath) ? PlatformEventLog.open(dbPath) : null;
@@ -191,7 +194,7 @@ async function main(): Promise<void> {
       `  repo       ${repo} (${options.remote}/${options.base})\n` +
       `  verdicts   ${paths.verdictsDir}\n` +
       `  journal    ${journal ? dbPath : 'none (no product store at ' + dbPath + ')'}\n` +
-      `  provider   ${provider.model} (${provider.source}${provider.baseUrl ? `, ${provider.baseUrl}` : ''})\n` +
+      `  provider   ${provider.selector} (${provider.source}${provider.baseUrl ? `, ${provider.baseUrl}` : ''})\n` +
       `  floor      confidence ≥ ${options.minConfidence}, defects only\n`
   );
 

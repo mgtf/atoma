@@ -88,28 +88,32 @@ Neighbours:
 - No refusal message carries a filesystem path. `project_runs.error` is served
   to tenants, and the row this reader replaced leaked an absolute host path.
 
-## Who paid for a run
+## Model selectors and who paid for a run
 
-- `runPayers.ts` is the ONE answer, and it is PER TIER. Four rows — `base`,
-  `l1`, `l2`, `l3` — each naming the selection, the provider that served it,
-  the payer kind and the chain level it came from. A run may spend the
-  operator's own Claude or ChatGPT login on some tiers while others bill an
-  organisation's key, and `run.host_subscription` used to be a whole-run fact
-  with no `detail` at all.
-- `base` IS A ROW. Every call carrying no `provider:` prefix reaches the
-  default client, so a three-row ledger names the tiers and stays silent about
-  the account that paid for everything else — the omission finding 2.2
-  punished on 2026-08-27.
-- The stored spellings are NON-ROUTABLE sentinels:
-  `host-subscription:<alias>` for Claude and
-  `chatgpt-subscription:<model>` for host Codex, plus
-  `principal-chatgpt-subscription:<model>` for requester Codex, never their CLI
-  route prefixes. They become transports only inside the coordinator,
-  downstream of the matching authority/profile check; both ChatGPT families
-  are L2/L3-only.
-- Nothing here carries a secret: a payer names a KIND and, for a key, its
-  provider. This detail is journaled beside `project_runs.error`, which is
-  served to tenants.
+- `modelSelector.ts` is the ONE grammar for a model choice, everywhere:
+  `<api|sub|own>:<vendor>:<model>`, closed mode and vendor vocabularies, the
+  third segment verbatim (Ollama tags keep their colons). `parseModelSelector`
+  is the only parser, `transportOf` the only mode+vendor → transport mapping,
+  and `readTierSelectors` the only reader of the three REQUIRED
+  `ATOMA_MODEL_L*` pins — there is no default, and no other module may
+  spell, split or default a selector. Stored pins written before this grammar
+  (2026-09-07) are not recognised; the store is reset, not migrated.
+- `runPayers.ts` is the ONE answer to who paid, and it is PER TIER: three rows,
+  `l1`, `l2`, `l3`, each naming the resolved selector, the transport that
+  served it (`transportOf`), the payer kind and the chain level it came from.
+  There is no `base` row any more because there is no base transport: every
+  call carries its full selector, so nothing is paid by an account the ledger
+  does not name.
+- THE PAYER IS THE SELECTOR'S FIRST SEGMENT (`payerForSelector`): `sub:` is
+  `host-subscription`, `own:` is `principal-subscription`, `api:` is `org-key`
+  when the organisation brought the vendor's key, else `host-key`, or
+  `host-selfhosted` for Ollama. Nothing infers a payer from a transport name.
+- Subscription selectors are ADMISSIBLE BY CHAIN LEVEL, not by spelling: the
+  coordinator honours `sub:`/`own:` from an account pin after re-asking the
+  authority, and refuses them from the org and host levels; both ChatGPT
+  families are L2/L3-only (`selectorAdmitsTools`).
+- Nothing here carries a secret: a payer names a KIND and a transport. This
+  detail is journaled beside `project_runs.error`, which is served to tenants.
 - Summary helpers distinguish host and requester subscription spend; both use
   the same structured `runPayerDetail` ledger.
 
