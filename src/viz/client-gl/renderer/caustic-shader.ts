@@ -51,6 +51,46 @@ const CAUSTIC_PRESS_SOFT = 3200;
 const CAUSTIC_PRESS_MIN = 0.32;
 const CAUSTIC_PRESS_MAX = 1.35;
 
+/** Conservative receiver bounds, using the shader's exact bundle-culling pad. */
+export function causticReceiverBounds(
+  cast: import('../mark-field-light.js').MarkCausticUniforms,
+  band: number
+): { left: number; top: number; right: number; bottom: number } {
+  let left = Infinity;
+  let top = Infinity;
+  let right = -Infinity;
+  let bottom = -Infinity;
+  const include = (
+    corners: readonly { x: number; y: number }[],
+    spectral: readonly { x: number; y: number }[] | null
+  ) => {
+    for (let start = 0; start < corners.length; start += 3) {
+      const triangle = corners.slice(start, start + 3);
+      let edge = 0;
+      let spectralReach = 0;
+      for (let index = 0; index < triangle.length; index += 1) {
+        const point = triangle[index]!;
+        const next = triangle[(index + 1) % triangle.length]!;
+        edge = Math.max(edge, Math.hypot(point.x - next.x, point.y - next.y));
+        const delta = spectral?.[start + index];
+        if (delta) spectralReach = Math.max(spectralReach, Math.hypot(delta.x, delta.y));
+      }
+      const pad = Math.min(CAUSTIC_CULL_PAD_MAX_PX,
+        Math.max(CAUSTIC_CULL_PAD_MIN_PX, edge * CAUSTIC_CULL_EDGE_FRACTION)) +
+        spectralReach * Math.min(2, Math.max(0, band));
+      for (const point of triangle) {
+        left = Math.min(left, point.x - pad);
+        top = Math.min(top, point.y - pad);
+        right = Math.max(right, point.x + pad);
+        bottom = Math.max(bottom, point.y + pad);
+      }
+    }
+  };
+  include(cast.corners, cast.spectral);
+  if (cast.secondary) include(cast.secondary.corners, cast.secondary.spectral);
+  return { left, top, right, bottom };
+}
+
 export const CAUSTIC_FIELD_GLSL = /* glsl */ `
   float causticCross(vec2 a, vec2 b) {
     return a.x * b.y - a.y * b.x;

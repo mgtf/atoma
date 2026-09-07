@@ -53,6 +53,9 @@ export const ATOMA_MARK_LOCAL_CENTER = 14;
 /** Compact scale used by the focused icon rail. */
 export const ATOMA_MARK_HEADER_SCALE = 1.8;
 
+/** Minimum wall magnification keeps compact caustics outside the crystal. */
+const ATOMA_MARK_RECEIVER_MIN_SCALE = 4;
+
 /** Prominent overview-rail scale; still below the hero reflection threshold. */
 export const ATOMA_MARK_OVERVIEW_RAIL_SCALE = 3.2;
 
@@ -761,8 +764,8 @@ export function attachAtomaMark(
     const beadVisible = markBeadVisible();
     const scale = visualScale * frame.scale;
     const pointer = renderer ? readPointerLight() : null;
-    // Compact chrome has no far-field receiver. Until the pointer actually
-    // interacts with that crystal it needs no DOM projection at all.
+    // Compact chrome only lights the receiver during pointer interaction;
+    // without a pointer it needs no DOM projection or CPU caustic trace.
     const projection = renderer && (pointer?.active || visualScale >= ATOMA_MARK_ENV_MIN_SCALE)
       ? markProjection(renderer)
       : null;
@@ -858,17 +861,25 @@ export function attachAtomaMark(
     // Lantern light belongs on the far-field mesh. The bead throws from
     // inside; the pointer lamp sits in front and has to go THROUGH the glass
     // to reach the same wall — same rear windows, stained by the faces.
-    if (!renderer || !projection || visualScale < ATOMA_MARK_ENV_MIN_SCALE) {
+    const hero = visualScale >= ATOMA_MARK_ENV_MIN_SCALE;
+    // Keep the compact receiver legible outside the opaque shell. This is
+    // display magnification of the same traced wall, including its spectral
+    // offsets, not another ray trace or a second receiver pass.
+    const receiverScale = Math.max(visualScale, ATOMA_MARK_RECEIVER_MIN_SCALE) * frame.scale;
+    if (!renderer || !projection || (!hero && pointerSpills.length === 0)) {
       clearMarkFieldLight();
+      causticWasCoupled = false;
     } else {
       const localRadius = Math.max(
         ATOMA_MARK_REAR_LIGHT_RADIUS * scale * VIZ_VISUAL_DEPTH.far.markHaloSpread,
         VIZ_VISUAL_DEPTH.far.markHaloMinPx
       );
-      const merged = mergeFieldSpills(
+      // The compact receiver shows the transported caustics alone. The
+      // hero's broad decorative spill would swamp their small footprints.
+      const merged = hero ? mergeFieldSpills(
         beadVisible ? frame.rearSpills : [],
         pointerSpills
-      );
+      ) : [];
       if (merged.length === 0) {
         // Clear only the halo lane. The caustic has its own 30 Hz clock below;
         // clearing both here would make its cached sample blink between ticks.
@@ -904,16 +915,16 @@ export function attachAtomaMark(
             for (let index = 0; index < corners.length; index += 1) {
               const corner = corners[index]!;
               const stageX = container.x + ATOMA_MARK_LOCAL_CENTER +
-                (corner.x - ATOMA_MARK_LOCAL_CENTER) * scale;
+                (corner.x - ATOMA_MARK_LOCAL_CENTER) * receiverScale;
               const stageY = container.y + ATOMA_MARK_LOCAL_CENTER +
-                (corner.y - ATOMA_MARK_LOCAL_CENTER) * scale;
+                (corner.y - ATOMA_MARK_LOCAL_CENTER) * receiverScale;
               const client = projection.stageToClient(stageX, stageY);
               points.push({ x: client.clientX, y: client.clientY });
               const delta = band?.[index];
               if (spectral && delta) {
                 const endpoint = projection.stageToClient(
-                  stageX + delta.x * scale,
-                  stageY + delta.y * scale
+                  stageX + delta.x * receiverScale,
+                  stageY + delta.y * receiverScale
                 );
                 spectral.push({
                   x: endpoint.clientX - client.clientX,

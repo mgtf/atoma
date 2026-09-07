@@ -56,6 +56,7 @@ import {
   shouldShowFarField,
   type FarField,
 } from './renderer/far-field.js';
+import { readMarkFieldCaustic, readMarkFieldLight } from './mark-field-light.js';
 import {
   markElapsedMs,
   markTurnDegrees,
@@ -562,7 +563,8 @@ export class GpuRenderer {
   private lightRendererY = 0;
   private pointerLightBufferPinned = false;
   private farField: FarField | null = null;
-  private farFieldTickerActive = false;
+  private farFieldActive = false;
+  private farFieldScenery = true;
   previousFilterBounds = new Map<string, FilterVisualTarget>();
   private currentFilterBounds = new Map<string, FilterVisualTarget>();
   private handledExitIds = new Set<string>();
@@ -969,10 +971,10 @@ export class GpuRenderer {
     this.app.ticker.add(this.updateCastShadows);
   }
 
-  /** Keep the compiled hero field across welcome rebuilds without drawing it in the app. */
+  /** Keep the one compiled receiver across scene rebuilds and pointer interactions. */
   private retainFarField() {
     const keep = this.farField?.mesh;
-    if (!this.farFieldTickerActive || !keep || keep.destroyed) return;
+    if (!this.farFieldActive || !keep || keep.destroyed) return;
     if (keep.parent !== this.ambientRoot) {
       this.ambientRoot.addChildAt(keep, 0);
       return;
@@ -983,19 +985,17 @@ export class GpuRenderer {
   }
 
   /**
-   * A hidden fullscreen mesh is still needless ticker and scene work. Detach
-   * both together; reactivation reuses the compiled shader and geometry.
+   * Detach the receiver while idle. Reactivation reuses the same compiled
+   * shader and geometry; compact chrome draws only its illuminated bounds.
    */
   private setFarFieldActive(active: boolean) {
     const field = this.farField;
-    if (!field || active === this.farFieldTickerActive) return;
-    this.farFieldTickerActive = active;
+    if (!field || active === this.farFieldActive) return;
+    this.farFieldActive = active;
     field.mesh.visible = active;
     if (active) {
       this.retainFarField();
-      this.app.ticker.add(this.tickFarField);
     } else {
-      this.app.ticker.remove(this.tickFarField);
       field.mesh.removeFromParent();
     }
   }
@@ -1024,14 +1024,22 @@ export class GpuRenderer {
       this.app.screen.width,
       this.app.screen.height,
       bounds,
-      mapClientToRenderer
+      mapClientToRenderer,
+      this.farFieldScenery
     );
   };
 
-  private readonly renderCameraFrame = () => this.app.renderer.render({
-    container: this.app.stage,
-    transform: this.cameraRenderTransform,
-  });
+  private readonly renderCameraFrame = () => {
+    // The mark has published this frame's optics. Idle chrome pays no field
+    // tick, layout read or draw; an illuminated gem reuses the one receiver.
+    this.setFarFieldActive(this.farFieldScenery || readMarkFieldLight().length > 0 ||
+      readMarkFieldCaustic() !== null);
+    if (this.farFieldActive) this.tickFarField(this.app.ticker);
+    this.app.renderer.render({
+      container: this.app.stage,
+      transform: this.cameraRenderTransform,
+    });
+  };
 
   /**
    * Keep the visible column foot on the exact camera ray without rebuilding
@@ -1163,8 +1171,7 @@ export class GpuRenderer {
     this.farField = createFarField();
     if (this.farField) {
       this.ambientRoot.addChild(this.farField.mesh);
-      this.farFieldTickerActive = true;
-      this.app.ticker.add(this.tickFarField);
+      this.farFieldActive = true;
     }
     this.installPointerLightFilter();
     this.app.canvas.className = 'gpu-ui-canvas';
@@ -1287,8 +1294,8 @@ export class GpuRenderer {
     this.tooltipLayer = null;
     this.app.ticker.remove(this.updatePointerLight);
     this.app.ticker.remove(this.updateCastShadows);
-    this.app.ticker.remove(this.tickFarField);
-    this.farFieldTickerActive = false;
+    this.farFieldActive = false;
+    this.farField?.destroy();
     this.farField = null;
     this.castShadows = [];
     this.stage.filters = null;
@@ -4314,10 +4321,11 @@ export class GpuRenderer {
     options?: { bobPx?: number; bobPeriodMs?: number }
   ) {
     const resolvedScale = visualScale ?? ATOMA_MARK_HEADER_SCALE;
-    this.setFarFieldActive(shouldShowFarField(
+    this.farFieldScenery = shouldShowFarField(
       this.snapshot?.state.entered ?? false,
       resolvedScale
-    ));
+    );
+    this.setFarFieldActive(this.farFieldScenery);
     const placement: AtomaMarkPlacement = {
       x,
       y,

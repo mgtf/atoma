@@ -17,6 +17,7 @@ import {
   writeMarkFieldCaustic,
 } from '../src/viz/client-gl/mark-field-light.js';
 import {
+  causticReceiverBounds,
   CAUSTIC_BUNDLE_COUNT,
   CAUSTIC_CORNER_SLOTS,
   CAUSTIC_FIELD_GLSL,
@@ -426,5 +427,24 @@ describe('far-field shader contract', () => {
 
     // Nothing published, nothing packed: the caller parks its own slots.
     expect(packMarkCaustic(null, bounds, 800, 400)).toBeNull();
+  });
+});
+
+
+describe('compact caustic receiver bounds', () => {
+  it('includes spectral fringes and the secondary ray without inflating to the viewport', () => {
+    const corners = [{ x: 20, y: 30 }, { x: 60, y: 30 }, { x: 20, y: 60 }];
+    const cast = {
+      corners, spectral: corners.map(() => ({ x: 6, y: 8 })),
+      optics: TEST_CAUSTIC_OPTICS,
+      secondary: {
+        corners: corners.map(({ x, y }) => ({ x: x + 200, y })),
+        spectral: null, optics: TEST_CAUSTIC_OPTICS[0],
+      },
+    };
+    // Longest edge 50px: the shared shader pad is 19px, plus 20px dispersion.
+    expect(causticReceiverBounds(cast, 2)).toEqual({ left: -19, top: -9, right: 279, bottom: 99 });
+    expect(causticReceiverBounds(cast, 20)).toEqual(causticReceiverBounds(cast, 2));
+    expect(causticReceiverBounds(cast, -1)).toEqual(causticReceiverBounds(cast, 0));
   });
 });

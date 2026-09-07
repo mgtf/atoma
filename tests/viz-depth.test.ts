@@ -68,8 +68,8 @@ describe('viz visual depth contract', () => {
     expect(renderer).toMatch(/attachAtomaMark\(\s*this\.markRoot/);
     expect(renderer).toMatch(/createFarField\(/);
     expect(renderer).toMatch(/FAR_FIELD_LABEL/);
-    expect(renderer).toMatch(/ticker\.add\(this\.tickFarField\)/);
-    expect(renderer).toMatch(/ticker\.remove\(this\.tickFarField\)/);
+    // Receiver activation, camera alignment and idle removal are exercised
+    // through the real pointer in viz:smoke (assertPointerLitMark).
     expect(renderer).toMatch(/setFarFieldActive\(shouldShowFarField\(\s*snapshot\.state\.entered/);
   });
 

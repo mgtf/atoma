@@ -8,6 +8,7 @@ import {
   readMarkFieldLight,
 } from '../mark-field-light.js';
 import {
+  causticReceiverBounds,
   CAUSTIC_CORNER_SLOTS,
   CAUSTIC_FIELD_GLSL,
   CAUSTIC_FIELD_WGSL,
@@ -68,10 +69,13 @@ export const FAR_FIELD_ATTRIBUTES = [
  * the first difference reads its neighbour. Mark colors are vec4 so a vec3
  * cannot hide the next float in padding.
  */
+// uResolution is reserved by Pixi's WebGL globals (physical framebuffer
+// pixels). This shader needs logical renderer pixels on both backends.
 export const FAR_FIELD_UNIFORMS = [
+  { name: 'uScenery', type: 'f32' },
   { name: 'uTime', type: 'f32' },
   { name: 'uPointerStrength', type: 'f32' },
-  { name: 'uResolution', type: 'vec2<f32>' },
+  { name: 'uFieldResolution', type: 'vec2<f32>' },
   { name: 'uPointerUv', type: 'vec2<f32>' },
   { name: 'uMark0', type: 'vec4<f32>' },
   { name: 'uMark1', type: 'vec4<f32>' },
@@ -114,9 +118,10 @@ const uniformValues: Record<
   (typeof FAR_FIELD_UNIFORMS)[number]['name'],
   () => Float32Array | number
 > = {
+  uScenery: () => 1,
   uTime: () => 0,
   uPointerStrength: () => 0,
-  uResolution: () => new Float32Array([1, 1]),
+  uFieldResolution: () => new Float32Array([1, 1]),
   uPointerUv: () => new Float32Array([-2, -2]),
   uMark0: () => new Float32Array([0, 0, 0, 1]),
   uMark1: () => new Float32Array([0, 0, 0, 1]),
@@ -173,9 +178,10 @@ export const FAR_FIELD_GLSL = /* glsl */ `#version 300 es
   in vec2 vUv;
   in vec2 vScreenUv;
   out vec4 finalColor;
+  uniform float uScenery;
   uniform float uTime;
   uniform float uPointerStrength;
-  uniform vec2 uResolution;
+  uniform vec2 uFieldResolution;
   uniform vec2 uPointerUv;
   uniform vec4 uMark0;
   uniform vec4 uMark1;
@@ -247,54 +253,58 @@ export const FAR_FIELD_GLSL = /* glsl */ `#version 300 es
 ${CAUSTIC_FIELD_GLSL}
 
   void main() {
-    float aspect = uResolution.x / max(1.0, uResolution.y);
+    float aspect = uFieldResolution.x / max(1.0, uFieldResolution.y);
     vec2 p = (vUv - 0.5) * vec2(aspect, 1.0);
-    float t = uTime * ${C.motionRate};
+    vec3 color = vec3(0.0);
+    if (uScenery > 0.5) {
+      float t = uTime * ${C.motionRate};
 
-    float fieldA = fbm(p * 3.2 + vec2(t, -t * 0.7));
-    float fieldB = fbm(p * 5.6 - vec2(t * 0.8, t));
-    float aurora = smoothstep(0.25, 0.9, fieldA * 0.8 + fieldB * 0.42);
+      float fieldA = fbm(p * 3.2 + vec2(t, -t * 0.7));
+      float fieldB = fbm(p * 5.6 - vec2(t * 0.8, t));
+      float aurora = smoothstep(0.25, 0.9, fieldA * 0.8 + fieldB * 0.42);
 
-    vec2 gridUv = abs(fract((p + 0.5) * ${C.gridFrequency}) - 0.5) /
-      fwidth(p * ${C.gridFrequency});
-    float grid = 1.0 - min(min(gridUv.x, gridUv.y), 1.0);
-    grid *= 0.022 + 0.016 * sin(uTime * 0.24 + p.y * 20.0);
+      vec2 gridUv = abs(fract((p + 0.5) * ${C.gridFrequency}) - 0.5) /
+        fwidth(p * ${C.gridFrequency});
+      float grid = 1.0 - min(min(gridUv.x, gridUv.y), 1.0);
+      grid *= 0.022 + 0.016 * sin(uTime * 0.24 + p.y * 20.0);
 
-    float radial = exp(-2.7 * dot(p, p));
-    float scan = pow(max(0.0, sin((p.y + t) * 42.0)), 28.0) * 0.055;
-    float star = step(0.9975, hash(floor((p + t * 0.04) * 150.0)));
+      float radial = exp(-2.7 * dot(p, p));
+      float scan = pow(max(0.0, sin((p.y + t) * 42.0)), 28.0) * 0.055;
+      float star = step(0.9975, hash(floor((p + t * 0.04) * 150.0)));
 
-    vec3 navy = vec3(0.012, 0.025, 0.065);
-    vec3 blue = vec3(0.055, 0.26, 0.58);
-    vec3 cyan = vec3(0.08, 0.72, 0.78);
-    vec3 violet = vec3(0.38, 0.12, 0.72);
-    vec3 color = navy;
-    color += mix(blue, violet, fieldB) * aurora * 0.2;
-    color += cyan * radial * (0.042 + fieldA * 0.03);
-    color += vec3(0.28, 0.52, 0.9) * grid;
-    color += cyan * scan * 0.72;
-    color += vec3(0.7, 0.86, 1.0) * star * 0.21;
-    color = mix(navy, color, ${C.colorGain});
+      vec3 navy = vec3(0.012, 0.025, 0.065);
+      vec3 blue = vec3(0.055, 0.26, 0.58);
+      vec3 cyan = vec3(0.08, 0.72, 0.78);
+      vec3 violet = vec3(0.38, 0.12, 0.72);
+      color = navy;
+      color += mix(blue, violet, fieldB) * aurora * 0.2;
+      color += cyan * radial * (0.042 + fieldA * 0.03);
+      color += vec3(0.28, 0.52, 0.9) * grid;
+      color += cyan * scan * 0.72;
+      color += vec3(0.7, 0.86, 1.0) * star * 0.21;
+      color = mix(navy, color, ${C.colorGain});
 
-    vec2 pointerDelta = (vScreenUv - uPointerUv) * uResolution;
-    float pointerDistance = length(pointerDelta);
-    float pointerHalo = exp(-2.2 * pow(pointerDistance / ${C.pointerHalo}, 2.0));
-    float pointerCore = exp(-2.8 * pow(pointerDistance / ${C.pointerCore}, 2.0));
-    float relief = clamp(abs(dFdx(fieldA)) + abs(dFdy(fieldA)) + abs(dFdx(fieldB)), 0.0, 0.55);
-    vec3 pointerTint = mix(vec3(0.24, 0.58, 1.0), vec3(0.82, 0.96, 1.0), pointerCore);
-    color += pointerTint * uPointerStrength * ${C.pointerGain} *
-      (pointerHalo * (0.14 + relief * 0.18) + pointerCore * 0.10);
+      vec2 pointerDelta = (vScreenUv - uPointerUv) * uFieldResolution;
+      float pointerDistance = length(pointerDelta);
+      float pointerHalo = exp(-2.2 * pow(pointerDistance / ${C.pointerHalo}, 2.0));
+      float pointerCore = exp(-2.8 * pow(pointerDistance / ${C.pointerCore}, 2.0));
+      float relief = clamp(abs(dFdx(fieldA)) + abs(dFdy(fieldA)) + abs(dFdx(fieldB)), 0.0, 0.55);
+      vec3 pointerTint = mix(vec3(0.24, 0.58, 1.0), vec3(0.82, 0.96, 1.0), pointerCore);
+      color += pointerTint * uPointerStrength * ${C.pointerGain} *
+        (pointerHalo * (0.14 + relief * 0.18) + pointerCore * 0.10);
 
-    color += stainedField(vScreenUv, uResolution, uMark0, uMarkColor0.rgb);
-    color += stainedField(vScreenUv, uResolution, uMark1, uMarkColor1.rgb);
-    color += stainedField(vScreenUv, uResolution, uMark2, uMarkColor2.rgb);
-    color += stainedField(vScreenUv, uResolution, uMark3, uMarkColor3.rgb);
+    }
+
+    color += stainedField(vScreenUv, uFieldResolution, uMark0, uMarkColor0.rgb);
+    color += stainedField(vScreenUv, uFieldResolution, uMark1, uMarkColor1.rgb);
+    color += stainedField(vScreenUv, uFieldResolution, uMark2, uMarkColor2.rgb);
+    color += stainedField(vScreenUv, uFieldResolution, uMark3, uMarkColor3.rgb);
 
     // The gem's CAST: additive like the pools, so it reads as the shape the
     // light is landing through, not a decal over the field. The polygon
     // arrives in renderer pixels, so the fragment goes there too.
     vec4 crystalCast = causticField(
-      vec2(vScreenUv.x, 1.0 - vScreenUv.y) * uResolution,
+      vec2(vScreenUv.x, 1.0 - vScreenUv.y) * uFieldResolution,
       uCaustic0, uCaustic1, uCaustic2, uCaustic3, uCaustic4, uCaustic5,
       uCausticSpec0, uCausticSpec1, uCausticSpec2,
       uCausticSpec3, uCausticSpec4, uCausticSpec5,
@@ -307,8 +317,15 @@ ${CAUSTIC_FIELD_GLSL}
     );
     color += crystalCast.rgb * ${C.markGain};
 
-    float vignette = smoothstep(1.0, 0.12, length(p));
-    finalColor = vec4(color * (0.62 + vignette * 0.38), ${C.fieldAlpha});
+    if (uScenery > 0.5) {
+      float vignette = smoothstep(1.0, 0.12, length(p));
+      finalColor = vec4(color * (0.62 + vignette * 0.38), ${C.fieldAlpha});
+    } else {
+      // The browser composites the transparent canvas too. Give emitted
+      // light valid premultiplied coverage; zero-alpha RGB can disappear
+      // in the window compositor even when a GPU readback contains it.
+      finalColor = vec4(color, clamp(max(color.r, max(color.g, color.b)), 0.0, 1.0));
+    }
   }
 `;
 
@@ -317,7 +334,7 @@ export const FAR_FIELD_WGSL = /* wgsl */ `
     uProjectionMatrix: mat3x3<f32>,
     uWorldTransformMatrix: mat3x3<f32>,
     uWorldColorAlpha: vec4<f32>,
-    uResolution: vec2<f32>,
+    uFieldResolution: vec2<f32>,
   }
 
   struct LocalUniforms {
@@ -327,9 +344,10 @@ export const FAR_FIELD_WGSL = /* wgsl */ `
   }
 
   struct FarFieldUniforms {
+    uScenery: f32,
     uTime: f32,
     uPointerStrength: f32,
-    uResolution: vec2<f32>,
+    uFieldResolution: vec2<f32>,
     uPointerUv: vec2<f32>,
     uMark0: vec4<f32>,
     uMark1: vec4<f32>,
@@ -437,54 +455,58 @@ ${CAUSTIC_FIELD_WGSL}
 
   @fragment
   fn mainFragment(input: VertexOutput) -> @location(0) vec4<f32> {
-    let aspect = farFieldUniforms.uResolution.x / max(1.0, farFieldUniforms.uResolution.y);
+    let aspect = farFieldUniforms.uFieldResolution.x / max(1.0, farFieldUniforms.uFieldResolution.y);
     let p = (input.vUv - vec2<f32>(0.5)) * vec2<f32>(aspect, 1.0);
-    let t = farFieldUniforms.uTime * ${C.motionRate};
+    var color = vec3<f32>(0.0);
+    if (farFieldUniforms.uScenery > 0.5) {
+      let t = farFieldUniforms.uTime * ${C.motionRate};
 
-    let fieldA = fbm(p * 3.2 + vec2<f32>(t, -t * 0.7));
-    let fieldB = fbm(p * 5.6 - vec2<f32>(t * 0.8, t));
-    let aurora = smoothstep(0.25, 0.9, fieldA * 0.8 + fieldB * 0.42);
+      let fieldA = fbm(p * 3.2 + vec2<f32>(t, -t * 0.7));
+      let fieldB = fbm(p * 5.6 - vec2<f32>(t * 0.8, t));
+      let aurora = smoothstep(0.25, 0.9, fieldA * 0.8 + fieldB * 0.42);
 
-    let gridUv = abs(fract((p + vec2<f32>(0.5)) * ${C.gridFrequency}) - vec2<f32>(0.5)) /
-      fwidth2(p * ${C.gridFrequency});
-    var grid = 1.0 - min(min(gridUv.x, gridUv.y), 1.0);
-    grid *= 0.022 + 0.016 * sin(farFieldUniforms.uTime * 0.24 + p.y * 20.0);
+      let gridUv = abs(fract((p + vec2<f32>(0.5)) * ${C.gridFrequency}) - vec2<f32>(0.5)) /
+        fwidth2(p * ${C.gridFrequency});
+      var grid = 1.0 - min(min(gridUv.x, gridUv.y), 1.0);
+      grid *= 0.022 + 0.016 * sin(farFieldUniforms.uTime * 0.24 + p.y * 20.0);
 
-    let radial = exp(-2.7 * dot(p, p));
-    let scan = pow(max(0.0, sin((p.y + t) * 42.0)), 28.0) * 0.055;
-    let star = step(0.9975, hash(floor((p + vec2<f32>(t * 0.04)) * 150.0)));
+      let radial = exp(-2.7 * dot(p, p));
+      let scan = pow(max(0.0, sin((p.y + t) * 42.0)), 28.0) * 0.055;
+      let star = step(0.9975, hash(floor((p + vec2<f32>(t * 0.04)) * 150.0)));
 
-    let navy = vec3<f32>(0.012, 0.025, 0.065);
-    let blue = vec3<f32>(0.055, 0.26, 0.58);
-    let cyan = vec3<f32>(0.08, 0.72, 0.78);
-    let violet = vec3<f32>(0.38, 0.12, 0.72);
-    var color = navy;
-    color += mix(blue, violet, fieldB) * aurora * 0.2;
-    color += cyan * radial * (0.042 + fieldA * 0.03);
-    color += vec3<f32>(0.28, 0.52, 0.9) * grid;
-    color += cyan * scan * 0.72;
-    color += vec3<f32>(0.7, 0.86, 1.0) * star * 0.21;
-    color = mix(navy, color, ${C.colorGain});
+      let navy = vec3<f32>(0.012, 0.025, 0.065);
+      let blue = vec3<f32>(0.055, 0.26, 0.58);
+      let cyan = vec3<f32>(0.08, 0.72, 0.78);
+      let violet = vec3<f32>(0.38, 0.12, 0.72);
+      color = navy;
+      color += mix(blue, violet, fieldB) * aurora * 0.2;
+      color += cyan * radial * (0.042 + fieldA * 0.03);
+      color += vec3<f32>(0.28, 0.52, 0.9) * grid;
+      color += cyan * scan * 0.72;
+      color += vec3<f32>(0.7, 0.86, 1.0) * star * 0.21;
+      color = mix(navy, color, ${C.colorGain});
 
-    let pointerDelta = (input.vScreenUv - farFieldUniforms.uPointerUv) * farFieldUniforms.uResolution;
-    let pointerDistance = length(pointerDelta);
-    let pointerHalo = exp(-2.2 * pow(pointerDistance / ${C.pointerHalo}, 2.0));
-    let pointerCore = exp(-2.8 * pow(pointerDistance / ${C.pointerCore}, 2.0));
-    let relief = clamp(abs(dpdx(fieldA)) + abs(dpdy(fieldA)) + abs(dpdx(fieldB)), 0.0, 0.55);
-    let pointerTint = mix(vec3<f32>(0.24, 0.58, 1.0), vec3<f32>(0.82, 0.96, 1.0), pointerCore);
-    color += pointerTint * farFieldUniforms.uPointerStrength * ${C.pointerGain} *
-      (pointerHalo * (0.14 + relief * 0.18) + pointerCore * 0.10);
+      let pointerDelta = (input.vScreenUv - farFieldUniforms.uPointerUv) * farFieldUniforms.uFieldResolution;
+      let pointerDistance = length(pointerDelta);
+      let pointerHalo = exp(-2.2 * pow(pointerDistance / ${C.pointerHalo}, 2.0));
+      let pointerCore = exp(-2.8 * pow(pointerDistance / ${C.pointerCore}, 2.0));
+      let relief = clamp(abs(dpdx(fieldA)) + abs(dpdy(fieldA)) + abs(dpdx(fieldB)), 0.0, 0.55);
+      let pointerTint = mix(vec3<f32>(0.24, 0.58, 1.0), vec3<f32>(0.82, 0.96, 1.0), pointerCore);
+      color += pointerTint * farFieldUniforms.uPointerStrength * ${C.pointerGain} *
+        (pointerHalo * (0.14 + relief * 0.18) + pointerCore * 0.10);
 
-    color += stainedField(input.vScreenUv, farFieldUniforms.uResolution, farFieldUniforms.uMark0, farFieldUniforms.uMarkColor0.xyz);
-    color += stainedField(input.vScreenUv, farFieldUniforms.uResolution, farFieldUniforms.uMark1, farFieldUniforms.uMarkColor1.xyz);
-    color += stainedField(input.vScreenUv, farFieldUniforms.uResolution, farFieldUniforms.uMark2, farFieldUniforms.uMarkColor2.xyz);
-    color += stainedField(input.vScreenUv, farFieldUniforms.uResolution, farFieldUniforms.uMark3, farFieldUniforms.uMarkColor3.xyz);
+    }
+
+    color += stainedField(input.vScreenUv, farFieldUniforms.uFieldResolution, farFieldUniforms.uMark0, farFieldUniforms.uMarkColor0.xyz);
+    color += stainedField(input.vScreenUv, farFieldUniforms.uFieldResolution, farFieldUniforms.uMark1, farFieldUniforms.uMarkColor1.xyz);
+    color += stainedField(input.vScreenUv, farFieldUniforms.uFieldResolution, farFieldUniforms.uMark2, farFieldUniforms.uMarkColor2.xyz);
+    color += stainedField(input.vScreenUv, farFieldUniforms.uFieldResolution, farFieldUniforms.uMark3, farFieldUniforms.uMarkColor3.xyz);
 
     // The gem's CAST: additive like the pools, so it reads as the shape the
     // light is landing through, not a decal over the field. The polygon
     // arrives in renderer pixels, so the fragment goes there too.
     let crystalCast = causticField(
-      vec2<f32>(input.vScreenUv.x, 1.0 - input.vScreenUv.y) * farFieldUniforms.uResolution,
+      vec2<f32>(input.vScreenUv.x, 1.0 - input.vScreenUv.y) * farFieldUniforms.uFieldResolution,
       farFieldUniforms.uCaustic0,
       farFieldUniforms.uCaustic1,
       farFieldUniforms.uCaustic2,
@@ -511,19 +533,24 @@ ${CAUSTIC_FIELD_WGSL}
     );
     color += crystalCast.rgb * ${C.markGain};
 
-    let vignette = smoothstep(1.0, 0.12, length(p));
-    return vec4<f32>(color * (0.62 + vignette * 0.38), ${C.fieldAlpha});
+    if (farFieldUniforms.uScenery > 0.5) {
+      let vignette = smoothstep(1.0, 0.12, length(p));
+      return vec4<f32>(color * (0.62 + vignette * 0.38), ${C.fieldAlpha});
+    }
+    return vec4<f32>(color, clamp(max(color.r, max(color.g, color.b)), 0.0, 1.0));
   }
 `;
 
 export interface FarField {
   mesh: FieldMesh;
+  destroy(): void;
   tick(
     deltaSeconds: number,
     screenW: number,
     screenH: number,
     bounds: PointerLightBounds,
-    mapClientToRenderer?: (x: number, y: number) => { x: number; y: number }
+    mapClientToRenderer?: (x: number, y: number) => { x: number; y: number },
+    scenery?: boolean
   ): void;
 }
 
@@ -551,11 +578,14 @@ export function createFarField(): FarField | null {
   if (typeof document === 'undefined') return null;
 
   const positions = new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]);
+  const positionBuffer = new Buffer({
+    data: positions, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST,
+  });
   const indices = new Uint32Array([0, 1, 2, 0, 2, 3]);
   const geometry = new Geometry({
     attributes: {
       aPosition: {
-        buffer: new Buffer({ data: positions, usage: BufferUsage.VERTEX }),
+        buffer: positionBuffer,
         format: 'float32x2',
       },
     },
@@ -586,9 +616,10 @@ export function createFarField(): FarField | null {
   mesh.cullable = false;
 
   const uniforms = shader.resources['farFieldUniforms'].uniforms as {
+    uScenery: number;
     uTime: number;
     uPointerStrength: number;
-    uResolution: Float32Array;
+    uFieldResolution: Float32Array;
     uPointerUv: Float32Array;
     uMark0: Float32Array;
     uMark1: Float32Array;
@@ -664,12 +695,20 @@ export function createFarField(): FarField | null {
 
   return {
     mesh,
-    tick(deltaSeconds, screenW, screenH, bounds, mapClientToRenderer) {
+    destroy() {
+      // Idle chrome detaches the receiver, so the stage cannot release it.
+      mesh.removeFromParent();
+      mesh.destroy();
+      geometry.destroy(true);
+      shader.destroy();
+    },
+    tick(deltaSeconds, screenW, screenH, bounds, mapClientToRenderer, scenery = true) {
+      uniforms.uScenery = scenery ? 1 : 0;
       const width = Math.max(1, screenW);
       const height = Math.max(1, screenH);
       mesh.scale.set(width, height);
-      uniforms.uResolution[0] = width;
-      uniforms.uResolution[1] = height;
+      uniforms.uFieldResolution[0] = width;
+      uniforms.uFieldResolution[1] = height;
       const dt = Math.max(0, deltaSeconds);
       if (!prefersReducedMotion()) elapsed += dt;
       uniforms.uTime = elapsed;
@@ -785,6 +824,44 @@ export function createFarField(): FarField | null {
       const tuning = readTuning();
       uniforms.uCausticBand = tuning.causticDispersion;
       uniforms.uCausticDetail = tuning.causticDetail;
+      // Compact chrome reuses this receiver, restricted to the light's bounds.
+      // The procedural branch is off and no full-viewport pass is introduced.
+      let left = 0;
+      let top = 0;
+      let right = width;
+      let bottom = height;
+      if (!scenery) {
+        const area = cast ? causticReceiverBounds(cast, tuning.causticDispersion) :
+          { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };
+        for (const mark of marks) {
+          if (mark[2]! < 0.001) continue;
+          // At two radii the halo has less than four millionths of its peak.
+          const radius = mark[3]! * 2;
+          const x = mark[0]! * width;
+          const y = (1 - mark[1]!) * height;
+          area.left = Math.min(area.left, x - radius);
+          area.top = Math.min(area.top, y - radius);
+          area.right = Math.max(area.right, x + radius);
+          area.bottom = Math.max(area.bottom, y + radius);
+        }
+        left = Math.max(0, area.left);
+        top = Math.max(0, area.top);
+        right = Math.min(width, area.right);
+        bottom = Math.min(height, area.bottom);
+      }
+      mesh.visible = right > left && bottom > top;
+      if (mesh.visible) {
+        const next = [left / width, top / height, right / width, top / height,
+          right / width, bottom / height, left / width, bottom / height];
+        let changed = false;
+        for (let index = 0; index < next.length; index += 1) {
+          const value = Math.fround(next[index]!);
+          if (positions[index] === value) continue;
+          positions[index] = value;
+          changed = true;
+        }
+        if (changed) positionBuffer.update();
+      }
     },
   };
 }

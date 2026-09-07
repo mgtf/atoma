@@ -5,7 +5,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import puppeteer from 'puppeteer';
-import { assertLiveMarkBead } from './viz-mark-bead-probe.mjs';
+import { assertLiveMarkBead, assertPointerLitMark } from './viz-mark-bead-probe.mjs';
 
 const packageMetadata = JSON.parse(
   await readFile(new URL('../package.json', import.meta.url), 'utf8')
@@ -906,6 +906,7 @@ try {
         `arrival camera must not deform the authored scene: ${JSON.stringify(arrivalCamera)}`
       );
     }
+    await assertPointerLitMark(page, softwareRastered ? null : sampleFrames);
     // Inspect real, rendered Text instances: the mocked suite cannot prove
     // that small glyphs avoid a 1x texture or fractional pixel placement.
     const textRaster = await page.evaluate(() => {
@@ -1029,6 +1030,7 @@ try {
       },
       { timeout: READY_TIMEOUT_MS }
     );
+    await assertPointerLitMark(page, softwareRastered ? null : sampleFrames);
     const compactRail = await page.evaluate(() => {
       const handle = globalThis.__ATOMA_GPU__;
       const targets = handle.hitTargets().filter((entry) => entry.id.startsWith('nav.'));
@@ -2623,7 +2625,7 @@ try {
   });
   try {
     const page = await fallbackBrowser.newPage();
-    await page.setViewport({ width: 1280, height: 800 });
+    await page.setViewport({ width: 1280, height: 800, deviceScaleFactor: 2 });
     const diagnostics = [];
     page.on('console', (message) => {
       if (
@@ -2649,6 +2651,7 @@ try {
     await assertLiveMarkBead(page);
     await passArrivalGate(page);
     await openView(page, 'Runs');
+    await assertPointerLitMark(page);
     const fallbackCursorEnv = await readCursorEnvironment(page);
     await page.mouse.move(640, 400);
     if (fallbackCursorEnv.expected) {
