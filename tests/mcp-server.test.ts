@@ -43,7 +43,6 @@ import {
   verdictsList,
 } from '../src/mcp/readers.js';
 import { SkillRegistry } from '../src/skills/registry.js';
-import { runStatusWait } from '../src/mcp/run.js';
 import { BUILTIN_TOOL_VOCABULARY } from '../src/atoms/verdict.js';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
@@ -842,41 +841,5 @@ describe('MCP readers — the ones the roadmap owed', () => {
     expect(shown.meta.analysisCostUsd).toBe(0.1);
     expect((verdictShow({ runId: '../verdicts/run-a' }) as { note: string }).note).toMatch(/refused/);
     expect((verdictShow({ runId: 'missing' }) as { note: string }).note).toMatch(/no verdict/);
-  });
-});
-
-describe('MCP run status — waitMs long-poll', () => {
-  afterEach(() => resetRunsForTest());
-
-  it('returns at once for a run that is not running, and on the first chunk for one that is', async () => {
-    let chunk: ((text: string) => void) | null = null;
-    const driver: RunDriver = (opts) => new Promise<string>(() => { chunk = (text) => opts.onChunk?.(text); });
-    const record = await startTestRun({ goal: 'a long poll goal' }, driver);
-    const t0 = Date.now();
-    const idle = runStatusWait({ runId: 'nope', waitMs: 5000 });
-    expect(Date.now() - t0).toBeLessThan(100);
-    expect(await idle).toMatchObject({ note: expect.stringMatching(/no run/) });
-    const waiting = runStatusWait({ runId: record.runId, waitMs: 5000 });
-    setTimeout(() => chunk?.('hello'), 20);
-    const result = (await waiting) as { progress: { chunks: number; tail: string } };
-    expect(Date.now() - t0).toBeLessThan(2000);
-    expect(result.progress).toEqual({ chunks: 1, tail: 'hello' });
-  });
-
-  it('with a progress sink it streams chunks and returns on the deadline or a status change', async () => {
-    let chunk: ((text: string) => void) | null = null;
-    const driver: RunDriver = (opts) => new Promise<string>(() => { chunk = (text) => opts.onChunk?.(text); });
-    const record = await startTestRun({ goal: 'a streaming goal' }, driver);
-    const seen: number[] = [];
-    const waiting = runStatusWait({ runId: record.runId, waitMs: 300, progress: (u) => seen.push(u.chunks) });
-    setTimeout(() => chunk?.('a'), 20);
-    setTimeout(() => chunk?.('b'), 60);
-    const result = (await waiting) as { progress: { chunks: number } };
-    expect(seen).toEqual([1, 2]);
-    expect(result.progress.chunks).toBe(2);
-    // The cap is the cap: nonsense waits are clamped, never honoured.
-    const t0 = Date.now();
-    await runStatusWait({ runId: record.runId, waitMs: -5 });
-    expect(Date.now() - t0).toBeLessThan(100);
   });
 });

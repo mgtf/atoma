@@ -2,7 +2,28 @@
 
 ## Unreleased
 
+### Changed
+
+- The MCP start tools are MCP TASKS (spec 2025-11-25): `atoma_run_start` and
+  `atoma_operator_run_start` answer a task-augmented call with a task id and
+  are driven through `tasks/get` (the operator run's output tail as the
+  status line), `tasks/result` (the status payload) and `tasks/cancel` (which
+  cancels the run). Called without task augmentation they return when the run
+  ends. The `waitMs` long-poll and its `notifications/progress`, added
+  earlier in this release, are gone: the status tools are plain readers.
+- The MCP transport answers on SSE instead of plain JSON. In JSON mode the SDK
+  drops every notification related to a request (0 of 3 progress lines
+  delivered, measured 2026-09-07); the stream is what carries task results,
+  the run log and resource updates. The release smoke reads SSE frames.
+
 ### Added
+
+- Every MCP session replays its stream: a bounded in-memory event store stamps
+  SSE frames with ids, so a client cut mid-call reconnects with `Last-Event-ID`
+  and receives what it missed, the response included.
+- The MCP declares `logging`: the session that started an operator run
+  receives its output as `notifications/message` under `atoma.run.<runId>`,
+  marked untrusted, and one notice when it ends.
 
 - The MCP catalogue grows from 24 to 37 tools, closing the 2026-08-21 surface
   roadmap. Readers, platform tier: `atoma_skills_show` (one recipe in full,
@@ -17,10 +38,8 @@
   CLI's own refusals (proven knowledge needs `force`) and, on a gated host, a
   journal row per action under the new kinds `skill.reset`, `skill.dropped`,
   `skill.merged`, `registry.rolled_back`.
-- Both status tools take `waitMs`: a bounded long-poll that returns when the
-  run changes, and streams `notifications/progress` to a host that sent a
-  progress token. Every tool result now also carries `structuredContent`; the
-  new readers declare an `outputSchema`.
+- Every tool result now also carries `structuredContent`; the new readers
+  declare an `outputSchema`.
 - MCP resources: `atoma://families`, `atoma://runs/{file}`,
   `atoma://operator-runs/{runId}` (platform) and
   `atoma://projects/{projectId}/runs/{runId}` (tenant), listable, completable

@@ -95,19 +95,60 @@ Neighbours:
   reaped, and `atoma_operator_run_status` with no in-memory match reports the
   cross-process lease row instead of amnesia.
 
-## Status, waiting and progress
+## Runs are tasks (`tasks.ts`)
 
-- `waitMs` on both status tools is a LONG-POLL, not a stream: the call
-  returns when the run changes (a chunk, a status flip) or the wait elapses,
-  capped at `MAX_STATUS_WAIT_MS`. "Start, then poll" stays the contract; a
-  host that passes `waitMs` merely polls less often. Nonsense waits clamp.
-- A host that sends a progress token gets `notifications/progress` while it
-  waits (`progressSender`): operator runs stream each output chunk, project
-  runs each observed change. Delivery failures are swallowed — the line is a
-  courtesy, the result is the contract.
-- The operator half waits on in-process change notifications (`run.ts`
-  `changeWaiters`); the project half polls the tenant store once a second.
-  Neither touches the run.
+- BOTH START TOOLS ARE MCP TASKS (spec 2025-11-25, SDK experimental
+  `registerToolTask`): `atoma_run_start` (member) and
+  `atoma_operator_run_start` (platform) answer a task-augmented call with a
+  task id; `tasks/get` reports `working` with a status line, `tasks/result`
+  blocks until the terminal result — the status tool's payload — and
+  `tasks/cancel` cancels the run. There is NO "start, then poll" contract and
+  NO long-poll: the status tools are plain readers, and a host that wants to
+  follow a run drives the task, subscribes to the run's resource, or reads the
+  run log. The `waitMs` long-poll and its `notifications/progress` were
+  removed on 2026-09-07, the day the tasks landed, so that one contract exists.
+- `taskSupport: 'optional'` is the SPEC'S fallback, not a second contract: a
+  host that does not augment the call gets the SDK's own drive and the
+  terminal result when the run ends — a synchronous call, minutes long, over
+  the SSE stream that keeps alive and replays. A refused start is a task that
+  fails at once, never a hung call.
+- `createTask` calls the very start the HTTP routes call (`startRun`,
+  `startProjectRunFromInput`), and the cancel hook calls the cancel tool's
+  body (`cancelRun`, `cancelProjectRun`). The operator watcher turns each
+  output chunk into the status line (bounded, marked untrusted) and the run's
+  end into the result; the project watcher reads the tenant store once every
+  `TASK_POLL_INTERVAL_MS`, because a project run's truth lives there.
+- THE SDK'S `tasks/cancel` ONLY FLIPS THE STORE. `SessionTaskStore` wraps the
+  SDK's in-memory store and intercepts the transition to `cancelled` to reach
+  the run. A cancelled task has no result by the SDK's rule (a result is
+  stored once, never on a terminal task); its last word is `tasks/get`, and
+  the run's own final status stays readable through the status tool.
+- TASKS LIVE WITH THE SESSION, like the event ring and the subscriptions: the
+  store is per server, the ttl is the run timeout plus `TASK_RESULT_GRACE_MS`,
+  the watchers are unhooked in `onclose`. A restart forgets task ids, never
+  runs.
+- THE TRANSPORT ANSWERS ON SSE, NEVER PLAIN JSON. `enableJsonResponse` makes
+  the SDK drop every notification related to a request (measured 2026-09-07:
+  0 of 3 delivered), and the standalone stream is what carries the run log and
+  the resource updates. A script reading `/mcp` by hand parses SSE frames
+  (`scripts/release-smoke.mjs#readResponseFrame`).
+- EVERY FRAME IS REPLAYABLE. Each session's transport holds a
+  `SessionEventStore` (`eventStore.ts`): a bounded in-memory ring that stamps
+  frames with ids so a client cut mid-call reconnects with `Last-Event-ID`
+  and receives the frames it missed, the response included. The ring dies
+  with the session; a cursor that fell off replays nothing rather than
+  something wrong.
+- THE RUN LOG: the server declares `logging`, and the session that started an
+  operator run receives each output chunk as `notifications/message` (`info`,
+  logger `atoma.run.<runId>`, `untrusted: true`) and one `notice` when it
+  ends. Only runs the session started are followed; the SDK filters by the
+  level the client set. Project runs have no chunk source here and log
+  nothing; their task's status line follows the store's status.
+- The start tools' input schemas live in `tasks.ts` (`OPERATOR_RUN_INPUT`,
+  `PROJECT_RUN_INPUT`), one per shape. `McpToolDeps.operatorRunDriver` /
+  `operatorRunLease` are `run.ts`'s injectable seam reached through the deps,
+  so a wire test drives a start without spawning the runner. Absent in
+  production.
 
 ## Resources and subscriptions (`resources.ts`)
 
@@ -214,6 +255,12 @@ Neighbours:
   authorization server is its own chantier, and the token store is shaped so
   an OAuth-issued access token can later resolve through the same
   `resolveApiToken` path.
+- A `waitMs` long-poll on the status tools, with `notifications/progress`,
+  lived two days (2026-09-05 to 2026-09-07) and was removed when the start
+  tools became tasks: two ways to follow a run is one too many, and the
+  long-poll never delivered its progress line in the JSON transport mode it
+  shipped with. Do not re-add a wait parameter to a reader; a host that wants
+  to wait drives the task.
 - Keeping stdio "for local development" was considered and dropped
   (2026-09-05): `npm run viz` already serves loopback ungated, so the local
   MCP is the same URL on `127.0.0.1`, and a second transport was code kept

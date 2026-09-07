@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { SessionEventStore } from './eventStore.js';
 import { callerKey, describeCaller, type McpCaller } from './identity.js';
 
 /**
@@ -123,9 +124,12 @@ export class McpHttpHost {
     let session: Session | null = null;
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
-      // Plain JSON responses: a client without SSE (a smoke, a script) can
-      // read every reply, and nothing here streams progress anyway.
-      enableJsonResponse: true,
+      // SSE responses, NEVER plain JSON. In JSON mode the SDK drops every
+      // notification related to a request — a `notifications/progress` sent
+      // during a `waitMs` long-poll reached nobody (measured 2026-09-07: 0 of 3
+      // delivered, against 3 of 3 over SSE). The stream is also what the event
+      // store replays after a cut connection (`Last-Event-ID`).
+      eventStore: new SessionEventStore(),
       enableDnsRebindingProtection: true,
       allowedHosts: [...this.options.allowedHosts],
       onsessioninitialized: (id) => {

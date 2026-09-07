@@ -38,9 +38,32 @@ const freePort = async () =>
  * 2026-09-05): on the ungated loopback the caller is the operator and the
  * catalogue is the operator's — operator runs, registry, skills, ledger,
  * traces, friction — with nothing tenant-shaped, since this store has no
- * organisations. Plain JSON responses, one session, the prompt surface with a
+ * organisations. SSE responses with replayable event ids, one session, the prompt surface with a
  * completion, and a deliberately refused call.
  */
+/**
+ * A request's reply travels on an SSE stream (the transport never answers plain
+ * JSON: that mode drops progress notifications). The stream carries the
+ * response frame and, before it, any notification the tool sent; the response
+ * is the frame with an `id`. Each SSE event is stamped with an `id:` line the
+ * event store can replay from.
+ */
+const readResponseFrame = async (response) => {
+  const contentType = response.headers.get('content-type') ?? '';
+  if (contentType.startsWith('application/json')) return response.json();
+  if (!contentType.startsWith('text/event-stream')) throw new Error(`MCP answered ${contentType || 'no content-type'}, expected an SSE stream`);
+  const body = await response.text();
+  const frames = body
+    .split(/\r?\n\r?\n/)
+    .map((event) => event.split(/\r?\n/).filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trim()).join('\n'))
+    .filter((data) => data.length > 0)
+    .map((data) => JSON.parse(data));
+  const reply = frames.find((frame) => frame.id !== undefined && ('result' in frame || 'error' in frame));
+  if (!reply) throw new Error(`MCP SSE stream carried no response frame (${frames.length} frames)`);
+  if (!/^id:/m.test(body)) throw new Error('MCP SSE frames carry no event ids; the event store is not wired');
+  return reply;
+};
+
 const mcpSmoke = async (base) => {
   const accessResponse = await fetch(`${base}/api/tokens`);
   const access = await accessResponse.json();
@@ -61,7 +84,7 @@ const mcpSmoke = async (base) => {
     });
     sessionId = response.headers.get('mcp-session-id') ?? sessionId;
     if (!response.ok) throw new Error(`MCP ${method} → HTTP ${response.status}: ${(await response.text()).slice(0, 300)}`);
-    const frame = await response.json();
+    const frame = await readResponseFrame(response);
     if (frame.error) throw new Error(`MCP ${method} failed: ${JSON.stringify(frame.error)}`);
     return frame.result;
   };
@@ -79,6 +102,8 @@ const mcpSmoke = async (base) => {
   });
   if (!sessionId) throw new Error('compiled MCP returned no session id');
   if (!initialized?.capabilities?.completions) throw new Error('compiled MCP does not advertise the completions capability');
+  if (!initialized?.capabilities?.tasks?.requests?.tools?.call) throw new Error('compiled MCP does not advertise task-augmented tools/call');
+  if (!initialized?.capabilities?.logging) throw new Error('compiled MCP does not advertise the logging capability');
   await notify('notifications/initialized');
   const { tools } = await call('tools/list');
   if (!Array.isArray(tools) || tools.length === 0) throw new Error('compiled MCP listed no tools');
@@ -86,6 +111,8 @@ const mcpSmoke = async (base) => {
   for (const required of ['atoma_operator_run_start', 'atoma_operator_run_cancel', 'atoma_registry_list', 'atoma_run_trace', 'atoma_skills_show', 'atoma_ledger_tail', 'atoma_costs', 'atoma_skill_reset', 'atoma_registry_rollback']) {
     if (!names.includes(required)) throw new Error(`compiled MCP is missing ${required}`);
   }
+  const startTool = tools.find((tool) => tool.name === 'atoma_operator_run_start');
+  if (startTool?.execution?.taskSupport !== 'optional') throw new Error('atoma_operator_run_start is not a task tool');
   for (const tenantOnly of ['atoma_projects_list', 'atoma_run_start', 'atoma_org_members', 'atoma_journal_tail', 'atoma_notifications', 'atoma_run_preview']) {
     if (names.includes(tenantOnly)) throw new Error(`ungated MCP must not expose ${tenantOnly}`);
   }

@@ -309,7 +309,8 @@ claude mcp add atoma --transport http https://<your-instance>/mcp \
 ```
 
 **Thirty-seven tools.** ONE MCP for everyone, and what you see depends on who you are. An organisation member
-sees its projects and runs — start one and get an id to poll (or long-poll with `waitMs`), cancel, retry a
+sees its projects and runs — start one as an MCP task and drive it through `tasks/get`, `tasks/result`
+and `tasks/cancel`, cancel, retry a
 publication, read a trace's shape, open the live preview of a deliverable, read their own notification
 tray. An organisation admin also sees its members and model defaults. The platform admin
 (or the operator on a local ungated server) sees everything above plus operator runs, the agent

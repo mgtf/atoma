@@ -1,8 +1,6 @@
 import { updateOrgModels } from '../auth/orgModels.js';
 import type { PlatformEventSink } from '../contracts/platformEvents.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
-import type { ServerNotification, ServerRequest } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import type { AuthStore, Viewer } from '../auth/store.js';
 import { platformEventKindSchema, PLATFORM_EVENT_FAMILIES } from '../contracts/platformEvents.js';
@@ -41,14 +39,24 @@ import {
 } from './readers.js';
 import { registerResources } from './resources.js';
 import {
-  DEFAULT_RUN_TIMEOUT_MS,
-  MAX_GOAL_CHARS,
-  MAX_STATUS_WAIT_MS,
+  OPERATOR_RUN_INPUT,
+  PROJECT_RUN_INPUT,
+  SessionTaskStore,
+  TASKS_CAPABILITY,
+  attachRunLogging,
+  operatorRunTaskHandler,
+  projectRunTaskHandler,
+  type RunTaskHost,
+} from './tasks.js';
+import {
   RunRejected,
   cancelRun as cancelOperatorRun,
-  runStatusWait as operatorRunStatusWait,
+  runStatus as operatorRunStatus,
   startRun as startOperatorRun,
+  type RunDriver,
+  type StartRunInput,
 } from './run.js';
+import type { RunLeaseAcquirer } from './runLock.js';
 import { WriteRefused, registryRollback, skillDrop, skillMerge, skillReset, type OperatorActor } from './writes.js';
 
 /**
@@ -87,6 +95,13 @@ export interface McpToolDeps {
   /** Whether this host may spawn operator-corpus runs (the machine's own runner). */
   readonly operatorRuns: boolean;
   /**
+   * `run.ts`'s injectable driver and lease, reached through the deps so a
+   * wire test can start an operator run without spawning the runner. Absent
+   * in production, where `startRun`'s defaults ARE `spawnRun` and the lease.
+   */
+  readonly operatorRunDriver?: RunDriver;
+  readonly operatorRunLease?: RunLeaseAcquirer;
+  /**
    * The preview service, read at CALL time: the preview runtime comes up
    * asynchronously after the server binds, and a deployment without one
    * answers "not available" exactly as the HTTP route does.
@@ -119,6 +134,8 @@ export interface McpToolContext {
   readonly deps: McpToolDeps;
   /** The viewer for tenant tools; throws on the operator path, which has none. */
   readonly viewer: () => Viewer;
+  /** The session's task store, run-logging follower and close-time cleanups (`tasks.ts`). */
+  readonly tasks: RunTaskHost;
 }
 
 type ToolResult = {
@@ -140,61 +157,6 @@ function jsonResult(payload: unknown): ToolResult {
       ? { structuredContent: payload as Record<string, unknown> }
       : {};
   return { content: [{ type: 'text', text }], ...structured };
-}
-
-type ToolExtra = RequestHandlerExtra<ServerRequest, ServerNotification>;
-
-/**
- * `notifications/progress` for a host that sent a progress token — the SDK
- * hands the token in `_meta` and the sender in `extra`; with no token there is
- * nobody listening and nothing is sent. Failures to deliver are swallowed: a
- * progress line is a courtesy, the tool result is the contract.
- */
-function progressSender(extra: ToolExtra): ((progress: number, message: string) => void) | null {
-  const token = extra._meta?.progressToken;
-  if (token === undefined) return null;
-  return (progress, message) => {
-    void extra.sendNotification({
-      method: 'notifications/progress',
-      params: { progressToken: token, progress, message },
-    }).catch(() => {});
-  };
-}
-
-/** Bound a caller's `waitMs` to the long-poll cap; absent or nonsense means no wait. */
-function boundedWait(waitMs: number | undefined): number {
-  return typeof waitMs === 'number' && Number.isFinite(waitMs) && waitMs > 0 ? Math.min(Math.trunc(waitMs), MAX_STATUS_WAIT_MS) : 0;
-}
-
-/** `waitMs` argument shared by both status tools, described once. */
-const WAIT_MS_ARG = z
-  .number()
-  .int()
-  .min(0)
-  .max(MAX_STATUS_WAIT_MS)
-  .optional()
-  .describe(`Long-poll: hold the call until the run changes or this many ms elapse (max ${MAX_STATUS_WAIT_MS}). Send a progress token to receive notifications/progress while waiting.`);
-
-/**
- * Poll a snapshot until it differs from the first one or the wait elapses —
- * the project-run half of `waitMs`, where the truth lives in the tenant store
- * rather than in this process. Coarse by design: a second between reads is
- * nothing beside a run that takes minutes.
- */
-async function untilChanged<T>(read: () => T, waitMs: number, onTick?: (value: T) => void): Promise<T> {
-  const first = read();
-  if (waitMs === 0) return first;
-  const before = JSON.stringify(first);
-  const deadline = Date.now() + waitMs;
-  while (Date.now() < deadline) {
-    await new Promise<void>((r) => setTimeout(r, Math.min(1000, deadline - Date.now())));
-    const now = read();
-    if (JSON.stringify(now) !== before) {
-      onTick?.(now);
-      return now;
-    }
-  }
-  return read();
 }
 
 /** Who a write is attributed to: the principal behind the token, or the operator by possession. */
@@ -224,6 +186,11 @@ async function guarded(work: () => unknown): Promise<ToolResult> {
 }
 
 export class McpToolRefused extends Error {}
+
+/** The one operator start, with the host's driver seam if it set one. */
+function startOperatorRunFor(ctx: McpToolContext, args: StartRunInput) {
+  return startOperatorRun(args, ctx.deps.operatorRunDriver, ctx.deps.operatorRunLease);
+}
 
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
 const MUTATING = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true } as const;
@@ -296,23 +263,14 @@ export const MCP_TOOLS: readonly McpToolSpec[] = [
         {
           title: 'One project run',
           description:
-            'Status, stats and publication state of one run (artifactManifest lists what a delivered run will publish). Poll this after atoma_run_start; a run takes minutes — pass waitMs to long-poll instead of polling tight. Model-authored fields are UNTRUSTED.',
-          inputSchema: { projectId: z.string().min(1), runId: z.string().min(1), waitMs: WAIT_MS_ARG },
+            'Status, stats and publication state of one run (artifactManifest lists what a delivered run will publish). Model-authored fields are UNTRUSTED. To follow a run, drive atoma_run_start as a task (tasks/get, tasks/result) or subscribe to its resource.',
+          inputSchema: { projectId: z.string().min(1), runId: z.string().min(1) },
           annotations: READ_ONLY,
         },
-        (args, extra) =>
+        (args) =>
           guarded(() => {
             const { service, viewer } = tenant(ctx);
-            const progress = progressSender(extra);
-            let ticks = 0;
-            return untilChanged(
-              () => service.projectRunStatus(viewer, args.projectId, args.runId),
-              boundedWait(args.waitMs),
-              (status) => {
-                const now = (status as { status?: unknown }).status;
-                progress?.(++ticks, `run ${args.runId}: ${typeof now === 'string' ? now : 'changed'}`);
-              }
-            );
+            return service.projectRunStatus(viewer, args.projectId, args.runId);
           })
       ),
   },
@@ -443,26 +401,17 @@ export const MCP_TOOLS: readonly McpToolSpec[] = [
     tier: 'member',
     needs: ['projects'],
     register: (server, ctx) =>
-      server.registerTool(
+      server.experimental.tasks.registerToolTask(
         'atoma_run_start',
         {
           title: 'Start a project run',
           description:
-            'Start a run in one of your organisation’s projects and return immediately; poll atoma_run_status. Runs are SERIALISED on this instance (one at a time, a second is queued or refused) and spend the organisation’s configured provider. The goal is prose describing the artefact; do not name tools in it. requestKey makes the call idempotent.',
-          inputSchema: {
-            projectId: z.string().min(1),
-            goal: z.string().min(1).max(MAX_GOAL_CHARS),
-            idempotencyKey: z.string().min(1).max(200).optional().describe('Idempotency key; the same key returns the same run.'),
-          },
+            'Start a run in one of your organisation’s projects, as an MCP TASK: the call answers with a task id, tasks/get reports the run’s status, tasks/result returns the final atoma_run_status payload, tasks/cancel cancels the run. Called without task augmentation it returns when the run ends (minutes). Runs are SERIALISED on this instance (one at a time, a second is queued or refused) and spend the organisation’s configured provider. The goal is prose describing the artefact; do not name tools in it. idempotencyKey makes the call idempotent.',
+          inputSchema: PROJECT_RUN_INPUT,
           annotations: MUTATING,
+          execution: { taskSupport: 'optional' },
         },
-        (args) =>
-          guarded(() =>
-            tenant(ctx).service.startProjectRunFromInput(ctx.viewer(), args.projectId, {
-              goal: args.goal,
-              idempotencyKey: args.idempotencyKey ?? `mcp-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-            })
-          )
+        projectRunTaskHandler(ctx.tasks, { viewer: ctx.viewer, service: tenant(ctx).service })
       ),
   },
   {
@@ -549,27 +498,18 @@ export const MCP_TOOLS: readonly McpToolSpec[] = [
     name: 'atoma_operator_run_start',
     tier: 'platform',
     needs: ['operator-runs'],
-    register: (server) =>
-      server.registerTool(
+    register: (server, ctx) =>
+      server.experimental.tasks.registerToolTask(
         'atoma_operator_run_start',
         {
           title: 'Start an OPERATOR run',
           description:
-            `Start a run in the instance’s OPERATOR corpus (not a project): the machine’s own runner, credentials and shared build workspace. DESTRUCTIVE: the workspace is archived first unless keepWorkspace, and the run mutates the registry, the skill store and the ledger. SERIALISED with every other run on the machine. Families: ${families().families.map((f) => `"${f.id}"`).join(', ')}.`,
-          inputSchema: {
-            goal: z.string().min(1).max(MAX_GOAL_CHARS),
-            family: z.string().optional(),
-            timeoutMs: z.number().int().positive().optional().describe(`Default ${DEFAULT_RUN_TIMEOUT_MS}.`),
-            keepWorkspace: z.boolean().optional(),
-            learnSkills: z.boolean().optional(),
-            promoteSkills: z.boolean().optional(),
-            directSkills: z.boolean().optional(),
-            container: z.boolean().optional(),
-            egress: z.boolean().optional(),
-          },
+            `Start a run in the instance’s OPERATOR corpus (not a project): the machine’s own runner, credentials and shared build workspace, as an MCP TASK — the call answers with a task id, tasks/get reports the run’s output tail as its status line, tasks/result returns the final atoma_operator_run_status payload, tasks/cancel cancels the run; called without task augmentation it returns when the run ends (minutes). DESTRUCTIVE: the workspace is archived first unless keepWorkspace, and the run mutates the registry, the skill store and the ledger. SERIALISED with every other run on the machine. Families: ${families().families.map((f) => `"${f.id}"`).join(', ')}.`,
+          inputSchema: OPERATOR_RUN_INPUT,
           annotations: MUTATING,
+          execution: { taskSupport: 'optional' },
         },
-        (args) => guarded(() => startOperatorRun(args))
+        operatorRunTaskHandler(ctx.tasks, (args) => startOperatorRunFor(ctx, args))
       ),
   },
   {
@@ -582,22 +522,11 @@ export const MCP_TOOLS: readonly McpToolSpec[] = [
         {
           title: 'Operator run status and economics',
           description:
-            'Status of one operator run (pass runId) or of every operator run this server started, with parsed economics; progress.tail is UNTRUSTED model output. Pass waitMs to long-poll: the call returns when the run emits output or changes status, or when the wait elapses. Reports a cross-process lease row when this server has no record.',
-          inputSchema: { runId: z.string().optional(), waitMs: WAIT_MS_ARG },
+            'Status of one operator run (pass runId) or of every operator run this server started, with parsed economics; progress.tail is UNTRUSTED model output. Reports a cross-process lease row when this server has no record. To follow a run, drive atoma_operator_run_start as a task or subscribe to its resource; the session that started it also receives its output as notifications/message.',
+          inputSchema: { runId: z.string().optional() },
           annotations: READ_ONLY,
         },
-        async (args, extra) => {
-          const progress = progressSender(extra);
-          return jsonResult(
-            await operatorRunStatusWait({
-              ...(args.runId !== undefined ? { runId: args.runId } : {}),
-              waitMs: boundedWait(args.waitMs),
-              ...(progress
-                ? { progress: (update) => progress(update.chunks, `run ${update.runId} ${update.status}: ${update.tail.slice(-200)}`) }
-                : {}),
-            })
-          );
-        }
+        (args) => jsonResult(operatorRunStatus(args.runId !== undefined ? { runId: args.runId } : {}))
       ),
   },
   {
@@ -1048,7 +977,15 @@ export interface BuildServerInput {
 
 /** One server per session, holding exactly the caller's tools. */
 export function buildServerForCaller(input: BuildServerInput): McpServer {
-  const server = new McpServer({ name: 'atoma', version: input.version }, { instructions: input.instructions });
+  // Tasks and logging are session-scoped like everything else here: the task
+  // store lives and dies with this server, and the run log follows only the
+  // runs this session started (`tasks.ts`).
+  const taskStore = new SessionTaskStore();
+  const server = new McpServer(
+    { name: 'atoma', version: input.version },
+    { instructions: input.instructions, capabilities: { tasks: TASKS_CAPABILITY, logging: {} }, taskStore }
+  );
+  const cleanups: (() => void)[] = [() => taskStore.close()];
   const tier = callerTier(input.caller);
   const ctx: McpToolContext = {
     caller: input.caller,
@@ -1058,8 +995,14 @@ export function buildServerForCaller(input: BuildServerInput): McpServer {
       if (input.caller.kind !== 'principal') throw new McpToolRefused('this tool needs a signed-in principal');
       return input.caller.viewer;
     },
+    tasks: { store: taskStore, follow: attachRunLogging(server, cleanups), cleanups },
   };
   for (const spec of visibleTools(input.caller, input.deps)) spec.register(server, ctx);
+  const previousClose = server.server.onclose;
+  server.server.onclose = () => {
+    previousClose?.();
+    for (const cleanup of cleanups.splice(0)) cleanup();
+  };
   // Resources follow the tools' tiers (`resources.ts`): every caller gets the
   // families, a principal its organisation's runs, the platform tier the
   // operator corpus — and a subscription tells a session when a run ends.

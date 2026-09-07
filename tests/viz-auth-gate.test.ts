@@ -251,6 +251,22 @@ async function startFakeProvider(input: {
   return { baseUrl: `http://127.0.0.1:${input.port}`, stats };
 }
 
+/**
+ * `/mcp` answers a request on an SSE stream (never plain JSON — that mode
+ * dropped progress notifications). The response is the frame carrying an id.
+ */
+async function mcpReply(response: Response): Promise<{ result?: unknown; error?: unknown }> {
+  expect(response.headers.get('content-type')).toMatch(/^text\/event-stream/);
+  const frames = (await response.text())
+    .split(/\r?\n\r?\n/)
+    .map((event) => event.split(/\r?\n/).filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trim()).join('\n'))
+    .filter((data) => data.length > 0)
+    .map((data) => JSON.parse(data) as { id?: unknown; result?: unknown; error?: unknown });
+  const reply = frames.find((frame) => frame.id !== undefined);
+  if (!reply) throw new Error(`MCP SSE stream carried no response frame (${frames.length} frames)`);
+  return reply;
+}
+
 function cleanChildEnv(overrides: Record<string, string>): NodeJS.ProcessEnv {
   const env = { ...process.env };
   for (const key of Object.keys(env)) {
@@ -772,14 +788,14 @@ describe('viz auth gate (process level)', () => {
       } }),
     });
     expect(initialized.status).toBe(200);
-    await initialized.json();
+    expect(await mcpReply(initialized)).toHaveProperty('result');
     const sessionId = initialized.headers.get('mcp-session-id')!;
     expect(sessionId).toBeTruthy();
     const sessionHeaders = { ...headers, 'mcp-session-id': sessionId };
     await fetch(token.mcpUrl, { method: 'POST', headers: sessionHeaders, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) });
     const tools = await fetch(token.mcpUrl, { method: 'POST', headers: sessionHeaders, body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) });
     expect(tools.status).toBe(200);
-    expect((await tools.json() as { result: { tools: unknown[] } }).result.tools.length).toBeGreaterThan(0);
+    expect(((await mcpReply(tools)).result as { tools: unknown[] }).tools.length).toBeGreaterThan(0);
     const listed = await (await fetch(`${base}/api/tokens`, { headers: cookie })).json() as { tokens: Array<{ tokenId: string; lastUsedAt: string | null }> };
     expect(JSON.stringify(listed)).not.toContain(token.token);
     expect(listed.tokens.find((row) => row.tokenId === token.tokenId)?.lastUsedAt).toBeTruthy();

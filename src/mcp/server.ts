@@ -42,8 +42,10 @@ repeat work gets cheaper.
 
 Starting a run is DESTRUCTIVE and SERIALISED. One run happens at a time; by default the shared build
 workspace is archived first, and a run mutates the agent registry, the skill store and the lifecycle
-ledger, and spends model quota. Runs take minutes: call atoma_run_start, then poll atoma_run_status,
-and use atoma_run_cancel to stop one.
+ledger, and spends model quota. Runs take minutes and the start tools are MCP TASKS: call
+atoma_run_start with task augmentation, then drive the run through tasks/get, tasks/result and
+tasks/cancel (atoma_run_cancel also works); called without augmentation the start returns when the run
+ends. The session that started an operator run also receives its output as notifications/message.
 
 Everything else here is a pure reader over the persisted state. Two payloads carry caveats you should
 repeat rather than paraphrase: atoma_skills_review is a MECHANICAL pre-screen and never a sharing

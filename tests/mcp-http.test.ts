@@ -14,6 +14,8 @@ import { McpHttpHost } from '../src/mcp/http.js';
 import { callerTier, type McpCaller } from '../src/mcp/identity.js';
 import { buildServer } from '../src/mcp/server.js';
 import { MCP_TOOL_NAMES, MCP_TOOLS, visibleTools, type McpToolDeps } from '../src/mcp/tools.js';
+import { SessionTaskStore, projectRunTaskHandler, type RunTaskHost } from '../src/mcp/tasks.js';
+import { CallToolResultSchema, CreateTaskResultSchema, LoggingMessageNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 
 /**
  * ONE MCP FOR EVERYONE, OVER HTTP. What these hold, through the real SDK
@@ -416,6 +418,217 @@ describe('resources — addressable state with subscriptions', () => {
     expect(updated).toEqual([uri]);
     const after = await client.readResource({ uri });
     expect(JSON.parse((after.contents[0] as { text: string }).text)).toMatchObject({ runId: record.runId, status: 'finished' });
+    await client.close();
+  });
+});
+
+describe('the stream — SSE frames and replay', () => {
+  afterEach(() => resetRunsForTest());
+
+  it('stamps every SSE frame with an event id the store can replay from', async () => {
+    const { url } = await listen(() => ({ kind: 'operator' }), NO_TENANT);
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '0' } } }),
+    });
+    expect(response.headers.get('content-type')).toMatch(/^text\/event-stream/);
+    const body = await response.text();
+    expect(body).toMatch(/^id: /m);
+    expect(body).toMatch(/"result"/);
+  });
+
+  it('replays the frames after a cursor on the same stream, and nothing for a lost cursor', async () => {
+    const { SessionEventStore } = await import('../src/mcp/eventStore.js');
+    const store = new SessionEventStore(4);
+    const note = (n: number) => ({ jsonrpc: '2.0' as const, method: 'notifications/progress', params: { progressToken: 't', progress: n } });
+    const a1 = await store.storeEvent('A', note(1));
+    await store.storeEvent('B', note(10));
+    await store.storeEvent('A', note(2));
+    await store.storeEvent('A', note(3));
+    expect(await store.getStreamIdForEventId(a1)).toBe('A');
+    const replayed: number[] = [];
+    const stream = await store.replayEventsAfter(a1, { send: async (_id, message) => { replayed.push((message as unknown as { params: { progress: number } }).params.progress); } });
+    expect(stream).toBe('A');
+    expect(replayed).toEqual([2, 3]);
+    // The ring evicts the oldest: a cursor that fell off replays nothing.
+    await store.storeEvent('A', note(4));
+    expect(store.size()).toBe(4);
+    expect(await store.replayEventsAfter(a1, { send: async () => {} })).toBe('');
+    expect(await store.replayEventsAfter('never', { send: async () => {} })).toBe('');
+  });
+});
+
+describe('runs as tasks, and the run log', () => {
+  afterEach(() => resetRunsForTest());
+
+  const lease = async () => ({ path: '<test>', attachChild() {}, release() {} });
+  /** A driver the test feeds: chunks on demand, a settle to end, and an abort that ends it as cancelled. */
+  function scriptedDriver() {
+    const handle = { chunk: (_text: string) => {}, settle: (_log: string) => {}, aborted: false };
+    const driver: RunDriver = (opts) =>
+      new Promise<string>((resolve) => {
+        handle.settle = resolve;
+        handle.chunk = (text) => opts.onChunk?.(text);
+        opts.signal?.addEventListener('abort', () => { handle.aborted = true; resolve('cancelled'); }, { once: true });
+      });
+    return { driver, handle };
+  }
+  const tick = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+  /**
+   * The task is a second door onto the SAME run: `createTask` starts it the way
+   * the start tool does, `tasks/get` carries the output tail as the status
+   * line, `tasks/result` returns the status payload when the run ends, and
+   * `tasks/cancel` reaches the run's abort. All through the real SDK client.
+   */
+  it('drives atoma_operator_run_start as an MCP task: working with a status line, the status payload as the result, cancel reaching the run', async () => {
+    const { driver, handle } = scriptedDriver();
+    const { url } = await listen(() => ({ kind: 'operator' }), { ...NO_TENANT, operatorRunDriver: driver, operatorRunLease: lease });
+    const client = await connect(url);
+    const caps = client.getServerCapabilities();
+    expect(caps?.tasks).toMatchObject({ list: {}, cancel: {}, requests: { tools: { call: {} } } });
+    expect(caps?.logging).toEqual({});
+    const listed = (await client.listTools()).tools.find((tool) => tool.name === 'atoma_operator_run_start');
+    expect(listed?.execution).toEqual({ taskSupport: 'optional' });
+
+    const created = await client.request(
+      { method: 'tools/call', params: { name: 'atoma_operator_run_start', arguments: { goal: 'a goal driven as a task' } } },
+      CreateTaskResultSchema,
+      { task: { ttl: 60_000 } }
+    );
+    expect(created.task.status).toBe('working');
+    expect(created.task.statusMessage).toMatch(/^run mcp-.* started \(build\)$/);
+    handle.chunk('alpha');
+    await tick(20);
+    const working = await client.experimental.tasks.getTask(created.task.taskId);
+    expect(working.status).toBe('working');
+    expect(working.statusMessage).toMatch(/1 chunks — untrusted model output: alpha$/);
+    handle.settle('no epilogue');
+    await tick(100);
+    const result = await client.experimental.tasks.getTaskResult(created.task.taskId, CallToolResultSchema);
+    const payload = result.structuredContent as { runId: string; status: string; progress: { chunks: number } };
+    expect(payload.status).toBe('finished');
+    expect(payload.progress.chunks).toBe(1);
+    expect(payload.runId).toMatch(/^mcp-/);
+
+    // A second run, cancelled through tasks/cancel: the run's abort fires and the record ends cancelled.
+    const second = await client.request(
+      { method: 'tools/call', params: { name: 'atoma_operator_run_start', arguments: { goal: 'a goal to cancel' } } },
+      CreateTaskResultSchema,
+      { task: { ttl: 60_000 } }
+    );
+    const cancelled = await client.experimental.tasks.cancelTask(second.task.taskId);
+    expect(cancelled.status).toBe('cancelled');
+    await tick(100);
+    expect(handle.aborted).toBe(true);
+    const runs = (await client.experimental.tasks.listTasks()).tasks;
+    expect(runs.map((task) => task.status).sort()).toEqual(['cancelled', 'completed']);
+    const status = await client.callTool({ name: 'atoma_operator_run_status', arguments: {} });
+    const seen = (status.structuredContent as { runs: { status: string }[] }).runs.map((run) => run.status);
+    expect(seen).toEqual(['cancelled', 'finished']);
+    await client.close();
+  });
+
+  it('answers a non-augmented start with the terminal result, as a synchronous run', async () => {
+    const { driver, handle } = scriptedDriver();
+    const { url } = await listen(() => ({ kind: 'operator' }), { ...NO_TENANT, operatorRunDriver: driver, operatorRunLease: lease });
+    const client = await connect(url);
+    const pending = client.callTool({ name: 'atoma_operator_run_start', arguments: { goal: 'a synchronous goal' } });
+    await tick(50);
+    handle.chunk('one');
+    handle.settle('done');
+    const result = await pending;
+    expect((result.structuredContent as { status: string }).status).toBe('finished');
+    // A refused start is a task that fails at once, never a hung call.
+    const refused = await client.request(
+      { method: 'tools/call', params: { name: 'atoma_operator_run_start', arguments: { goal: 'x', family: 'no-such-family' } } },
+      CreateTaskResultSchema,
+      { task: { ttl: 60_000 } }
+    );
+    expect(refused.task.status).toBe('failed');
+    const failure = await client.experimental.tasks.getTaskResult(refused.task.taskId, CallToolResultSchema);
+    expect(failure.isError).toBe(true);
+    expect((failure.content as { text: string }[])[0]!.text).toMatch(/refused/);
+    await client.close();
+  });
+
+  it('follows atoma_run_start through the tenant store, and cancels the run on tasks/cancel', async () => {
+    const statuses = ['queued', 'running', 'running', 'delivered'];
+    const cancelled: string[] = [];
+    const service = {
+      startProjectRunFromInput: async (_v: unknown, _p: string, body: unknown) => ({ projectRunId: 'run-1', status: 'queued', goal: (body as { goal: string }).goal }),
+      projectRunStatus: () => ({ projectRunId: 'run-1', status: statuses.length > 1 ? statuses.shift()! : statuses[0]! }),
+      cancelProjectRun: async (_v: unknown, _p: string, runId: string) => { cancelled.push(runId); return { cancelled: runId }; },
+    };
+    const store = new SessionTaskStore();
+    const host: RunTaskHost = { store, follow: () => {}, cleanups: [] };
+    const handler = projectRunTaskHandler(host, { viewer: () => viewer('org:member'), service, pollMs: 10 });
+    const requestStore = {
+      createTask: (params: { ttl?: number | null; pollInterval?: number }) => store.createTask(params, 1, { method: 'tools/call' }),
+      getTask: async (taskId: string) => (await store.getTask(taskId))!,
+      storeTaskResult: (taskId: string, status: 'completed' | 'failed', result: { content: unknown[] }) => store.storeTaskResult(taskId, status, result),
+      getTaskResult: (taskId: string) => store.getTaskResult(taskId),
+      updateTaskStatus: (taskId: string, status: 'working' | 'input_required' | 'completed' | 'failed' | 'cancelled', message?: string) => store.updateTaskStatus(taskId, status, message),
+    };
+    const extra = { taskStore: requestStore, signal: new AbortController().signal, requestId: 1, sendNotification: async () => {}, sendRequest: async () => ({}) } as never;
+    const created = await handler.createTask({ projectId: 'p-1', goal: 'ship it', idempotencyKey: undefined }, extra);
+    expect(created.task.status).toBe('working');
+    expect(created.task.statusMessage).toBe('run run-1 queued');
+    await tick(120);
+    const done = await store.getTask(created.task.taskId);
+    expect(done?.status).toBe('completed');
+    const result = (await store.getTaskResult(created.task.taskId)) as { structuredContent: { status: string } };
+    expect(result.structuredContent.status).toBe('delivered');
+    // A second task, cancelled the way the SDK's tasks/cancel handler does it: the run is cancelled too.
+    statuses.splice(0, statuses.length, 'running');
+    const second = await handler.createTask({ projectId: 'p-1', goal: 'stop me', idempotencyKey: undefined }, extra);
+    await store.updateTaskStatus(second.task.taskId, 'cancelled', 'Client cancelled task execution.');
+    expect(cancelled).toEqual(['run-1']);
+    for (const cleanup of host.cleanups) cleanup();
+    store.close();
+  });
+
+  it('sends the output of a run this session started as notifications/message, and one notice when it ends', async () => {
+    const { driver, handle } = scriptedDriver();
+    const { url } = await listen(() => ({ kind: 'operator' }), { ...NO_TENANT, operatorRunDriver: driver, operatorRunLease: lease });
+    const client = await connect(url);
+    const messages: { level: string; logger?: string | undefined; data: unknown }[] = [];
+    client.setNotificationHandler(LoggingMessageNotificationSchema, (n) => { messages.push({ level: n.params.level, logger: n.params.logger, data: n.params.data }); });
+    await client.setLoggingLevel('info');
+    // A run this session did NOT start is not followed.
+    const foreign = await startRun({ goal: 'a goal started elsewhere' }, driver, lease);
+    handle.chunk('unfollowed');
+    handle.settle('done');
+    await tick(100);
+    expect(messages).toEqual([]);
+    // A run started through the session IS followed, chunk by chunk, then the notice.
+    const started = await client.request(
+      { method: 'tools/call', params: { name: 'atoma_operator_run_start', arguments: { goal: 'a followed goal' } } },
+      CreateTaskResultSchema,
+      { task: { ttl: 60_000 } }
+    );
+    const runId = started.task.statusMessage!.match(/^run (mcp-\S+) started/)![1]!;
+    expect(runId).not.toBe(foreign.runId);
+    handle.chunk('alpha');
+    handle.chunk('beta');
+    handle.settle('done');
+    await tick(150);
+    expect(messages.map((m) => m.level)).toEqual(['info', 'info', 'notice']);
+    expect(messages.every((m) => m.logger === `atoma.run.${runId}`)).toBe(true);
+    expect(messages[0]!.data).toEqual({ runId, chunk: 'alpha', chunks: 1, untrusted: true });
+    expect(messages[2]!.data).toMatchObject({ runId, status: 'finished' });
+    // Below the level the client asked for, nothing is sent.
+    await client.setLoggingLevel('warning');
+    await client.request(
+      { method: 'tools/call', params: { name: 'atoma_operator_run_start', arguments: { goal: 'a quiet goal' } } },
+      CreateTaskResultSchema,
+      { task: { ttl: 60_000 } }
+    );
+    handle.chunk('gamma');
+    handle.settle('done');
+    await tick(100);
+    expect(messages).toHaveLength(3);
     await client.close();
   });
 });

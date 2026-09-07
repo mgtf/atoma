@@ -135,14 +135,16 @@ const records = new Map<string, RunRecord>();
 let inFlight: RunRecord | null = null;
 let seq = 0;
 const idleWaiters = new Set<() => void>();
-/** Woken on EVERY observable change of any record: a chunk, a status flip, a finish. */
-const changeWaiters = new Set<() => void>();
 /** Told once per run when it leaves `running` for good — the resource-update fan-out. */
 const finishListeners = new Set<(record: RunRecordPublic) => void>();
+/** Told on every output chunk of every run — the `notifications/message` fan-out and the task status line. */
+const outputListeners = new Set<(update: RunOutputUpdate) => void>();
 
-function notifyChange(): void {
-  for (const wake of changeWaiters) wake();
-  changeWaiters.clear();
+export interface RunOutputUpdate {
+  readonly runId: string;
+  readonly chunk: string;
+  readonly chunks: number;
+  readonly tail: string;
 }
 
 /**
@@ -157,8 +159,16 @@ export function onRunFinished(listener: (record: RunRecordPublic) => void): () =
   return () => finishListeners.delete(listener);
 }
 
-/** Longest a status call may hold the connection — a long-poll, not a stream. */
-export const MAX_STATUS_WAIT_MS = 30_000;
+/**
+ * Subscribe to run OUTPUT, chunk by chunk. The MCP logging layer forwards it
+ * as `notifications/message` to the session that started the run, and a run
+ * task keeps its status line from it. Same lifetime rule as `onRunFinished`:
+ * unsubscribe when the session closes. The chunk is UNTRUSTED model output.
+ */
+export function onRunOutput(listener: (update: RunOutputUpdate) => void): () => void {
+  outputListeners.add(listener);
+  return () => outputListeners.delete(listener);
+}
 
 /**
  * The atoma repo root, derived from this module's own location so the server
@@ -329,7 +339,6 @@ function finishRun(record: RunRecord): void {
       for (const resolveIdle of idleWaiters) resolveIdle();
       idleWaiters.clear();
     }
-    notifyChange();
     const published = publish(record);
     for (const listener of finishListeners) {
       try {
@@ -351,7 +360,6 @@ function requestCancellation(record: RunRecord, reason: string): void {
   record.status = 'cancelling';
   record.hint = `Cancellation requested: ${reason}. Waiting for the child process group to exit.`;
   record.abort.abort(new Error(reason));
-  notifyChange();
 }
 
 /**
@@ -367,8 +375,8 @@ function requestCancellation(record: RunRecord, reason: string): void {
  */
 export async function startRun(
   input: StartRunInput,
-  driver: RunDriver = spawnRun,
-  acquireLease: RunLeaseAcquirer = acquireRunLease
+  driver: RunDriver | undefined = spawnRun,
+  acquireLease: RunLeaseAcquirer | undefined = acquireRunLease
 ): Promise<RunRecordPublic> {
   if (inFlight) {
     throw new RunRejected(
@@ -428,7 +436,13 @@ export async function startRun(
       onChunk: (chunk) => {
         record.chunks++;
         record.tail = (record.tail + chunk).slice(-PROGRESS_TAIL_CHARS);
-        notifyChange();
+        for (const listener of outputListeners) {
+          try {
+            listener({ runId, chunk, chunks: record.chunks, tail: record.tail });
+          } catch {
+            // A listener is a courtesy; the record is the contract.
+          }
+        }
       },
       onSpawn: (pid) => {
         record.lease.attachChild(pid);
@@ -528,58 +542,6 @@ export function runStatus(opts: { runId?: string } = {}): unknown {
 }
 
 /**
- * `runStatus`, held open for up to `waitMs` — the long-poll the roadmap
- * preferred over a notification model: "call start, then poll" stays the
- * contract, and a host that passes `waitMs` simply polls less often.
- *
- * Returns as soon as the named run (or, with no runId, the run in flight)
- * CHANGES — a new output chunk, a status flip — or when the wait elapses,
- * whichever comes first. A run that is not running returns at once. With a
- * `progress` sink the wait becomes a stream instead: chunks are reported
- * through it as they arrive and the call returns only on a status change or
- * the deadline — that is what carries `notifications/progress` to a host that
- * sent a progress token. The wait is capped so a status call can never hold a
- * connection longer than the transport's own patience.
- */
-export async function runStatusWait(opts: {
-  runId?: string;
-  waitMs?: number;
-  progress?: (update: { runId: string; status: RunRecordPublic['status']; chunks: number; tail: string }) => void;
-}): Promise<unknown> {
-  const waitMs = Math.max(0, Math.min(MAX_STATUS_WAIT_MS, Math.trunc(opts.waitMs ?? 0)));
-  const target = () => (opts.runId ? records.get(opts.runId) : inFlight) ?? null;
-  const live = (r: RunRecord | null) => r !== null && (r.status === 'running' || r.status === 'cancelling');
-  const initial = target();
-  if (waitMs === 0 || !live(initial)) return runStatus(opts.runId ? { runId: opts.runId } : {});
-  const record = initial!;
-  const deadline = Date.now() + waitMs;
-  let seenChunks = record.chunks;
-  const seenStatus = record.status;
-  while (Date.now() < deadline) {
-    const remaining = deadline - Date.now();
-    const changed = await new Promise<boolean>((resolveWait) => {
-      const timer = setTimeout(() => {
-        changeWaiters.delete(wake);
-        resolveWait(false);
-      }, remaining);
-      const wake = () => {
-        clearTimeout(timer);
-        resolveWait(true);
-      };
-      changeWaiters.add(wake);
-    });
-    if (!changed) break;
-    if (record.status !== seenStatus) break;
-    if (record.chunks !== seenChunks) {
-      seenChunks = record.chunks;
-      if (!opts.progress) break;
-      opts.progress({ runId: record.runId, status: record.status, chunks: record.chunks, tail: record.tail });
-    }
-  }
-  return runStatus(opts.runId ? { runId: opts.runId } : {});
-}
-
-/**
  * Cancel by aborting, which routes into the SAME graceful group-kill every
  * other stop uses: SIGTERM, a 5s grace window, then SIGKILL. That ordering is
  * what lets the run close its trace and let Chrome reap its own helper fleet —
@@ -632,7 +594,7 @@ export function resetRunsForTest(): void {
   inFlight = null;
   for (const resolveIdle of idleWaiters) resolveIdle();
   idleWaiters.clear();
-  notifyChange();
   finishListeners.clear();
+  outputListeners.clear();
   seq = 0;
 }

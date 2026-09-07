@@ -10,8 +10,9 @@
 > **Closed 2026-09-07.** Every item below that was still open has been built,
 > on the HTTP surface, as one commit (37 tools): `atoma_skills_show` (with the
 > skill-id completion that waited for it), `atoma_ledger_tail`, `atoma_costs`,
-> `atoma_registry_history`; the `waitMs` long-poll on both status tools, with
-> `notifications/progress` for a host that sends a progress token; resources
+> `atoma_registry_history`; a `waitMs` long-poll on both status tools (removed
+> the same day, when the start tools became MCP tasks — see
+> [src/mcp/AGENTS.md](../src/mcp/AGENTS.md)); resources
 > (`atoma://families`, `atoma://runs/{file}`, `atoma://operator-runs/{runId}`,
 > `atoma://projects/{projectId}/runs/{runId}`) with `resources/subscribe` and
 > a `resources/updated` notification when a run ends; `structuredContent` on
