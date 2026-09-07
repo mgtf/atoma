@@ -1,5 +1,13 @@
 # MCP surface roadmap — candidate features
 
+> Historical proposal (2026-08-21), not the current MCP setup guide. The
+> stdio-only boundary and 13-tool inventory below were superseded on 2026-09-05
+> by one role-scoped HTTP `/mcp` surface with 24 tools. Operator run names now
+> use `atoma_operator_run_*`; `atoma_run_*` drive organisation project runs.
+> See the [current README](../README.md#drive-it-from-the-agent-you-already-use-mcp)
+> and [decision record](mcp-one-surface-2026-09-05.md).
+
+
 Status: PROPOSAL, not scheduled, EXCEPT where an item is marked DELIVERED.
 Recorded 2026-08-21 after a survey of the current 13-tool surface against the
 CLI/viz capabilities and the unused parts of the MCP protocol. Nothing else

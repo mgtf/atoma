@@ -13,12 +13,12 @@ locally or to use the visualizer.
 
 1. **The visualizer auth gate must be on.** Without it there is no projects
    runtime at all, and every GitHub route answers 404
-   ([`server.ts:558`](../src/viz/server.ts#L558)).
+   ([`server.ts`](../src/viz/server.ts)).
 2. **A GitHub login provider must exist** (`ATOMA_AUTH_GITHUB_CLIENT_ID` /
    `ATOMA_AUTH_GITHUB_CLIENT_SECRET`).
 3. **That login provider should be the App itself.** atoma passes the auth
    provider's client credentials into the App snapshot
-   ([`server.ts:576-580`](../src/viz/server.ts#L576-L580)), so the App's own
+   ([`server.ts`](../src/viz/server.ts)), so the App's own
    *Client ID* and *Client secret* are what belong in those two variables. A
    separate OAuth App for login and a GitHub App for publication is not a
    supported pairing.
@@ -48,16 +48,16 @@ Substitute your `ATOMA_VIZ_PUBLIC_ORIGIN`.
 
 **Request user authorization (OAuth) during installation → OFF.** Enabling it
 removes the Setup URL field, and the Setup URL is the only place an installation
-is bound to an organisation ([`http.ts:178-188`](../src/github/http.ts#L178)).
+is bound to an organisation ([`http.ts`](../src/github/http.ts)).
 The post-install arrival would land on the Callback URL instead, where the
 connect branch requires a transaction cookie that `startGitHubConnect` never
-mints ([`server.ts:1660-1663`](../src/viz/server.ts#L1660)) — every connect
+mints ([`server.ts`](../src/viz/server.ts)) — every connect
 would fail as expired.
 
 **Expire user authorization tokens → ENABLED** (GitHub's default; leave it
 alone). With it off, GitHub returns no `expires_in` and no refresh token, and
 `persistGitHubUserTokens` throws `GitHub user access token has no expiry`
-([`tokens.ts:19-23`](../src/github/tokens.ts#L19)) on every connect callback.
+([`tokens.ts`](../src/github/tokens.ts)) on every connect callback.
 That breaks the personal-account branch permanently, with a 502 and nothing
 useful in the UI.
 
@@ -67,7 +67,7 @@ Set **Active**, give it the URL above, and set a secret — see step 2.
 
 **Subscribe to no events.** The only two events the code handles are
 `installation` and `installation_repositories`
-([`webhook.ts:95`](../src/github/webhook.ts#L95)), and GitHub sends both to
+([`webhook.ts`](../src/github/webhook.ts)), and GitHub sends both to
 every App by default; neither appears in the subscribe list. Every other event
 is signature-checked, journaled and discarded, and a large `push` payload would
 be refused at the 1 MiB ceiling and journaled as noise.
@@ -85,13 +85,13 @@ account level.
 
 Those first two are also requested in the installation-token body
 (`GITHUB_PUBLISH_PERMISSIONS`,
-[`client.ts:40-43`](../src/github/client.ts#L40)) and the token is refused
+[`client.ts`](../src/github/client.ts)) and the token is refused
 unless both were granted, so the checkbox set is fully determined.
 
 **Leave Workflows at No access.** It looks conditionally needed — GitHub
 requires it to write under `.github/workflows/` — but
 `assertPublishableArtifactPath`
-([`artifacts.ts:133-144`](../src/projects/artifacts.ts#L133)) rejects any such
+([`artifacts.ts`](../src/projects/artifacts.ts)) rejects any such
 path during manifest collection, before a single GitHub call, and its error
 message names this permission. Granting it changes nothing until that policy
 changes.
@@ -143,7 +143,7 @@ openssl rand -hex 32
 openssl rand -hex 32
 
 mkdir -p ~/.atoma
-mv ~/Downloads/*.private-key.pem ~/.atoma/github-app.pem
+mv ~/Downloads/your-app-key.private-key.pem ~/.atoma/github-app.pem  # use the exact downloaded filename
 chmod 600 ~/.atoma/github-app.pem
 ```
 
@@ -206,9 +206,9 @@ GitHub not at all.
 The reasoning, and its limits: a project's repository is created at publication
 time, so it cannot be pre-selected — it does not exist yet. On the
 personal-account branch it is created with a *user-to-server* token
-([`publisher.ts:232-235`](../src/projects/publisher.ts#L232)) while every write
+([`publisher.ts`](../src/projects/publisher.ts)) while every write
 afterwards uses the *installation* token
-([`publisher.ts:345`](../src/projects/publisher.ts#L345)), and an installation
+([`publisher.ts`](../src/projects/publisher.ts)), and an installation
 token cannot reach a repository outside its installation's scope.
 
 Whether GitHub adds a newly created repository to the installation on that

@@ -37,7 +37,7 @@ The [native SQLite incident](incidents/sqlite-node24-2026-09-06.md) records the
 runtime evidence and the compatibility boundary behind this minimum.
 
 ```bash
-git clone git@github.com:mgtf/atoma.git
+git clone https://github.com/mgtf/atoma.git
 cd atoma
 nvm install && nvm use
 npm ci                            # `prepare` installs the husky hooks; needs .git
@@ -55,10 +55,10 @@ Nothing beyond the block above is required for development, verification and
 runs. Two optional pieces:
 
 - **Docker Desktop**, only for the container-isolation commands.
-- **python3 with Pillow**, for `viz:mark-turn:analyze` and for the
-  `start_static_server` element, which spawns `python3` at run time. macOS ships
-  python3; add Pillow with `pip3 install --user pillow`. Doctor reports its
-  absence as a warning, not a failure.
+- **python3**, for the `start_static_server` element at run time, and
+  **Pillow** for `viz:mark-turn:analyze`. Verify `python3 --version`; install
+  Python if it is absent. Install Pillow in the Python environment used for the
+  analysis script. Doctor reports missing Python as a warning.
 
 Puppeteer downloads its own Chrome on `npm ci`, and macOS already carries the
 libraries it links against.
@@ -109,7 +109,7 @@ ext4:
 
 ```bash
 cd ~ && mkdir -p dev && cd dev
-git clone git@github.com:mgtf/atoma.git    # ~/dev/atoma, NOT /mnt/c/...
+git clone https://github.com/mgtf/atoma.git    # ~/dev/atoma, NOT /mnt/c/...
 ```
 
 ### Do not put the checkout on /mnt/c
@@ -156,9 +156,9 @@ npm run viz:dev                   # UI :5173, API :4111
 Then one real task. Pick the authentication you have:
 
 ```bash
-ANTHROPIC_API_KEY=... npm run run:build:dev "a Node CLI that converts CSV to JSON"
-ATOMA_LLM=claude-cli  npm run run:build:dev "…"    # Claude subscription, no API key
-ATOMA_LLM=ollama      npm run run:build:dev "…"    # local models
+ANTHROPIC_API_KEY=... npm run run:build:dev -- "a Node CLI that converts CSV to JSON"
+ATOMA_LLM=claude-cli  npm run run:build:dev -- "…"    # Claude subscription, no API key
+ATOMA_LLM=ollama      npm run run:build:dev -- "…"    # local models
 ```
 
 Only one live run at a time on a machine: model quota is one account, and the MCP

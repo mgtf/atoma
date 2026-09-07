@@ -21,9 +21,9 @@ agents alike.
 ## Working on a change
 
 ```bash
-nvm use
+nvm install && nvm use
 npm ci
-npm run check          # typecheck + lint + tests, all offline, no paid calls
+npm run check          # docs + typecheck + lint + tests, no paid model calls
 npm run docs:check     # subsystem map, README facts, architecture IR
 ```
 
@@ -38,6 +38,21 @@ npm run docs:check     # subsystem map, README facts, architecture IR
 - Runs execute on macOS or Linux. Windows is a development host; the full test
   suite runs in WSL2. [`docs/development-setup.md`](docs/development-setup.md)
   covers each platform.
+
+## Documentation changes
+
+Keep the README and [technical guide](docs/how-it-works.md) aligned with the
+supported commands and runtime behavior. Update the relevant operator guide when
+configuration or deployment changes. Dated designs and incident reports are
+historical evidence: add a supersession note when needed instead of rewriting
+the recorded experiment.
+
+The README facts block is generated with `npm run docs:facts -- --apply`.
+Architecture components are generated with `npm run docs:architecture -- --apply`;
+rendering the SVG requires the separate Archify tooling. `docs:check` checks those
+facts and the IR, but does not prove every narrative statement or render the SVG.
+Check command examples, relative links and the implementation behind changed claims.
+Historical benchmarks whose raw data is archived must remain labelled historical.
 
 ## Pull requests
 

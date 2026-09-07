@@ -1,7 +1,7 @@
 # How atoma works
 
 *A high-level technical tour: the components, how they fit together, and what happens
-during a run. Written for a CTO, an architect, or an engineer doing technical due
+during a run. Updated against the v0.2.0 source on 2026-09-07. Written for a CTO, an architect, or an engineer doing technical due
 diligence — enough depth to judge the design, not enough to need the source open.*
 
 [← back to the README](../README.md) · for the multi-tenant target state, see
@@ -15,8 +15,9 @@ there to `docs/incidents/` so it is loaded only when needed.
 
 atoma models tools as atomic **elements** and arranges its LLM-backed agents in three
 compositional tiers: **molecules**, **cells**, and botanical **tissues**. The agent tiers
-differ in exactly two ways: **which model they run on**, and **whether they can invoke
-elements that touch the outside world**.
+have different responsibilities and default model tiers. **Only molecules invoke
+elements on the supervised path**; provider and model pins may override the default
+cost gradient.
 
 The curated identity pools mirror expected population: 118 molecule names for the
 numerous L1 workers, 40 cell names for L2, and 20 botanical tissue names for the small
@@ -37,7 +38,6 @@ graph TB
     L1B -.-> E
     L1C -.-> E
     E -.-> WS[("Sandboxed<br/>workspace")]
-    L1C -.-> WS
     style L3 fill:#6b21a8,color:#fff
     style L2A fill:#1d4ed8,color:#fff
     style L2B fill:#1d4ed8,color:#fff
@@ -48,10 +48,10 @@ graph TB
 
 Two consequences fall out of that split:
 
-- **Cost is bounded by structure, not discipline.** On the SUPERVISED path only the bottom tier
+- **Tool execution is separated from supervision.** On the SUPERVISED path only the bottom tier
   is handed atoma's tool executor, so supervisors cannot mutate the workspace through the
   framework. The one application-level exception is deliberate and labelled in code: after
-  supervision has failed outright, a supervisor takes over for a last-resort turn. The Codex CLI
+  supervision has failed outright, a supervisor takes over for a last-resort turn using the L1 model route. The Codex CLI
   transport is a narrower provider caveat: Codex cannot disable its own built-ins, so L2/L3 run
   read-only in an empty directory and may still perform internal read-only tool turns; Codex is
   structurally refused at L1.
@@ -61,7 +61,7 @@ Two consequences fall out of that split:
 
 ---
 
-## 2. The complete component map
+## 2. The component map
 
 ```mermaid
 graph TB
@@ -72,6 +72,18 @@ graph TB
         BURN["<b>burnin</b><br/>batch measurement"]
         CURR["<b>curriculum</b><br/>propose next tasks"]
         OPS["<b>registry · skills · ledger</b><br/><b>friction · viz</b><br/>operator tooling"]
+    end
+
+    subgraph PLATFORM[" 🌐 Authenticated control plane "]
+        AUTH["OAuth · organisations<br/>API tokens · personal profiles"]
+        PROJECTS["Projects · run admission<br/>artifact publication"]
+        GITHUB["GitHub App"]
+        PREVIEW["Ephemeral previews<br/>delivered or in-flight snapshots"]
+        LAUNCHER["Launcher<br/>container-engine access"]
+        JOURNAL["Platform journal<br/>notifications"]
+        SENTINEL["Sentinel: live, no LLM"]
+        ANALYST["Analyst: ended runs, read-only"]
+        MENDER["Mender: isolated fixes → PR<br/>human merge"]
     end
 
     subgraph RT[" ⚙️ Runtime assembly "]
@@ -128,6 +140,19 @@ graph TB
     BURN -.->|"fresh process per task"| RUN
     MCP -.->|"starts a serialised child"| RUN
     MCP -.-> MEM
+    AUTH --> PROJECTS
+    PROJECTS --> RUNNER
+    PROJECTS --> GITHUB
+    PROJECTS --> PREVIEW
+    PREVIEW --> LAUNCHER
+    CONT --> LAUNCHER
+    TRACE --> SENTINEL
+    TRACE --> ANALYST
+    ANALYST --> MENDER
+    SENTINEL --> JOURNAL
+    ANALYST --> JOURNAL
+    MENDER --> JOURNAL
+    MCP --> PROJECTS
     RUN ==> RUNNER
     RUNNER ==> L3B
     L3B ==> L2B ==> L1B
@@ -151,11 +176,21 @@ graph TB
     style L3B fill:#6b21a8,color:#fff
 ```
 
+The maintained [architecture diagram](architecture.svg) covers the repository's
+18 subsystems. Its component inventory is derived from the root subsystem map;
+`npm run docs:check` validates the underlying IR, while SVG rendering is a separate
+development step.
+
 ### The bricks, in one line each
 
 | Layer | Component | What it does |
 |---|---|---|
 | **Entry** | MCP over HTTP (`/mcp`) | One catalogue tiered by role: members drive their organisation's runs; the platform admin also starts operator runs and reads registry, skills, ledger, traces, friction and the journal |
+| **Control plane** | Auth and projects | OAuth identities, active organisations, API tokens, per-tier model settings, project run admission and artifact manifests |
+| | GitHub App | Installation separate from login; idempotent publication of a delivered run, with retry after publication failure |
+| | Preview and launcher | Classify web results, serve isolated ephemeral generations, and keep container-engine access in one subsystem |
+| | Platform journal and notifications | Attributable control-plane events, member run notifications and curated platform-admin alerts |
+| | Sentinel / analyst / mender | Live mechanical watch; optional read-only post-mortems; isolated correction PRs requiring human merge |
 | **Runtime** | Runner | Everything family-independent: provider choice, sandbox, budget, abort signals, watchdog, trace, post-mortem |
 | | TaskProfile | The *only* per-family part: workspace prep, seed agents, task constraints |
 | | Provider routing | Five provider routes over four transports; a tier can be pinned to a different vendor than its neighbours. Codex is L2/L3 only |
@@ -194,12 +229,12 @@ sequenceDiagram
     participant L1 as L1 (cheap)
     participant W as Workspace
 
-    U->>R: npm run run:build "<goal>"
+    U->>R: npm run run:build -- "<goal>"
     R->>R: pick provider · open stores · prepare workspace<br/>seed the standard agents · set budget + watchdog
     R->>L3: handle(task)
 
     Note over L3: cheap scan first — used only as a hint
-    L3->>L3: plan → 2–5 phases, each naming a preferred coordinator
+    L3->>L3: plan → phases with declared outputs and proof obligations
 
     loop each phase, usually sequential on a shared workspace
         L3->>L2: run this phase (L3 is the judge)
@@ -217,7 +252,7 @@ sequenceDiagram
             L2->>L1: subtask, with the recipe injected if one matched
             L1->>L1: plan in prose — no tools attached yet
             L2->>L2: judge the plan
-            L1->>W: execute — up to 24 tool rounds
+            L1->>W: execute — bounded tool loop
             L2->>W: zero-token probe: re-read the files, load the page
             L2->>L2: judge the result against that evidence
         end
@@ -228,18 +263,26 @@ sequenceDiagram
     R->>U: result · agent catalogue · cost table · trace file
 ```
 
-**What the judge actually does, in order** — this sequence is where most of the cost discipline
+**Sequential and parallel work.** A sequential plan threads the previous phase's
+summary and declared outputs into the next. `concat` and `llm-synthesize` fan out
+orthogonal work in parallel; synthesis adds a model call. Shared-file mutations
+belong in sequential phases. A parallel root plan with colliding declared outputs
+gets one coached replan; that is advisory, not a filesystem lock. For fan-out
+followed by a join, L3 sequences groups and L2 fans out within a group.
+
+**What the plan judge does, in order** — this sequence is where most of the cost discipline
 lives:
 
-1. A plan the cheap router wrote itself is **auto-approved**. Asking a second cheap model to vet
-   a one-line routing decision produces no new information, and was observed rejecting perfectly
-   good freshly-created agents.
-2. A **free mechanical check** rejects any plan promising tools the worker does not have. It runs
-   *before* the trust shortcut, so a trusted child's out-of-scope plan is not waved through.
+1. A **free mechanical scope check** runs before either approval shortcut. It
+   can reject repeated mentions of undeclared tools once with corrective guidance;
+   actual execution also enforces the worker's tool scope.
+2. A **prefilter-generated routing plan** can then be auto-approved. Its
+   internal marker cannot be supplied by the model. A second model verdict on
+   the same bounded routing choice would add cost without new evidence.
 3. A child with a clean track record is **approved with no model call**.
 4. Otherwise, a cheap-model verdict.
 
-On the *result* side, step 3 is deliberately **not blind**: the zero-token reality probe runs
+On the *result* side, trusted approval is deliberately **not blind**: the zero-token reality probe runs
 first, and a hard contradiction — a claimed file missing or empty, a page that will not load —
 drops the decision through to a full review. The cheapest path is not allowed to be the least
 verified one.
@@ -247,16 +290,16 @@ verified one.
 **When it goes wrong.** Three rejections, or the same complaint three times, raises an
 escalation: the child's failure counter moves (revoking trust), a variant with narrower
 instructions is created and given exactly one clean attempt, and if that also fails the parent
-does the work itself — with the result explicitly stamped as fallback-produced so nobody
+uses the L1 model route to do the work itself — with the result explicitly stamped as fallback-produced so nobody
 mistakes it for a normal delivery.
 
 ---
 
 ## 4. Flow — how a repeatable phase gets compiled away
 
-The most speculative of the three mechanisms, and the one that has not yet paid: across eight
+Historical evidence, not a current-release performance claim: across the first eight
 controlled rounds the compiled path fired 14 times, 11 of them in a single round whose
-deliverables turned out wrong. The lifecycle below is sound and every step is guarded; what is
+deliverables turned out wrong. The lifecycle below has guarded promotion and dispatch; what is
 missing is demand for it on the task families measured so far. See
 [`hybrid-skills-design.md`](hybrid-skills-design.md) for the most recent attempt to change
 that — designed, measured and refused.
@@ -287,6 +330,13 @@ actually do* — and that, not correctness, is the binding constraint: in round 
 correct compiled script was withheld 14 times, every refusal justified, and dispatched zero
 times.
 
+**Promotion is opt-in for from-scratch runs.** A seeded workspace enables it by
+default; `ATOMA_SKILL_PROMOTE=1` explicitly enables it elsewhere and
+`--no-promote-skills` is the final veto. Recipes live under the owning molecule's
+id, and skill credit requires evidence that the recipe drove the attempt.
+Plans declare `outputs`; compilation declares `writes`. Those structured fields
+are checked before dispatch, with lexical matching retained for legacy records.
+
 **Splitting build from verify is what makes anything compilable at all.** A monolithic
 "build and check it" recipe always gets refused, because the build half is irreducible
 reasoning. Distilling the verification half separately is where most compiled scripts come from —
@@ -298,10 +348,10 @@ package metadata and documentation for an already-tested CLI.
 semantics broke a compiled verifier, the entire safety stack ran by itself across two runs —
 dispatch, contract failure, failure streak, demotion to the recipe, an anti-recompile stamp with
 the reason recorded — and every run still shipped via the supervised path while the system
-quarantined its own broken optimisation. Only the outcome is reproducible from a committed
-artefact: all eight runs of that batch read `delivered` in `burnin/results.csv`. The demotion
-chain itself predates both the trace archive and the CSV columns that would show it, and
-survives only in the archived engineering record linked from `AGENTS.md`.
+quarantined its own broken optimisation. This is historical evidence: the batch's CSV and traces are archived outside the
+checkout. The account survives in the archived engineering record linked from
+[`AGENTS.md`](../AGENTS.md); it is not reproducible from a committed
+`burnin/results.csv`.
 
 ---
 
@@ -318,10 +368,10 @@ graph TB
     FILE -.->|"only if the result names a<br/>local address really serving HTML"| WEB
     WEB --> FACTS
     FILE --> FACTS["<b>Structured facts</b><br/>not prose"]
-    MAN[("📄 .atoma-probes.json<br/>written by the worker:<br/>commands, exit codes, output")] --> FACTS
+    MAN[("📄 .atoma-probes.json<br/>written by execution tools:<br/>commands, exit codes, output")] --> FACTS
     FACTS --> D{"Hard<br/>contradiction?"}
     D -->|"claimed file missing or empty ·<br/>address unreachable ·<br/>worker's own record self-inconsistent"| REJ["Override the trust shortcut,<br/>run a full review<br/>with the evidence attached"]
-    D -->|"no"| OK["Approve"]
+    D -->|"no"| OK["Evaluate result gates and proof coverage,<br/>then trusted approval or model review"]
     style FACTS fill:#f0fdf4
     style MAN fill:#fefce8
 ```
@@ -330,19 +380,31 @@ Three design decisions worth flagging:
 
 - **The probe costs zero tokens.** It is local file reads, or one page load. That is why it can
   afford to run on the most-trusted path.
-- **It never fails a run on its own judgement.** It supplies facts; the reviewer decides. A
-  path-extraction heuristic must not be able to fail a correct deliverable by itself.
+- **Ground-truth heuristics supply facts for review.** They can remove the trust
+  shortcut, but do not reject alone. Separate declared-failure gates reject directly;
+  disk-evidence gates reject once per task and send byte-identical repeats to the
+  model reviewer. These dispositions live in one result-gate table.
 - **Command replay was considered and rejected.** Re-running command strings the worker wrote
   would mean parsing model-authored shell out of prose, and execution is not idempotent — the
   verification could mutate the thing it verifies. Instead the *evidence format* was raised: the
-  worker records what it observed in a machine-readable file, and the supervisor reads and
-  cross-checks it.
+  execution tools record observations in a machine-readable file, and the supervisor reads and
+  cross-checks it. A compiled verifier may consume that manifest as L1 execution;
+  that does not give supervisors permission to replay arbitrary shell commands.
 
 **The manifest is the machine interface.** Its schemas, the instructions given to writers, the
 instructions given to replaying scripts, and its health check are all generated from one module
 whose examples are validated against the schemas at load time — so the four sides cannot drift
 apart. That structure exists because the hand-written era produced two production incidents where
 they did.
+
+**The manifest is not the only evidence.** `record_probe`, `fetch_url` recording
+and `validate_html` write structured observations; a manifest on disk remains
+workspace data. Transport-observed attestations are held by the supervisor,
+outside the worker's writable evidence. Declared proof obligations inherit through
+plans. Missing coverage forces full review and, even when the artifact is approved,
+withholds L2's child trust credit, skill credit, distillation and promotion. An
+observation bound to a document whose digest changed is stale. Acceptance of a
+result and permission to learn from its method are separate decisions.
 
 ---
 
@@ -354,12 +416,12 @@ graph LR
         SRC["src/ · tests/ · docs/"]
     end
     subgraph DATA["Runtime data — deliberately not committed"]
-        DB[("<b>atoma.db</b><br/>agent types · versions<br/>lifecycle ledger · routing cache")]
+        DB[("<b>atoma.db</b><br/>agent types · versions<br/>auth · projects · platform journal<br/>lifecycle ledger · routing cache")]
         SK[("<b>skills/</b><br/>recipe bodies<br/>+ counters")]
         TR[("<b>runs/</b><br/>full JSON traces")]
         WS[("<b>~/.atoma/workspaces/</b><br/>deliverables")]
     end
-    subgraph MEAS["Measurement — committed"]
+    subgraph MEAS["New measurements — runtime output"]
         CSV["burnin/results.csv"]
     end
     SRC --> DATA
@@ -369,20 +431,29 @@ graph LR
     style MEAS fill:#f0fdf4
 ```
 
-**One database, not several.** Agent types, their version history, the audit ledger and the
-routing cache all live in a single SQLite file. That consolidation was recent and deliberate:
+**One primary product database, with operational exceptions.** Agent types, their
+version history, the lifecycle ledger, routing cache, auth, projects and platform
+journal use the primary SQLite store. This consolidation is deliberate:
 when the ledger was a sibling file, a counter and its audit event could be written in separate
 steps, so an ill-timed crash left the integrity checker reporting a state that could not
 otherwise occur. They now share a transaction.
 
 **Recipes stay on disk, and that is a decision rather than an omission.** `SKILL.md` is the
 portable interchange format — it can be read, grepped, hand-edited and exported to other agent
-tooling verbatim. Moving it into the database is recorded as revisit-when-a-second-tenant-exists,
-not as a to-do.
+tooling verbatim. Sidecars carry skill counters and provenance. Project workspaces, traces and skills
+live below `orgs/<orgId>/projects/<projectId>/`; the operator paths above remain
+separate. Agent trust is still instance-global. The intended shared skill commons
+with per-organisation trust is a design boundary, not a shipped guarantee.
+
+The machine-global MCP run lease uses `~/.atoma/mcp-run-lock.db`; private subscription
+profiles and their locks have their own operational storage. Supervisor verdicts
+and mend records live under `ATOMA_SUPERVISOR_DIR`. None belongs in a release
+archive. Back up persistent state before replacing it; do not wipe a store or
+trace corpus to reproduce a benchmark.
 
 **A fresh clone starts at zero.** The trained state is data, not source. That is what makes the
-cost curve a *measurement* — you can wipe everything and watch it regrow, which has been done
-across several full resets.
+cost curve a *measurement* — new runs can measure learning from empty state. Older measurements were
+archived at the 2026-08-18 reset; a fresh run does not regenerate their exact rows.
 
 ---
 
@@ -420,9 +491,18 @@ the engineering record linked from `AGENTS.md` rather than papered over.
   requires Docker Engine 28+: both bridge gateway modes are `isolated`, removing the host-side
   gateway addresses that a plain `--internal` network would still expose.
 
-It is not the default, deliberately: local development is single-tenant, so the isolation would
-protect the operator from nobody, while a real multi-tenant deployment would containerise always
-rather than by flipping a flag.
+Container isolation is optional on the local operator path. Model-authored shell
+commands still pose a risk to that operator's host. Authenticated project runs
+use containers with outbound networking disabled. Preview policies are configured
+separately; the login gate alone does not turn the local shell into a tenant boundary.
+
+**Preview is a separate boundary.** Supported delivered results and in-flight
+snapshots run as ephemeral generations, never in the mutable live workspace.
+Static previews need no application container; Node previews use a runtime image,
+a read-only root and, in production, gVisor. Origins use a separate registrable
+domain, short-lived claims and credential filtering. Runtime egress is denied by
+default; an organisation admin can approve hosts requested by a delivered project.
+In-flight previews receive no egress. See [preview deployment](preview-deployment.md).
 
 **One weak mechanism, documented as weak.** The routing cache memoises identical routing
 decisions. Measured over 748 real calls, only 13 were repeats — a **1.7% ceiling**, worth
@@ -435,16 +515,16 @@ above it.
 
 ## 8. Where the money goes
 
-Per run, on a mature family:
+Typical roles in the measured normal path; counts are not hard limits or current benchmarks:
 
 | Slot | Model tier | Typical count | Note |
 |---|---|---|---|
-| Top-level plan | frontier | **1** | The single largest line item. A shortcut existed and was removed: collapsing it produced monolithic deliverables with no per-phase checkpoint |
+| Top-level plan | frontier | **1** | One strategy call on the normal path; root replanning or synthesis can add calls. A shortcut existed and was removed: collapsing it produced monolithic deliverables with no per-phase checkpoint |
 | Routing scans | cheap | ~5–7 | One per phase; short-circuits the expensive call when something already fits |
 | Mid-tier plans | mid | **0 on the happy path** | Skipped entirely when the routing scan finds a clear match |
 | Reviews | cheap | 0 on trusted components | Replaced by the zero-token probe |
 | Execution | cheap | the bulk of tokens | Long tool loops; prompt caching is monitored live in every run summary |
-| Compiled phases | — | **0 calls**, but rare | Two tool calls and a strict JSON parse. Present in 45 of 156 corpus runs; across every committed controlled-run row it fired once in 54 build runs and 13 times in 30 maintenance runs |
+| Compiled phases | — | **0 calls**, but rare | Two tool calls and a strict JSON parse. Present in 45 of 156 corpus runs; across the historical controlled-run rows it fired once in 54 build runs and 13 times in 30 maintenance runs |
 
 **Prompt caching is load-bearing and monitored.** The system-level prompt is deliberately long
 enough to clear the provider's minimum cacheable size; trimming it below that threshold silently
@@ -467,16 +547,23 @@ Recorded so nobody has to discover it in a demo:
   trust and lifecycle ledger remain instance-global, so this is not yet safe for mutually
   untrusted organisations; see the dated boundary in
   [`saas-architecture.md`](saas-architecture.md).
-- **No hosted service.** The repository is public under the [AGPL-3.0](../LICENSE);
-  nothing runs it for you yet.
+- **Self-hosting requires operator setup.** The repository includes a compiled
+  deployment workflow and host templates, but deploying requires a configured host,
+  identity providers and credentials. See [automatic deployment](automatic-deployment.md).
 - **The browser-based family cannot reach zero cost yet.** Compiled scripts have no browser, so
-  the compiler correctly refuses to compile web-validation recipes. Every compiled script in the
-  catalogue belongs to the command-line and documentation bucket; other families borrow them
-  through the shared catalogue rather than owning any.
+  the compiler correctly refuses to compile web-validation recipes. In the historical measured
+  catalogue, compiled scripts belonged to the command-line and documentation bucket; those observations do not establish the contents of a fresh or privately trained store.
 - **Partial replay does not exist.** When a multi-phase plan is rejected, the whole plan re-runs;
   there is no mechanism to keep the good phases and redo only the bad one.
-- **Streaming, OpenTelemetry and external dashboards** are out of scope; observability is the
-  in-process metrics summary, the JSON traces and the local console.
+- **No OpenTelemetry export or external dashboard integration.** The console follows
+  runs live and optional web push reports meaningful events. Those features do not
+  imply a public model-token streaming API.
+- **No autonomous merge of repairs.** The sentinel observes live without an LLM.
+  The optional analyst inspects finished runs read-only; the mender consumes eligible
+  cited defects, checks an isolated change and opens a PR. A person merges it.
+  Analyst and mender reserve the shared run lease while working and cleaning up,
+  so a product run cannot start beside them. See the
+  [supervisor deployment guide](supervisor-codex-production.md).
 
 ---
 
@@ -487,8 +574,8 @@ Recorded so nobody has to discover it in a demo:
 | Why does mechanism X exist? | `AGENTS.md` for the active contract, then its linked engineering-record entry |
 | What was tried and rejected? | `docs/incidents/engineering-record-2026-08-14.md` § *Considered and rejected* |
 | What would multi-tenancy require? | [`saas-architecture.md`](saas-architecture.md) Layer 2 invariants and Layer 3 Track A/Track B roadmap |
-| What does a real run look like? | `npm run viz` — or `npm run viz:demo` for a mocked run with no API key |
+| What does a real run look like? | `npm run viz` for existing traces; `npm run viz:demo` writes a mocked run, and `npm run preview:demo` opens a seeded authenticated preview without paid inference |
 | How does another agent drive atoma? | `claude mcp add atoma --transport http <origin>/mcp --header "Authorization: Bearer <token>"` — one MCP, the tools your role admits, plus a goal-template prompt per task family at the platform tier |
-| Are the economics real? | regenerable with `npm run burnin`; the historical CSV was archived out of the repo at the 2026-08-18 from-scratch reset |
+| Are the economics real? | `npm run burnin` measures a new corpus using model quota; historical CSVs were archived at the 2026-08-18 reset |
 | …under a control? | `benchmark/PROTOCOL.md` — every round registered before it ran — and `benchmark/ROUND8.md` |
 | Do the deliverables actually work? | `benchmark/results-round8-scores.json` is the committed historical 7-check output; `verify-maint.mjs` now has 10 checks, but the round workspaces needed to regenerate it are not committed. Rounds 4-7 have no committed scorer output |

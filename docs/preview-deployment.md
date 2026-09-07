@@ -126,7 +126,7 @@ routing key.
 
 ```caddyfile
 atoma.run {
-    reverse_proxy 127.0.0.1:5173
+    reverse_proxy 127.0.0.1:4111
 }
 
 *.previews.example.net {
@@ -156,7 +156,9 @@ ignored otherwise.
 ## 4. The environment
 
 Every variable, with the reasoning, is in
-[`.env.example`](../.env.example). The minimum:
+[`.env.example`](../.env.example). The preview-specific settings below accompany
+the complete OAuth configuration
+from [automatic deployment](automatic-deployment.md):
 
 ```bash
 ATOMA_VIZ_AUTH=1
@@ -180,9 +182,10 @@ than a silent "disabled".
 
 ## 5. What it costs while it runs
 
-A preview is one container per generation plus a small relay, bounded by
-`ATOMA_PREVIEW_MAX_GLOBAL` and `ATOMA_PREVIEW_MAX_PER_ORG`. It lives only while
-someone is watching: the visualizer heartbeats, and the container stops at
+A Node preview uses one container per generation plus a small relay; static
+previews serve the classified files without an application container. Both are bounded by
+`ATOMA_PREVIEW_MAX_GLOBAL` and `ATOMA_PREVIEW_MAX_PER_ORG`. A preview lives only
+while someone is watching: the visualizer heartbeats, and the instance stops at
 `ATOMA_PREVIEW_IDLE_MS` without one, or at `ATOMA_PREVIEW_HARD_MS` regardless.
 The application's own traffic never counts as activity — a tab left open on
 generated code that polls itself cannot keep its own container alive.

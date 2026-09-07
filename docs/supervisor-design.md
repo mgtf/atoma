@@ -1,4 +1,4 @@
-> Deployment update, 2026-09-06: the operator selected a separate mender service on the VPS, with a dedicated clone and the shared run lease held throughout maintenance. The earlier CI and phase-boundary-only design below is historical. Current setup: [production guide](supervisor-codex-production.md).
+> Deployment update, 2026-09-06: the operator selected a separate mender service on the VPS, with a dedicated clone and the shared run lease held throughout maintenance. The earlier CI and phase-boundary-only design below is historical. Current setup: [production guide](supervisor-codex-production.md). The stdio MCP references below are historical too: the current control plane serves HTTP `/mcp`, as recorded in [the MCP decision](mcp-one-surface-2026-09-05.md).
 
 # Run supervision and the self-improvement loop — design
 

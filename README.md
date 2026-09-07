@@ -2,21 +2,17 @@
 
 # ⚛️ atoma
 
-### An AI agent platform that pays for the frontier model **once per task**, not once per step.
+### Three-tier AI orchestration with earned trust and inspectable execution.
 
-*Most agent systems run every step of every task on the most expensive model. atoma spends
-frontier reasoning on the decomposition alone and pushes the rest — routing, execution,
-verification — down to models that cost a fraction as much.*
+*atoma separates goal decomposition, routing and execution across model tiers. It
+builds software in a workspace, records the evidence behind each result, and retains
+reusable agent types and skills between runs.*
 
 [![CI](https://github.com/mgtf/atoma/actions/workflows/ci.yml/badge.svg)](https://github.com/mgtf/atoma/actions/workflows/ci.yml)
 ![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6)
-![benchmark](https://img.shields.io/badge/vs_Opus_direct-1.0–3.6×-success)
-![benchmark2](https://img.shields.io/badge/vs_Sonnet_direct-1.05×-yellow)
-![benchmark3](https://img.shields.io/badge/vs_Haiku_direct-0.36×_(atoma_loses)-critical)
-![breakeven](https://img.shields.io/badge/break--even-run_1–2_in_7_of_11_rounds-gold)
 ![providers](https://img.shields.io/badge/LLM_routes-Anthropic_·_Claude_·_Ollama_·_Z.ai_·_Codex-8A2BE2)
 
-**[→ How it works, in detail](docs/how-it-works.md)** · **[atoma.run](https://atoma.run)**
+**[→ How it works, in detail](docs/how-it-works.md)** · **[Install](#install-and-evaluate-it-locally)** · **[Documentation](#documentation)** · **[atoma.run](https://atoma.run)**
 
 </div>
 
@@ -28,44 +24,18 @@ verification — down to models that cost a fraction as much.*
 
 ---
 
-## The problem this addresses
+## What you can use today
 
-An AI agent that writes software costs money every time it thinks. Today that bill has an
-uncomfortable shape:
+Run a goal from the CLI or the role-scoped HTTP MCP, or configure the authenticated
+web console to create projects, start runs, inspect traces and publish delivered
+artifacts to GitHub. Supported web results have ephemeral previews, including
+snapshots while a run is in flight. The console includes a member guide, model
+settings and optional notifications.
 
-- **It does not improve.** The thousandth invoice-parser looks exactly as expensive as the first.
-  Nothing the system learned on task 999 makes task 1000 cheaper.
-- **It is unpredictable.** On the same task, on the same model, a single frontier agent's cost
-  varied by **2.1×** between rounds measured 22 hours apart — depending on how long the model
-  chooses to think. That is hard to put in a client proposal.
-- **It cannot prove its work.** The agent that did the job is usually also the one that certifies
-  it. For anything billable, self-certification is not evidence.
-
-For a consultancy or a product team, this makes agent automation a variable cost that scales
-linearly with delivery — the opposite of the software economics that justified building it.
-
-## Where the money actually goes
-
-One measured run of the same maintenance task, both arms, [round 8](benchmark/ROUND8.md):
-
-| | frontier calls | **frontier cost** | cheap-model cost | total |
-|---|---|---|---|---|
-| single frontier agent | 1 | **$0.820** | — | $0.820 |
-| atoma, warm | 1 | **$0.027** | $0.192 | $0.219 |
-
-> **This comparison is against a frontier agent, and that choice does most of the
-> work.** [Rounds 9–11](#rounds-911--how-much-of-this-is-tiering-and-how-much-is-the-control-model)
-> re-ran the same task against Sonnet-direct and Haiku-direct: the advantage falls
-> to 1.05× and then reverses to a 2.8× loss. Read them before quoting the table
-> above.
-
-The baseline does the whole job inside one frontier call: read the files, edit, run five
-verification commands, rewrite the docs. Every tool result stays in the conversation and is
-re-billed at frontier rates on every subsequent turn.
-
-atoma pays the frontier model **only to decompose the goal** — one call, $0.027 — and hands the
-execution to a cheap model. **A ~30× reduction on the expensive line item** is where the saving
-comes from. Everything below is that fact, measured repeatedly.
+The default local runner has file-tool containment and process cleanup; shell
+isolation requires the container backend. The authenticated control plane scopes
+projects and runs to organisations, but agent trust remains instance-global.
+See [Status](#status) before deploying for unrelated organisations.
 
 ## The approach
 
@@ -75,7 +45,8 @@ Three mechanisms. The first two carry the result; the third is real but has not 
 An L3 **tissue** decomposes the goal into phases, an L2 **cell** routes each phase, and an L1
 **molecule** does the work by invoking atomic tool **elements** such as file-writing and
 command-running. This is structural, not a guideline — only molecules receive elements on the
-supervised path. A yes/no check never runs on a reasoning model.
+supervised path. Validation uses the cheap route by default; explicit tier pins determine the
+models actually served.
 
 **2. Components earn trust, and can lose it.**
 Every reusable component carries a success/failure record. Once one has a clean track record the
@@ -83,17 +54,20 @@ system stops paying a model to review its output — but it still runs a zero-to
 probe against the artefact first, because the component nobody watches is exactly the one that
 needs watching. One failure revokes trust automatically.
 
-**3. What proves repeatable gets compiled away — a correct mechanism that does not yet pay.**
-When the system solves a novel task it writes the pattern down as a recipe; a recipe that keeps
-working is compiled into a script that runs with zero model calls. The compiler *refuses*
+**3. Reusable recipes can become deterministic scripts.**
+After verified, observed work, the system can learn a reusable recipe. With promotion
+enabled, a repeatedly successful recipe can be compiled into a script; that new script
+must earn its own trust before it can run with zero model calls. Promotion is disabled
+by default for from-scratch runs and enabled for seeded maintenance work. The compiler *refuses*
 patterns needing judgment, and records why — verbatim, from a benchmark run:
 
 > *"designing a hand-written state-machine parser and type-inference/stats engine tailored to
 > whatever edge cases a given spec names … is an irreducible per-task design/reasoning act that
 > cannot be replaced by a fixed deterministic script without hardcoding one particular grammar."*
 
-**Twelve controlled rounds have not shown this mechanism paying.** Across every committed atoma
-row it fired once in 54 build runs, then 11 / 1 / 1 / 0 times across four maintenance rounds
+**Twelve controlled rounds have not shown this mechanism paying.** These are historical
+measurements, not a benchmark of the current release. Across the recorded atoma
+rows it fired once in 54 build runs, then 11 / 1 / 1 / 0 times across four maintenance rounds
 (10 / 1 / 1 / 0 on the primary tasks alone) — and **zero times in rounds 9, 10, 11 and 12**,
 despite four promotions, making seven consecutive rounds contributing nothing. Round 5 shipped
 seven wrong deliverables out of nine. Each fix since made the path more correct and none made it cheaper; the best remaining
@@ -101,170 +75,14 @@ idea was designed, measured at a **$0.03/run ceiling** and
 [refused](docs/hybrid-skills-design.md). It is kept because it is sound and cheap to carry, not
 because it is load-bearing. Mechanisms 1 and 2 are the product.
 
-## The controlled experiment
-
-The same task, from an **empty registry and empty skill store**, given to atoma and to a single
-frontier agent — same sandbox, same tools, same budget, same token accounting,
-> **Raw measurement CSVs are no longer in the repository.** The project was reset to a from-scratch state on 2026-08-18 — store, skills, traces and measurement CSVs were archived out of the tree so that no code has to accommodate a previous era. The round write-ups keep the reasoning and the numbers as recorded at the time; the rows behind them are in the archive, not reproducible from this checkout.
-
-[registered before each run](benchmark/PROTOCOL.md). Twelve rounds: four on a from-scratch build,
-four on a maintenance task, three that vary the control arm’s model instead of the code, and one on a
-harder maintenance family built after the eighth could no longer discriminate.
-
-![cost curve, round 1](docs/benchmark-cost-curve.svg)
-<sub>Round 1 only. Later rounds are written up in `benchmark/ROUND{2..12}.md`.</sub>
-
-Mean cost per run on each round's main task, each against **its own same-day control**:
-
-| | R1 | R2 | R3 | R4 | | R5 | R6 | R7 | R8 |
-|---|---|---|---|---|---|---|---|---|---|
-| | *build task* | | | | | *maintenance task* | | | |
-| frontier direct | $0.82 | $1.01 | $1.68 | $1.10 | | $0.71 | $0.58 | $0.58 | $0.82 |
-| **atoma** | **$0.53** | **$0.54** | **$0.51** | **$0.47** | | **$0.20** | **$0.28** | **$0.59** | **$0.31** |
-| ratio | 1.54× | 1.89× | 3.33× | 2.35× | | 3.57× | 2.05× | **1.00×** | 2.62× |
-| control arm *n* | 5 | 3 | 3 | 2 | | 2 | 2 | 2 | **1** |
-
-**Read the two weak rounds, not just the strong ones.** Round 7 shows **no saving at all** — an
-earlier sequential phase had already applied the edit, then validators repeatedly rejected a
-later phase for honestly reporting the work already satisfied. That rare semantics gap cost
-$0.33/run in escalation churn until it was [diagnosed and fixed](benchmark/ROUND7.md). Round 8's
-control arm is a **single observation**: its
-second run lost its LLM connection, so its cost is unrecoverable (the deliverable was correct).
-Round 5's 3.57× is the round whose deliverables were later found wrong — see below.
-
-### Rounds 9–11 — how much of this is tiering, and how much is the control model?
-
-Rounds 1–8 all compared atoma against **one Opus agent**. A sceptic's obvious reply is
-that they would simply run a cheaper model directly and pay less than either arm. Rounds
-9–11 ran exactly that experiment: the control arm's model was pinned independently
-(`ATOMA_BASELINE_MODEL`) while atoma kept its default `L1=haiku / L2=sonnet / L3=opus`
-gradient. Same task, same seed, same code path, **all measured on 2026-08-15**.
-
-| control arm | n | mean | correct | mean ÷ atoma |
-|---|---|---|---|---|
-| [Opus direct](benchmark/ROUND11.md) | 3 | $0.5104 | 3/3 | **1.78×** |
-| [Sonnet direct](benchmark/ROUND9.md) | 3 | $0.3012 | 3/3 | **1.05×** |
-| [Haiku direct](benchmark/ROUND10.md) | 6 | $0.1032 | 6/6 | **0.36×** — atoma loses |
-| atoma (12 runs, two series from empty state) | 12 | $0.2865 | 13/14 | — |
-
-**Both registered hypotheses were refuted, and they are published here as required by the
-protocol.** Against Sonnet, atoma never reached break-even inside six runs (H9, cost).
-Against Haiku, atoma was 2.5× more expensive *and* scored lower — one deliverable in seven
-left two probe-manifest entries pointing at a fixture it had deleted (H10, correctness).
-
-**What survives:** the structural claim. atoma really does spend one frontier call per task
-rather than one per step, visibly, in every trace. On this task that is worth about $0.22 a
-run against Opus-direct.
-
-**What does not:** the assumption underneath the architecture — that a cheap model needs
-supervision to be *correct*. Twelve of twelve unsupervised control deliverables were right,
-first try, at all three price points.
-
-### Round 12 — the harder task, and what it found
-
-Rounds 9–11 ran on a one-file, five-invocation maintenance edit that turned out not to
-discriminate: every deliverable of every arm scored full marks. [Round 12](benchmark/ROUND12.md)
-was built to be able to fail — `tabstat`, three source files, eleven documented invocations,
-three clauses one of which forbids a change, and **only three of ten documented statistics
-actually move**, so a deliverable can fail by leaving the record stale *or* by whitewashing
-values that never changed. The scorer was validated in four directions before the round.
-
-| | control (Haiku direct) | atoma |
-|---|---|---|
-| deliverables at full marks | **6 of 6** | **5 of 7** |
-| mean cost | **$0.2495** | $0.4881 |
-
-**The task discriminated, and it discriminated against atoma.** Both failures are the same
-class — the README contradicting the artefact — and the code was correct in 6 of 6 atoma runs.
-One run updated the README's prose and left all seven recorded output blocks stale; another
-updated every block and left the prose verbatim from the seed. **atoma updated each half of
-the file and never both.**
-
-Run 3's trace shows why, and it is a real architectural defect rather than bad luck. The plan
-was three sequential phases — implement, re-verify, document. Phase 2 re-recorded the probes
-*after* the edit, compared them against themselves and reported *"zero changed entries"*; phase
-3 was then told to update *"only the invocations whose output legitimately changed per the
-previous phase's change list"* — an empty list — and correctly did nothing. **The change list
-must be computed before the edit, not after it.** A single agent holding the whole job in one
-context never has that failure available.
-
-**So the correctness case for supervision is now refuted twice, in the same direction, on an
-easy task and a harder one.** It is not merely unmeasured — on this family of work, at this
-scale, it is absent. What round 12 did produce is the first finding in four rounds that is
-about supervision itself, and it is actionable.
-
-**The frontier baseline is volatile; atoma is not.** Across the four build rounds the control
-swung **2.1×** ($0.82 → $1.68) while atoma stayed inside **$0.47–0.54**. atoma exposes one
-frontier call in roughly fifteen, so frontier variance is diluted; a single-agent baseline is
-exposed end to end and passes it straight through. That was never the hypothesis — it fell out of
-a confounder the protocol registered in advance, and it is the most reproducible result of the
-eight.
-
-| | frontier direct | atoma |
-|---|---|---|
-| A *novel* task in the same family | $1.18 <sub>(n=2, spanning 2.5×)</sub> | **$0.18–0.55, zero new recipes learned** |
-| Deliverable correctness, executing scorer <sub>(R1 · R2 · R3 · R8 · R9 · R10 · R11 · R12)</sub> | 7/7 · 3/3 · 3/3 · 2/2 · 3/3 · 6/6 · 3/3 · **6/6** | **12/12 · 16/16 · 16/16 · 7/7 · 7/7 · 6/7 · — · 5/7** |
-
-Generalisation is the claim that has held most consistently: **eleven held-out runs across eight
-rounds, all in the same family as the trained task, all needing zero new recipes.** The frontier
-comparison for it rests on two observations from round 1 and should be read as indicative.
-
-Correctness is scored by [an executing scorer run outside both arms](benchmark/verify-maint.mjs)
-— it runs the artefact rather than reading claims about it. **Rounds 4–7 have no committed
-scorer output**, so their correctness figures are not reproducible from this repo; rounds 1–3 and
-8–11 are. That gap is recorded rather than papered over. From round 9 the run→workspace mapping
-is [computed from an anchor recorded before the round](benchmark/score-round.mjs) rather than
-reconstructed afterwards, which is how round 8 came to publish a false 83.3% before correcting it.
-
-**One headline in this table used to be wrong, and how it was caught matters more than the
-number.** Round 5 measured 4.7× — and the independent scorer found **7 of 9 deliverables shipping
-a README that contradicted the artefact it documented**. A compiled verifier had been handed an
-*"update README.md"* subtask, replayed its manifest, reported success and written nothing; the
-guard meant to catch that only checked whether named files *exist*, which is inert when every
-file was seeded. With the guard fixed, correctness went to 5 of 6 and the ratio fell to 2.05×.
-Half the original headline was work that had not happened. The pipeline's own "delivered" banner
-never noticed.
-
-## The longer-run picture
-
-Beyond the controlled experiment, a burn-in corpus of 156 runs across 8 task families was
-measured with `npm run burnin`. Its CSV is archived rather than committed — see the note above.
-
-| | |
-|---|---|
-| Runs recorded | **156** across 8 task families |
-| Delivered successfully | **150 — 96.2%** |
-| Cost per delivered run | median **$0.33**, mean $0.37 |
-| Cheapest *delivered* run | **$0.126 · 132s** |
-| Runs containing at least one zero-model-call phase | **45 of 156** — median $0.26 · 227s |
-| Expensive-model calls per run | **1** on the normal path (148 of 150 delivered runs) |
-
-### Three honest readings
-
-**The batch average across those 156 runs does not fall, and that is expected.** It is not the
-same measurement as the experiment above. Cost falls on a *repeated* task; the batch curve is
-flat-to-rising because the task generator deliberately proposes harder, novel work each round.
-Read the controlled experiment for the amortisation claim and this corpus for breadth — not the
-other way round.
-
-**The zero-cost mechanism applies to *phases*, and it is not what makes atoma cheaper.** No
-complete run has ever cost $0.00, and none can today: every run still pays for one top-level
-planning call. 45 of 156 corpus runs contain a phase that executed with no model call — but those
-runs' mean cost is $0.37, identical to the corpus mean, and in the controlled rounds the compiled
-path fired 14 times in 8 rounds, 11 of them in the single round whose deliverables were wrong.
-The saving comes from tiering and earned trust.
-
-**Failure handling improved measurably.** Runs with at least one escalation fell from **27 of
-the first 52** to **zero in the last thirty**. That is a learning curve being paid down.
-
 ## What it builds today
 
-Verified across 156 runs: **single-page web applications**, **zero-dependency HTTP JSON APIs**,
+The historical 156-run corpus covered: **single-page web applications**, **zero-dependency HTTP JSON APIs**,
 **command-line tools**, and **technical documentation** — each delivered into an isolated
 workspace with a machine-readable record of every command that was run to verify it.
 
-It is a **framework for building such systems**, not a finished product. There is no hosted
-service or complete multi-tenancy — see [Status](#status) below. The opt-in authenticated
+It is a **framework for building such systems**, not a finished product. The repository supports self-hosted deployment; full tenant isolation remains
+incomplete — see [Status](#status) below. The opt-in authenticated
 control plane permits multiple organisations and scopes projects, runs, workspaces, traces and
 project learning to them. The atom catalogue, atom trust and lifecycle ledger remain
 instance-global, while the operator skill store and burn-in surfaces answer only the
@@ -337,7 +155,7 @@ npm run viz:mui                   # frozen DOM/MUI fallback (bugfixes only)
 npm run viz:serve                 # compiled visualizer after npm run build
 npm run viz:smoke                 # real-browser proof of the compiled GPU client
 npm run skills -- list            # what it learned, and what it refused to compile
-npm run burnin                    # regenerate the economics table above
+npm run burnin                    # optional: measure a NEW corpus; consumes model quota
 ```
 
 ### Optional organisation login
@@ -347,7 +165,7 @@ The visualizer remains open on loopback by default. The keys to set are
 provider's canonical `ATOMA_AUTH_<PROVIDER>_CLIENT_ID` (plus its client
 secret for GitHub and Google; an approved ChatGPT client may use PKCE
 without one) — `.env.example` documents them all. On a source checkout, copy
-it to `.env`: `npm run viz`, `npm run doctor:dev` and `npm run auth:dev`
+it to `.env`: `npm run viz`, `npm run doctor:dev`, `npm run auth:dev` and `npm run projects:dev`
 apply unset keys from that file. The compiled `npm run viz:serve` reads only
 the process environment (systemd, Docker, the platform), matching
 production — a `.env` file does nothing there. For the Vite HMR path the origin is
@@ -371,8 +189,9 @@ manifest is published into one idempotent GitHub repository. Gated `/api/runs`
 lists that organisation's project traces from
 `orgs/<orgId>/projects/<projectId>/runs/<runId>/`.
 
-The first GitHub login creates an organisation and becomes its owner. Further
-admission is explicit and one-use. In a source checkout, mint an invitation
+A first login without an invitation creates a personal organisation and makes
+that principal its owner. Joining an existing organisation requires an explicit
+one-use invitation. In a source checkout, mint an invitation
 for an existing org, then send the printed token only to its intended
 recipient:
 
@@ -389,6 +208,12 @@ org. Gated run traces follow the active org too. Ungated viz still reads the
 operator `./runs` directory.
 `npm run doctor` validates the auth switch, canonical origin, provider
 registry and optional GitHub App snapshot without contacting GitHub.
+
+Settings separates provider API keys, per-tier models, personal subscriptions and
+MCP access. Personal Codex login binds a private inference profile to the requesting
+principal; it is distinct from signing into the console. Personal Claude connection
+is currently unavailable pending provider approval. Operator-configured host
+subscriptions and the local `claude-cli` runner are separate paths.
 
 The default visualizer is a full-GPU React 19 client: one PixiJS context
 renders the component system and ambient field through WebGPU with a
@@ -453,8 +278,8 @@ command. The compiled archive attached to each GitHub Release includes MCP,
 its build-run path, doctor, the identity/invitation CLI (`npm run auth`), and
 the compiled visualizer (`npm run viz:serve`), including authenticated
 organisation-scoped project creation and launch when the optional gate is
-configured;
-benchmark and registry/skill mutation-oriented operator CLIs remain source-only.
+configured. The compiled project, sentinel, analyst, mender and deployment-preflight CLIs are
+also included. Benchmark and registry/skill mutation-oriented operator CLIs remain source-only.
 See [`CHANGELOG.md`](CHANGELOG.md) and the
 [`v0.1.0 release soak`](docs/release-soak-v0.1.0.md), followed by the
 [`v0.1.1 container/egress acceptance matrix`](docs/release-acceptance-v0.1.1.md)
@@ -462,8 +287,8 @@ and [`v0.1.3 release acceptance`](docs/release-acceptance-v0.1.3.md).
 
 A fresh clone starts with **no learned state at all** — the catalogue, the recipes and the
 traces are runtime data, deliberately not committed. What you clone is the framework; the
-experience is earned on your own machine, which is what makes the cost curve verifiable rather
-than asserted.
+experience is earned on your own machine, which lets you measure learning on your own tasks. Historical costs are not a
+prediction for a fresh checkout or different models.
 
 ## Drive it from the agent you already use (MCP)
 
@@ -474,7 +299,7 @@ line registers it — a URL and a bearer:
 ```bash
 claude mcp add atoma --transport http https://<your-instance>/mcp \
   --header "Authorization: Bearer <token from Settings, or npm run auth -- token>"
-# locally, ungated: npm run viz, then http://127.0.0.1:4110/mcp with no token
+# locally, ungated: npm run viz, then http://127.0.0.1:4111/mcp with no token
 ```
 
 **Twenty-four tools.** ONE MCP for everyone, and what you see depends on who you are. An organisation member
@@ -482,8 +307,9 @@ sees its projects and runs — start one and get an id to poll, cancel, retry a 
 trace's shape. An organisation admin also sees its members and model defaults. The platform admin
 (or the operator on a local ungated server) sees everything above plus operator runs, the agent
 catalogue with its earned trust, the recipe library and its lifecycle, the audit ledger's integrity
-projection, the operator run corpus, the tool-friction report and the audit journal. The caller pays
-for one tool call and atoma does the tiering.
+projection, the operator run corpus, the tool-friction report and the audit journal.
+Starting a run initiates multiple internal model calls on the configured provider
+accounts; polling and readers do not themselves launch inference.
 
 **Identity is the security argument.** A token is minted by a signed-in principal for one
 organisation, stored hashed, revocable, journaled; every call is bound to that organisation and
@@ -491,10 +317,11 @@ re-checks the role, and a run itself holds no token. The earlier stdio-only rule
 framework on the operator's machine; the deployed product answered that question with its
 authentication gate ([decision record](docs/mcp-one-surface-2026-09-05.md)).
 
-Two properties are declared to the host rather than left to be discovered: starting a run is
-**destructive** — it archives the shared workspace unless told otherwise, and it mutates the
-catalogue, the recipe store and the ledger — and runs are **serialised**, because concurrent runs
-share one workspace and would yield plausible-looking wrong economics instead of an error. The
+Two properties are declared to the host rather than left to be discovered: starting an
+operator run is **destructive** — it archives the shared workspace unless told otherwise,
+and it mutates the catalogue, the recipe store and the ledger. Runs are
+**serialised** by a machine-global admission lease. Project runs have
+separate workspaces but share that slot with operator runs and background maintenance. The
 slot is a cross-process lease, not just server memory; cancellation keeps it until the detached
 process group is confirmed gone and the trace has closed.
 
@@ -507,24 +334,26 @@ What exists: the full three-tier loop, the learning and compilation lifecycle, s
 execution with opt-in container isolation and proxied egress, an append-only audit ledger with
 integrity checking, a web console with optional multi-organisation login, project launch and
 GitHub publication, ephemeral previews of delivered or in-flight web results, a mechanical live
-watch, platform notifications, and a measurement harness. A first login creates a personal
+watch, an optional post-mortem analyst, an isolated mender that proposes correction
+pull requests for human merge, platform notifications, and a measurement harness.
+A first login creates a personal
 organisation unless it redeems an invitation to an existing one.
 
-What does not: full tenant isolation or a hosted service. Authenticated projects, their run
+What does not: full tenant isolation. Authenticated projects, their run
 workspaces, traces and project skills are scoped to the viewer's active organisation for now;
 skills are meant to become a commons shared across organisations, with trust earned per
 organisation. The platform admin can read across organisations. The atom catalogue, atom
 trust and lifecycle ledger remain instance-global, however, so the control plane is not yet
-safe for mutually
-untrusted organisations. The repository is public and open source so that the sandbox, the
-egress path and the cost accounting can be audited and built upon; the hosted service does
-not exist yet.
+safe for mutually untrusted organisations. The repository is public and open source so that the sandbox, the
+egress path and the cost accounting can be audited and built upon; the supported deployment procedure is
+[`docs/automatic-deployment.md`](docs/automatic-deployment.md).
 The dated current state, invariants and Track A/Track B roadmap are reconciled in
 [`docs/saas-architecture.md`](docs/saas-architecture.md).
 
 ![atoma's subsystems and the paths between them, drawn from the AGENTS.md subsystem map](docs/architecture.svg)
 <sub>Regenerated from the repository by <code>npm run docs:architecture -- --apply --render --svg</code>; a subsystem
-that exists in `src/` and not in this picture fails <code>npm run docs:check</code>.</sub>
+that is absent from the diagram IR fails <code>npm run docs:check</code>. The check
+validates the IR, not the rendered SVG; rendering requires a separate Archify checkout.</sub>
 
 <!-- atoma:facts:begin -->
 <!-- Generated from this checkout by `npm run docs:facts -- --apply`. Do not edit by hand. -->
@@ -542,6 +371,213 @@ that exists in `src/` and not in this picture fails <code>npm run docs:check</co
 <!-- atoma:facts:end -->
 
 **[→ How it works: components, flows and diagrams](docs/how-it-works.md)**
+
+## Documentation
+
+- [How it works](docs/how-it-works.md): architecture, supervision, evidence, state and limits.
+- [Development setup](docs/development-setup.md) and [contributing](CONTRIBUTING.md): install and verify a source checkout.
+- [Automatic deployment](docs/automatic-deployment.md), [GitHub App setup](docs/github-app-setup.md) and [preview deployment](docs/preview-deployment.md): operator procedures.
+- [Supervisor on Debian](docs/supervisor-codex-production.md): optional analyst and mender services.
+- [Changelog](CHANGELOG.md) and [security policy](SECURITY.md): release history and reporting.
+- [SaaS architecture](docs/saas-architecture.md): implemented boundaries and the remaining design roadmap.
+
+Dated designs, incident reports and release acceptance notes describe the revision
+or experiment they record; they are not substitutes for the current setup guides.
+
+## Historical measurements
+
+The following results predate the 2026-08-18 state reset and the current release.
+Raw CSVs and run workspaces were archived outside this repository. The committed
+round write-ups and scorer summaries preserve the findings, including failures;
+new runs measure a new corpus rather than regenerate those rows.
+
+<details>
+<summary>Read the controlled benchmark and 156-run corpus findings</summary>
+
+### Where the money went in round 8
+
+One measured run of the same maintenance task, both arms, [round 8](benchmark/ROUND8.md):
+
+| | frontier calls | **frontier cost** | cheap-model cost | total |
+|---|---|---|---|---|
+| single frontier agent | 1 | **$0.820** | — | $0.820 |
+| atoma, warm | 1 | **$0.027** | $0.192 | $0.219 |
+
+> **This comparison is against a frontier agent, and that choice does most of the
+> work.** [Rounds 9–11](#rounds-911--how-much-of-this-is-tiering-and-how-much-is-the-control-model)
+> re-ran the same task against Sonnet-direct and Haiku-direct: the advantage falls
+> to 1.05× and then reverses to a 2.8× loss. Read them before quoting the table
+> above.
+
+The baseline does the whole job inside one frontier call: read the files, edit, run five
+verification commands, rewrite the docs. Every tool result stays in the conversation and is
+re-billed at frontier rates on every subsequent turn.
+
+In this observation, atoma paid the frontier model **to decompose the goal** — one call, $0.027 — and hands the
+execution to a cheap model. **A ~30× reduction on the expensive line item** is where the saving
+comes from. Everything below is that fact, measured repeatedly.
+
+
+### The controlled experiment
+
+The same task, from an **empty registry and empty skill store**, given to atoma and to a single
+frontier agent — same sandbox, same tools, same budget and token accounting,
+[registered before each run](benchmark/PROTOCOL.md).
+
+> **Raw measurement CSVs are no longer in the repository.** The project was reset to a from-scratch state on 2026-08-18 — store, skills, traces and measurement CSVs were archived out of the tree so that no code has to accommodate a previous era. The round write-ups keep the reasoning and the numbers as recorded at the time; the rows behind them are in the archive, not reproducible from this checkout.
+
+Twelve rounds: four on a from-scratch build,
+four on a maintenance task, three that vary the control arm’s model instead of the code, and one on a
+harder maintenance family built after the eighth could no longer discriminate.
+
+![cost curve, round 1](docs/benchmark-cost-curve.svg)
+<sub>Round 1 only. Later rounds are written up in `benchmark/ROUND{2..12}.md`.</sub>
+
+Mean cost per run on each round's main task, each against **its own same-day control**:
+
+| | R1 | R2 | R3 | R4 | | R5 | R6 | R7 | R8 |
+|---|---|---|---|---|---|---|---|---|---|
+| | *build task* | | | | | *maintenance task* | | | |
+| frontier direct | $0.82 | $1.01 | $1.68 | $1.10 | | $0.71 | $0.58 | $0.58 | $0.82 |
+| **atoma** | **$0.53** | **$0.54** | **$0.51** | **$0.47** | | **$0.20** | **$0.28** | **$0.59** | **$0.31** |
+| ratio | 1.54× | 1.89× | 3.33× | 2.35× | | 3.57× | 2.05× | **1.00×** | 2.62× |
+| control arm *n* | 5 | 3 | 3 | 2 | | 2 | 2 | 2 | **1** |
+
+**Read the two weak rounds, not just the strong ones.** Round 7 shows **no saving at all** — an
+earlier sequential phase had already applied the edit, then validators repeatedly rejected a
+later phase for honestly reporting the work already satisfied. That rare semantics gap cost
+$0.33/run in escalation churn until it was [diagnosed and fixed](benchmark/ROUND7.md). Round 8's
+control arm is a **single observation**: its
+second run lost its LLM connection, so its cost is unrecoverable (the deliverable was correct).
+Round 5's 3.57× is the round whose deliverables were later found wrong — see below.
+
+### Rounds 9–11 — how much of this is tiering, and how much is the control model?
+
+Rounds 1–8 all compared atoma against **one Opus agent**. A sceptic's obvious reply is
+that they would simply run a cheaper model directly and pay less than either arm. Rounds
+9–11 ran exactly that experiment: the control arm's model was pinned independently
+(`ATOMA_BASELINE_MODEL`) while atoma kept its default `L1=haiku / L2=sonnet / L3=opus`
+gradient. Same task, same seed, same code path, **all measured on 2026-08-15**.
+
+| control arm | n | mean | correct | mean ÷ atoma |
+|---|---|---|---|---|
+| [Opus direct](benchmark/ROUND11.md) | 3 | $0.5104 | 3/3 | **1.78×** |
+| [Sonnet direct](benchmark/ROUND9.md) | 3 | $0.3012 | 3/3 | **1.05×** |
+| [Haiku direct](benchmark/ROUND10.md) | 6 | $0.1032 | 6/6 | **0.36×** — atoma loses |
+| atoma (12 runs, two series from empty state) | 12 | $0.2865 | 13/14 | — |
+
+**Both registered hypotheses were refuted, and they are published here as required by the
+protocol.** Against Sonnet, atoma never reached break-even inside six runs (H9, cost).
+Against Haiku, atoma was 2.5× more expensive *and* scored lower — one deliverable in seven
+left two probe-manifest entries pointing at a fixture it had deleted (H10, correctness).
+
+**What survives:** the structural claim. the measured normal path spent one top-tier decomposition call per task.
+That is not a hard call limit: replanning and synthesis can add calls. On this task that is worth about $0.22 a
+run against Opus-direct.
+
+**What does not:** the assumption underneath the architecture — that a cheap model needs
+supervision to be *correct*. Twelve of twelve unsupervised control deliverables were right,
+first try, at all three price points.
+
+### Round 12 — the harder task, and what it found
+
+Rounds 9–11 ran on a one-file, five-invocation maintenance edit that turned out not to
+discriminate: every deliverable of every arm scored full marks. [Round 12](benchmark/ROUND12.md)
+was built to be able to fail — `tabstat`, three source files, eleven documented invocations,
+three clauses one of which forbids a change, and **only three of ten documented statistics
+actually move**, so a deliverable can fail by leaving the record stale *or* by whitewashing
+values that never changed. The scorer was validated in four directions before the round.
+
+| | control (Haiku direct) | atoma |
+|---|---|---|
+| deliverables at full marks | **6 of 6** | **5 of 7** |
+| mean cost | **$0.2495** | $0.4881 |
+
+**The task discriminated, and it discriminated against atoma.** Both failures are the same
+class — the README contradicting the artefact — and the code was correct in 6 of 6 atoma runs.
+One run updated the README's prose and left all seven recorded output blocks stale; another
+updated every block and left the prose verbatim from the seed. **atoma updated each half of
+the file and never both.**
+
+Run 3's trace shows why, and it is a real architectural defect rather than bad luck. The plan
+was three sequential phases — implement, re-verify, document. Phase 2 re-recorded the probes
+*after* the edit, compared them against themselves and reported *"zero changed entries"*; phase
+3 was then told to update *"only the invocations whose output legitimately changed per the
+previous phase's change list"* — an empty list — and correctly did nothing. **The change list
+must be computed before the edit, not after it.** A single agent holding the whole job in one
+context never has that failure available.
+
+**So the correctness case for supervision is now refuted twice, in the same direction, on an
+easy task and a harder one.** It is not merely unmeasured — on this family of work, at this
+scale, it is absent. What round 12 did produce is the first finding in four rounds that is
+about supervision itself, and it is actionable.
+
+**The historical frontier baseline varied more across these rounds.** Across the four build rounds the control
+swung **2.1×** ($0.82 → $1.68) while atoma stayed inside **$0.47–0.54**. atoma exposes one
+frontier call in roughly fifteen, so frontier variance is diluted; a single-agent baseline is
+exposed end to end and passes it straight through. That was never the hypothesis — it fell out of
+a confounder the protocol registered in advance, within these historical observations. It does not establish current model economics.
+
+| | frontier direct | atoma |
+|---|---|---|
+| A *novel* task in the same family | $1.18 <sub>(n=2, spanning 2.5×)</sub> | **$0.18–0.55, zero new recipes learned** |
+| Deliverable correctness, executing scorer <sub>(R1 · R2 · R3 · R8 · R9 · R10 · R11 · R12)</sub> | 7/7 · 3/3 · 3/3 · 2/2 · 3/3 · 6/6 · 3/3 · **6/6** | **12/12 · 16/16 · 16/16 · 7/7 · 7/7 · 6/7 · — · 5/7** |
+
+Generalisation is the claim that has held most consistently: **eleven held-out runs across eight
+rounds, all in the same family as the trained task, all needing zero new recipes.** The frontier
+comparison for it rests on two observations from round 1 and should be read as indicative.
+
+Correctness is scored by [an executing scorer run outside both arms](benchmark/verify-maint.mjs)
+— it runs the artefact rather than reading claims about it. **Rounds 4–7 have no committed
+scorer output**, so their correctness figures are not reproducible from this repo; rounds 1–3 and
+8–11 retain scorer summaries, but their original workspaces are archived and cannot
+be re-executed from this checkout alone. That gap is recorded rather than papered over. From round 9 the run→workspace mapping
+is [computed from an anchor recorded before the round](benchmark/score-round.mjs) rather than
+reconstructed afterwards, which is how round 8 came to publish a false 83.3% before correcting it.
+
+**One headline in this table used to be wrong, and how it was caught matters more than the
+number.** Round 5 measured 4.7× — and the independent scorer found **7 of 9 deliverables shipping
+a README that contradicted the artefact it documented**. A compiled verifier had been handed an
+*"update README.md"* subtask, replayed its manifest, reported success and written nothing; the
+guard meant to catch that only checked whether named files *exist*, which is inert when every
+file was seeded. With the guard fixed, correctness went to 5 of 6 and the ratio fell to 2.05×.
+Half the original headline was work that had not happened. The pipeline's own "delivered" banner
+never noticed.
+
+### The longer-run picture
+
+Beyond the controlled experiment, a burn-in corpus of 156 runs across 8 task families was
+measured with `npm run burnin`. Its CSV is archived rather than committed — see the note above.
+
+| | |
+|---|---|
+| Runs recorded | **156** across 8 task families |
+| Delivered successfully | **150 — 96.2%** |
+| Cost per delivered run | median **$0.33**, mean $0.37 |
+| Cheapest *delivered* run | **$0.126 · 132s** |
+| Runs containing at least one zero-model-call phase | **45 of 156** — median $0.26 · 227s |
+| Expensive-model calls per run | **1** on the normal path (148 of 150 delivered runs) |
+
+### Three honest readings
+
+**The batch average across those 156 runs does not fall, and that is expected.** It is not the
+same measurement as the experiment above. Cost falls on a *repeated* task; the batch curve is
+flat-to-rising because the task generator deliberately proposes harder, novel work each round.
+Read the controlled experiment for the amortisation claim and this corpus for breadth — not the
+other way round.
+
+**The zero-cost mechanism applies to *phases*, and it is not what makes atoma cheaper.** No
+complete run has ever cost $0.00, and none can today: every run still pays for one top-level
+planning call. 45 of 156 corpus runs contain a phase that executed with no model call — but those
+runs' mean cost is $0.37, identical to the corpus mean, and in the controlled rounds the compiled
+path fired 14 times in 8 rounds, 11 of them in the single round whose deliverables were wrong.
+The saving comes from tiering and earned trust.
+
+**Failure handling improved measurably.** Runs with at least one escalation fell from **27 of
+the first 52** to **zero in the last thirty**. That is a learning curve being paid down.
+
+
+</details>
 
 ## License
 
@@ -574,6 +610,6 @@ Copyright 2026 Matthieu Foillard.
 ---
 
 <div align="center">
-<sub>TypeScript · SQLite · Node 22.14+ / 24+ · the corpus table regenerates with <code>npm run burnin</code>;
+<sub>TypeScript · SQLite · Node 22.14+ / 24+ · new corpora can be measured with <code>npm run burnin</code>;
 the controlled rounds are in <code>benchmark/</code></sub>
 </div>
