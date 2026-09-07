@@ -1,4 +1,4 @@
-import { CanvasSource, Container, Sprite, Texture } from 'pixi.js';
+import { CanvasSource, ColorMatrixFilter, Container, RenderTexture, Sprite, Texture, type Renderer } from 'pixi.js';
 import type { Group, WebGLRenderer } from 'three';
 import { pointerLightFalloff } from '../pointer-light.js';
 
@@ -80,6 +80,7 @@ export interface NavIconMesh {
   readonly texture: Texture;
   /** White RGB + the live mesh alpha, so Pixi tint paints a clean shadow. */
   readonly shadowTexture: Texture;
+  destroy(): void;
   render(rotationY: number, lighting: NavIconLighting, now: number, animated: boolean): void;
 }
 
@@ -231,7 +232,7 @@ function measureSilhouette(source: HTMLCanvasElement): {
   }
   const context = measureContext;
   context.clearRect(0, 0, NAV_ICON_SOURCE_SIZE, NAV_ICON_SOURCE_SIZE);
-  context.drawImage(source, 0, 0);
+  context.drawImage(source, 0, 0, NAV_ICON_SOURCE_SIZE, NAV_ICON_SOURCE_SIZE);
   const { data } = context.getImageData(0, 0, NAV_ICON_SOURCE_SIZE, NAV_ICON_SOURCE_SIZE);
   let minX = NAV_ICON_SOURCE_SIZE;
   let minY = NAV_ICON_SOURCE_SIZE;
@@ -269,7 +270,9 @@ function createMeshTexture(
   three: ThreeModule,
   renderer: WebGLRenderer,
   model: Group,
-  kind: MeshKind
+  kind: MeshKind,
+  pixi: Renderer,
+  sourceSize: number
 ): NavIconMesh {
   polishMaterials(model, three, kind);
   fitModel(model, three);
@@ -301,26 +304,30 @@ function createMeshTexture(
   camera.lookAt(0, 0, 0);
 
   const output = document.createElement('canvas');
-  output.width = NAV_ICON_SOURCE_SIZE;
-  output.height = NAV_ICON_SOURCE_SIZE;
+  output.width = sourceSize;
+  output.height = sourceSize;
   // GPU-backed on purpose (no `willReadFrequently`): both the copy from the
   // WebGL renderer and Pixi's texture upload then stay on the GPU. Pixel
   // reads go through `measureSilhouette`'s own canvas.
   const context = output.getContext('2d', { alpha: true });
   if (!context) throw new Error(`Could not create the ${kind} navigation mesh canvas`);
   const texture = new Texture({
-    source: new CanvasSource({ resource: output, autoGenerateMipmaps: true }),
+    source: new CanvasSource({ resource: output, autoGenerateMipmaps: false }),
   });
   texture.label = `nav-mesh-${kind}`;
-  const shadowOutput = document.createElement('canvas');
-  shadowOutput.width = NAV_ICON_SOURCE_SIZE;
-  shadowOutput.height = NAV_ICON_SOURCE_SIZE;
-  const shadowContext = shadowOutput.getContext('2d', { alpha: true });
-  if (!shadowContext) throw new Error(`Could not create the ${kind} shadow-mask canvas`);
-  const shadowTexture = new Texture({
-    source: new CanvasSource({ resource: shadowOutput, autoGenerateMipmaps: true }),
-  });
+  // One external upload. Whiten the sampled alpha on Pixi's own device;
+  // both WebGPU and WebGL use the stock two-backend colour-matrix shader.
+  const shadowTexture = RenderTexture.create({ width: sourceSize, height: sourceSize });
   shadowTexture.label = `nav-mesh-shadow-${kind}`;
+  const white = new ColorMatrixFilter();
+  white.matrix = [
+    0, 0, 0, 0, 1,
+    0, 0, 0, 0, 1,
+    0, 0, 0, 0, 1,
+    0, 0, 0, 1, 0,
+  ];
+  const silhouetteSprite = new Sprite(texture);
+  silhouetteSprite.filters = [white];
 
   let lastAt = Number.NEGATIVE_INFINITY;
   let lastRotation = Number.NaN;
@@ -346,19 +353,10 @@ function createMeshTexture(
     key.position.set(lighting.keyX * 3.2, lighting.keyY * 3.2, 4);
     key.intensity = 2.1 + lighting.light * 3.2;
     renderer.render(scene, camera);
-    context.clearRect(0, 0, NAV_ICON_SOURCE_SIZE, NAV_ICON_SOURCE_SIZE);
+    context.clearRect(0, 0, sourceSize, sourceSize);
     context.drawImage(renderer.domElement, 0, 0);
     texture.source.update();
-    // A tint MULTIPLIES RGB; tinting the coloured face made its blue/gold
-    // regions turn into unrelated black slabs. The shared shadow painter gets
-    // a neutral white silhouette instead, so only alpha describes the mesh.
-    shadowContext.clearRect(0, 0, NAV_ICON_SOURCE_SIZE, NAV_ICON_SOURCE_SIZE);
-    shadowContext.drawImage(output, 0, 0);
-    shadowContext.globalCompositeOperation = 'source-in';
-    shadowContext.fillStyle = '#ffffff';
-    shadowContext.fillRect(0, 0, NAV_ICON_SOURCE_SIZE, NAV_ICON_SOURCE_SIZE);
-    shadowContext.globalCompositeOperation = 'source-over';
-    shadowTexture.source.update();
+    pixi.render({ container: silhouetteSprite, target: shadowTexture, clear: true });
     lastAt = now;
     lastRotation = rotationY;
     lastLight = lighting.light;
@@ -385,16 +383,27 @@ function createMeshTexture(
     lastRotation = Number.NaN;
     render(0, { keyX: -0.35, keyY: 0.8, light: 0 }, 2, true);
   }
-  return { texture, shadowTexture, render };
+  return {
+    texture, shadowTexture, render,
+    destroy() {
+      silhouetteSprite.destroy();
+      white.destroy();
+      shadowTexture.destroy(true);
+      texture.destroy(true);
+    },
+  };
 }
 
 /** Load, light and rasterise the actual GLB meshes through one shared renderer. */
-export async function loadNavIconMeshes(): Promise<NavIconMeshes> {
+export async function loadNavIconMeshes(pixi: Renderer): Promise<NavIconMeshes> {
   const three = await import('./nav-icon-three-runtime.js');
   const { GLTFLoader } = three;
   const renderer = new three.WebGLRenderer({ alpha: true, antialias: true });
   renderer.setPixelRatio(1);
-  renderer.setSize(NAV_ICON_SOURCE_SIZE, NAV_ICON_SOURCE_SIZE, false);
+  // Include the hover scale in the physical display footprint. Calibration
+  // still measures on the fixed 128px grid, independently of output density.
+  const sourceSize = Math.ceil(NAV_ICON_RENDER_SIZE * 1.06 * pixi.resolution);
+  renderer.setSize(sourceSize, sourceSize, false);
   renderer.setClearColor(0x000000, 0);
   renderer.outputColorSpace = three.SRGBColorSpace;
   renderer.toneMapping = three.ACESFilmicToneMapping;
@@ -405,7 +414,7 @@ export async function loadNavIconMeshes(): Promise<NavIconMeshes> {
     Promise.all(
       Object.entries(MODEL_FILE).map(async ([kind, file]) => {
         const gltf = await loader.loadAsync(`/models/navigation/${file}.glb`);
-        const mesh = createMeshTexture(three, renderer, gltf.scene, kind as NavIconKind);
+        const mesh = createMeshTexture(three, renderer, gltf.scene, kind as NavIconKind, pixi, sourceSize);
         return [kind, mesh] as const;
       })
     ),
@@ -414,11 +423,15 @@ export async function loadNavIconMeshes(): Promise<NavIconMeshes> {
   const icons = Object.fromEntries(entries) as unknown as Readonly<
     Record<NavIconKind, NavIconMesh>
   >;
-  const github = createMeshTexture(three, renderer, githubGltf.scene, 'github');
+  const github = createMeshTexture(three, renderer, githubGltf.scene, 'github', pixi, sourceSize);
   return {
     icons,
     github,
-    destroy: () => renderer.dispose(),
+    destroy: () => {
+      for (const mesh of Object.values(icons)) mesh.destroy();
+      github.destroy();
+      renderer.dispose();
+    },
   };
 }
 

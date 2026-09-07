@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type {
   GpuRenderer,
   GpuDataSnapshot,
@@ -22,11 +22,17 @@ export function GpuSurface({
   /** Rebuild once after the imperative camera reaches a settled pose. */
   cameraRevision?: number;
 }) {
+  // Retained Pixi listeners dispatch to the latest application callback.
+  // Callback identity can change on an otherwise scroll-only React render.
+  const activateRef = useRef(onActivate);
+  useLayoutEffect(() => { activateRef.current = onActivate; }, [onActivate]);
+  const activate = useCallback((id: string) => activateRef.current(id), []);
   const host = useRef<HTMLDivElement>(null);
   const renderer = useRef<GpuRenderer | null>(null);
   const [ready, setReady] = useState(false);
   const [resizeVersion, setResizeVersion] = useState(0);
   const renderCount = useRef(0);
+  const lastLayoutRevision = useRef<string | null>(null);
   const state = useGpuStore();
 
   useEffect(() => {
@@ -60,12 +66,15 @@ export function GpuSurface({
   useEffect(() => {
     const current = renderer.current;
     if (!current || !ready) return;
+    const layoutRevision = `${resizeVersion}:${cameraRevision}`;
+    const forceRebuild = layoutRevision !== lastLayoutRevision.current;
+    lastLayoutRevision.current = layoutRevision;
     current.render({
       state,
       data,
       releaseVersion,
       t,
-      onActivate,
+      onActivate: activate,
       onScroll: (view, delta) => {
         const currentY = useGpuStore.getState().scrollY[view];
         useGpuStore.getState().setScrollY(view, currentY + delta);
@@ -74,7 +83,7 @@ export function GpuSurface({
         const store = useGpuStore.getState();
         store.setRunPickerScrollY(store.runPickerScrollY + delta);
       },
-    });
+    }, forceRebuild);
     const metrics = current.getMetrics();
     if (host.current) {
       host.current.dataset['gpuBackend'] = metrics.backend;
@@ -92,7 +101,7 @@ export function GpuSurface({
       host.current.dataset['gpuRenderCount'] = String(renderCount.current);
     }
     onMetrics(metrics);
-  }, [cameraRevision, data, onActivate, onMetrics, ready, releaseVersion, resizeVersion, state, t]);
+  }, [activate, cameraRevision, data, onMetrics, ready, releaseVersion, resizeVersion, state, t]);
 
   return <div ref={host} className="gpu-ui-host" />;
 }

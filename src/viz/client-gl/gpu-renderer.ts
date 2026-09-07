@@ -522,6 +522,11 @@ export class GpuRenderer {
   private host: HTMLElement | null = null;
   private initialized = false;
   private snapshot: GpuRenderSnapshot | null = null;
+  /** The current bounded timeline window; dropped before scene teardown. */
+  runsScroll: { origin: number; min: number; max: number; move: (offset: number) => void } | null = null;
+  private runsScrollWidth = 0;
+  private runsScrollHeight = 0;
+
   readonly scrollMax: Partial<Record<ViewName, number>> = {};
   private readonly tickerCallbacks = new Set<(ticker: Ticker) => void>();
   /**
@@ -1123,7 +1128,7 @@ export class GpuRenderer {
     ensureFpsBitmapFont(Math.min(devicePixelRatio || 1, 2));
     [this.timelineCardMaterial, this.navIconMeshes] = await Promise.all([
       loadTimelineCardMaterial(),
-      loadNavIconMeshes(),
+      loadNavIconMeshes(this.app.renderer),
     ]);
     // Application rendering runs at LOW. Every event-card animation runs at
     // the default NORMAL priority, so LOW + 1 combines all changed faces into
@@ -1237,6 +1242,7 @@ export class GpuRenderer {
     // destroyed Application (2026-08-27, 3.14). One frame wide, and reachable
     // every HMR reload. Nulling it here is what makes those guards false.
     this.snapshot = null;
+    this.runsScroll = null;
     this.cameraFrameUnsubscribe?.();
     this.cameraFrameUnsubscribe = null;
     this.cameraFramePanels = [];
@@ -1312,10 +1318,10 @@ export class GpuRenderer {
    * actually costs, and it is the metric the smoke budgets — the rAF interval
    * it also samples saturates at vsync and cannot show this.
    */
-  render(snapshot: GpuRenderSnapshot) {
+  render(snapshot: GpuRenderSnapshot, forceRebuild = false) {
     const startedAt = performance.now();
     try {
-      this.renderScene(snapshot);
+      if (forceRebuild || !this.tryScrollRuns(snapshot)) this.renderScene(snapshot);
     } finally {
       this.metrics.renderMs = performance.now() - startedAt;
       this.metrics.labelsCreated = this.labels.created;
@@ -1323,7 +1329,40 @@ export class GpuRenderer {
     }
   }
 
+  private tryScrollRuns(snapshot: GpuRenderSnapshot): boolean {
+    const previous = this.snapshot;
+    const window = this.runsScroll;
+    if (!previous || !window || snapshot.state.view !== 'runs' ||
+        this.roleRowTransition || sceneCameraIsMoving(this.app.canvas) ||
+        (this.host && (Math.abs(this.host.clientWidth - this.runsScrollWidth) > 1 ||
+          Math.abs(this.host.clientHeight - this.runsScrollHeight) > 1)) ||
+        snapshot.state.scrollY.runs === previous.state.scrollY.runs ||
+        this.app.screen.width !== this.runsScrollWidth ||
+        this.app.screen.height !== this.runsScrollHeight) return false;
+    // A scroll-only update may reuse geometry. Any data, selection, filter,
+    // camera, locale or overlay change still takes the ordinary rebuild.
+    for (const key of Object.keys(snapshot.state) as (keyof GpuRenderSnapshot['state'])[]) {
+      if (key !== 'scrollY' && snapshot.state[key] !== previous.state[key]) return false;
+    }
+    for (const key of Object.keys(snapshot.data) as (keyof GpuDataSnapshot)[]) {
+      if (snapshot.data[key] !== previous.data[key]) return false;
+    }
+    if (snapshot.t !== previous.t || snapshot.onActivate !== previous.onActivate ||
+        snapshot.releaseVersion !== previous.releaseVersion) return false;
+    const offset = Math.max(0, Math.min(this.scrollMax.runs ?? 0, snapshot.state.scrollY.runs));
+    if (offset < window.min || offset > window.max ||
+        ((offset === 0 || offset === this.scrollMax.runs) && offset !== window.origin)) return false;
+    window.move(offset);
+    this.snapshot = snapshot;
+    this.anchorCastShadows();
+    this.updateCastShadows();
+    return true;
+  }
+
   private renderScene(snapshot: GpuRenderSnapshot) {
+    this.runsScroll = null;
+    this.runsScrollWidth = this.app.screen.width;
+    this.runsScrollHeight = this.app.screen.height;
     this.snapshot = snapshot;
     this.setFarFieldActive(shouldShowFarField(
       snapshot.state.entered,
@@ -3070,9 +3109,14 @@ export class GpuRenderer {
     let currentLabelTint = active ? NO_TINT : idleTint;
     labelText.tint = currentLabelTint;
     container.alpha = wasVisible || prefersReducedMotion() ? 1 : 0;
+    let settled = false;
+    let lastReduced = prefersReducedMotion();
     const animate = (ticker: Ticker) => {
+      const reduced = prefersReducedMotion();
+      if (settled && !hovered && !pressed && !active && reduced === lastReduced) return;
+      lastReduced = reduced;
       if (!prefersReducedMotion()) elapsed += ticker.deltaMS;
-      const entrance = Math.max(0, Math.min(1, elapsed / 260));
+      const entrance = reduced ? 1 : Math.max(0, Math.min(1, elapsed / 260));
       const easedEntrance = 1 - (1 - entrance) ** 3;
       const targetScale = pressed ? 0.955 : hovered ? 1.035 : 1;
       const scale = easedEntrance * targetScale;
@@ -3097,6 +3141,7 @@ export class GpuRenderer {
       // the shadow around INSIDE it. Reduced motion jumps rather than damps.
       insetDepth += ((pressed || active ? 1 : 0) - insetDepth) *
         (prefersReducedMotion() ? 1 : 0.3);
+      if (!active && !pressed && insetDepth < 0.001) insetDepth = 0;
       insetShadow.alpha = insetDepth;
       insetShadow.visible = insetDepth > 0.02;
       dropShadow.alpha = 1 - insetDepth;
@@ -3117,6 +3162,7 @@ export class GpuRenderer {
             ? 0.18 + pulse * 0.35
             : 0;
       });
+      settled = entrance >= 1 && !active && !hovered && !pressed && insetDepth === 0;
     };
     this.addTicker(animate);
 
@@ -3260,9 +3306,34 @@ export class GpuRenderer {
     container.alpha = firstAppearance ? 0 : 1;
     let currentLabelTint = active ? NO_TINT : BUTTON_LABEL_IDLE_TINT;
     if (labelText) labelText.tint = currentLabelTint;
+    let settled = false;
+    let lastReduced = prefersReducedMotion();
     const animate = (ticker: Ticker) => {
+      const reduced = prefersReducedMotion();
+      if (icon) {
+        iconSpin = advanceNavIconSpin(
+          iconSpin,
+          ticker.deltaMS,
+          prefersReducedMotion()
+        );
+        this.navIconSpins.set(id, iconSpin);
+        const iconCenterX = x + iconX + iconWidth / 2;
+        const iconCenterY = y + height / 2;
+        const fromLightX = iconCenterX - this.lightRendererX;
+        const fromLightY = iconCenterY - this.lightRendererY;
+        const lightStrength = Math.max(0, this.pointerLightUniforms?.uStrength ?? 0);
+        const lighting = navIconLighting(fromLightX, fromLightY, lightStrength);
+        icon.mesh.render(
+          iconSpin.rotation % (Math.PI * 2),
+          lighting,
+          performance.now(),
+          iconSpin.rotation < iconSpin.target
+        );
+      }
+      if (settled && !hovered && !pressed && !active && reduced === lastReduced) return;
+      lastReduced = reduced;
       if (!prefersReducedMotion()) elapsed += ticker.deltaMS;
-      const entrance = Math.max(0, Math.min(1, elapsed / 280));
+      const entrance = reduced ? 1 : Math.max(0, Math.min(1, elapsed / 280));
       const easedEntrance = 1 - (1 - entrance) ** 3;
       const targetScale = pressed ? 0.95 : hovered ? NAV_HOVER_SCALE : 1;
       const scale = easedEntrance * targetScale;
@@ -3287,6 +3358,7 @@ export class GpuRenderer {
       // the shadow around INSIDE it. Reduced motion jumps rather than damps.
       insetDepth += ((pressed || active ? 1 : 0) - insetDepth) *
         (prefersReducedMotion() ? 1 : 0.3);
+      if (!active && !pressed && insetDepth < 0.001) insetDepth = 0;
       insetShadow.alpha = insetDepth;
       insetShadow.visible = insetDepth > 0.02;
       dropShadow.alpha = 1 - insetDepth;
@@ -3295,32 +3367,13 @@ export class GpuRenderer {
         currentLabelTint = nextLabelTint;
         labelText.tint = nextLabelTint;
       }
-      if (icon) {
-        iconSpin = advanceNavIconSpin(
-          iconSpin,
-          ticker.deltaMS,
-          prefersReducedMotion()
-        );
-        this.navIconSpins.set(id, iconSpin);
-        const iconCenterX = x + iconX + iconWidth / 2;
-        const iconCenterY = y + height / 2;
-        const fromLightX = iconCenterX - this.lightRendererX;
-        const fromLightY = iconCenterY - this.lightRendererY;
-        const lightStrength = Math.max(0, this.pointerLightUniforms?.uStrength ?? 0);
-        const lighting = navIconLighting(fromLightX, fromLightY, lightStrength);
-        icon.mesh.render(
-          iconSpin.rotation % (Math.PI * 2),
-          lighting,
-          performance.now(),
-          iconSpin.rotation < iconSpin.target
-        );
-        icon.root.alpha = active || hovered || pressed ? 1 : 0.88;
-      }
+      if (icon) icon.root.alpha = active || hovered || pressed ? 1 : 0.88;
       sparks.forEach((spark, index) => {
         const phase = elapsed / 350 + index * 2.1;
         spark.position.set(10 + (Math.sin(phase) * 0.5 + 0.5) * (width - 20), height - 3 - Math.abs(Math.cos(phase)) * 4);
         spark.alpha = active ? 0.25 + pulse * 0.5 : hovered ? 0.18 + pulse * 0.3 : 0;
       });
+      settled = entrance >= 1 && !active && !hovered && !pressed && insetDepth === 0;
     };
     this.addTicker(animate);
 
@@ -3524,9 +3577,14 @@ export class GpuRenderer {
     let insetDepth = active ? 1 : 0;
     let elapsed = firstAppearance ? -(x % 120) * 1.2 : performance.now();
     container.alpha = firstAppearance ? 0 : 1;
+    let settled = false;
+    let lastReduced = prefersReducedMotion();
     const animate = (ticker: Ticker) => {
+      const reduced = prefersReducedMotion();
+      if (settled && !hovered && !pressed && !active && reduced === lastReduced) return;
+      lastReduced = reduced;
       if (!prefersReducedMotion()) elapsed += ticker.deltaMS;
-      const entrance = Math.max(0, Math.min(1, elapsed / 300));
+      const entrance = reduced ? 1 : Math.max(0, Math.min(1, elapsed / 300));
       const eased = 1 - (1 - entrance) ** 3;
       const targetScale = pressed ? 0.95 : hovered ? 1.04 : 1;
       const scale = eased * targetScale;
@@ -3549,6 +3607,7 @@ export class GpuRenderer {
       // the shadow around INSIDE it. Reduced motion jumps rather than damps.
       insetDepth += ((pressed || active ? 1 : 0) - insetDepth) *
         (prefersReducedMotion() ? 1 : 0.3);
+      if (!active && !pressed && insetDepth < 0.001) insetDepth = 0;
       insetShadow.alpha = insetDepth;
       insetShadow.visible = insetDepth > 0.02;
       dropShadow.alpha = 1 - insetDepth;
@@ -3565,6 +3624,7 @@ export class GpuRenderer {
         );
         electron.alpha = active ? 0.5 + pulse * 0.4 : hovered ? 0.55 : 0;
       });
+      settled = entrance >= 1 && !active && !hovered && !pressed && insetDepth === 0;
     };
     this.addTicker(animate);
 
@@ -4865,6 +4925,7 @@ export type RendererCtx = Pick<
   | 'animateEnteringFilterSpace'
   | 'metrics'
   | 'scrollMax'
+  | 'runsScroll'
   | 'detailScrollY'
   | 'detailScrollMax'
   | 'detailBounds'

@@ -376,12 +376,15 @@ async function sampleFrames(page, target, budgetMs = 8_000) {
       }
       ticker?.remove(begin);
       ticker?.remove(end);
-      // Let the last timestamp readbacks land before the delta is taken.
+      // Stop structural counters at the sampling boundary. Counting the next
+      // 150ms while waiting for GPU timestamps inflated unlocked-frame costs.
+      const gpuEnd = snapshotGpu();
+      const pixiEnd = { ...(globalThis.__ATOMA_PIXI_STATS__ ?? {}) };
+      // Only asynchronous timestamp readbacks need the grace period.
       setTimeout(() => {
-        const gpuEnd = snapshotGpu();
-        const pixiEnd = globalThis.__ATOMA_PIXI_STATS__ ?? {};
+        const timingEnd = snapshotGpu();
         const perFrame = {};
-        const n = Math.max(1, intervals.length);
+        const n = Math.max(1, tickerMs.length);
         for (const key of new Set([...Object.keys(gpuEnd.calls), ...Object.keys(gpuStart.calls)])) {
           perFrame[key] = +(((gpuEnd.calls[key] ?? 0) - (gpuStart.calls[key] ?? 0)) / n).toFixed(1);
         }
@@ -390,11 +393,11 @@ async function sampleFrames(page, target, budgetMs = 8_000) {
         for (const key of Object.keys(pixiEnd)) {
           perFrame[key] = +(((pixiEnd[key] ?? 0) - (pixiStart[key] ?? 0)) / n).toFixed(2);
         }
-        const gpuSubmits = gpuEnd.gpuSubmits - gpuStart.gpuSubmits;
+        const gpuSubmits = timingEnd.gpuSubmits - gpuStart.gpuSubmits;
         const submits = (gpuEnd.calls.submit ?? 0) - (gpuStart.calls.submit ?? 0);
         // GPU ns are attributed to the frames whose submits were read back.
         const gpuMsPerFrame = gpuSubmits > 0
-          ? ((gpuEnd.gpuNs - gpuStart.gpuNs) / 1e6) / n * (submits / Math.max(1, gpuSubmits))
+          ? ((timingEnd.gpuNs - gpuStart.gpuNs) / 1e6) / n * (submits / Math.max(1, gpuSubmits))
           : null;
         resolve({
           intervals,
@@ -727,7 +730,10 @@ async function scrollRebuilds(page) {
     };
     const p = handle.projectRendererPoint(handle.app.screen.width * 0.2, handle.app.screen.height * 0.6);
     let missed = 0;
+    let retainedTicks = 0;
+    const content = () => handle.app.stage.getChildByLabel('timeline-scroll-content', true);
     for (let tick = 0; tick < 32; tick++) {
+      const previousContent = content();
       canvas.dispatchEvent(new WheelEvent('wheel', {
         deltaY: tick < 16 ? 140 : -140,
         clientX: p.x,
@@ -736,12 +742,14 @@ async function scrollRebuilds(page) {
         cancelable: true,
       }));
       if (!(await awaitRender())) missed += 1;
+      if (previousContent && previousContent === content()) retainedTicks += 1;
     }
     observer.disconnect();
     const sorted = [...samples].sort((a, b) => a - b);
     const at = (q) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))] ?? 0;
     return {
       renders: samples.length,
+      retainedTicks,
       missed,
       p50: +at(0.5).toFixed(2),
       p95: +at(0.95).toFixed(2),
@@ -914,7 +922,7 @@ async function main() {
           ...scroll,
         };
         console.log(
-          `runs-scroll-rebuild     renders ${scroll.renders} missed ${scroll.missed} | ` +
+          `runs-scroll-rebuild     updates ${scroll.renders} retained ${scroll.retainedTicks} missed ${scroll.missed} | ` +
           `renderMs p50 ${scroll.p50} p95 ${scroll.p95} max ${scroll.max}`
         );
       }

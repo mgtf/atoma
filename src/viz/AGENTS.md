@@ -68,8 +68,7 @@ npm run viz:mark-turn:analyze
   goes there, never back into the class.
 - Scrollable GPU content goes through `createScrollPane` (bounded + masked);
   the wheel handler FAILS CLOSED on `scrollMax`, so a view that never declares
-  its max does not scroll. Cull by skipping draws, not by stopping the layout
-  cursor. Detail panes report `detailBounds`/`detailScrollMax`.
+  its max does not scroll. Cull by skipping draws, not by stopping the layout cursor. Detail panes report `detailBounds`/`detailScrollMax`. Runs retains a bounded row window under a fixed mask. Reproject hit targets and shadow anchors on scroll; window crossings, changed data/selection/filters, resize and camera travel rebuild. Retained listeners dispatch to the latest React callback.
 - `prefersReducedMotion()` (`renderer/motion.ts`) is the only reduced-motion
   source in the GL client. Every animation system consults it and JUMPS to its
   final state — exit effects are skipped entirely, never left running.
@@ -116,6 +115,7 @@ npm run viz:mark-turn:analyze
   owns composition, hit testing and the shared cast-shadow painter. Render the
   resting icons once, normalise optical size from their rendered alpha area,
   use the one gold material across the set, and throttle pointer-light updates.
+  Live textures match display pixels including hover, without mipmaps. Derive the white shadow mask on Pixi's device from the one uploaded face; never restore a shadow canvas upload. Inactive nav/filter/agent chips settle after entry/interaction; icon relighting stays independently live.
   The folder alone keeps its pale document material and a near-front rest pose
   so its pocket, rear tab and papers remain legible at rail size. Preserve the
   artist-authored GLB normals: recomputing them smears bevel lighting across

@@ -152,6 +152,9 @@ pixels and does nothing at 1920×1080; it is not a default and not a setting.
 
 ## Registered, not built
 
+Historical registration below. Implementation and new measurements:
+[2026-09-07 follow-up](gpu-fps-followups-2026-09-07.md).
+
 Collected here per the cooling-off rule; design each once, against all of it.
 
 1. Derive the icon shadow mask inside WebGPU (a small render-to-texture with a

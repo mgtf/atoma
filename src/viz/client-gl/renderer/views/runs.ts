@@ -550,12 +550,16 @@ export function drawRuns(
   listMask.rect(leftX + 1, listY, leftWidth - 2, listHeight).fill(0xffffff);
   listMask.eventMode = 'none';
   lowerControlsLayer.addChild(listMask);
+  const listViewport = new Container();
+  listViewport.eventMode = 'static';
+  listViewport.interactiveChildren = true;
+  listViewport.hitArea = new Rectangle(leftX + 1, listY, leftWidth - 2, listHeight);
+  listViewport.mask = listMask;
+  lowerControlsLayer.addChild(listViewport);
   const listLayer = new Container();
-  listLayer.eventMode = 'static';
-  listLayer.interactiveChildren = true;
-  listLayer.hitArea = new Rectangle(leftX + 1, listY, leftWidth - 2, listHeight);
-  listLayer.mask = listMask;
-  lowerControlsLayer.addChild(listLayer);
+  listLayer.label = 'timeline-scroll-content';
+  listViewport.addChild(listLayer);
+  const firstTimelineTarget = ctx.metrics.hitTargets.length;
   // Newest first: what happened last is what you opened the run to read.
   const timeline = buildTimelineLayout(run.events, runFilters, { newestFirst: true });
   const rowHeight = timeline.rowHeight;
@@ -579,11 +583,17 @@ export function drawRuns(
     snapshot.state.scrollY.runs,
     ctx.scrollMax.runs
   );
+  // A viewport of overscan on either side bounds retained geometry. Wheel
+  // ticks inside this window only translate it; crossing a boundary refreshes
+  // the window through the normal scene lifecycle (including pooled labels).
+  const overscan = Math.max(rowHeight, listHeight);
+  const minScroll = Math.max(0, scrollY - overscan);
+  const maxScroll = Math.min(ctx.scrollMax.runs, scrollY + overscan);
   const start = Math.max(
     0,
-    Math.floor(Math.max(0, scrollY - contentTopPadding) / rowHeight)
+    Math.floor(Math.max(0, minScroll - contentTopPadding) / rowHeight)
   );
-  const count = Math.ceil(listHeight / rowHeight) + 2;
+  const count = Math.ceil((maxScroll - minScroll + listHeight) / rowHeight) + 3;
   // The window is expressed in DISPLAY rows; event indices sit one row lower.
   const itemStart = Math.max(0, start - rowOffset);
   const laneSpacing =
@@ -733,7 +743,7 @@ export function drawRuns(
   ): void => {
     const y =
       listY + contentTopPadding + row * rowHeight - scrollY;
-    if (y > listY + listHeight || y + rowHeight < listY) return;
+    if (y > listY + listHeight + overscan || y + rowHeight < listY - overscan) return;
     const cardHeight = rowHeight - 10;
     const panel = new Graphics();
     panel.roundRect(cardBaseX, y, cardBaseWidth, cardHeight, 7);
@@ -792,7 +802,7 @@ export function drawRuns(
       contentTopPadding +
       displayRow(item.row) * rowHeight -
       scrollY;
-    if (y > listY + listHeight || y + rowHeight < listY) return;
+    if (y > listY + listHeight + overscan || y + rowHeight < listY - overscan) return;
     const selected = snapshot.state.selectedEventId === event.id;
     const branch = item.branchId
       ? timeline.branches.find((candidate) => candidate.id === item.branchId)
@@ -882,6 +892,29 @@ export function drawRuns(
       );
     }
   });
+
+  const timelineTargets = ctx.metrics.hitTargets.slice(firstTimelineTarget)
+    .map((target) => ({ target, y: target.y }));
+  const viewport = ctx.metrics.timelineViewport;
+  const applyScroll = (offset: number) => {
+    const delta = scrollY - offset;
+    listLayer.y = delta;
+    viewport.scrollY = offset;
+    // Diagnostics must remain clickable in renderer space after translation.
+    // Drop overscan targets from the public list while retaining their bounds.
+    const owned = new Set(timelineTargets.map(({ target }) => target));
+    ctx.metrics.hitTargets = ctx.metrics.hitTargets.filter((target) => !owned.has(target));
+    const top = listViewport.toGlobal({ x: 0, y: listY }).y;
+    const bottom = top + listHeight;
+    for (const { target, y } of timelineTargets) {
+      target.y = y + delta;
+      if (target.y >= top && target.y + target.height <= bottom) {
+        ctx.metrics.hitTargets.push(target);
+      }
+    }
+  };
+  applyScroll(scrollY);
+  ctx.runsScroll = { origin: scrollY, min: minScroll, max: maxScroll, move: applyScroll };
 
   if (twoPane) {
     const secondaryFrame = ctx.panel(
@@ -1252,6 +1285,7 @@ function drawEventDetail(
     const detailHeight = Math.max(40, detailBottom - detailTop);
     ctx.detailBounds = new Rectangle(x + 12, detailTop - 6, width - 24, detailHeight + 6);
     const detailLayer = new Container();
+    detailLayer.label = `event-detail:${event.id}`;
     detailLayer.position.y = -ctx.detailScrollY;
     ctx.root.addChild(detailLayer);
     const mask = ctx.detailMask(x + 12, detailTop - 6, width - 24, detailHeight + 6);
@@ -1383,6 +1417,7 @@ function drawEventDetail(
   const detailHeight = Math.max(40, detailBottom - detailTop);
   ctx.detailBounds = new Rectangle(x + 12, detailTop - 6, width - 24, detailHeight + 6);
   const detailLayer = new Container();
+  detailLayer.label = `event-detail:${event.id}`;
   detailLayer.position.y = -ctx.detailScrollY;
   ctx.root.addChild(detailLayer);
   const mask = ctx.detailMask(x + 12, detailTop - 6, width - 24, detailHeight + 6);

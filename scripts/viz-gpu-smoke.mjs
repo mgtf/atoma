@@ -564,17 +564,18 @@ async function readTimelineCardMaterials(page) {
 }
 
 function timelineCardsUseSharedMaterial(state) {
-  const eventKey = state.eventIds.join('\0');
+  const eventKey = state.cardIds.join('\0');
   const batch = state.batches[0];
   return state.eventIds.length > 0 &&
-    state.cardIds.join('\0') === eventKey &&
+    state.eventIds.every((id) => state.cardIds.includes(id)) &&
+    state.cardIds.length <= state.eventIds.length * 3 + 4 &&
     state.faceIds.join('\0') === eventKey &&
     state.underlayIds.join('\0') === eventKey &&
     state.legacyGrainIds.length === 0 &&
     state.filtered.length === 0 &&
     state.batches.length === 1 &&
     batch.cardIds.join('\0') === eventKey &&
-    batch.cardCount === state.eventIds.length &&
+    batch.cardCount === state.cardIds.length &&
     batch.shaderUid > 0 &&
     batch.compatibleRenderers === 3 &&
     batch.diffuseLabel === 'timeline-sand-diffuse' &&
@@ -592,9 +593,9 @@ function timelineCardsUseSharedMaterial(state) {
     batch.normalRepeat &&
     batch.diffuseSamplerBound &&
     batch.normalSamplerBound &&
-    batch.geometrySize >= state.eventIds.length * 9 &&
+    batch.geometrySize >= state.cardIds.length * 9 &&
     batch.geometryAttributes.join(',') === 'aBaseColor,aMaterialPx,aPosition' &&
-    batch.baseColors.length === state.eventIds.length &&
+    batch.baseColors.length === state.cardIds.length &&
     batch.baseColors.every((color) =>
       color.every((channel) => channel >= 0 && channel < 0.55) &&
       color.some((channel) => channel > 0));
@@ -1405,8 +1406,11 @@ try {
           buffers: live(buffers),
         };
       };
+      let retainedTicks = 0;
+      const scrollContent = () => handle.app.stage.getChildByLabel('timeline-scroll-content', true);
       const runCycle = async (onMiss) => {
         for (let tick = 0; tick < 32; tick++) {
+          const beforeContent = scrollContent();
           canvas.dispatchEvent(new WheelEvent('wheel', {
             deltaY: tick < 16 ? 140 : -140,
             clientX,
@@ -1415,6 +1419,7 @@ try {
             cancelable: true,
           }));
           if (!(await awaitRender())) onMiss();
+          if (beforeContent === scrollContent()) retainedTicks += 1;
         }
       };
 
@@ -1429,6 +1434,7 @@ try {
       await frame();
       const resourcesBefore = managedResources();
       samples.length = 0;
+      retainedTicks = 0;
       await runCycle(() => { missed += 1; });
       await frame();
       const resourcesAfter = managedResources();
@@ -1446,6 +1452,7 @@ try {
         reused: samples.reduce((sum, sample) => sum + sample.reused, 0),
         resourcesBefore,
         resourcesAfter,
+        retainedTicks,
       };
     });
     const cardMaterialStats = await readTimelineCardMaterials(page);
@@ -1483,6 +1490,7 @@ try {
       scrollStats.warmupMissed !== 0 ||
       scrollStats.missed !== 0 ||
       scrollStats.renders < 30 ||
+      scrollStats.retainedTicks < 1 ||
       scrollStats.p95Ms > scrollRebuildMax ||
       scrollStats.resourcesBefore.graphicsContexts <= 0 ||
       scrollStats.resourcesBefore.buffers <= 0 ||
@@ -1530,8 +1538,8 @@ try {
       `viz GPU nav ok: 6 RUNS<->SKILLS round-trips past the 560ms view transition, views ${navStats.views.join('/')}, no render error`
     );
     console.log(
-      `viz GPU scroll ok: ${scrollStats.renders} measured rebuilds after a full warm-up ` +
-        `(${scrollStats.warmupMissed + scrollStats.missed} ticks missed), ` +
+      `viz GPU scroll ok: ${scrollStats.renders} measured scroll updates after a full warm-up ` +
+        `(${scrollStats.retainedTicks} retained, ${scrollStats.warmupMissed + scrollStats.missed} ticks missed), ` +
         `${scrollStats.p50Ms.toFixed(2)}ms P50/${scrollStats.p95Ms.toFixed(2)}ms P95/` +
         `${scrollStats.maxMs.toFixed(2)}ms max against a ${scrollRebuildMax}ms ceiling, ` +
         `labels ${scrollStats.reused} reused vs ${scrollStats.created} built, resources stable at ` +
@@ -1539,6 +1547,28 @@ try {
         `${scrollStats.resourcesAfter.buffers} buffers, ` +
         `${cardMaterialStats.eventIds.length} cards in one shared diffuse + normal mesh`
     );
+
+    // Select through the real moved Pixi row, not its accessibility mirror.
+    const retainedPick = await page.evaluate(async () => {
+      const handle = globalThis.__ATOMA_GPU__;
+      const content = handle.app.stage.getChildByLabel('timeline-scroll-content', true);
+      const wheel = handle.projectRendererPoint(handle.app.screen.width * 0.2, handle.app.screen.height * 0.6);
+      handle.app.canvas.dispatchEvent(new WheelEvent('wheel', {
+        deltaY: 20, clientX: wheel.x, clientY: wheel.y, bubbles: true, cancelable: true,
+      }));
+      for (let i = 0; i < 4; i++) await new Promise((resolve) => requestAnimationFrame(resolve));
+      if (content !== handle.app.stage.getChildByLabel('timeline-scroll-content', true) || content.y !== -20) {
+        throw new Error('retained selection did not arm a translated timeline');
+      }
+      const target = handle.hitTargets().find((entry) => entry.id.startsWith('event.'));
+      if (!target) throw new Error('translated timeline has no visible event target');
+      return { id: target.id.slice(6), ...handle.projectRendererPoint(target.x + target.width / 2, target.y + target.height / 2) };
+    });
+    await page.mouse.click(retainedPick.x, retainedPick.y);
+    await page.waitForFunction((id) =>
+      !!globalThis.__ATOMA_GPU__.app.stage.getChildByLabel(`event-detail:${id}`, true),
+    { timeout: READY_TIMEOUT_MS }, retainedPick.id);
+    console.log('viz GPU retained selection ok: translated canvas row opened its own event detail');
 
     // THE REGRESSION SCENARIO. Scene Tuning is DOM chrome so it can sit above
     // DOM project/settings forms; its sliders still write the mutable sample
@@ -1832,6 +1862,9 @@ try {
           accountDiagnostics.push(`${message.type()}: ${message.text()}`);
         }
       });
+      accountPage.on('response', (response) => {
+        if (response.status() >= 400) accountDiagnostics.push(`http ${response.status()}: ${response.url()}`);
+      });
       accountPage.on('pageerror', (error) => {
         accountDiagnostics.push(`pageerror: ${error.message}`);
       });
@@ -1874,6 +1907,12 @@ try {
           ],
           projectCount: 0,
           pendingInvitations: 0,
+        },
+        // Settings mounts the subscription reader even on its General tab.
+        '/api/account/subscriptions': {
+          claude: { provider: 'claude', state: 'unavailable', connectedAt: null, lastVerifiedAt: null, reason: 'provider-approval-required' },
+          codex: { provider: 'codex', state: 'disconnected', connectedAt: null, lastVerifiedAt: null, reason: null },
+          codexAttempt: null,
         },
         '/api/account/models': {
           pins: { l1: null, l2: null, l3: null },

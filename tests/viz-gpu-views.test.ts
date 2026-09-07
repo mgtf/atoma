@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Container, Graphics, Rectangle } from 'pixi.js';
-import type { Text, Ticker } from 'pixi.js';
-import { afterEach, describe, expect, it } from 'vitest';
+import type { FederatedPointerEvent, Text, Ticker } from 'pixi.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { I18N_CATALOGS, translate } from '../src/viz/client/i18n-catalog.js';
 import type {
   BurninRow,
@@ -285,6 +285,7 @@ function createRecordingCtx(): RecordingCtx {
     privateRepositoryIcons: [],
     links: [],
     metrics: emptyRenderMetrics(),
+    runsScroll: null,
     // Headless retention stub: no renderer, so no textures to retain — every
     // call attaches a fresh mark, which is what the layout assertions read.
     // The orb is a Mesh with a shader and a decoded texture: recording the
@@ -5481,5 +5482,101 @@ describe('render groups — per-frame animation stays off the root batch', () =>
     } finally {
       setReducedMotionOverrideForTests(null);
     }
+  });
+});
+
+
+describe('FPS follow-ups', () => {
+  it.each(['filterButton', 'navButton', 'atomButton'] as const)('%s settles, wakes on hover, and settles again', (kind) => {
+    setReducedMotionOverrideForTests(false);
+    const renderer = new GpuRenderer();
+    const callbacks: ((ticker: Ticker) => void)[] = [];
+    renderer.addTicker = (callback) => { callbacks.push(callback); };
+    renderer.text = (_parent, value, _x, _y, options) => textStub(value, options);
+    renderer.fitText = (value) => value;
+    const parent = new Container();
+    const control = kind === 'atomButton'
+      ? renderer.atomButton(parent, 'test.control', 'Test', 1, 20, 30, 120, 28, false, () => {})
+      : renderer[kind](parent, 'test.control', 'Test', 20, 30, 120, 28, false, () => {});
+    const tick = () => callbacks.forEach((callback) => callback({ deltaMS: 16 } as Ticker));
+    for (let i = 0; i < 80; i++) tick();
+    const position = vi.spyOn(control.position, 'set');
+    for (let i = 0; i < 10; i++) tick();
+    expect(position).not.toHaveBeenCalled();
+    control.emit('pointerover', {} as FederatedPointerEvent);
+    tick();
+    expect(position).toHaveBeenCalled();
+    control.emit('pointerout', {} as FederatedPointerEvent);
+    for (let i = 0; i < 80; i++) tick();
+    position.mockClear();
+    tick();
+    expect(position).not.toHaveBeenCalled();
+    expect(control.alpha).toBe(1);
+    expect(control.scale.x).toBe(1);
+    parent.destroy({ children: true, context: true });
+  });
+
+  it('moves a bounded timeline window without recreating cards and keeps targets clipped', () => {
+    const ctx = createRecordingCtx();
+    const events = Array.from({ length: 200 }, (_, i) => makeLlmEvent(`e${i}`));
+    drawRuns(ctx, makeSnapshot({}, { run: makeRun(events) }), 1280, 800);
+    const window = ctx.runsScroll!;
+    const cards = [...ctx.eventCards];
+    expect(cards.length).toBeLessThan(events.length / 2);
+    expect(window.max).toBeGreaterThan(0);
+    const layer = ctx.eventCards[0]!.content.parent!;
+    window.move(20);
+    expect(layer.y).toBe(-20);
+    expect(ctx.eventCards).toEqual(cards);
+    expect(ctx.metrics.timelineViewport!.scrollY).toBe(20);
+    const viewport = ctx.metrics.timelineViewport!;
+    const targets = ctx.metrics.hitTargets.filter((target) => /^e\d+$/.test(target.id));
+    expect(targets.length).toBeGreaterThan(0);
+    for (const target of targets) {
+      const card = cards.find((card) => card.id === target.id)!;
+      expect(target.y).toBe(card.y - 20);
+      expect(target.y).toBeGreaterThanOrEqual(viewport.top);
+      expect(target.y + target.height).toBeLessThanOrEqual(viewport.top + viewport.height);
+    }
+  });
+
+  it('reuses only scroll updates; data, filters and window crossings rebuild', () => {
+    const renderer = new GpuRenderer();
+    const first = makeSnapshot({ view: 'runs' });
+    const move = vi.fn();
+    const internals = renderer as unknown as {
+      snapshot: GpuRenderSnapshot;
+      runsScrollWidth: number;
+      runsScrollHeight: number;
+      anchorCastShadows(): void;
+      updateCastShadows(): void;
+      renderScene(snapshot: GpuRenderSnapshot): void;
+      app: { screen: { width: number; height: number } };
+      host: { clientWidth: number; clientHeight: number } | null;
+    };
+    internals.app = { screen: { width: 1280, height: 800 } };
+    internals.runsScrollWidth = 1280;
+    internals.runsScrollHeight = 800;
+    internals.anchorCastShadows = () => {};
+    internals.updateCastShadows = () => {};
+    const rebuild = vi.spyOn(internals, 'renderScene').mockImplementation(() => {});
+    renderer.runsScroll = { origin: 0, min: 0, max: 200, move };
+    renderer.scrollMax.runs = 1000;
+    const at = (y: number) => ({ ...first, state: { ...first.state, scrollY: { ...first.state.scrollY, runs: y } } });
+    internals.snapshot = first;
+    renderer.render(at(50));
+    expect(move).toHaveBeenCalledWith(50);
+    expect(rebuild).not.toHaveBeenCalled();
+    renderer.render({ ...at(60), data: { ...first.data, run: makeRun([]) } });
+    expect(rebuild).toHaveBeenCalledTimes(1);
+    renderer.render({ ...at(60), state: { ...at(60).state, selectedEventId: 'e1' } });
+    expect(rebuild).toHaveBeenCalledTimes(2);
+    renderer.render(at(201));
+    expect(rebuild).toHaveBeenCalledTimes(3);
+    renderer.render(at(60), true);
+    expect(rebuild).toHaveBeenCalledTimes(4);
+    internals.host = { clientWidth: 900, clientHeight: 800 };
+    renderer.render(at(60));
+    expect(rebuild).toHaveBeenCalledTimes(5);
   });
 });

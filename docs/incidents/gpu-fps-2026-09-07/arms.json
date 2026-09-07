@@ -1,0 +1,56 @@
+{
+  "baseline": {
+    "startedAt": "2026-09-07T05:59:01.991210+00:00",
+    "sourceSha256": {
+      "src/viz/client-gl/gpu-renderer.ts": "9a7768bc77b34e7349f7d7e8e0087b55697db60f6b98e55622c82b42d16d0c00",
+      "src/viz/client-gl/renderer/nav-icons.ts": "d18797011dc40934c34d5758c73f0b1090a15b0edac9bc3515b492aa840095fc",
+      "src/viz/client-gl/renderer/views/runs.ts": "f4f8e473f4f9d6cb6dc3ef8a2c47be518e462ce7c1f0dab17c648d40b85c9919",
+      "src/viz/client-gl/GpuSurface.tsx": "34f9f6faac6f0cf70fd0d8fcd8781a40113f0db292d89fb2dd28dfcda5d0c6f1"
+    }
+  },
+  "icons": {
+    "startedAt": "2026-09-07T05:59:39.971956+00:00",
+    "sourceSha256": {
+      "src/viz/client-gl/gpu-renderer.ts": "7958b889e2daaad2c66c6254ad4df71b8a142ee3d99ad37e2972adc07dc7946b",
+      "src/viz/client-gl/renderer/nav-icons.ts": "fc996bf6a0a62f8f69ebb8e794e9110b7e181fb6e93013d43a0517b44fd07429",
+      "src/viz/client-gl/renderer/views/runs.ts": "f4f8e473f4f9d6cb6dc3ef8a2c47be518e462ce7c1f0dab17c648d40b85c9919",
+      "src/viz/client-gl/GpuSurface.tsx": "34f9f6faac6f0cf70fd0d8fcd8781a40113f0db292d89fb2dd28dfcda5d0c6f1"
+    }
+  },
+  "idle": {
+    "startedAt": "2026-09-07T06:00:19.234902+00:00",
+    "sourceSha256": {
+      "src/viz/client-gl/gpu-renderer.ts": "2ee27d0806d427aeb83573cc56e2150cd20d9e811f27e05c8fe46760939e45f7",
+      "src/viz/client-gl/renderer/nav-icons.ts": "d18797011dc40934c34d5758c73f0b1090a15b0edac9bc3515b492aa840095fc",
+      "src/viz/client-gl/renderer/views/runs.ts": "f4f8e473f4f9d6cb6dc3ef8a2c47be518e462ce7c1f0dab17c648d40b85c9919",
+      "src/viz/client-gl/GpuSurface.tsx": "34f9f6faac6f0cf70fd0d8fcd8781a40113f0db292d89fb2dd28dfcda5d0c6f1"
+    }
+  },
+  "scroll": {
+    "startedAt": "2026-09-07T06:00:58.135026+00:00",
+    "sourceSha256": {
+      "src/viz/client-gl/gpu-renderer.ts": "e80a98064f2307a5d8832a755eee753a22010b08c1af2135ca0aad01b0fa27e7",
+      "src/viz/client-gl/renderer/nav-icons.ts": "d18797011dc40934c34d5758c73f0b1090a15b0edac9bc3515b492aa840095fc",
+      "src/viz/client-gl/renderer/views/runs.ts": "ea25090e3bc47fec780ff374019a86c9f86707d58df9e4da7dc7fd0abd367bb5",
+      "src/viz/client-gl/GpuSurface.tsx": "e2009dab80323803100584e95756894ecfae1da87179fed05afe26d78c447ee4"
+    }
+  },
+  "combined": {
+    "startedAt": "2026-09-07T06:01:37.231479+00:00",
+    "sourceSha256": {
+      "src/viz/client-gl/gpu-renderer.ts": "6f75f6f528271b3c7c863581a2439f98c7b1a14b24a934060d4d2b1259b8c6cd",
+      "src/viz/client-gl/renderer/nav-icons.ts": "fc996bf6a0a62f8f69ebb8e794e9110b7e181fb6e93013d43a0517b44fd07429",
+      "src/viz/client-gl/renderer/views/runs.ts": "ea25090e3bc47fec780ff374019a86c9f86707d58df9e4da7dc7fd0abd367bb5",
+      "src/viz/client-gl/GpuSurface.tsx": "e2009dab80323803100584e95756894ecfae1da87179fed05afe26d78c447ee4"
+    }
+  },
+  "combined-final": {
+    "startedAt": "2026-09-07T06:06:36.892Z",
+    "sourceSha256": {
+      "src/viz/client-gl/gpu-renderer.ts": "45f1b0835114772f2d0619da51ca9929e8e5dbaf9a36c7f8cb128ae43e006d16",
+      "src/viz/client-gl/renderer/nav-icons.ts": "fc996bf6a0a62f8f69ebb8e794e9110b7e181fb6e93013d43a0517b44fd07429",
+      "src/viz/client-gl/renderer/views/runs.ts": "ea25090e3bc47fec780ff374019a86c9f86707d58df9e4da7dc7fd0abd367bb5",
+      "src/viz/client-gl/GpuSurface.tsx": "0333513dcc4cd02414f3a0525fa1631c85a5cdc1632cf987854ea1ace667a3f2"
+    }
+  }
+}
