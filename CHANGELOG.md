@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Added
+
+- The MCP catalogue grows from 24 to 37 tools, closing the 2026-08-21 surface
+  roadmap. Readers, platform tier: `atoma_skills_show` (one recipe in full,
+  body bounded and marked untrusted), `atoma_ledger_tail`, `atoma_costs` (per
+  model/tier/role totals and an older-half vs newer-half median trend),
+  `atoma_registry_history`, `atoma_verdicts_list`, `atoma_verdict_show`,
+  `atoma_sentinel_health`. Tenant tier: `atoma_run_preview` (state for a
+  viewer; open/stop for a member) and `atoma_notifications` (the viewer's
+  tray, through the same builder as `/api/notifications`). Operator writes,
+  platform tier and attributed to the caller: `atoma_skill_reset`,
+  `atoma_skill_drop`, `atoma_skill_merge`, `atoma_registry_rollback`, with the
+  CLI's own refusals (proven knowledge needs `force`) and, on a gated host, a
+  journal row per action under the new kinds `skill.reset`, `skill.dropped`,
+  `skill.merged`, `registry.rolled_back`.
+- Both status tools take `waitMs`: a bounded long-poll that returns when the
+  run changes, and streams `notifications/progress` to a host that sent a
+  progress token. Every tool result now also carries `structuredContent`; the
+  new readers declare an `outputSchema`.
+- MCP resources: `atoma://families`, `atoma://runs/{file}`,
+  `atoma://operator-runs/{runId}` (platform) and
+  `atoma://projects/{projectId}/runs/{runId}` (tenant), listable, completable
+  and subscribable — a subscribed session is told when the run finishes.
+- Three prompts: `atoma_read_skill` (completes the skill id once the molecule
+  is named), `atoma_inspect_verdict`, `atoma_cost_curve`.
+
 ### Changed
 
 - The production activator refreshes the mender at the end of every

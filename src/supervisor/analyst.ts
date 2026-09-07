@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { verdictsDirPath } from './paths.js';
 import type { PlatformEventSink } from '../contracts/platformEvents.js';
 import {
   FINDING_SEVERITY,
@@ -60,7 +61,7 @@ export interface AnalystPaths {
 export function analystPaths(supervisorDir: string): AnalystPaths {
   return {
     supervisorDir,
-    verdictsDir: join(supervisorDir, 'verdicts'),
+    verdictsDir: verdictsDirPath(supervisorDir),
     workDir: join(supervisorDir, 'work'),
     backlogPath: join(supervisorDir, 'backlog.jsonl'),
     alertsPath: join(supervisorDir, 'ALERTS.jsonl'),

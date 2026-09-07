@@ -83,10 +83,10 @@ const mcpSmoke = async (base) => {
   const { tools } = await call('tools/list');
   if (!Array.isArray(tools) || tools.length === 0) throw new Error('compiled MCP listed no tools');
   const names = tools.map((tool) => tool.name);
-  for (const required of ['atoma_operator_run_start', 'atoma_operator_run_cancel', 'atoma_registry_list', 'atoma_run_trace']) {
+  for (const required of ['atoma_operator_run_start', 'atoma_operator_run_cancel', 'atoma_registry_list', 'atoma_run_trace', 'atoma_skills_show', 'atoma_ledger_tail', 'atoma_costs', 'atoma_skill_reset', 'atoma_registry_rollback']) {
     if (!names.includes(required)) throw new Error(`compiled MCP is missing ${required}`);
   }
-  for (const tenantOnly of ['atoma_projects_list', 'atoma_run_start', 'atoma_org_members', 'atoma_journal_tail']) {
+  for (const tenantOnly of ['atoma_projects_list', 'atoma_run_start', 'atoma_org_members', 'atoma_journal_tail', 'atoma_notifications', 'atoma_run_preview']) {
     if (names.includes(tenantOnly)) throw new Error(`ungated MCP must not expose ${tenantOnly}`);
   }
   const families = await call('tools/call', { name: 'atoma_families', arguments: {} });
@@ -96,6 +96,19 @@ const mcpSmoke = async (base) => {
   }
   const refused = await call('tools/call', { name: 'atoma_run_trace', arguments: { file: '../etc/passwd' } });
   if (!JSON.stringify(refused).includes('refused')) throw new Error('atoma_run_trace did not refuse a traversal');
+  if (!initialized?.capabilities?.resources?.subscribe) throw new Error('compiled MCP does not advertise subscribable resources');
+  const resources = (await call('resources/list', {}))?.resources;
+  if (!Array.isArray(resources) || !resources.some((resource) => resource.uri === 'atoma://families')) {
+    throw new Error('compiled MCP resources/list does not offer atoma://families');
+  }
+  const templates = (await call('resources/templates/list', {}))?.resourceTemplates ?? [];
+  if (!templates.some((template) => template.uriTemplate === 'atoma://runs/{file}')) {
+    throw new Error('compiled MCP does not offer the operator trace resource template');
+  }
+  const costsResult = await call('tools/call', { name: 'atoma_costs', arguments: {} });
+  if (!costsResult?.structuredContent || typeof costsResult.structuredContent.runsScanned !== 'number') {
+    throw new Error('atoma_costs returned no structured content');
+  }
   const { prompts } = await call('prompts/list');
   if (!Array.isArray(prompts) || prompts.length < 4) {
     throw new Error(`expected the compiled MCP prompt surface, got ${Array.isArray(prompts) ? prompts.length : 'none'}`);

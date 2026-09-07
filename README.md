@@ -308,12 +308,18 @@ claude mcp add atoma --transport http https://<your-instance>/mcp \
 # locally, ungated: npm run viz, then http://127.0.0.1:4111/mcp with no token
 ```
 
-**Twenty-four tools.** ONE MCP for everyone, and what you see depends on who you are. An organisation member
-sees its projects and runs — start one and get an id to poll, cancel, retry a publication, read a
-trace's shape. An organisation admin also sees its members and model defaults. The platform admin
+**Thirty-seven tools.** ONE MCP for everyone, and what you see depends on who you are. An organisation member
+sees its projects and runs — start one and get an id to poll (or long-poll with `waitMs`), cancel, retry a
+publication, read a trace's shape, open the live preview of a deliverable, read their own notification
+tray. An organisation admin also sees its members and model defaults. The platform admin
 (or the operator on a local ungated server) sees everything above plus operator runs, the agent
-catalogue with its earned trust, the recipe library and its lifecycle, the audit ledger's integrity
-projection, the operator run corpus, the tool-friction report and the audit journal.
+catalogue with its earned trust and version history, the recipe library with its lifecycle and every
+recipe body, the audit ledger's integrity projection and its newest entries, the cost curve over
+recent runs, the operator run corpus, the tool-friction report, the sentinel's health, the analyst's
+post-mortem verdicts and the audit journal — plus four attributed, journaled catalogue actions:
+reset, drop or merge a recipe, roll an agent type back. The same state is addressable as MCP
+resources (`atoma://runs/…`, `atoma://projects/…/runs/…`) that a host can subscribe to and be told
+when a run finishes.
 Starting a run initiates multiple internal model calls on the configured provider
 accounts; polling and readers do not themselves launch inference.
 
@@ -369,7 +375,7 @@ validates the IR, not the rendered SVG; rendering requires a separate Archify ch
 | Version | `0.2.0` |
 | Node | 24.20+ (`.nvmrc` 24.20.0, `engines` >=24) |
 | Subsystems under their own contract | 18 |
-| MCP tools | 24 |
+| MCP tools | 37 |
 | Curated agent names | 118 molecules · 40 cells · 20 tissues |
 | Controlled benchmark rounds | 12 (`benchmark/RESULT.md` + `ROUND<n>.md`) |
 | Interface locales | 13 catalogs — 1 source, 12 translated |

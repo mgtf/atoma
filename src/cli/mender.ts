@@ -35,6 +35,7 @@ import {
   type MenderOptions,
 } from '../supervisor/mender.js';
 import { DEFAULT_MAX_DIFF_LINES } from '../supervisor/menderPolicy.js';
+import { supervisorDirPath } from '../supervisor/paths.js';
 import { looksPinned, menderProvider } from '../supervisor/session.js';
 import { parseCliArgs } from './args.js';
 import { applyCheckoutDotenvForSourceEntry } from './loadDotenv.js';
@@ -168,7 +169,7 @@ async function main(): Promise<void> {
   const options: MenderOptions = {
     repo,
     runsDir: resolve(args.flags['runs'] || process.env['ATOMA_RUNS_DIR'] || './runs'),
-    supervisorDir: resolve(args.flags['supervisor-dir'] || process.env['ATOMA_SUPERVISOR_DIR'] || './supervisor'),
+    supervisorDir: args.flags['supervisor-dir'] ? resolve(args.flags['supervisor-dir']) : supervisorDirPath(),
     leasePath: mcpRunLockPath(),
     provider,
     commands: menderCommandsFromEnv(),

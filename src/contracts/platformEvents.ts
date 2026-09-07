@@ -144,6 +144,17 @@ export const platformEventKindSchema = z.enum([
   'org.models_updated',
   'org.provider_key_set',
   'org.provider_key_removed',
+  /**
+   * An operator lifecycle action over the skill catalogue or the agent
+   * registry taken THROUGH THE MCP (the CLI writes the lifecycle ledger only;
+   * it has no principal). The skills contract requires every such action to
+   * be attributable, and a bearer token gives it an actor: these rows carry
+   * the molecule, the skill or type, and what changed — never a body.
+   */
+  'skill.reset',
+  'skill.dropped',
+  'skill.merged',
+  'registry.rolled_back',
   'auth.rate_limited',
   'auth.state_flood',
   'webhook.rejected',
@@ -346,6 +357,13 @@ export const PLATFORM_EVENT_SEVERITY: Record<PlatformEventKind, PlatformEventSev
   'org.models_updated': 'info',
   'org.provider_key_set': 'info',
   'org.provider_key_removed': 'info',
+  // Catalogue hygiene is routine; a rollback or a drop of PROVEN knowledge
+  // is what an operator will want to find again, so the whole family is a
+  // warning rather than info — and never security: nothing crossed a gate.
+  'skill.reset': 'warning',
+  'skill.dropped': 'warning',
+  'skill.merged': 'warning',
+  'registry.rolled_back': 'warning',
   'auth.rate_limited': 'warning',
   'auth.state_flood': 'security',
   'webhook.rejected': 'security',

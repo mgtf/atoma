@@ -58,9 +58,22 @@ Neighbours:
   moot; there is no cookie path into `/mcp`.
 - WHAT DID NOT CHANGE: payloads are BOUNDED and honest about trust — traces
   page (`offset`/`limit`, capped), error strings truncate, run output, skill
-  bodies and trace text are marked UNTRUSTED model data; the operator readers
-  never leave their directories (`pathIsInsideDir`); a project run's trace is
-  read only through the store's own resolver for a run the caller may see.
+  bodies, verdicts and trace text are marked UNTRUSTED model data; the
+  operator readers never leave their directories (`pathIsInsideDir`, and a
+  verdict is opened by run id, never by path); a project run's trace is read
+  only through the store's own resolver for a run the caller may see.
+- EVERY RESULT GOES OUT TWICE: the text block every host renders, and
+  `structuredContent` for hosts that read typed results (`jsonResult`). A
+  reader whose shape is stable declares an `outputSchema` (loose,
+  `passthrough`-shaped, so an additive field never fails the host's
+  validation); the older readers with polymorphic payloads (`note` on an
+  absent store) declare none. Never add an `outputSchema` a payload can miss.
+- HOST-PROVIDED NEEDS ARE READ AT CALL TIME. `preview`, `sentinel`,
+  `analyst` and `notifications` are functions on `McpToolDeps`, because the
+  preview runtime comes up after the bind and the watch's health changes every
+  tick. A tool whose dependency is absent answers what the HTTP route answers
+  (`503 previews are not available`), never a missing-tool error — except the
+  tray, which needs a builder to exist at all and is a `needs` row.
 
 ## Operator runs and the lease
 
@@ -82,6 +95,64 @@ Neighbours:
   reaped, and `atoma_operator_run_status` with no in-memory match reports the
   cross-process lease row instead of amnesia.
 
+## Status, waiting and progress
+
+- `waitMs` on both status tools is a LONG-POLL, not a stream: the call
+  returns when the run changes (a chunk, a status flip) or the wait elapses,
+  capped at `MAX_STATUS_WAIT_MS`. "Start, then poll" stays the contract; a
+  host that passes `waitMs` merely polls less often. Nonsense waits clamp.
+- A host that sends a progress token gets `notifications/progress` while it
+  waits (`progressSender`): operator runs stream each output chunk, project
+  runs each observed change. Delivery failures are swallowed — the line is a
+  courtesy, the result is the contract.
+- The operator half waits on in-process change notifications (`run.ts`
+  `changeWaiters`); the project half polls the tenant store once a second.
+  Neither touches the run.
+
+## Resources and subscriptions (`resources.ts`)
+
+- Resources are DOORS ONTO THE READERS, never second bodies: `atoma://runs/
+  {file}` reads through `runTrace` with its paging and truncation,
+  `atoma://operator-runs/{runId}` through `runStatus`, `atoma://projects/
+  {projectId}/runs/{runId}` through `ProjectService.projectRunStatus`,
+  `atoma://families` through `families`. A URI carries no way to ask for more.
+- Registration follows the tools' tiers and needs, per session: the operator
+  corpus only at the platform tier on a host with `operatorRuns`, a project
+  run only for a principal on a host with organisations. Listings are menus,
+  capped at `RESOURCE_LIST_LIMIT`; the trace template completes over
+  `completeTraceFile`.
+- `resources/subscribe` is per session and dies with it. A finished operator
+  run (`onRunFinished`) or a `run.finished`/`run.cancelled` journal row sends
+  `resources/updated` to the sessions that subscribed to that URI, and a
+  finished operator run also sends `list_changed` (a new trace exists). The
+  listeners are unhooked in the server's `onclose`, so nothing is ever written
+  to a transport that is gone. The capability is declared BEFORE `connect`
+  (`registerCapabilities`), which is when the SDK freezes it.
+
+## Operator writes (`writes.ts`)
+
+- Four verbs, platform tier, `needs: ['operator-runs']`: `atoma_skill_reset`,
+  `atoma_skill_drop`, `atoma_skill_merge`, `atoma_registry_rollback`. They
+  call the SAME store methods the CLI calls (`SkillRegistry.resetCounters/
+  drop/merge`, `AtomRegistry.rollback`), so the lifecycle ledger rows are the
+  CLI's rows and `ledger check` projects the same counters.
+- THE CLI'S REFUSALS, IN THE CLI'S WORDS: dropping or absorbing a skill with
+  recorded successes is refused without `force`; a rollback to the live
+  version is a no-op the registry itself reports. A second door must never be
+  looser than the first, and must not grow a rule the first lacks.
+- ATTRIBUTION is what the MCP adds. The actor is the principal behind the
+  bearer (`mcp:<principalId>`) or the loopback operator (`mcp:operator`), and
+  it is written into the payload, into `AtomRegistry.rollback`'s `modifiedBy`,
+  and — on a gated host — into one journal row per action (`skill.reset`,
+  `skill.dropped`, `skill.merged`, `registry.rolled_back`, `actorType:
+  principal`, severity warning, never pushed). Rows carry names, ids and
+  counters, NEVER a body. On the ungated path there is no journal and the
+  payload says `journaled: false`; that matches the CLI, which has no principal
+  to name.
+- Writes open the store through `openDb` (schema and migrations), exactly as
+  the CLI does, and close it before returning. The readers' readonly handles
+  are not a write path and must not become one.
+
 ## Prompts and completions
 
 - The PROMPT surface adds no tool: one goal template per launchable family
@@ -94,15 +165,34 @@ Neighbours:
   and `ref/resource` and no `ref/tool`. Every completable argument is
   REQUIRED (the SDK does not unwrap an optional). Completion sources live in
   `readers.ts` and bound their own SCAN, not just the returned slice.
+- A completion that needs ANOTHER argument reads it from the completion
+  context (`context.arguments`), which is how `atoma_read_skill` completes a
+  skill id inside the molecule already typed; with no molecule there is
+  nothing to complete against, and the source answers nothing rather than
+  every skill on the machine.
+- A prompt may NAME a write tool (`atoma_read_skill` names the three skill
+  verbs) only to hand the decision back to the person; it must never instruct
+  the host to perform the write.
 
 ## Changing the catalogue
 
 - Adding a tool is adding a row: name, minimum tier, needs, registration.
   With it come a behavioural test in `tests/mcp-http.test.ts` (which tier sees
   it, what it refuses), the release smoke if it is operator-visible, and the
-  README sentence `docs:check` derives from the table. Removing or renaming
-  one is a compatibility change for every registered client and is stated in
-  the changelog.
+  README sentence `docs:check` derives from the table (the spelled-out count
+  in `scripts/repo-facts.mjs` runs to forty; extend the table before the
+  catalogue passes it). Removing or renaming one is a compatibility change for
+  every registered client and is stated in the changelog.
+- A reader the MCP grows is a reader the CLI or the viz already has, reached
+  through a second door: `skillShow` mirrors `skills show`, `ledgerTail`
+  `ledger tail`, the tray builder is shared with `/api/notifications`
+  (`src/viz/push/tray.ts`). When a new reader has no first door, build the
+  shared body first and mount both doors on it — never a loop the route keeps
+  and the tool copies.
+- `atoma_doctor` was considered and NOT built (roadmap, 2026-08-21 and
+  2026-09-07): doctor probes Docker and the environment and is not a pure
+  reader. Exposing a side-effect-free subset needs that subset to exist in
+  `src/cli` first.
 - The tenant tools call `ProjectService` through its input-based methods
   (`createProjectFromInput`, `startProjectRunFromInput`, `projectRunStatus`);
   the HTTP routes are body readers in front of the same checks. Never

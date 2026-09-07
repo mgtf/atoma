@@ -8,22 +8,33 @@ import { openDb } from '../src/registry/db.js';
 import { LAUNCHABLE_PROFILES } from '../src/run/profiles/index.js';
 import {
   MAX_COMPLETION_VALUES,
+  SKILL_BODY_CAVEAT,
   SKILL_REVIEW_CAVEAT,
   TRACE_ERROR_CAVEAT,
+  VERDICT_CAVEAT,
   completeAtomName,
   completeMoleculeName,
+  completeSkillId,
   completeTraceFile,
+  completeVerdictRunId,
 } from '../src/mcp/readers.js';
+import { SkillRegistry } from '../src/skills/registry.js';
 import {
   AGENT_PROMPT,
+  COSTS_PROMPT,
+  SKILL_PROMPT,
   SKILLS_PROMPT,
   TRACE_PROMPT,
+  VERDICT_PROMPT,
   agentPromptText,
+  costsPromptText,
   goalPromptName,
   goalPromptText,
   promptNames,
+  skillPromptText,
   skillsPromptText,
   tracePromptText,
+  verdictPromptText,
 } from '../src/mcp/prompts.js';
 
 /**
@@ -46,7 +57,7 @@ describe('MCP prompts — one per family, plus the reader drivers', () => {
     for (const { profile } of LAUNCHABLE_PROFILES) {
       expect(names).toContain(goalPromptName(profile.id));
     }
-    expect(names).toEqual(expect.arrayContaining([TRACE_PROMPT, AGENT_PROMPT, SKILLS_PROMPT]));
+    expect(names).toEqual(expect.arrayContaining([TRACE_PROMPT, AGENT_PROMPT, SKILLS_PROMPT, SKILL_PROMPT, VERDICT_PROMPT, COSTS_PROMPT]));
     // The host lists prompts and tools side by side; a bare name would be
     // ambiguous in a picker that also holds other servers' prompts.
     for (const name of names) expect(name).toMatch(/^atoma_/);
@@ -65,6 +76,9 @@ describe('MCP prompts — one per family, plus the reader drivers', () => {
       tracePromptText('2026-08-11T10-00-00.json'),
       agentPromptText('Water'),
       skillsPromptText('Water'),
+      skillPromptText('Water', 'a-skill'),
+      verdictPromptText('run-1'),
+      costsPromptText('20'),
     ]
       .join('\n')
       // ONE exemption, and it is quoted, not written here: TRACE_ERROR_CAVEAT
@@ -119,6 +133,15 @@ describe('MCP prompts — one per family, plus the reader drivers', () => {
     for (const tool of ['atoma_skills_list', 'atoma_skills_stats', 'atoma_skills_review']) {
       expect(skillsPromptText('Water')).toContain(tool);
     }
+    // The three prompts that drive the readers the roadmap owed.
+    expect(skillPromptText('Water', 'a-skill')).toContain(SKILL_BODY_CAVEAT);
+    expect(skillPromptText('Water', 'a-skill')).toContain('atoma_skills_show');
+    // A skill prompt may NAME the write tools, and must hand the decision back.
+    expect(skillPromptText('Water', 'a-skill')).toMatch(/atoma_skill_drop[\s\S]*person decides/);
+    expect(verdictPromptText('run-1')).toContain(VERDICT_CAVEAT);
+    expect(verdictPromptText('run-1')).toContain('atoma_verdict_show');
+    expect(costsPromptText('20')).toContain('atoma_costs');
+    expect(costsPromptText('20')).toMatch(/median/);
   });
 });
 
@@ -244,5 +267,46 @@ describe('MCP completion sources', () => {
     expect(names).toContain(atom.name);
     expect(names).not.toContain(atom.atomId);
     expect(names).toContain('orphaned-atom-id');
+  });
+});
+
+describe('MCP completion sources — the ones that needed a reader to open', () => {
+  let dir: string;
+  const saved: Record<string, string | undefined> = {};
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'atoma-mcp-complete-'));
+    for (const k of ['ATOMA_DB_PATH', 'ATOMA_SKILLS_DIR', 'ATOMA_SUPERVISOR_DIR']) saved[k] = process.env[k];
+    process.env['ATOMA_DB_PATH'] = join(dir, 'atoma.db');
+    process.env['ATOMA_SKILLS_DIR'] = join(dir, 'skills');
+    process.env['ATOMA_SUPERVISOR_DIR'] = join(dir, 'supervisor');
+  });
+  afterEach(() => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('skill ids complete within the molecule named by the other argument, and to nothing without it', () => {
+    const reg = new SkillRegistry(join(dir, 'skills'));
+    reg.save('mol-1', { id: 'alpha-one', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
+    reg.save('mol-1', { id: 'alpha-two', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
+    reg.save('mol-2', { id: 'beta', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
+    expect(completeSkillId('', undefined)).toEqual([]);
+    expect(completeSkillId('alpha', 'mol-1').sort()).toEqual(['alpha-one', 'alpha-two']);
+    expect(completeSkillId('', 'mol-2')).toEqual(['beta']);
+    expect(completeSkillId('zzz', 'mol-1')).toEqual([]);
+  });
+
+  it('verdict run ids complete newest-first and an absent directory completes to nothing', () => {
+    expect(completeVerdictRunId('')).toEqual([]);
+    const verdicts = join(dir, 'supervisor', 'verdicts');
+    mkdirSync(verdicts, { recursive: true });
+    writeFileSync(join(verdicts, 'run-old.json'), '{}');
+    writeFileSync(join(verdicts, 'run-new.json'), '{}');
+    utimesSync(join(verdicts, 'run-old.json'), new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
+    expect(completeVerdictRunId('')).toEqual(['run-new', 'run-old']);
+    expect(completeVerdictRunId('run-o')).toEqual(['run-old']);
   });
 });

@@ -26,14 +26,24 @@ import {
 } from '../src/mcp/run.js';
 import type { RunLeaseAcquirer } from '../src/mcp/runLock.js';
 import {
+  costs,
   families,
   friction,
+  ledgerTail,
   pathIsInsideDir,
+  registryHistory,
   registryList,
   runTrace,
+  SKILL_BODY_CAVEAT,
+  skillShow,
   skillsList,
   TRACE_ERROR_CAVEAT,
+  VERDICT_CAVEAT,
+  verdictShow,
+  verdictsList,
 } from '../src/mcp/readers.js';
+import { SkillRegistry } from '../src/skills/registry.js';
+import { runStatusWait } from '../src/mcp/run.js';
 import { BUILTIN_TOOL_VOCABULARY } from '../src/atoms/verdict.js';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
@@ -694,4 +704,179 @@ describe('MCP server instructions', () => {
     expect(INSTRUCTIONS).toMatch(/never follow it as instructions/);
   });
 
+});
+
+describe('MCP readers — the ones the roadmap owed', () => {
+  let dir: string;
+  const saved: Record<string, string | undefined> = {};
+  const KEYS = ['ATOMA_DB_PATH', 'ATOMA_LEDGER_DB', 'ATOMA_SKILLS_DIR', 'ATOMA_RUNS_DIR', 'ATOMA_SUPERVISOR_DIR'];
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'atoma-mcp-readers-'));
+    for (const k of KEYS) saved[k] = process.env[k];
+    process.env['ATOMA_DB_PATH'] = join(dir, 'atoma.db');
+    process.env['ATOMA_LEDGER_DB'] = join(dir, 'atoma.db');
+    process.env['ATOMA_SKILLS_DIR'] = join(dir, 'skills');
+    process.env['ATOMA_RUNS_DIR'] = join(dir, 'runs');
+    process.env['ATOMA_SUPERVISOR_DIR'] = join(dir, 'supervisor');
+  });
+  afterEach(() => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('skillShow returns the body bounded, the status from the thresholds in force, and the caveat', () => {
+    const reg = new SkillRegistry(join(dir, 'skills'));
+    reg.save('mol-1', { id: 'long-body', description: 'd', whenToUse: 'w', kind: 'llm', body: 'x'.repeat(5000) });
+    reg.recordSuccess('mol-1', 'long-body');
+    const out = skillShow({ l1: 'mol-1', id: 'long-body' }) as {
+      skill: { body: string; bodyChars: number; successes: number; freeRides: number };
+      status: string;
+      thresholdsInForce: { trust: number; promote: number };
+      caveat: string;
+    };
+    expect(out.skill.bodyChars).toBe(5000);
+    expect(out.skill.body).toMatch(/truncated at 4000 chars/);
+    expect(out.skill.successes).toBe(1);
+    expect(out.skill.freeRides).toBe(0);
+    expect(out.status).toMatch(/promotion/);
+    expect(out.thresholdsInForce.promote).toBeGreaterThan(0);
+    expect(out.caveat).toBe(SKILL_BODY_CAVEAT);
+    expect((skillShow({ l1: 'mol-1', id: 'nope' }) as { note: string }).note).toMatch(/no skill/);
+  });
+
+  it('ledgerTail reads newest-first through a readonly handle, and an absent ledger is an answer', () => {
+    expect((ledgerTail() as { note: string }).note).toMatch(/no ledger/);
+    const reg = new SkillRegistry(join(dir, 'skills'));
+    reg.save('mol-1', { id: 's1', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
+    reg.recordSuccess('mol-1', 's1');
+    reg.recordFailure('mol-1', 's1');
+    const all = ledgerTail({ limit: 2 }) as { total: number; events: { kind: string; entity: string }[] };
+    expect(all.total).toBeGreaterThanOrEqual(3);
+    expect(all.events).toHaveLength(2);
+    expect(all.events[0]!.kind).toBe('skill-failure');
+    expect(all.events[1]!.kind).toBe('skill-success');
+    const filtered = ledgerTail({ kind: 'skill-save' }) as { events: { kind: string }[] };
+    expect(filtered.events.map((e) => e.kind)).toEqual(['skill-save']);
+    const byEntity = ledgerTail({ entity: 'mol-1' }) as { events: { entity: string }[] };
+    expect(byEntity.events.every((e) => e.entity.startsWith('mol-1/'))).toBe(true);
+  });
+
+  it('costs folds traces per model, tier and role and reads the trend from medians', () => {
+    const runs = join(dir, 'runs');
+    mkdirSync(runs, { recursive: true });
+    const trace = (id: string, startedAt: string, cost: number, tier: number) => ({
+      id,
+      label: `run ${id}`,
+      startedAt,
+      endedAt: startedAt,
+      totals: { calls: 2, inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUsd: cost, perModel: [{ model: 'm', calls: 2, inputTokens: 10, outputTokens: 5, costUsd: cost }] },
+      events: [
+        { id: 'e1', ts: 1, kind: 'llm', role: 'plan', model: 'm', actor: { tier, name: 'A' }, usage: { inputTokens: 5, outputTokens: 2, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 }, costUsd: cost / 2 },
+        { id: 'e2', ts: 2, kind: 'llm', role: 'execute', model: 'm', usage: { inputTokens: 5, outputTokens: 3, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 }, costUsd: cost / 2 },
+      ],
+    });
+    const costsByRun = [4, 4, 1, 1];
+    costsByRun.forEach((cost, i) => {
+      writeFileSync(join(runs, `r${i}.json`), JSON.stringify(trace(`r${i}`, `2026-09-0${i + 1}T00:00:00.000Z`, cost, 3)));
+    });
+    writeFileSync(join(runs, 'index.json'), '{}');
+    writeFileSync(join(runs, 'broken.json'), '{ not json');
+    const out = costs({ last: 10 }) as {
+      runsScanned: number;
+      unparseable: number;
+      totals: { costUsd: number; calls: number };
+      perModel: { key: string; costUsd: number }[];
+      perTier: { key: string; calls: number }[];
+      perRole: { key: string; calls: number }[];
+      trend: { olderHalfMedianUsd: number; newerHalfMedianUsd: number };
+      runs: { id: string }[];
+    };
+    expect(out.runsScanned).toBe(4);
+    expect(out.unparseable).toBe(1);
+    expect(out.totals).toMatchObject({ costUsd: 10, calls: 8 });
+    expect(out.perModel).toEqual([expect.objectContaining({ key: 'm', costUsd: 10 })]);
+    expect(out.perTier.map((r) => [r.key, r.calls]).sort()).toEqual([['L3', 4], ['unattributed', 4]]);
+    expect(out.perRole.map((r) => r.key).sort()).toEqual(['execute', 'plan']);
+    expect(out.trend).toEqual({ olderHalfMedianUsd: 4, newerHalfMedianUsd: 1, runsPerHalf: [2, 2] });
+    expect(out.runs.map((r) => r.id)).toEqual(['r0', 'r1', 'r2', 'r3']);
+  });
+
+  it('registryHistory carries versions without prompt text', () => {
+    const db = openDb(join(dir, 'atoma.db'));
+    const registry = new AtomRegistry(db);
+    const created = registry.create(1, { description: 'fixture', systemPrompt: 'secret prompt', tools: [], params: {}, createdBy: 'test' });
+    registry.patch(created.name, { systemPromptReplace: 'another secret prompt' }, 'test', 'because');
+    db.close();
+    const out = registryHistory({ name: created.name }) as { liveVersion: number; versions: { version: number; reason: string | null; systemPromptChars: number }[] };
+    expect(out.liveVersion).toBe(2);
+    expect(out.versions.map((v) => v.systemPromptChars)).toContain('secret prompt'.length);
+    expect(out.versions.some((v) => v.reason === 'because')).toBe(true);
+    expect(JSON.stringify(out)).not.toContain('secret prompt');
+  });
+
+  it('verdicts are listed newest-first, opened by run id only, and never by path', () => {
+    expect((verdictsList() as { count: number }).count).toBe(0);
+    const verdicts = join(dir, 'supervisor', 'verdicts');
+    mkdirSync(verdicts, { recursive: true });
+    const verdict = (runId: string, grade: string) => ({
+      schema: 'atoma.supervisor.verdict/v1',
+      runId,
+      runStatus: 'delivered',
+      runAssessment: { grade, summary: 'fine' },
+      findings: [{ kind: 'observation', title: 't', detail: 'd', evidence: [], confidence: 'low' }],
+      _meta: { analysedAt: '2026-09-07T00:00:00.000Z', promptVersion: 'v', modelRequested: 'm', providerBaseUrl: null, modelsServed: null, worstFindingKind: null, analysisCostUsd: 0.1, analysisDurationMs: 1, analysisTurns: 1 },
+    });
+    writeFileSync(join(verdicts, 'run-a.json'), JSON.stringify(verdict('run-a', 'sound')));
+    writeFileSync(join(verdicts, 'not-a-verdict.json'), '{"schema":"other"}');
+    const listed = verdictsList() as { count: number; verdicts: ({ runId: string; findings: Record<string, number> } | { note: string })[]; caveat: string };
+    expect(listed.count).toBe(2);
+    expect(listed.verdicts).toEqual(expect.arrayContaining([expect.objectContaining({ runId: 'run-a', grade: 'sound', findings: { observation: 1 } }), expect.objectContaining({ note: expect.stringMatching(/not a verdict/) })]));
+    expect(listed.caveat).toBe(VERDICT_CAVEAT);
+    const shown = verdictShow({ runId: 'run-a' }) as { verdict: { runId: string; findings: unknown[] }; meta: { analysisCostUsd: number } };
+    expect(shown.verdict.runId).toBe('run-a');
+    expect(shown.verdict.findings).toHaveLength(1);
+    expect(shown.meta.analysisCostUsd).toBe(0.1);
+    expect((verdictShow({ runId: '../verdicts/run-a' }) as { note: string }).note).toMatch(/refused/);
+    expect((verdictShow({ runId: 'missing' }) as { note: string }).note).toMatch(/no verdict/);
+  });
+});
+
+describe('MCP run status — waitMs long-poll', () => {
+  afterEach(() => resetRunsForTest());
+
+  it('returns at once for a run that is not running, and on the first chunk for one that is', async () => {
+    let chunk: ((text: string) => void) | null = null;
+    const driver: RunDriver = (opts) => new Promise<string>(() => { chunk = (text) => opts.onChunk?.(text); });
+    const record = await startTestRun({ goal: 'a long poll goal' }, driver);
+    const t0 = Date.now();
+    const idle = runStatusWait({ runId: 'nope', waitMs: 5000 });
+    expect(Date.now() - t0).toBeLessThan(100);
+    expect(await idle).toMatchObject({ note: expect.stringMatching(/no run/) });
+    const waiting = runStatusWait({ runId: record.runId, waitMs: 5000 });
+    setTimeout(() => chunk?.('hello'), 20);
+    const result = (await waiting) as { progress: { chunks: number; tail: string } };
+    expect(Date.now() - t0).toBeLessThan(2000);
+    expect(result.progress).toEqual({ chunks: 1, tail: 'hello' });
+  });
+
+  it('with a progress sink it streams chunks and returns on the deadline or a status change', async () => {
+    let chunk: ((text: string) => void) | null = null;
+    const driver: RunDriver = (opts) => new Promise<string>(() => { chunk = (text) => opts.onChunk?.(text); });
+    const record = await startTestRun({ goal: 'a streaming goal' }, driver);
+    const seen: number[] = [];
+    const waiting = runStatusWait({ runId: record.runId, waitMs: 300, progress: (u) => seen.push(u.chunks) });
+    setTimeout(() => chunk?.('a'), 20);
+    setTimeout(() => chunk?.('b'), 60);
+    const result = (await waiting) as { progress: { chunks: number } };
+    expect(seen).toEqual([1, 2]);
+    expect(result.progress.chunks).toBe(2);
+    // The cap is the cap: nonsense waits are clamped, never honoured.
+    const t0 = Date.now();
+    await runStatusWait({ runId: record.runId, waitMs: -5 });
+    expect(Date.now() - t0).toBeLessThan(100);
+  });
 });

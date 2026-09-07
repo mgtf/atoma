@@ -7,6 +7,9 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { afterEach, describe, expect, it } from 'vitest';
 import { AuthStore, sha256Hex, type Viewer } from '../src/auth/store.js';
 import { closeStoreHandles } from '../src/core/stores.js';
+import { SkillRegistry } from '../src/skills/registry.js';
+import { resetRunsForTest, startRun, type RunDriver } from '../src/mcp/run.js';
+import { FAMILIES_URI, operatorRunUri } from '../src/mcp/resources.js';
 import { McpHttpHost } from '../src/mcp/http.js';
 import { callerTier, type McpCaller } from '../src/mcp/identity.js';
 import { buildServer } from '../src/mcp/server.js';
@@ -30,7 +33,12 @@ const servers: Server[] = [];
 const hosts: McpHttpHost[] = [];
 afterEach(async () => {
   for (const host of hosts.splice(0)) await host.close();
-  for (const server of servers.splice(0)) await new Promise<void>((r) => server.close(() => r()));
+  for (const server of servers.splice(0)) {
+    // The SDK client keeps its sockets alive; `close` alone would wait out
+    // their idle timeout (~4s per server) before calling back.
+    server.closeAllConnections();
+    await new Promise<void>((r) => server.close(() => r()));
+  }
   closeStoreHandles();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
@@ -92,18 +100,28 @@ describe('the catalogue by tier', () => {
     const asMember = names({ kind: 'principal', viewer: viewer('org:member'), tokenId: 't' }, TENANT_HOST);
     const asAdmin = names({ kind: 'principal', viewer: viewer('org:admin'), tokenId: 't' }, TENANT_HOST);
     const asPlatform = names({ kind: 'principal', viewer: viewer('org:viewer', true), tokenId: 't' }, TENANT_HOST);
-    expect(asViewer).toEqual(['atoma_families', 'atoma_projects_list', 'atoma_project_runs', 'atoma_run_status', 'atoma_run_trace']);
+    expect(asViewer).toEqual(['atoma_families', 'atoma_projects_list', 'atoma_project_runs', 'atoma_run_status', 'atoma_run_trace', 'atoma_run_preview']);
     expect(asMember).toEqual([...asViewer, 'atoma_project_create', 'atoma_run_start', 'atoma_run_cancel', 'atoma_publication_retry']);
     expect(asAdmin).toEqual([...asMember, 'atoma_org_members', 'atoma_org_models']);
-    expect(asPlatform).toEqual(MCP_TOOL_NAMES); // a platform admin's ladder is the whole table
+    // The tray needs the host's notification builder; this host has none, so
+    // the platform ladder is the whole table minus that one row.
+    expect(asPlatform).toEqual(MCP_TOOL_NAMES.filter((name) => name !== 'atoma_notifications'));
+    const withTray = names({ kind: 'principal', viewer: viewer('org:viewer'), tokenId: 't' }, { ...TENANT_HOST, notifications: () => ({ notifications: [], nextBefore: null }) });
+    expect(withTray).toContain('atoma_notifications');
     expect(callerTier({ kind: 'operator' })).toBe('platform');
     // The ungated operator: no organisations to honour, no journal.
     const asOperator = names({ kind: 'operator' }, NO_TENANT);
     expect(asOperator).not.toContain('atoma_projects_list');
     expect(asOperator).not.toContain('atoma_journal_tail');
+    expect(asOperator).not.toContain('atoma_notifications');
     expect(asOperator).toContain('atoma_operator_run_start');
     expect(asOperator).toContain('atoma_registry_list');
     expect(asOperator).toContain('atoma_run_trace');
+    // The readers and writes the roadmap owed, all platform-tier.
+    for (const owed of ['atoma_skills_show', 'atoma_ledger_tail', 'atoma_costs', 'atoma_registry_history', 'atoma_verdicts_list', 'atoma_verdict_show', 'atoma_sentinel_health', 'atoma_skill_reset', 'atoma_skill_drop', 'atoma_skill_merge', 'atoma_registry_rollback']) {
+      expect(asOperator).toContain(owed);
+      expect(asAdmin).not.toContain(owed);
+    }
   });
 
   it('names every tool once and states a tier for each', () => {
@@ -238,6 +256,166 @@ describe('organisation model audit across MCP', () => {
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ kind: 'org.models_updated', actorType: 'principal',
       actorId: viewer('org:admin').principalId, orgId: viewer('org:admin').orgId });
+    await client.close();
+  });
+});
+
+describe('operator writes over MCP — attributed and journaled', () => {
+  const saved: Record<string, string | undefined> = {};
+  function skillsFixture(): { dir: string; l1: string } {
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-mcp-writes-'));
+    dirs.push(dir);
+    for (const k of ['ATOMA_DB_PATH', 'ATOMA_SKILLS_DIR', 'ATOMA_LEDGER_DB']) saved[k] = process.env[k];
+    process.env['ATOMA_DB_PATH'] = join(dir, 'atoma.db');
+    process.env['ATOMA_LEDGER_DB'] = join(dir, 'atoma.db');
+    process.env['ATOMA_SKILLS_DIR'] = join(dir, 'skills');
+    const reg = new SkillRegistry(join(dir, 'skills'));
+    reg.save('mol-1', { id: 'keep-me', description: 'keep', whenToUse: 'when keeping', kind: 'llm', body: 'body A' });
+    reg.save('mol-1', { id: 'absorb-me', description: 'absorb', whenToUse: 'when absorbing', kind: 'llm', body: 'body B' });
+    reg.recordSuccess('mol-1', 'absorb-me');
+    return { dir, l1: 'mol-1' };
+  }
+  afterEach(() => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  it('refuses to drop or absorb proven knowledge without force, and journals the actor when it does act', async () => {
+    const { l1 } = skillsFixture();
+    const events: unknown[] = [];
+    const admin = viewer('org:owner', true);
+    const { url } = await listen(() => ({ kind: 'principal', viewer: admin, tokenId: 'a' }), { ...TENANT_HOST, emit: (event) => { events.push(event); } });
+    const client = await connect(url);
+    const refused = await client.callTool({ name: 'atoma_skill_drop', arguments: { l1, id: 'absorb-me' } });
+    expect(refused.isError).toBe(true);
+    expect(JSON.stringify(refused.content)).toMatch(/proven knowledge/);
+    const mergeRefused = await client.callTool({ name: 'atoma_skill_merge', arguments: { l1, keep: 'keep-me', absorb: 'absorb-me' } });
+    expect(mergeRefused.isError).toBe(true);
+    expect(events).toEqual([]);
+    const reset = await client.callTool({ name: 'atoma_skill_reset', arguments: { l1, id: 'absorb-me' } });
+    expect(reset.isError).not.toBe(true);
+    expect(reset.structuredContent).toMatchObject({ before: { successes: 1 }, after: { successes: 0 }, journaled: true, actor: `mcp:${admin.principalId}` });
+    const merged = await client.callTool({ name: 'atoma_skill_merge', arguments: { l1, keep: 'keep-me', absorb: 'absorb-me' } });
+    expect(merged.isError).not.toBe(true);
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({ kind: 'skill.reset', actorType: 'principal', actorId: admin.principalId, orgId: admin.orgId });
+    expect(events[1]).toMatchObject({ kind: 'skill.merged', actorType: 'principal', actorId: admin.principalId });
+    expect(JSON.stringify(events)).not.toContain('body A');
+    expect(new SkillRegistry(process.env['ATOMA_SKILLS_DIR']).loadFor(l1).map((s) => s.id)).toEqual(['keep-me']);
+    await client.close();
+  });
+
+  it('a member cannot even see the writes, and a rollback of a missing type is a refusal, not a fault', async () => {
+    skillsFixture();
+    const { url } = await listen(() => ({ kind: 'principal', viewer: viewer('org:member'), tokenId: 'm' }), TENANT_HOST);
+    const client = await connect(url);
+    expect(await toolNames(client)).not.toContain('atoma_skill_drop');
+    await client.close();
+    const { url: opUrl } = await listen(() => ({ kind: 'operator' }), NO_TENANT);
+    const operator = await connect(opUrl);
+    const rollback = await operator.callTool({ name: 'atoma_registry_rollback', arguments: { name: 'Nobody', toVersion: 1 } });
+    expect(rollback.isError).toBe(true);
+    expect(JSON.stringify(rollback.content)).toMatch(/refused/);
+    await operator.close();
+  });
+});
+
+describe('preview, notifications and the tray over MCP', () => {
+  it('reads preview state as a viewer, refuses to open one below member, opens as a member', async () => {
+    const calls: string[] = [];
+    const preview = {
+      status: (_v: Viewer, p: string, r: string) => { calls.push(`status ${p}/${r}`); return { state: 'idle' }; },
+      open: async (_v: Viewer, p: string, r: string, o: { inFlight?: boolean }) => { calls.push(`open ${p}/${r} ${o.inFlight}`); return { status: 200, body: { summary: { state: 'ready' }, url: 'https://preview/x#claim' } }; },
+      stop: async () => ({ state: 'stopped' }),
+    } as never;
+    const callers: Record<string, McpCaller> = {
+      v: { kind: 'principal', viewer: viewer('org:viewer'), tokenId: 'v' },
+      m: { kind: 'principal', viewer: viewer('org:member'), tokenId: 'm' },
+    };
+    const { url } = await listen((req) => callers[/^Bearer (.+)$/.exec(String(req.headers.authorization ?? ''))?.[1] ?? ''] ?? null, { ...TENANT_HOST, preview: () => preview });
+    const asViewer = await connect(url, 'v');
+    const state = await asViewer.callTool({ name: 'atoma_run_preview', arguments: { projectId: 'p1', runId: 'r1' } });
+    expect(state.structuredContent).toEqual({ state: 'idle' });
+    const refused = await asViewer.callTool({ name: 'atoma_run_preview', arguments: { projectId: 'p1', runId: 'r1', action: 'open' } });
+    expect(refused.isError).toBe(true);
+    expect(JSON.stringify(refused.content)).toMatch(/403/);
+    await asViewer.close();
+    const asMember = await connect(url, 'm');
+    const opened = await asMember.callTool({ name: 'atoma_run_preview', arguments: { projectId: 'p1', runId: 'r1', action: 'open', inFlight: true } });
+    expect(opened.structuredContent).toMatchObject({ httpStatus: 200, url: 'https://preview/x#claim' });
+    expect(calls).toEqual(['status p1/r1', 'open p1/r1 true']);
+    await asMember.close();
+  });
+
+  it('answers "not available" when the host has no preview runtime, like the HTTP route', async () => {
+    const { url } = await listen(() => ({ kind: 'principal', viewer: viewer('org:member'), tokenId: 'm' }), { ...TENANT_HOST, preview: () => null });
+    const client = await connect(url);
+    const result = await client.callTool({ name: 'atoma_run_preview', arguments: { projectId: 'p1', runId: 'r1' } });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toMatch(/503/);
+    await client.close();
+  });
+
+  it('the tray is the host builder’s answer for THIS principal, with structured content', async () => {
+    const seen: unknown[] = [];
+    const { url } = await listen(() => ({ kind: 'principal', viewer: viewer('org:viewer'), tokenId: 'v' }), {
+      ...TENANT_HOST,
+      notifications: (input) => { seen.push(input); return { notifications: [{ seq: 7, at: 'now', kind: 'run.finished', severity: 'info', title: 'Run finished', body: 'b', orgId: 'org-1', projectId: null, runId: null, traceId: null }], nextBefore: null }; },
+    });
+    const client = await connect(url);
+    const result = await client.callTool({ name: 'atoma_notifications', arguments: { locale: 'fr', limit: 5 } });
+    expect(seen).toEqual([{ principalId: viewer('org:viewer').principalId, locale: 'fr', limit: 5 }]);
+    expect(result.structuredContent).toMatchObject({ notifications: [{ seq: 7 }], nextBefore: null });
+    await client.close();
+  });
+});
+
+describe('resources — addressable state with subscriptions', () => {
+  afterEach(() => resetRunsForTest());
+
+  it('lists the families for everyone, the operator corpus only for the platform tier, and reads through the readers', async () => {
+    const { url } = await listen(() => ({ kind: 'principal', viewer: viewer('org:member'), tokenId: 'm' }), TENANT_HOST);
+    const member = await connect(url);
+    const caps = member.getServerCapabilities();
+    expect(caps?.resources).toMatchObject({ subscribe: true, listChanged: true });
+    const templates = (await member.listResourceTemplates()).resourceTemplates.map((t) => t.uriTemplate);
+    expect(templates).toContain('atoma://projects/{projectId}/runs/{runId}');
+    expect(templates).not.toContain('atoma://runs/{file}');
+    const families = await member.readResource({ uri: FAMILIES_URI });
+    expect(JSON.parse((families.contents[0] as { text: string }).text)).toHaveProperty('families');
+    await member.close();
+    const { url: opUrl } = await listen(() => ({ kind: 'operator' }), NO_TENANT);
+    const operator = await connect(opUrl);
+    const opTemplates = (await operator.listResourceTemplates()).resourceTemplates.map((t) => t.uriTemplate);
+    expect(opTemplates).toContain('atoma://runs/{file}');
+    expect(opTemplates).toContain('atoma://operator-runs/{runId}');
+    const traversal = await operator.readResource({ uri: 'atoma://runs/..%2F..%2Fetc%2Fpasswd' });
+    expect((traversal.contents[0] as { text: string }).text).toMatch(/refused/);
+    await operator.close();
+  });
+
+  it('tells a subscribed session when an operator run finishes', async () => {
+    let settle: (log: string) => void = () => {};
+    const driver: RunDriver = () => new Promise<string>((resolve) => { settle = resolve; });
+    const record = await startRun({ goal: 'a goal for the resource test' }, driver, async () => ({ path: '<test>', attachChild() {}, release() {} }));
+    const { url } = await listen(() => ({ kind: 'operator' }), NO_TENANT);
+    const client = await connect(url);
+    const updated: string[] = [];
+    client.setNotificationHandler(
+      (await import('@modelcontextprotocol/sdk/types.js')).ResourceUpdatedNotificationSchema,
+      (notification) => { updated.push(notification.params.uri); }
+    );
+    const uri = operatorRunUri(record.runId);
+    await client.subscribeResource({ uri });
+    const before = await client.readResource({ uri });
+    expect(JSON.parse((before.contents[0] as { text: string }).text)).toMatchObject({ runId: record.runId, status: 'running' });
+    settle('no epilogue');
+    await new Promise<void>((r) => setTimeout(r, 200));
+    expect(updated).toEqual([uri]);
+    const after = await client.readResource({ uri });
+    expect(JSON.parse((after.contents[0] as { text: string }).text)).toMatchObject({ runId: record.runId, status: 'finished' });
     await client.close();
   });
 });

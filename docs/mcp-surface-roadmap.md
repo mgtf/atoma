@@ -2,10 +2,29 @@
 
 > Historical proposal (2026-08-21), not the current MCP setup guide. The
 > stdio-only boundary and 13-tool inventory below were superseded on 2026-09-05
-> by one role-scoped HTTP `/mcp` surface with 24 tools. Operator run names now
+> by one role-scoped HTTP `/mcp` surface. Operator run names now
 > use `atoma_operator_run_*`; `atoma_run_*` drive organisation project runs.
 > See the [current README](../README.md#drive-it-from-the-agent-you-already-use-mcp)
 > and [decision record](mcp-one-surface-2026-09-05.md).
+>
+> **Closed 2026-09-07.** Every item below that was still open has been built,
+> on the HTTP surface, as one commit (37 tools): `atoma_skills_show` (with the
+> skill-id completion that waited for it), `atoma_ledger_tail`, `atoma_costs`,
+> `atoma_registry_history`; the `waitMs` long-poll on both status tools, with
+> `notifications/progress` for a host that sends a progress token; resources
+> (`atoma://families`, `atoma://runs/{file}`, `atoma://operator-runs/{runId}`,
+> `atoma://projects/{projectId}/runs/{runId}`) with `resources/subscribe` and
+> a `resources/updated` notification when a run ends; `structuredContent` on
+> every payload and `outputSchema` on the new readers; and the operator
+> writes (`atoma_skill_reset|drop|merge`, `atoma_registry_rollback`), whose
+> actor question the 2026-09-05 identity layer answered — a bearer token names
+> a principal, and each write is journaled as `skill.*` / `registry.rolled_back`
+> with that actor. Beyond this list, the same commit exposed what had appeared
+> since the roadmap was written: `atoma_run_preview`, `atoma_notifications`,
+> `atoma_verdicts_list`, `atoma_verdict_show`, `atoma_sentinel_health`.
+> `atoma_doctor` was NOT built, on the caution recorded below: doctor probes
+> Docker and the environment and is not a pure reader.
+> The normative rules live in [src/mcp/AGENTS.md](../src/mcp/AGENTS.md).
 
 
 Status: PROPOSAL, not scheduled, EXCEPT where an item is marked DELIVERED.

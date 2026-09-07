@@ -208,7 +208,7 @@ export function buildIr({ subsystems, facts }) {
         dot: 'cyan',
         title: 'Read out of this checkout',
         items: [
-          `${facts.mcpTools} MCP tools on the stdio control plane`,
+          `${facts.mcpTools} MCP tools on the HTTP control plane`,
           `${facts.pools.molecules} molecules · ${facts.pools.cells} cells · ${facts.pools.tissues} tissues`,
           `${facts.benchmarkRounds} controlled benchmark rounds recorded`,
         ],

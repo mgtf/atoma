@@ -120,10 +120,10 @@ import { PushNotifier } from './push/notifier.js';
 import {
   NotificationRouter,
   cachedAudienceDirectory,
-  resolveAudience,
   type AudienceDirectory,
 } from './push/router.js';
-import { PUSH_ROUTES, asPushLocale, renderPush } from './push/routes.js';
+import { asPushLocale } from './push/routes.js';
+import { clampTrayLimit, notificationTray } from './push/tray.js';
 import { draftAnnouncementTranslations } from './push/translate.js';
 import { organisationsForSegment } from './push/segments.js';
 import {
@@ -140,6 +140,7 @@ import type { LlmClient } from '../core/types.js';
 import { PlatformEventLog } from '../platform/events.js';
 import { eventLabel } from '../contracts/platformEvents.js';
 import { sentinelRuleTable } from '../sentinel/rules.js';
+import { supervisorDirPath } from '../supervisor/paths.js';
 import {
   operatorRunSource,
   projectRunSource,
@@ -610,6 +611,22 @@ function audienceDirectory(authStore: AuthStore): AudienceDirectory {
         .flatMap((organisation) => organisation.members.map((member) => member.principalId));
     },
   };
+}
+
+/**
+ * A project-run id → its trace id, for the tray rows and the MCP. `runId` on a
+ * journal row is a PROJECT-RUN id, which the Runs view cannot address, so the
+ * trace is resolved against the org-scoped projects store — the same fact the
+ * audience member would get by opening the project. A foreign or
+ * operator-shaped id resolves to null, never to a crash.
+ */
+function projectRunTraceId(orgId: string | null, runId: string | null): string | null {
+  if (!orgId || !runId || !PROJECTS_RUNTIME) return null;
+  try {
+    return PROJECTS_RUNTIME.store.getProjectRun(orgId, runId)?.traceId ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -1110,7 +1127,7 @@ const ANALYST: ResidentAnalyst | null = (() => {
     runsDir: RUNS_DIR,
     projectReader: PROJECTS_RUNTIME.store,
     dispatch,
-    supervisorDir: resolve(process.env['ATOMA_SUPERVISOR_DIR'] ?? './supervisor'),
+    supervisorDir: supervisorDirPath(),
     leasePath: mcpRunLockPath(),
     provider,
     claudeCommand: process.env['ATOMA_SUPERVISOR_CMD_CLAUDE'] ?? 'claude',
@@ -1149,6 +1166,24 @@ const MCP_DEPS: McpToolDeps = {
   journal: EVENTS,
   operatorRuns: true,
   emit,
+  // Read at call time: the preview runtime comes up after the bind.
+  preview: () => PREVIEW_RUNTIME?.service ?? null,
+  sentinel: () => sentinelHealth(),
+  analyst: () => ANALYST?.health() ?? null,
+  ...(EVENTS && AUTH?.store
+    ? {
+        notifications: (input) =>
+          notificationTray({
+            journal: EVENTS,
+            principalId: input.principalId,
+            directory: cachedAudienceDirectory(audienceDirectory(AUTH.store!)),
+            locale: input.locale,
+            ...(input.before !== undefined ? { before: input.before } : {}),
+            ...(input.limit !== undefined ? { limit: input.limit } : {}),
+            traceIdFor: (event) => projectRunTraceId(event.orgId, event.runId),
+          }),
+      }
+    : {}),
 };
 const MCP_HOST = new McpHttpHost({
   resolveCaller: (req): McpCaller | null => {
@@ -3039,13 +3074,10 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       return;
     }
 
-    // THE VIEWER'S NOTIFICATION TRAY — the journal, projected through the SAME
-    // routing table the push path delivers from. A row is in your tray exactly
-    // when `PUSH_ROUTES` would have pushed it to your devices, resolved
-    // against your CURRENT roles: no second table of per-principal deliveries,
-    // no second audience policy. Newest first, cursor-paged on `seq` like the
-    // admin journal; copy is rendered per request in the viewer's language by
-    // the same `renderPush` a subscription reads.
+    // THE VIEWER'S NOTIFICATION TRAY — one builder shared with the MCP's
+    // `atoma_notifications` (`src/viz/push/tray.ts`); this route only reads
+    // the query string. The trace id is resolved against the org-scoped
+    // projects store, tolerant like every journal reader.
     if (pathname === '/api/notifications') {
       if (!methodAllowed(req, res, 'GET')) return;
       if (!EVENTS) {
@@ -3053,88 +3085,24 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         return;
       }
       const rawBefore = url.searchParams.get('before');
-      const rawLimit = url.searchParams.get('limit');
-      const before = rawBefore === null ? Number.NaN : Number(rawBefore);
-      const limit = Math.max(
-        1,
-        Math.min(50, Number.isFinite(Number(rawLimit)) && rawLimit !== null ? Math.trunc(Number(rawLimit)) : 30)
-      );
+      const before = rawBefore === null ? undefined : Number(rawBefore);
       const locale = asPushLocale(url.searchParams.get('locale')) ?? DEFAULT_LOCALE;
-      // One request, one directory: the cache keeps a page scan from listing
-      // every organisation once per row, and dies with the response so a
-      // membership change is visible on the next read.
-      const directory = cachedAudienceDirectory(audienceDirectory(AUTH.store!));
-      // The event's own scope ids ride each row so the client can LINK a
-      // notification to its subject. `runId` is a PROJECT-RUN id, which the
-      // Runs view cannot address, so the trace is resolved here against the
-      // org-scoped projects store — the same fact the audience member would
-      // get by opening the project. Tolerant like every journal reader: a
-      // foreign or operator-shaped id resolves to null, never to a crash.
-      const traceIdFor = (event: { orgId: string | null; runId: string | null }): string | null => {
-        if (!event.orgId || !event.runId || !PROJECTS_RUNTIME) return null;
-        try {
-          return PROJECTS_RUNTIME.store.getProjectRun(event.orgId, event.runId)?.traceId ?? null;
-        } catch {
-          return null;
-        }
-      };
-      const notifications: {
-        seq: number;
-        at: string;
-        kind: string;
-        severity: string;
-        title: string;
-        body: string;
-        orgId: string | null;
-        projectId: string | null;
-        runId: string | null;
-        traceId: string | null;
-      }[] = [];
-      // Routed kinds are sparse in the journal, so the page FILLS by scanning:
-      // filtering a fixed page would thin it (the journal filter rule). The
-      // scan is bounded per request; a cap hit hands back the cursor with a
-      // short page rather than holding the response open over 50k rows.
-      let cursor = Number.isFinite(before) && before > 0 ? Math.trunc(before) : undefined;
-      let nextBefore: number | null = null;
-      for (let scanned = 0; notifications.length < limit && scanned < 1_000; ) {
-        const chunk = EVENTS.list({
-          ...(cursor !== undefined ? { before: cursor } : {}),
-          limit: 200,
-        });
-        for (const event of chunk.events) {
-          scanned += 1;
-          nextBefore = event.seq;
-          const route = PUSH_ROUTES[event.kind] ?? null;
-          if (!route) continue;
-          if (!resolveAudience(event, route.audience, directory).includes(viewer.principalId)) {
-            continue;
-          }
-          const copy = renderPush(event, locale, route);
-          // The router's own refusal: a row that renders no title is a blank
-          // line in a tray, not a degraded notification.
-          if (!copy.title) continue;
-          notifications.push({
-            seq: event.seq,
-            at: event.at,
-            kind: event.kind,
-            severity: event.severity,
-            title: copy.title,
-            body: copy.body,
-            orgId: event.orgId,
-            projectId: event.projectId,
-            runId: event.runId,
-            traceId: traceIdFor(event),
-          });
-          if (notifications.length >= limit) break;
-        }
-        if (notifications.length >= limit) break;
-        if (chunk.nextBefore === null) {
-          nextBefore = null;
-          break;
-        }
-        cursor = chunk.nextBefore;
-      }
-      sendJson(res, 200, { notifications, nextBefore });
+      sendJson(
+        res,
+        200,
+        notificationTray({
+          journal: EVENTS,
+          principalId: viewer.principalId,
+          // One request, one directory: the cache keeps a page scan from
+          // listing every organisation once per row, and dies with the
+          // response so a membership change is visible on the next read.
+          directory: cachedAudienceDirectory(audienceDirectory(AUTH.store!)),
+          locale,
+          ...(before !== undefined ? { before } : {}),
+          limit: clampTrayLimit(url.searchParams.get('limit')),
+          traceIdFor: (event) => projectRunTraceId(event.orgId, event.runId),
+        })
+      );
       return;
     }
 
