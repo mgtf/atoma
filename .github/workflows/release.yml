@@ -36,7 +36,11 @@ jobs:
           root="atoma-${GITHUB_REF_NAME}"
           mkdir -p "release/${root}"
           cp -R dist docker scripts docs deploy src "release/${root}/"
-          cp package.json package-lock.json LICENSE README.md AGENTS.md CLAUDE.md CHANGELOG.md SECURITY.md .env.example "release/${root}/"
+          # The benchmark write-ups, not the driver logs or CSVs: `docs:check`
+          # counts the rounds the README argues from, inside the extracted install.
+          mkdir -p "release/${root}/benchmark"
+          cp benchmark/*.md "release/${root}/benchmark/"
+          cp package.json package-lock.json LICENSE README.md AGENTS.md CLAUDE.md CHANGELOG.md SECURITY.md .env.example .nvmrc "release/${root}/"
           tar -C release -czf "release/${root}.tar.gz" "${root}"
           (cd release && sha256sum "${root}.tar.gz" > "${root}.tar.gz.sha256")
 
