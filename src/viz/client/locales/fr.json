@@ -168,7 +168,7 @@
   "docs.theme.admin.title": "Admin",
   "docs.theme.admin.body": "Cinq écrans derrière le drapeau platform-admin : les organisations avec leurs membres et leurs invitations à usage unique, le journal d'audit de la plateforme (l'unique source de ce qui s'est passé sur ce déploiement), le registre du catalogue — ce que le catalogue d'agents a appris —, la sentinelle, la veille mécanique sur les runs en vol, et les annonces, la seule notification écrite par un humain, relue dans chaque langue supportée avant de partir. Une invitation ne donne jamais un accès de niveau opérateur.",
   "docs.theme.mcp.title": "MCP",
-  "docs.theme.mcp.body": "",
+  "docs.theme.mcp.body": "Un seul plan de contrôle Streamable HTTP sur /mcp pour les applications hôtes comme Claude Code ou Codex, qui présente à chaque appelant les outils atoma_* autorisés par son rôle. Il s’agit d’API de lecture et de lanceurs de run pilotés comme des tâches MCP, et non d’éléments d’agent — un seul run est exécuté à la fois, sérialisé par un bail partagé.",
   "nav.admin": "Organisations",
   "nav.journal": "Journal",
   "nav.ledger": "Ledger",
@@ -1070,7 +1070,7 @@
   "settings.mcpUnavailable": "La requête n’a pas pu aboutir. Vérifie ta connexion et réessaie. Si le problème persiste, demande à l’administrateur du déploiement de vérifier le service d’API.",
   "settings.mcpChangedRefreshFailed": "La modification a été enregistrée, mais la liste des tokens n’a pas pu être actualisée. Copie tout nouveau token maintenant, puis réessaie de charger la liste.",
   "settings.mcpCheckTitle": "Vérifier la connexion et résoudre les problèmes",
-  "settings.mcpCheckSteps": "",
+  "settings.mcpCheckSteps": "Dans Claude Code ou Codex, exécute /mcp et vérifie qu’atoma est connecté, puis demande à l’agent de lister tes projets atoma. Dans un autre client, actualise ses outils MCP et essaie une action de lecture. La création d’un token ne suffit pas à établir une connexion.",
   "settings.mcpCheckUsage": "La date de dernière utilisation ci-dessous est mise à jour une fois que le client présente un token valide ; recharge les paramètres pour l’actualiser. Elle ne prouve pas qu’un appel d’outil a réussi. Si atoma est déjà enregistré, modifie ou supprime cette entrée existante du client avant de l’ajouter à nouveau.",
   "settings.mcpTroubleshootAuth": "401 : vérifie le token Bearer ; s’il est perdu ou révoqué, crée-en un autre et mets à jour le client. 403 : vérifie les autorisations de l’organisation et l’adresse MCP. La révocation d’un token met fin à son accès dès la requête suivante.",
   "settings.mcpTroubleshoot404": "404 lors de la première connexion : vérifie l’adresse /mcp complète et demande à l’administrateur du déploiement de vérifier son routage. 404 après une session qui fonctionnait auparavant : reconnecte le client pour qu’il démarre une nouvelle session MCP ; cela peut arriver après le redémarrage d’un serveur. Une erreur de découverte OAuth nécessite un client configuré pour les tokens Bearer.",
@@ -1081,5 +1081,7 @@
   "settings.tab.mcp": "MCP d’atoma",
   "settings.tabs": "Sections des paramètres",
   "settings.orgDefaultsReadOnly": "Seuls les propriétaires et les admins de l’organisation peuvent modifier ces valeurs par défaut ; tes propres choix ci-dessus sont prioritaires.",
-  "settings.orgKeysReadOnly": "Les clés des fournisseurs sont gérées par les propriétaires et les admins de l’organisation. Demande à l’un d’eux d’ajouter ou de remplacer une clé."
+  "settings.orgKeysReadOnly": "Les clés des fournisseurs sont gérées par les propriétaires et les admins de l’organisation. Demande à l’un d’eux d’ajouter ou de remplacer une clé.",
+  "settings.mcpCodexHint": "Codex CLI (OpenAI) — ajoute cette table à ~/.codex/config.toml sur ta machine, ou exécute : codex mcp add atoma --url <adresse MCP> --bearer-token-env-var ATOMA_MCP_TOKEN. Lance ensuite Codex et exécute /mcp pour vérifier qu’atoma figure dans la liste :",
+  "settings.mcpCodexEnvHint": "Codex lit le token depuis la variable d’environnement {{env}}, afin que le secret ne soit jamais inscrit dans config.toml. Ajoute cette ligne au profil du shell depuis lequel Codex est lancé (~/.zshrc, ~/.bashrc), puis ouvre un nouveau terminal :"
 }
