@@ -17,7 +17,7 @@ reusable agent types and skills between runs.*
 </div>
 
 <p align="center">
-  <img src="docs/atoma-run-audit.png" alt="atoma run visualizer showing cost, cache usage, three-tier routing, validation verdicts, ground-truth evidence and the full execution timeline">
+  <img src="docs/atoma-run-audit.png" alt="atoma run visualizer: a delivered build-app run with its duration, model calls, tokens and cost, the timeline ending in approved validation verdicts, a credit withheld on a skill the run did not follow, registry success records, parallel branches, and the planner’s routing and phased execution reasoning">
 </p>
 
 <p align="center"><em>One run, fully inspectable: every model call, routing decision, tool action, cache hit, trust shortcut, validation verdict and cost estimate remains attributable.</em></p>
