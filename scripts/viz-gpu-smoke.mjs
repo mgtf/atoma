@@ -2069,6 +2069,27 @@ try {
         timeout: READY_TIMEOUT_MS,
       });
       const clickAccountTarget = async (id) => {
+        // Scene assembly publishes hit targets before Pixi paints them and
+        // updates the world transforms used by its event boundary. In that
+        // gap a menu-row click can hit the scrim and close the menu instead.
+        // Wait for an actual screen render, not a delay or an offscreen pass.
+        await accountPage.evaluate((timeout) => new Promise((resolve, reject) => {
+          const { app } = globalThis.__ATOMA_GPU__;
+          const runner = app.renderer.runners.postrender;
+          const observer = {
+            postrender(options) {
+              if (options.container !== app.stage || options.target !== app.renderer.view.renderTarget) return;
+              runner.remove(observer);
+              clearTimeout(timer);
+              resolve();
+            },
+          };
+          const timer = setTimeout(() => {
+            runner.remove(observer);
+            reject(new Error('account scenario: screen render never completed before click'));
+          }, timeout);
+          runner.add(observer);
+        }), READY_TIMEOUT_MS);
         const spot = await accountPage.evaluate((targetId) => {
           const handle = globalThis.__ATOMA_GPU__;
           const row = handle?.hitTargets().find((entry) => entry.id === targetId);
@@ -2195,13 +2216,9 @@ try {
       // replaces were bets on a rasteriser's frame time, and losing one
       // surfaced two clicks later as "account.settings not found".
       //
-      // Each click is also retried, because a hit target is published by a
-      // RENDER while the Pixi listener answering it attaches on the frame that
-      // draws the control; right after a viewport change those can be far
-      // enough apart that the first synthetic click hits a drawn-but-not-yet
-      // -listening control and is swallowed. Every attempt waits many frames
-      // (the CI runner draws one roughly every 2s) so a click still in flight
-      // is never mistaken for one that was lost. The assertions are unchanged:
+      // Each click waits for a screen render through clickAccountTarget.
+      // Retry only while the source control remains, and wait for the outcome
+      // on slower rasterisers too. The assertions are unchanged:
       // the GL orb must open the menu, and the menu must reach Settings.
       // `reached` is a PREDICATE, not an id, because the two things this drives
       // to no longer land in the same layer: the menu publishes a Pixi hit
@@ -2228,7 +2245,12 @@ try {
             );
           }
         }
-        throw new Error(`${describe}: ${JSON.stringify(attempts)}`);
+        const state = await accountPage.evaluate(() => ({
+          selectedView: document.querySelector('[role="tab"][aria-selected="true"]')?.textContent,
+          targets: globalThis.__ATOMA_GPU__.hitTargets().map((entry) => entry.id),
+          settingsBody: document.querySelector('.gpu-org-models-form') !== null,
+        }));
+        throw new Error(`${describe}: ${JSON.stringify({ attempts, state, accountDiagnostics })}`);
       };
       const hasTarget = (id) => async () => (await targetIds()).includes(id);
 
