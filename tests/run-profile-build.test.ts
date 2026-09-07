@@ -14,6 +14,8 @@ import {
   runTask,
   parseRunnerArgs,
   resolveSkillPromotion,
+  formatUsage,
+  HELP_FLAGS,
 } from '../src/run/runner.js';
 import {
   assertIsolationBoundary,
@@ -263,6 +265,55 @@ describe('parseRunnerArgs equivalence — documented invocations', () => {
     expect(a.container).toBe(false);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith('unknown flag: --contianer');
+  });
+});
+
+describe('runTask --help — usage, never a run', () => {
+  // `--help` used to be an UNKNOWN flag: discarded with a warning, after
+  // which the runner fell through to the profile's default goal and started
+  // a real, quota-spending run (2026-09-07). Usage is answered before
+  // startTask, so it needs no tier pins and touches nothing.
+  const PINS = ['ATOMA_MODEL_L1', 'ATOMA_MODEL_L2', 'ATOMA_MODEL_L3'] as const;
+  const saved: Record<string, string | undefined> = {};
+  beforeEach(() => {
+    for (const k of PINS) {
+      saved[k] = process.env[k];
+      delete process.env[k];
+    }
+  });
+  afterEach(() => {
+    for (const k of PINS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+    vi.restoreAllMocks();
+  });
+
+  it.each(HELP_FLAGS)('%s prints the usage and returns without pins or a run', async (flag) => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const exit = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`process.exit(${code ?? ''}) must not be called`);
+    }) as never);
+
+    await expect(runTask(buildProfile, [flag])).resolves.toBeUndefined();
+
+    expect(exit).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledWith(formatUsage(buildProfile));
+  });
+
+  it('the usage is derived from the profile guidance and the runner flags', () => {
+    const usage = formatUsage(buildProfile);
+    expect(usage).toContain(`Usage: ${buildProfile.id}`);
+    expect(usage).toContain(buildProfile.guidance.label);
+    expect(usage).toContain(buildProfile.guidance.help);
+    for (const example of buildProfile.guidance.examples) expect(usage).toContain(example);
+    for (const flag of ['--clean-workspace', '--container', '--no-container', '--egress', '--seed <dir>', '--help, -h']) {
+      expect(usage).toContain(flag);
+    }
+    expect(usage).toContain('ATOMA_MODEL_L1');
   });
 });
 

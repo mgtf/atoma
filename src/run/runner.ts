@@ -184,6 +184,37 @@ const RUNNER_NEGATABLE_FLAGS = ['--baseline', '--container', '--egress'] as cons
 
 const stripDashes = (flag: string): string => flag.slice(2);
 
+/** Spellings that print usage and exit 0 — answered by `runTask` before any side effect. */
+export const HELP_FLAGS: readonly string[] = ['--help', '-h'];
+
+/**
+ * Usage text for a family's CLI, derived from the profile's own guidance so
+ * a new family is describable without touching the runner.
+ */
+export function formatUsage(profile: TaskProfile): string {
+  const flags = [
+    ...RUNNER_BOOLEAN_FLAGS,
+    ...RUNNER_NEGATABLE_FLAGS.flatMap((flag) => [flag, `--no-${stripDashes(flag)}`]),
+    '--seed <dir>',
+  ];
+  return [
+    `Usage: ${profile.id} [flags] "<goal>"`,
+    ``,
+    `${profile.guidance.label}. ${profile.guidance.help}`,
+    ``,
+    `Flags:`,
+    ...flags.map((flag) => `  ${flag}`),
+    `  --help, -h`,
+    ``,
+    `Without a goal the run uses this family's default goal.`,
+    `Every run needs ATOMA_MODEL_L1, ATOMA_MODEL_L2 and ATOMA_MODEL_L3 set to a`,
+    `<api|sub|own>:<vendor>:<model> selector.`,
+    ``,
+    `Examples:`,
+    ...profile.guidance.examples.map((example) => `  ${profile.id} "${example}"`),
+  ].join('\n');
+}
+
 export function parseRunnerArgs(argv: readonly string[]): RunnerArgs {
   // Container/egress stay OWNED by resolveToolBackendMode (doctor shares it,
   // including the env precedence and egress→container implication). They are
@@ -911,6 +942,13 @@ export async function startTask(
  * run down (trace closed as cancelled when mid-flight) before exiting 0.
  */
 export async function runTask(profile: TaskProfile, argv: readonly string[]): Promise<void> {
+  // `--help` is answered BEFORE startTask: the runner discards unknown flags
+  // by contract, so `build-app --help` used to fall through to the profile's
+  // DEFAULT GOAL and start a real, quota-spending run (2026-09-07).
+  if (argv.some((token) => HELP_FLAGS.includes(token))) {
+    console.log(formatUsage(profile));
+    return;
+  }
   let run: RunHandle;
   try {
     run = await startTask(profile, argv);
