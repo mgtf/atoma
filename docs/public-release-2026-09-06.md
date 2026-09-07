@@ -43,7 +43,7 @@ file, not that conversation, to pick the thread up.
 |---|---|---|
 | Wiki, Projects | off | Discussions on, Issues on |
 | Default workflow token | read-only | Workflows that write declare it themselves |
-| Ruleset `protect-main` | active | No deletion or force-push; pull request with resolved threads; required checks `Hermetic checks (Node 22)`, `Hermetic checks (Node 24)`, `Mender credential isolation`, `Fresh worker image`, `cla`; bypass for the repository admin only. Versioned in [`.github/rulesets/`](../.github/rulesets/README.md) |
+| Ruleset `protect-main` | active | No deletion or force-push; pull request with resolved threads; required checks `Hermetic checks (Node 24)` (the Node 22 arm was dropped on 2026-09-07 with the move to Node 24 only), `Mender credential isolation`, `Fresh worker image`, `cla`; bypass for the repository admin only. Versioned in [`.github/rulesets/`](../.github/rulesets/README.md) |
 | CLA Assistant Lite | active | `.github/workflows/cla.yml`, action pinned by commit (v2.6.1); signatures on the orphan `cla-signatures` branch; `mgtf` and bots allowlisted |
 | Dependabot | alerts and security updates on | Its pull requests pass the CLA as bots and need the CI checks |
 | Private vulnerability reporting | on | What `SECURITY.md` points to |

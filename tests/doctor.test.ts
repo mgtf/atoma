@@ -19,7 +19,7 @@ function dependencies(
   overrides: Partial<DoctorDependencies> = {}
 ): Partial<DoctorDependencies> {
   return {
-    nodeVersion: 'v22.14.0',
+    nodeVersion: 'v24.20.0',
     // PINNED, so this suite diagnoses one platform whatever host it runs on.
     // Without it every doctor assertion below would flip on a Windows
     // developer's machine, where the run-host check fails by contract.
@@ -58,9 +58,10 @@ describe('atoma doctor', () => {
     ['v20.19.0', false],
     ['22.12.0', false],
     ['22.13.0', false],
-    ['22.14.0', true],
+    ['22.14.0', false],
     ['v23.9.0', false],
     ['v24.0.0', true],
+    ['v24.20.0', true],
     ['v25.1.0', true],
     ['garbage', false],
   ])('applies the package Node engine floor to %s', (version, supported) => {

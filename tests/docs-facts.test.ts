@@ -93,8 +93,9 @@ describe('the generated README block', () => {
   });
 
   it('escapes the pipes inside the engines range so the table survives', () => {
-    // "^22.14.0 || >=24" pasted raw ends the Markdown cell mid-value.
-    expect(rendered).toContain('\\|\\|');
+    // A range such as "^22.14.0 || >=24" pasted raw ends the Markdown cell
+    // mid-value; the escape must hold for whatever the range becomes.
+    expect(renderFactsBlock({ ...facts, node: { ...facts.node, engines: '^22.14.0 || >=24' } })).toContain('\\|\\|');
   });
 
   it('replaces only what lies between the markers', () => {
@@ -124,7 +125,7 @@ describe('the prose assertions', () => {
   });
 
   it('catches a Node version that drifted away from .nvmrc', () => {
-    const drifted = readme.replace('22.14+ or 24+', '20.11+ or 24+');
+    const drifted = readme.replace('24.20+', '20.11+');
     expect(proseFailures({ readme: drifted, agents, facts })).toContainEqual(
       expect.stringContaining('claims Node 20.11+'),
     );

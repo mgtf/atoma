@@ -9,7 +9,7 @@
 # skills directory, the ledger, any credential. `run_shell`'s child is not
 # jailed to its cwd, so in a single process those are always one filesystem
 # walk away; here the walk finds nothing because they were never mounted.
-FROM node:22-slim
+FROM node:24-slim
 
 # python3  -> start_static_server
 # chromium -> validate_html (puppeteer uses the system browser rather than

@@ -41,10 +41,6 @@
         "do_not_enforce_on_create": false,
         "required_status_checks": [
           {
-            "context": "Hermetic checks (Node 22)",
-            "integration_id": 15368
-          },
-          {
             "context": "Hermetic checks (Node 24)",
             "integration_id": 15368
           },

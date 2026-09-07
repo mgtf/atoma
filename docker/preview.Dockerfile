@@ -18,7 +18,7 @@
 # network operation on a member's click, and this container has no egress to
 # do it with. A missing dependency is a bounded failure the classifier reports,
 # not something to paper over here.
-FROM node:22-slim
+FROM node:24-slim
 
 # NO apt layer. The worker image installs python3 and chromium because the
 # TOOLS need them; nothing here runs a tool. Every package added is attack

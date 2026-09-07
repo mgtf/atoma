@@ -328,7 +328,7 @@ process group is confirmed gone and the trace has closed.
 ## Status
 
 **Working research system, honestly labelled.** Strict TypeScript on Node
-22.14+ or 24+, with hermetic and fresh-worker CI.
+24.20+, with hermetic and fresh-worker CI.
 
 What exists: the full three-tier loop, the learning and compilation lifecycle, sandboxed
 execution with opt-in container isolation and proxied egress, an append-only audit ledger with
@@ -361,7 +361,7 @@ validates the IR, not the rendered SVG; rendering requires a separate Archify ch
 | Read out of this checkout | |
 | --- | --- |
 | Version | `0.2.0` |
-| Node | 22.14+ / 24+ (`.nvmrc` 22.14.0, `engines` ^22.14.0 \|\| >=24) |
+| Node | 24.20+ (`.nvmrc` 24.20.0, `engines` >=24) |
 | Subsystems under their own contract | 18 |
 | MCP tools | 24 |
 | Curated agent names | 118 molecules · 40 cells · 20 tissues |
@@ -610,6 +610,6 @@ Copyright 2026 Matthieu Foillard.
 ---
 
 <div align="center">
-<sub>TypeScript · SQLite · Node 22.14+ / 24+ · new corpora can be measured with <code>npm run burnin</code>;
+<sub>TypeScript · SQLite · Node 24.20+ · new corpora can be measured with <code>npm run burnin</code>;
 the controlled rounds are in <code>benchmark/</code></sub>
 </div>

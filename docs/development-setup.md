@@ -29,12 +29,13 @@ several processes deep. There is deliberately no override flag.
 
 ## Every platform
 
-Node is pinned to **22.14.0** (`.nvmrc`); `engines` accepts `^22.14.0 || >=24`.
-The SQLite driver requires Node-API 10, introduced in Node 22.14.0. Core CI
-verifies both 22.14.0 and the production runtime 24.20.0; the other jobs use
-the pin. Use the pin unless you have a reason not to.
-The [native SQLite incident](incidents/sqlite-node24-2026-09-06.md) records the
-runtime evidence and the compatibility boundary behind this minimum.
+Node is pinned to **24.20.0** (`.nvmrc`), the runtime production runs;
+`engines` accepts `>=24`. The 22.x line was dropped on 2026-09-07: the SQLite
+driver needs Node-API 10 (22.14+), and keeping a second supported line meant a
+second full CI arm for a version nothing deploys. Every CI job, the release
+job and the mender image use the pin. The
+[native SQLite incident](incidents/sqlite-node24-2026-09-06.md) records the
+runtime evidence behind the driver requirement.
 
 ```bash
 git clone https://github.com/mgtf/atoma.git

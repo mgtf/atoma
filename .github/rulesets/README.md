@@ -13,8 +13,7 @@ What it enforces on `main`:
 
 - no deletion, no force-push;
 - changes arrive through a pull request with every review thread resolved;
-- the CI checks `Hermetic checks (Node 22)`, `Hermetic checks (Node 24)`,
-  `Mender credential isolation`, `Fresh worker image` and the `cla` check
+- the CI checks `Hermetic checks (Node 24)`, `Mender credential isolation`, `Fresh worker image` and the `cla` check
   must pass, reported by GitHub Actions only.
 
 Bypass is granted to the repository admin role only. GitHub refuses the GitHub

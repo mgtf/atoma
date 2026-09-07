@@ -18,7 +18,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
-          node-version: 22.14.0
+          node-version: 24.20.0
           cache: npm
       - name: Verify release tag matches package version
         run: |
@@ -53,8 +53,10 @@ jobs:
           tar -C /tmp/atoma-release -xzf "release/${root}.tar.gz"
           cd "/tmp/atoma-release/${root}"
           npm run docs:check
-          node scripts/supervisor-release-smoke.mjs .
+          # Production dependencies first: the supervisor smoke imports the
+          # compiled analyst transport, which needs them.
           npm ci --omit=dev
+          node scripts/supervisor-release-smoke.mjs .
           node scripts/release-smoke.mjs
           node scripts/auth-release-smoke.mjs
           npm run auth -- --help

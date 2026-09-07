@@ -45,7 +45,11 @@ This version gathers everything landed since v0.1.4.
 - The GPU visualizer isolates every per-frame animation in its own retained
   render group, so a pulsing chip no longer re-uploads the whole view each
   frame; the frame is measured by `viz:smoke`.
-- Node 24 is supported: the legacy SQLite bindings are replaced.
+- Node 24 only. `.nvmrc` pins 24.20.0, the runtime production runs;
+  `engines` is `>=24`; CI, the release job and the worker, preview and mender
+  images use the same line. Node 22 is no longer supported: the SQLite driver
+  needed 22.14+ anyway, and a second CI arm for a version nothing deploys was
+  not worth keeping. The `protect-main` ruleset requires one hermetic check.
 - ESLint 10.
 
 ### Added

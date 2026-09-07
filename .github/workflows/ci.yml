@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 22.14.0
+          node-version: 24.20.0
           cache: npm
       - run: npm ci
       - run: docker build -f docker/mender.Dockerfile -t atoma-mender:local .
@@ -40,8 +40,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - node: '22.14.0'
-            line: '22'
           - node: '24.20.0'
             line: '24'
     runs-on: ubuntu-latest
@@ -60,7 +58,7 @@ jobs:
       - run: npm run release:check
 
       - name: Package the exact main revision for deployment
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.node == '22.14.0'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.node == '24.20.0'
         shell: bash
         run: |
           set -euo pipefail
@@ -74,7 +72,7 @@ jobs:
           (cd deployment && sha256sum "${root}.tar.gz" > "${root}.tar.gz.sha256")
 
       - name: Upload immutable deployment artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.node == '22.14.0'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.node == '24.20.0'
         uses: actions/upload-artifact@v4
         with:
           name: atoma-deploy-${{ github.sha }}
@@ -149,7 +147,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 22.14.0
+          node-version: 24.20.0
           cache: npm
 
       # No npm ci: the i18n script is dependency-free (node:fs, node:child_process).
@@ -244,7 +242,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 22.14.0
+          node-version: 24.20.0
           cache: npm
       - run: npm ci
       - run: npm run viz:smoke
@@ -278,7 +276,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 22.14.0
+          node-version: 24.20.0
           cache: npm
       - run: npm ci
       - name: Install gVisor
@@ -315,7 +313,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 22.14.0
+          node-version: 24.20.0
           cache: npm
       - run: npm ci
       - run: npm run build:worker:dev

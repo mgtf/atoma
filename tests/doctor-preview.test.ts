@@ -47,7 +47,7 @@ interface EngineState {
 function engine(state: EngineState): Partial<DoctorDependencies> {
   const commands: string[][] = [];
   return {
-    nodeVersion: 'v22.14.0',
+    nodeVersion: 'v24.20.0',
     platform: 'linux',
     runCommand: async (command, args) => {
       commands.push([command, ...args]);
