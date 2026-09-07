@@ -898,6 +898,24 @@ try {
         `arrival camera must not deform the authored scene: ${JSON.stringify(arrivalCamera)}`
       );
     }
+    // Inspect real, rendered Text instances: the mocked suite cannot prove
+    // that small glyphs avoid a 1x texture or fractional pixel placement.
+    const textRaster = await page.evaluate(() => {
+      let count = 0;
+      const invalid = [];
+      const walk = (node) => {
+        if (node.renderPipeId === 'text' && node.text?.trim()) {
+          count += 1;
+          if (node.resolution < 2 || !node.roundPixels) invalid.push(node.text);
+        }
+        for (const child of node.children ?? []) walk(child);
+      };
+      walk(globalThis.__ATOMA_GPU__.app.stage);
+      return { count, invalid };
+    });
+    if (textRaster.count === 0 || textRaster.invalid.length > 0) {
+      throw new Error(`GPU text raster quality regressed: ${JSON.stringify(textRaster)}`);
+    }
     if (arrivalCamera.headerBands !== 1) {
       throw new Error(`overview header band missing: ${JSON.stringify(arrivalCamera)}`);
     }

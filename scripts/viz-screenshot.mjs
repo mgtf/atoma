@@ -329,6 +329,14 @@ function gatedStubs() {
       },
     ],
     '/api/runs/run-fixture': fixtureTrace(),
+    // Runs also reads preview availability. A real 401 here reloads the page
+    // back to the arrival gate before the screenshot can capture the run.
+    [`/api/projects/${projectId}/runs/run-fixture/preview`]: {
+      availability: 'unavailable', kind: null, reason: 'disabled',
+      state: 'stopped', generation: 0, source: 'delivered', snapshotAt: null,
+      readyAt: null, expiresAt: null, errorCode: null,
+      requestedHosts: [], allowedHosts: [], blockedHosts: [],
+    },
     '/api/github/installations': [],
     // WITHOUT this stub the page reload-loops: the checkout `.env` usually arms
     // the auth gate, the browser has no session cookie, and the client treats

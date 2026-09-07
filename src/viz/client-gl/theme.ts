@@ -1,3 +1,12 @@
+/** Supersample cached glyphs, not the full scene's MSAA/filter targets. */
+export function gpuTextRasterOptions() {
+  const ratio = typeof devicePixelRatio === 'number' ? devicePixelRatio : 1;
+  return {
+    resolution: Math.min(4, Math.max(2, ratio * 2)),
+    roundPixels: true,
+  };
+}
+
 export const GPU_COLORS = {
   background: 0x0d1726,
   panel: 0x182941,

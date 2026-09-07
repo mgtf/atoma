@@ -114,7 +114,7 @@ import {
 import { TooltipLayer } from './renderer/tooltip.js';
 import { viewFrameGutterRects } from './renderer/view-frame.js';
 import type { GpuUiState, ViewName } from './store.js';
-import { GPU_COLORS, GPU_LAYOUT, sidebarWidthForViewport } from './theme.js';
+import { GPU_COLORS, GPU_LAYOUT, gpuTextRasterOptions, sidebarWidthForViewport } from './theme.js';
 import { VIZ_VISUAL_DEPTH } from './visual-depth.js';
 import type { AuthUiSnapshot } from './AuthControls.js';
 import {
@@ -2069,7 +2069,7 @@ export class GpuRenderer {
     // every drag step, and a pool keyed on `key\0value` would allocate a new
     // entry per step. The FPS readout solves the same live-string problem with
     // BitmapText because its glyph set is tiny and fixed.
-    const readout = new Text({ text: '', style });
+    const readout = new Text({ text: '', style, ...gpuTextRasterOptions() });
     readout.anchor.set(1, 0.5);
     readout.position.set(x + width, y + TUNING_ROW_HEIGHT / 2);
     readout.eventMode = 'none';
@@ -2199,7 +2199,7 @@ export class GpuRenderer {
     });
     // LIVE label, outside the retained pool: the degree string ticks with
     // the mark clock / drag. Same reason `tuningRow` owns its own Text.
-    const readout = new Text({ text: '', style });
+    const readout = new Text({ text: '', style, ...gpuTextRasterOptions() });
     readout.anchor.set(1, 0.5);
     readout.position.set(liveX - 6, y + rowHeight / 2);
     readout.eventMode = 'none';
@@ -2469,7 +2469,7 @@ export class GpuRenderer {
     // Retained across renders: a scroll tick rebuilds the scene, and
     // re-rasterising every label was the cost that made it expensive.
     const label = this.labels.acquire(`${key}\u0000${value}`, () =>
-      new Text({ text: value, style })
+      new Text({ text: value, style, ...gpuTextRasterOptions() })
     );
     label.position.set(x, y);
     label.alpha = options.alpha ?? 1;

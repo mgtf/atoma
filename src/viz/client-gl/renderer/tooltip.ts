@@ -1,5 +1,5 @@
 import { Container, Graphics, Text, TextStyle } from 'pixi.js';
-import { GPU_COLORS } from '../theme.js';
+import { GPU_COLORS, gpuTextRasterOptions } from '../theme.js';
 
 /**
  * ONE hover bubble for the whole GPU client.
@@ -79,6 +79,7 @@ export class TooltipLayer {
   constructor(parent: Container, measure?: TooltipMeasure) {
     this.label = new Text({
       text: '',
+      ...gpuTextRasterOptions(),
       style: new TextStyle({
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
         fontSize: FONT_SIZE,
