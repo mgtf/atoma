@@ -9,7 +9,7 @@ import {
 import { formatRunStatsEpilogue } from '../src/contracts/runStats.js';
 import { loadRetrievalDataset, retrievalSha256 } from '../src/cli/retrievalDataset.js';
 import {
-  assertRetrievalExecutionIdentity, createRetrievalRegistration, RETRIEVAL_CAMPAIGN_POLICY, retrievalSchedule, retrievalSourceIdentity,
+  archiveRetrievalSource, assertRetrievalExecutionIdentity, createRetrievalRegistration, RETRIEVAL_CAMPAIGN_POLICY, retrievalSchedule, retrievalSourceIdentity,
   validateRetrievalRegistration, writeRetrievalRegistration,
 } from '../src/cli/retrievalRegistration.js';
 import { retrievalChildEnvironment, runRetrievalCampaign } from '../src/cli/retrievalCampaign.js';
@@ -96,6 +96,22 @@ describe('retrieval campaign registration', () => {
     expect(retrievalSourceIdentity(dir).sha256).not.toBe(before.sha256);
     reg.source.sha256 = retrievalSourceIdentity(dir).sha256;
     expect(() => assertRetrievalExecutionIdentity(reg, dir)).toThrow(/registered revision/);
+  });
+
+  it('archives the registered Git tree when watched paths are absent, excluding later edits and unrelated files', () => {
+    const dir = sourceRepo();
+    const reg = createRetrievalRegistration(spec, dataset, dir);
+    expect(existsSync(join(dir, '.dockerignore'))).toBe(false);
+    writeFileSync(join(dir, 'src/cli/retrievalCampaign.ts'), 'later working tree edit');
+    writeFileSync(join(dir, '.env'), 'PRIVATE_FIXTURE=never-archive\n');
+    const out = temp();
+    archiveRetrievalSource(dir, reg, out);
+    const extracted = temp();
+    execFileSync('tar', ['-xf', join(out, 'source.tar'), '-C', extracted]);
+    expect(readFileSync(join(extracted, 'src/cli/retrievalCampaign.ts'), 'utf8')).toBe('export {};\n');
+    expect(readFileSync(join(extracted, '.nvmrc'), 'utf8')).toBe(process.version.slice(1) + '\n');
+    expect(readdirSync(extracted).sort()).toEqual(['.nvmrc', 'src']);
+    expect(() => archiveRetrievalSource(dir, reg, out)).toThrow();
   });
 
   it('rejects changed schedules, instruments and reserved held-out questions', () => {

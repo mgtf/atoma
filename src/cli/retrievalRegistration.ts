@@ -105,7 +105,13 @@ export function assertRetrievalExecutionIdentity(registration: RetrievalRegistra
 
 /** Archive committed code, with no ignored stores, credentials or tenant data. */
 export function archiveRetrievalSource(repo: string, registration: RetrievalRegistration, out: string): void {
-  const bytes = execFileSync('git', ['archive', '--format=tar', registration.source.revision, '--', ...RETRIEVAL_SOURCE_PATHS], {
+  // Some watched inputs are optional. Unlike diff/ls-files, archive rejects
+  // unmatched pathspecs; resolve them against the registered tree first.
+  const paths = execFileSync('git', ['ls-tree', '--name-only', '-z', registration.source.revision, '--', ...RETRIEVAL_SOURCE_PATHS], {
+    cwd: repo, encoding: 'utf8', maxBuffer: 4_000_000,
+  }).split('\0').filter(Boolean);
+  if (!paths.length) throw new Error('registered revision has no retrieval source to archive');
+  const bytes = execFileSync('git', ['archive', '--format=tar', registration.source.revision, '--', ...paths], {
     cwd: repo, maxBuffer: 32_000_000,
   });
   writeFileSync(join(out, 'source.tar'), bytes, { flag: 'wx', mode: 0o600 });
