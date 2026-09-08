@@ -1,7 +1,13 @@
 # Project retrieval: downstream privacy audit
 
+**Correction implemented:** [project registry ownership](project-registry-ownership-2026-09-09.md)
+closes the registry channel characterized below. The original observations refer
+to `3b0f4e5`; the executable fixture now asserts absence in other projects and
+reuse within the owner, including L3 → L2 and planner-created tool metadata.
+The historical finding is retained as evidence, not as the current code status.
+
 Date: 2026-09-09. Source reviewed: `3b0f4e5`, with the executable audit fixture
-introduced alongside this record. Status: **audit complete; confidentiality
+introduced alongside this record. Status at audit: **audit complete; confidentiality
 condition NOT satisfied. Real tenant-document rollout is blocked by the
 common registry channel below.** This is an offline adversarial characterization,
 not a live customer incident, an independent security review or a measurement

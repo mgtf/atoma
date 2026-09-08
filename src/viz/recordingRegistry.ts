@@ -1,3 +1,4 @@
+import type { RegistryOwner } from '../contracts/registryOwner.js';
 import { randomUUID } from 'node:crypto';
 import {
   AtomRegistry,
@@ -18,8 +19,8 @@ import {
  * both examples accept `AtomRegistry` so this is a one-line swap.
  */
 export class RecordingRegistry extends AtomRegistry {
-  constructor(db: DB, private readonly recorder: TraceRecorder) {
-    super(db);
+  constructor(db: DB, private readonly recorder: TraceRecorder, owner?: RegistryOwner, authorize?: () => boolean) {
+    super(db, owner, authorize);
   }
 
   private ref(name: string): VizAtomRef {

@@ -52,10 +52,9 @@ project runs. The compiled process smoke covers coordinator → child → L1 →
 FTS5, live revocation and the real isolated worker. The benchmark treatment and
 operational lifecycle are still pending; this is not default activation or
 evidence of an A/B gain. The [downstream privacy audit](project-retrieval-privacy-audit-2026-09-09.md)
-is now reproducible and finds a blocker: common registry prompts, descriptions
-and branch names can carry private facts into another project. The next
-corrective increment is registry ownership, before real-document activation
-or a treatment intended to justify rollout.
+reproduced a common-registry disclosure. [Project registry ownership](project-registry-ownership-2026-09-09.md)
+now contains those prompts, descriptions, names, tools and history. Registered
+treatment evaluation and operational lifecycle remain before rollout.
 
 ## Objective and implementation order
 
@@ -450,7 +449,7 @@ the supervision protocol.
   fixtures. The [audit](project-retrieval-privacy-audit-2026-09-09.md) reproduces
   private facts in learned bodies, confirms their project-directory containment,
   and exposes the independent common-registry channel across a process reload.
-- [ ] Close the audited common-registry disclosure. Source excerpts, private
+- [x] Close the audited common-registry disclosure. Source excerpts, private
   facts and tenant-specific references must not escape through persistent
   metadata, learned skills, shared caches or catalogue export. Reuse the skills'
   generalization and sharing contracts; search authorization alone does not
@@ -475,9 +474,9 @@ modes; undeclared calls fail; ordinary file/shell calls retain their original
 execution boundary; branch recording has no duplicate observations.
 
 **Implemented increment:** [activation and current limits](project-retrieval-activation-2026-09-09.md).
-The downstream audit is complete; its reproduced confidentiality blocker
-remains an unfinished exit condition, with a concrete correction sequence in
-the [audit record](project-retrieval-privacy-audit-2026-09-09.md).
+The downstream audit and its [registry ownership correction](project-registry-ownership-2026-09-09.md)
+are implemented. Sharing admission, retention and measured treatment value remain
+separate conditions; no production environment was enabled.
 
 ### Step 9 — prove the container and compiled-process boundaries
 

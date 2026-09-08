@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+import { operatorRegistryPredicate } from '../registry/db.js';
 /**
  * atoma skills CLI — inspect and manage the filesystem-backed skill store.
  *
@@ -111,7 +112,7 @@ function displayNamesByAtomId(dbFlag?: string): Map<string, string> {
   if (!existsSync(dbPath)) return out;
   const db = new Database(dbPath, { readonly: true });
   try {
-    for (const r of db.prepare('SELECT atom_id, name FROM atom_types').all() as {
+    for (const r of db.prepare(`SELECT atom_id, name FROM atom_types WHERE ${operatorRegistryPredicate(db)}`).all() as {
       atom_id: string | null;
       name: string;
     }[]) {
@@ -473,7 +474,7 @@ function cmdReview(registry: SkillRegistry, l1Filter?: string, dbFlag?: string):
   if (existsSync(dbPath)) {
     const db = new Database(dbPath, { readonly: true });
     try {
-      for (const r of db.prepare('SELECT atom_id, name, tools_json FROM atom_types').all() as {
+      for (const r of db.prepare(`SELECT atom_id, name, tools_json FROM atom_types WHERE ${operatorRegistryPredicate(db)}`).all() as {
         atom_id: string | null;
         name: string;
         tools_json: string;

@@ -1,3 +1,4 @@
+import { operatorRegistryPredicate } from '../registry/db.js';
 import { updateOrgModels } from '../auth/orgModels.js';
 import { createServer, request as httpRequest } from 'node:http';
 import { randomBytes } from 'node:crypto';
@@ -1701,7 +1702,7 @@ function countsOf(path: string): { 1: number; 2: number; 3: number; total: numbe
   try {
     db = openReadOnly(path);
     const rows = db
-      .prepare('SELECT tier, COUNT(*) as n FROM atom_types GROUP BY tier')
+      .prepare(`SELECT tier, COUNT(*) as n FROM atom_types WHERE ${operatorRegistryPredicate(db)} GROUP BY tier`)
       .all() as { tier: number; n: number }[];
     const out = { ...zero };
     for (const r of rows) {
@@ -1738,7 +1739,7 @@ function dumpRegistry(id: string): { registry: RegistrySummary; types: RegistryT
   const db = openReadOnly(entry.path);
   try {
     const rows = db
-      .prepare('SELECT * FROM atom_types ORDER BY tier ASC, ordinal ASC')
+      .prepare(`SELECT * FROM atom_types WHERE ${operatorRegistryPredicate(db)} ORDER BY tier ASC, ordinal ASC`)
       .all() as Array<{
         tier: number;
         ordinal: number;
@@ -1756,7 +1757,7 @@ function dumpRegistry(id: string): { registry: RegistrySummary; types: RegistryT
 
     const versions = db
       .prepare(
-        'SELECT tier, ordinal, version, system_prompt, tools_json, params_json, modified_by, modified_at, reason FROM atom_type_versions ORDER BY version ASC'
+        `SELECT tier, ordinal, version, system_prompt, tools_json, params_json, modified_by, modified_at, reason FROM atom_type_versions WHERE ${operatorRegistryPredicate(db)} ORDER BY version ASC`
       )
       .all() as Array<{
         tier: number;
@@ -1900,7 +1901,7 @@ function displayNameForAtomId(atomId: string): string | null {
     let db: Database.Database | null = null;
     try {
       db = new Database(reg.path, { readonly: true, fileMustExist: true });
-      const row = db.prepare('SELECT name FROM atom_types WHERE atom_id = ?').get(atomId) as
+      const row = db.prepare(`SELECT name FROM atom_types WHERE ${operatorRegistryPredicate(db)} AND atom_id = ?`).get(atomId) as
         | { name: string }
         | undefined;
       if (row) return row.name;
@@ -1919,7 +1920,7 @@ function toolNamesForAtomId(atomName: string): string[] {
     let db: Database.Database | null = null;
     try {
       db = new Database(reg.path, { readonly: true, fileMustExist: true });
-      const row = db.prepare('SELECT tools_json FROM atom_types WHERE atom_id = ?').get(atomName) as
+      const row = db.prepare(`SELECT tools_json FROM atom_types WHERE ${operatorRegistryPredicate(db)} AND atom_id = ?`).get(atomName) as
         | { tools_json: string }
         | undefined;
       if (row) return (JSON.parse(row.tools_json) as { name: string }[]).map((t) => t.name);

@@ -1,3 +1,4 @@
+import { operatorRegistryPredicate } from '../registry/db.js';
 /**
  * The READ-ONLY half of the MCP surface: every question a host can ask about
  * atoma's accumulated state, answered in-process with zero LLM calls and zero
@@ -239,7 +240,7 @@ function displayNamesByAtomId(): Map<string, string> {
   if (!existsSync(dbPath)) return out;
   const db = readonlyDb(dbPath);
   try {
-    for (const r of db.prepare('SELECT atom_id, name FROM atom_types').all() as {
+    for (const r of db.prepare(`SELECT atom_id, name FROM atom_types WHERE ${operatorRegistryPredicate(db)}`).all() as {
       atom_id: string | null;
       name: string;
     }[]) {

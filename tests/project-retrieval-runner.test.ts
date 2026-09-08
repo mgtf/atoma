@@ -2,6 +2,7 @@ import { mkdtempSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { L3Atom } from '../src/atoms/L3Atom.js';
 import { MockLlmClient } from '../src/core/llm.js';
 import { resetHostLifecycleSnapshotForTests, startTask } from '../src/run/runner.js';
 import { buildProfile } from '../src/run/profiles/build.js';
@@ -13,6 +14,9 @@ import { silentLogger } from './helpers.js';
 import { projectRetrievalFixture } from './helpers/projectRetrievalLaunch.js';
 import { retrievalContext } from './helpers/projectRetrievalCorpus.js';
 import { ProjectRetrievalLaunchStore } from '../src/projects/retrievalLaunch.js';
+import { AtomRegistry } from '../src/registry/atomRegistry.js';
+import { openDb } from '../src/registry/db.js';
+import { resolveProjectRegistryOwner } from '../src/projects/runAuthority.js';
 import { closeStoreHandles } from '../src/core/stores.js';
 
 vi.mock('../src/run/toolBackend.js', async original => ({
@@ -67,6 +71,49 @@ describe('trusted retrieval injection through startTask', () => {
       expect((await handle.settled).outcome).toBe('delivered');
       expect(observed).toMatchObject({ ok: true, passages: [expect.objectContaining({ excerpt: 'Private price is 190 euros.\n' })] });
     } finally { await handle.shutdown(); }
+  });
+
+  it('constructs a private registry through startTask even with retrieval disabled', async () => {
+    const root = environment(); const f = projectRetrievalFixture(root); const current = f.makeRun();
+    for (const [key, value] of Object.entries({ ATOMA_PROJECT_RETRIEVAL: '0', ATOMA_TENANT_RUN: '1', ATOMA_RUN_ID: current.run.projectRunId,
+      ATOMA_DB_PATH: f.dbPath, ATOMA_BUILD_WORKSPACE: current.layout.workspacePath, ATOMA_RUNS_DIR: current.layout.runsPath,
+      ATOMA_SKILLS_DIR: current.layout.skillsPath, ATOMA_SKILL_PROMOTE: '0', ATOMA_SKILL_DIRECT: '0', ATOMA_PREFILTER_CACHE: '0' })) vi.stubEnv(key, value);
+    resetHostLifecycleSnapshotForTests();
+    const db = openDb(f.dbPath); const operator = new AtomRegistry(db);
+    operator.create(1, { description: 'Legacy private material', systemPrompt: 'Must never enter a project', tools: [], params: {}, createdBy: 'legacy' });
+    vi.mocked(buildTierClients).mockReturnValue({ ollama: new MockLlmClient() });
+    vi.mocked(containerToolBackend).mockImplementation(async opts => localToolBackend({ workspaceRoot: opts.workspaceRoot, logger: silentLogger() }));
+    let captured: AtomRegistry | undefined;
+    const seedL3 = vi.fn((ctx: Parameters<typeof buildProfile.seedL3>[0]) => {
+      captured = ctx.registry;
+      expect(ctx.registry.listByTier(1)).toEqual([]);
+      ctx.registry.create(1, { description: 'Project price 731', systemPrompt: 'Project price 731', tools: [], params: {}, createdBy: 'project' });
+      return buildProfile.seedL3(ctx);
+    });
+    vi.spyOn(L3Atom.prototype, 'handle').mockResolvedValue({ output: 'done', summary: 'done', trace: [],
+      producedBy: { tier: 3, name: 'Meristem', viaFallback: false } });
+    const handle = await startTask({ ...buildProfile, seedL3 }, ['--container', '--no-promote-skills', '--no-direct-skills', 'Read workspace.']);
+    await handle.settled;
+    const owner = resolveProjectRegistryOwner({ dbPath: f.dbPath, runId: current.run.projectRunId,
+      workspacePath: current.layout.workspacePath, skillsPath: current.layout.skillsPath, runsPath: current.layout.runsPath });
+    expect(new AtomRegistry(db, owner).listByTier(1)[0]?.systemPrompt).toBe('Project price 731');
+    expect(operator.listByTier(1)[0]?.systemPrompt).toBe('Must never enter a project');
+    f.projects.transitionProjectRun({ orgId: f.viewer.orgId, projectRunId: current.run.projectRunId, from: 'running', to: 'cancelled' });
+    expect(() => captured!.listByTier(1)).toThrow('access denied');
+    await handle.shutdown(); db.close();
+  });
+
+  it.each(['missing', 'foreign-path'])('refuses %s project authority without retrieval before any setup', async variant => {
+    const root = environment(); const f = projectRetrievalFixture(root); const current = f.makeRun();
+    for (const [key, value] of Object.entries({ ATOMA_PROJECT_RETRIEVAL: '0', ATOMA_TENANT_RUN: '1',
+      ATOMA_RUN_ID: variant === 'missing' ? 'missing-run' : current.run.projectRunId,
+      ATOMA_DB_PATH: f.dbPath, ATOMA_BUILD_WORKSPACE: join(root, 'wrong-workspace'),
+      ATOMA_RUNS_DIR: current.layout.runsPath, ATOMA_SKILLS_DIR: current.layout.skillsPath,
+      ATOMA_SKILL_PROMOTE: '0', ATOMA_SKILL_DIRECT: '0', ATOMA_PREFILTER_CACHE: '0' })) vi.stubEnv(key, value);
+    resetHostLifecycleSnapshotForTests(); vi.mocked(buildTierClients).mockClear();
+    await expect(startTask(buildProfile, ['--container', '--no-promote-skills', '--no-direct-skills', 'Read workspace.']))
+      .rejects.toThrow('project registry launch is unavailable or denied');
+    expect(buildTierClients).not.toHaveBeenCalled(); expect(existsSync(join(root, 'wrong-workspace'))).toBe(false);
   });
 
   it('refuses a marked child without a stored receipt before workspace or provider construction', async () => {

@@ -3,9 +3,11 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { L3Atom } from '../src/atoms/L3Atom.js';
 import { L2Atom } from '../src/atoms/L2Atom.js';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
+import { resolveProjectRegistryOwner } from '../src/projects/runAuthority.js';
 import { AnthropicLlmClient } from '../src/core/llm.js';
 import { closeStoreHandles, openStoreHandle } from '../src/core/stores.js';
 import { SkillRegistry } from '../src/skills/registry.js';
@@ -21,7 +23,7 @@ import { PROJECT_RETRIEVAL_TOOL_NAME as SEARCH } from '../src/contracts/projectR
 import { prefilterCacheGet, prefilterCachePut, PREFILTER_CACHE_TABLE_DDL } from '../src/atoms/prefilterCache.js';
 import { projectRetrievalFixture } from './helpers/projectRetrievalLaunch.js';
 import { retrievalContext } from './helpers/projectRetrievalCorpus.js';
-import { makeCtx, jsonText, silentLogger } from './helpers.js';
+import { makeCtx, jsonText, jsonTextPair, silentLogger } from './helpers.js';
 
 // Synthetic tenant evidence, not a secret detector vocabulary or a live customer document.
 const FACT = 'Asterfall private annual price is 731 euros.';
@@ -30,19 +32,28 @@ const RELOAD_IN_ANOTHER_PROCESS = String.raw`
   import { readFileSync } from 'node:fs';
   import { AtomRegistry } from './src/registry/atomRegistry.ts';
   import { openDb } from './src/registry/db.ts';
+  import { resolveProjectRegistryOwner } from './src/projects/runAuthority.ts';
   import { L1Atom } from './src/atoms/L1Atom.ts';
   import { L2Atom } from './src/atoms/L2Atom.ts';
+  import { L3Atom } from './src/atoms/L3Atom.ts';
   import { closeStoreHandles } from './src/core/stores.ts';
   import { openProjectRunRetrieval } from './src/projects/retrievalLaunch.ts';
   import { createProjectRetrievalTool } from './src/tools/projectRetrieval.ts';
-  import { makeCtx, jsonText } from './tests/helpers.ts';
+  import { makeCtx, jsonText, jsonTextPair } from './tests/helpers.ts';
   const { dbPath } = JSON.parse(readFileSync(0, 'utf8'));
   const binding = openProjectRunRetrieval({ dbPath, runId: process.env.ATOMA_RUN_ID,
     workspacePath: process.env.ATOMA_BUILD_WORKSPACE, skillsPath: process.env.ATOMA_SKILLS_DIR,
     runsPath: process.env.ATOMA_RUNS_DIR });
   const search = createProjectRetrievalTool(binding, { signal: new AbortController().signal, deadlineAt: Date.now() + 10_000 });
   const ownSource = await search.execute({ query: 'annual price' });
-  const registry = new AtomRegistry(openDb(dbPath));
+  const registry = new AtomRegistry(openDb(dbPath), resolveProjectRegistryOwner({ dbPath,
+    runId: process.env.ATOMA_RUN_ID, workspacePath: process.env.ATOMA_BUILD_WORKSPACE,
+    skillsPath: process.env.ATOMA_SKILLS_DIR, runsPath: process.env.ATOMA_RUNS_DIR }));
+  // Each fresh project bootstraps from code, never from another owner's rows.
+  const seed = { description: 'Reads documented constraints', systemPrompt: 'Read authorized sources.',
+    tools: [{ name: 'write_file', description: 'Write a file', inputSchema: { type: 'object', properties: {} } }], params: {}, createdBy: 'privacy-fixture' };
+  if (!registry.listByTier(1).length) registry.create(1, seed);
+  if (!registry.listByTier(2).length) registry.create(2, seed);
   const prompts = [];
   for (const type of registry.listByTier(1)) {
     const ctx = makeCtx();
@@ -53,12 +64,19 @@ const RELOAD_IN_ANOTHER_PROCESS = String.raw`
   const ctx = makeCtx();
   ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: registry.listByTier(1)[0].name, confidence: 'high', reasoning: 'reader' }));
   await L2Atom.fromType(registry.listByTier(2)[0], registry, []).plan({ description: 'Read this other project.' }, ctx);
-  process.stdout.write(JSON.stringify({ prompts, catalogue: ctx.llm.calls[0].userContent,
+  const root = registry.listByTier(3)[0] ?? registry.create(3, seed);
+  const parent = makeCtx();
+  parent.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'inspect catalogue' }));
+  parent.llm.enqueueText(jsonTextPair({ strategy: 'reuse', target: registry.listByTier(2)[0].name, reasoning: 'read' },
+    { reasoning: 'read', subtasks: [{ description: 'Read source' }], aggregation: { mode: 'concat' }, expectedOutput: 'source' }));
+  await L3Atom.buildWithModel(root, registry, 'api:ollama:test').plan({ description: 'Read this project.' }, parent);
+  process.stdout.write(JSON.stringify({ prompts, catalogue: ctx.llm.calls[0].userContent + parent.llm.calls.map(call => call.userContent).join('\n'),
+    types: [1, 2, 3].flatMap(tier => registry.listByTier(tier)),
     ownPassages: ownSource.ok ? ownSource.passages.length : null }));
   await search.close();
   closeStoreHandles();
 `;
-async function readNextProject(dbPath: string, other: ReturnType<ReturnType<typeof projectRetrievalFixture>['makeRun']>): Promise<{ prompts: string[]; catalogue: string }> {
+async function readNextProject(dbPath: string, other: ReturnType<ReturnType<typeof projectRetrievalFixture>['makeRun']>): Promise<{ prompts: string[]; catalogue: string; types: unknown[] }> {
   await ProjectRetrievalLaunchStore.open(dbPath).prepare(other.run.projectRunId, null, retrievalContext());
   const result = JSON.parse(execFileSync(process.execPath,
     ['--import', 'tsx', '--input-type=module', '--eval', RELOAD_IN_ANOTHER_PROCESS], {
@@ -89,13 +107,15 @@ async function fixture() {
   const binding = openProjectRunRetrieval({ dbPath: f.dbPath, runId: run.run.projectRunId,
     workspacePath: run.layout.workspacePath, skillsPath: run.layout.skillsPath, runsPath: run.layout.runsPath });
   const backend = await withProjectRetrievalBackend(localToolBackend({ workspaceRoot: run.layout.workspacePath, logger: silentLogger() }), binding, context);
-  const registry = new AtomRegistry(openDb(f.dbPath));
+  const owner = resolveProjectRegistryOwner({ dbPath: f.dbPath, runId: run.run.projectRunId,
+    workspacePath: run.layout.workspacePath, skillsPath: run.layout.skillsPath, runsPath: run.layout.runsPath });
+  const registry = new AtomRegistry(openDb(f.dbPath), owner);
   const tools = backend.toolDecls.filter(t => t.name === SEARCH || t.name === 'write_file');
   const seed = { description: 'Reads documented constraints', systemPrompt: 'Read the authorized source and cite it.', tools, params: {}, createdBy: 'privacy-fixture' };
   const supervisor = registry.create(2, seed);
   const child = registry.create(1, seed);
   const skills = new SkillRegistry(run.layout.skillsPath);
-  return { ...f, run, registry, child, supervisor, skills, backend, tools };
+  return { ...f, run, owner, registry, child, supervisor, skills, backend, tools };
 }
 
 function enqueueSearch(ctx: ReturnType<typeof makeCtx>): void {
@@ -198,10 +218,7 @@ describe('tenant retrieval downstream privacy audit', () => {
     } finally { await f.backend.cleanup(); }
   });
 
-  // These are exposure characterizations, NOT passing confidentiality assertions.
-  // They pin the unresolved common-registry channel; change the expected disposition
-  // with the registry isolation repair, rather than calling this audit a rollout approval.
-  it.each(['ephemeral', 'patch', 'branch'] as const)('measures %s validator coaching through retrieval, persistence and another project reload', async scope => {
+  it.each(['ephemeral', 'patch', 'branch'] as const)('contains %s validator coaching through retrieval, persistence and another project reload', async scope => {
     const f = await fixture();
     vi.stubEnv('ATOMA_SKILL_LEARN', '0');
     const ctx = { ...makeCtx(), tools: f.backend.executor };
@@ -215,16 +232,71 @@ describe('tenant retrieval downstream privacy audit', () => {
       await L2Atom.fromType(f.supervisor, f.registry, [], f.skills).handleDirect({ description: 'Find the annual price.' }, ctx);
       expect(ctx.llm.calls.some(call => call.role === 'plan' && call.systemPrompt.includes(FACT))).toBe(true);
       const other = projectRetrievalFixture(root, { subject: 'other-owner', slug: 'other' }).makeRun();
-      const reloaded = new AtomRegistry(openDb(f.dbPath));
+      const reloaded = new AtomRegistry(openDb(f.dbPath), f.owner);
       const tainted = reloaded.listByTier(1).filter(type => type.systemPrompt.includes(FACT));
       expect(tainted).toHaveLength(scope === 'ephemeral' ? 0 : 1);
       for (const type of tainted) expect(type.systemPrompt).not.toContain('Cite private/pricing.md.');
-      const { prompts } = await readNextProject(f.dbPath, other);
-      expect(prompts.some(prompt => prompt.includes(FACT))).toBe(scope !== 'ephemeral');
+      for (const next of [other, projectRetrievalFixture(root, { slug: 'sibling' }).makeRun()]) {
+        const { prompts, catalogue, types } = await readNextProject(f.dbPath, next);
+        expect(JSON.stringify({ prompts, catalogue, types })).not.toContain(FACT);
+      }
+      const sameProject = await readNextProject(f.dbPath, f.makeRun());
+      expect(sameProject.prompts.some(prompt => prompt.includes(FACT))).toBe(scope !== 'ephemeral');
+      expect(new AtomRegistry(openDb(f.dbPath)).listByTier(1)).toEqual([]);
     } finally { await f.backend.cleanup(); }
   });
 
-  it.each(['description', 'branch-name'])('characterizes private %s entering another organisation’s routing catalogue', async field => {
+  it('keeps planner-created L1 descriptions and tool metadata inside the project', async () => {
+    const f = await fixture(); vi.stubEnv('ATOMA_SKILL_LEARN', '0');
+    const ctx = { ...makeCtx(), tools: f.backend.executor };
+    ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'new reader' }));
+    ctx.llm.enqueueText(jsonTextPair({ strategy: 'create', reasoning: 'new reader',
+      seed: { description: FACT, systemPrompt: FACT, tools: [{ name: 'private_metadata', description: FACT,
+        inputSchema: { type: 'object', properties: {} } }], params: {} } },
+    { reasoning: 'read', subtasks: [{ description: 'Find annual price' }], aggregation: { mode: 'concat' }, expectedOutput: 'source' }));
+    enqueueAttempt(ctx); ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'source consulted' }));
+    try {
+      await L2Atom.fromType(f.supervisor, f.registry, [], f.skills).handleDirect({ description: 'Find annual price' }, ctx);
+      expect(f.registry.listByTier(1).some(type => JSON.stringify(type).includes(FACT))).toBe(true);
+      const other = projectRetrievalFixture(root, { subject: 'other-owner', slug: 'other' }).makeRun();
+      expect(JSON.stringify(await readNextProject(f.dbPath, other))).not.toContain(FACT);
+    } finally { await f.backend.cleanup(); }
+  });
+
+  it.each(['patch', 'branch', 'create'] as const)('contains L3-to-L2 %s metadata from a source-derived decision', async scope => {
+    const f = await fixture();
+    vi.stubEnv('ATOMA_SKILL_LEARN', '0');
+    const root = f.registry.create(3, { ...f.supervisor, createdBy: 'privacy-fixture' });
+    const ctx = { ...makeCtx(), tools: f.backend.executor };
+    const privateTool = { name: 'private_metadata', description: FACT, inputSchema: { type: 'object', properties: {} } };
+    ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'plan explicitly' }));
+    ctx.llm.enqueueText(jsonTextPair(scope === 'create'
+      ? { strategy: 'create', seed: { description: FACT, systemPrompt: FACT, tools: [privateTool], params: {} }, reasoning: 'new reader' }
+      : { strategy: 'reuse', target: f.supervisor.name, reasoning: 'reader' },
+    { reasoning: 'read', subtasks: [{ description: 'Find annual price' }], aggregation: { mode: 'concat' }, expectedOutput: 'source' }));
+    // L2 execution still reads the real host retrieval element; only provider responses are mocked.
+    const reuse = () => ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: f.child.name, confidence: 'high', reasoning: 'reader' }));
+    reuse();
+    enqueueAttempt(ctx);
+    ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'cited source' }));
+    if (scope !== 'create') {
+      ctx.llm.enqueueText(jsonText({ approved: false, scope, branchName: 'Private-731', reasoning: FACT,
+        modifications: { systemPromptAppend: FACT, descriptionReplace: FACT, addTools: [privateTool] } }));
+      reuse();
+        enqueueAttempt(ctx);
+      ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'cited source' }));
+    }
+    ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'done' }));
+    try {
+      await L3Atom.buildWithModel(root, f.registry, 'api:ollama:test').handle({ description: 'Find annual price' }, ctx);
+      expect(f.registry.listByTier(2).some(type => JSON.stringify(type).includes(FACT))).toBe(true);
+      const other = projectRetrievalFixture(f.root, { subject: 'other-owner', slug: 'other' }).makeRun();
+      expect(JSON.stringify(await readNextProject(f.dbPath, other))).not.toContain(FACT);
+      expect(JSON.stringify(await readNextProject(f.dbPath, f.makeRun()))).toContain(FACT);
+    } finally { await f.backend.cleanup(); }
+  });
+
+  it.each(['description', 'branch-name'])('keeps private %s out of another organisation’s routing catalogue', async field => {
     const f = await fixture();
     vi.stubEnv('ATOMA_SKILL_LEARN', '0');
     const ctx = { ...makeCtx(), tools: f.backend.executor };
@@ -241,7 +313,7 @@ describe('tenant retrieval downstream privacy audit', () => {
     try {
       await L2Atom.fromType(f.supervisor, f.registry, [], f.skills).handleDirect({ description: 'Find the annual price.' }, ctx);
       const other = projectRetrievalFixture(root, { subject: 'other-owner', slug: 'other' }).makeRun();
-      expect((await readNextProject(f.dbPath, other)).catalogue).toContain(marker);
+      expect((await readNextProject(f.dbPath, other)).catalogue).not.toContain(marker);
     } finally { await f.backend.cleanup(); }
   });
 });

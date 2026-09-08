@@ -1,3 +1,4 @@
+import { operatorRegistryPredicate } from '../registry/db.js';
 /**
  * The OPERATOR WRITES of the MCP surface — the four catalogue-hygiene verbs
  * the CLI has had all along (`skills reset|drop|merge`, `registry rollback`),
@@ -49,7 +50,7 @@ function labels(): Map<string, string> {
   if (!existsSync(dbPath)) return out;
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   try {
-    for (const r of db.prepare('SELECT atom_id, name FROM atom_types').all() as { atom_id: string | null; name: string }[]) {
+    for (const r of db.prepare(`SELECT atom_id, name FROM atom_types WHERE ${operatorRegistryPredicate(db)}`).all() as { atom_id: string | null; name: string }[]) {
       if (r.atom_id) out.set(r.atom_id, r.name);
     }
   } catch {

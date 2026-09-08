@@ -1,3 +1,4 @@
+import { operatorRegistryPredicate } from '../registry/db.js';
 /**
  * atoma curriculum generator — write the NEXT burn-in batch from the
  * lifecycle state instead of a hand-picked task list (Voyager's
@@ -315,7 +316,7 @@ function displayNamesByAtomId(): Map<string, string> {
   if (!fsExistsSync(dbPath)) return out;
   const db = new Database(dbPath, { readonly: true });
   try {
-    for (const r of db.prepare('SELECT atom_id, name FROM atom_types').all() as {
+    for (const r of db.prepare(`SELECT atom_id, name FROM atom_types WHERE ${operatorRegistryPredicate(db)}`).all() as {
       atom_id: string | null;
       name: string;
     }[]) {

@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+import { operatorRegistryPredicate } from '../registry/db.js';
 /**
  * atoma ledger CLI — inspect the append-only lifecycle ledger and check
  * the mutable stores against it.
@@ -109,10 +110,10 @@ function main(): void {
   // Atom types — the SAME file the events came from, so this half of the
   // comparison cannot be mispaired.
   const rows = db
-    .prepare('SELECT name, successes, failures FROM atom_types')
-    .all() as { name: string; successes: number; failures: number }[];
+    .prepare(`SELECT ${operatorRegistryPredicate(db) === '1' ? "'operator' AS owner_key, NULL AS atom_id" : 'owner_key, atom_id'}, name, successes, failures FROM atom_types`)
+    .all() as { owner_key: string; atom_id: string; name: string; successes: number; failures: number }[];
   for (const r of rows) {
-    const p = projected.get(r.name) ?? { successes: 0, failures: 0 };
+    const p = projected.get(r.owner_key === 'operator' ? r.name : r.atom_id) ?? { successes: 0, failures: 0 };
     if (r.successes < p.successes || r.failures < p.failures) {
       impossible++;
       console.log(

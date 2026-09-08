@@ -7,9 +7,9 @@ and [SQLite ingestion/backend](project-retrieval-sqlite-2026-09-09.md).
 Retrieval remains opt-in; no embedding, reranking or LLM context call is added.
 
 **Subsequent audit:** the [downstream privacy audit](project-retrieval-privacy-audit-2026-09-09.md)
-reproduces cross-project disclosure through common registry metadata. Keep this
-path limited to synthetic, isolated evaluation until registry ownership is
-corrected. The query boundary passing its tests is not a tenant-rollout approval.
+reproduces cross-project disclosure through common registry metadata. That
+finding is now corrected by [project registry ownership](project-registry-ownership-2026-09-09.md).
+Continue with the registered evaluation and operational lifecycle before rollout. The query boundary passing its tests is not a tenant-rollout approval.
 
 ## Activation and source admission
 
@@ -105,8 +105,9 @@ The subsequent [tenant-fixture audit](project-retrieval-privacy-audit-2026-09-09
 confirms skill-directory containment but reproduces disclosure through common
 registry prompts, descriptions and branch names. Search isolation alone cannot
 certify downstream confidentiality or prompt-injection resistance. Broader
-activation requires the registry ownership correction, registered A/B treatment
-and operational diagnostics/rebuild/retention. No production environment is
+activation still requires registered A/B treatment and operational
+diagnostics/rebuild/retention. The [ownership correction](project-registry-ownership-2026-09-09.md)
+now contains registry data within its project. No production environment is
 enabled by this code change.
 
 ## Verification and rollback

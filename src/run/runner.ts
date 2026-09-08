@@ -1,3 +1,5 @@
+import { eligibleProjectRun, projectRunPathsMatch, resolveProjectRegistryOwner } from '../projects/runAuthority.js';
+import type { RegistryOwner } from '../contracts/registryOwner.js';
 import { dirname, resolve } from 'node:path';
 import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { setMaxListeners } from 'node:events';
@@ -634,9 +636,26 @@ export async function startTask(
         skillsPath: skillsDirPath(), runsPath: runsDir });
     } catch { throw new RunnerConfigError('project retrieval launch is unavailable or denied'); }
   }
+  const tenantRun = process.env['ATOMA_TENANT_RUN'] === '1';
+  const projectPaths = { dbPath, runId: requestedRunId ?? '', workspacePath: workspaceRoot,
+    skillsPath: skillsDirPath(), runsPath: runsDir };
+  let registryOwner: RegistryOwner = { kind: 'operator' };
+  if (tenantRun) {
+    if (!args.container || process.env['ATOMA_PREFILTER_CACHE'] !== '0' || promotion.enabled || direct.enabled) {
+      throw new RunnerConfigError('project registry requires container isolation and tenant lifecycle settings');
+    }
+    try { registryOwner = resolveProjectRegistryOwner(projectPaths); }
+    catch { throw new RunnerConfigError('project registry launch is unavailable or denied'); }
+  }
   const recorder = new TraceRecorder(runsDir);
   const db = openDb(dbPath);
-  const registry = new RecordingRegistry(db, recorder);
+  const registry = new RecordingRegistry(db, recorder, registryOwner, tenantRun ? () => {
+    try {
+      const run = eligibleProjectRun(db, projectPaths.runId);
+      return !!run && registryOwner.kind === 'project' && run.orgId === registryOwner.orgId &&
+        run.projectId === registryOwner.projectId && projectRunPathsMatch(run, projectPaths);
+    } catch { return false; }
+  } : undefined);
   const metrics = new InMemoryMetrics();
   const runSignals: RunSignalCounts = {
     deterministic: 0,

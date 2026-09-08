@@ -1,4 +1,5 @@
-import type { DB } from './db.js';
+import { registryOwnerKey, type RegistryOwner } from '../contracts/registryOwner.js';
+import { operatorRegistryPredicate, type DB } from './db.js';
 import { appendLedger } from '../core/ledger.js';
 import type {
   AtomModifications,
@@ -248,7 +249,29 @@ export function rebrandPersona(systemPrompt: string, newName: string): string {
 }
 
 export class AtomRegistry {
-  constructor(private readonly db: DB) {}
+  private readonly ownerKey: string;
+  private readonly ownerPredicate: string;
+  constructor(private readonly db: DB, owner: RegistryOwner = { kind: 'operator' },
+    private readonly authorize?: () => boolean) {
+    this.ownerKey = registryOwnerKey(owner);
+    this.ownerPredicate = this.ownerKey === 'operator' && operatorRegistryPredicate(db) === '1'
+      ? '1' : 'owner_key = @owner';
+  }
+
+  /** Every statement binds the same immutable owner, including history and allocation. */
+  private prepare(sql: string) {
+    if (this.authorize && !this.authorize()) throw new Error('registry access denied');
+    if (this.ownerPredicate === '1' && operatorRegistryPredicate(this.db) !== '1') {
+      throw new Error('registry schema changed; reopen the registry');
+    }
+    const statement = this.db.prepare(sql);
+    const bindings = this.ownerPredicate === '1' ? [] : [{ owner: this.ownerKey }];
+    return {
+      get: (...args: unknown[]) => statement.get(...bindings, ...args),
+      all: (...args: unknown[]) => statement.all(...bindings, ...args),
+      run: (...args: unknown[]) => statement.run(...bindings, ...args),
+    };
+  }
 
   /**
    * Append a lifecycle event TO THIS REGISTRY'S OWN STORE.
@@ -266,19 +289,25 @@ export class AtomRegistry {
    *     `check` reads as ledger > store: the IMPOSSIBLE direction.
    */
   private note(event: Parameters<typeof appendLedger>[0]): void {
-    appendLedger(event, this.db);
+    if (this.ownerKey === 'operator') appendLedger(event, this.db);
+    else {
+      const target = this.getByName(event.entity);
+      if (!target) return;
+      appendLedger({ ...event, entity: target.atomId,
+        detail: { ...event.detail, owner: this.ownerKey, name: event.entity } }, this.db);
+    }
   }
 
   listByTier(tier: Tier): AtomType[] {
-    const rows = this.db
-      .prepare('SELECT * FROM atom_types WHERE tier = ? ORDER BY ordinal ASC')
+    const rows = this
+      .prepare(`SELECT * FROM atom_types WHERE ${this.ownerPredicate} AND tier = ? ORDER BY ordinal ASC`)
       .all(tier) as Row[];
     return rows.map(rowToType);
   }
 
   getByName(name: string): AtomType | null {
-    const row = this.db
-      .prepare('SELECT * FROM atom_types WHERE name = ?')
+    const row = this
+      .prepare(`SELECT * FROM atom_types WHERE ${this.ownerPredicate} AND name = ?`)
       .get(name) as Row | undefined;
     return row ? rowToType(row) : null;
   }
@@ -298,15 +327,15 @@ export class AtomRegistry {
    * rather than crashing.
    */
   getByAtomId(atomId: string): AtomType | null {
-    const row = this.db
-      .prepare('SELECT * FROM atom_types WHERE atom_id = ?')
+    const row = this
+      .prepare(`SELECT * FROM atom_types WHERE ${this.ownerPredicate} AND atom_id = ?`)
       .get(atomId) as Row | undefined;
     return row ? rowToType(row) : null;
   }
 
   getByTierOrdinal(tier: Tier, ordinal: number): AtomType | null {
-    const row = this.db
-      .prepare('SELECT * FROM atom_types WHERE tier = ? AND ordinal = ?')
+    const row = this
+      .prepare(`SELECT * FROM atom_types WHERE ${this.ownerPredicate} AND tier = ? AND ordinal = ?`)
       .get(tier, ordinal) as Row | undefined;
     return row ? rowToType(row) : null;
   }
@@ -337,16 +366,16 @@ export class AtomRegistry {
    * allocator's.
    */
   private takenNames(): Set<string> {
-    const rows = this.db.prepare('SELECT name FROM atom_types').all() as { name: string }[];
+    const rows = this.prepare(`SELECT name FROM atom_types WHERE ${this.ownerPredicate}`).all() as { name: string }[];
     return new Set(rows.map((r) => r.name));
   }
 
   private usedOrdinals(tier: Tier): Set<number> {
-    const rows = this.db
+    const rows = this
       .prepare(
-        `SELECT ordinal FROM atom_types WHERE tier = ?
+        `SELECT ordinal FROM atom_types WHERE ${this.ownerPredicate} AND tier = ?
          UNION
-         SELECT DISTINCT ordinal FROM atom_type_versions WHERE tier = ?`
+         SELECT DISTINCT ordinal FROM atom_type_versions WHERE ${this.ownerPredicate} AND tier = ?`
       )
       .all(tier, tier) as { ordinal: number }[];
     return new Set(rows.map((r) => r.ordinal));
@@ -369,11 +398,11 @@ export class AtomRegistry {
       const systemPrompt = rebrandPersona(seed.systemPrompt, name);
       const atomId = newAtomId();
 
-      this.db
+      this
         .prepare(
           `INSERT INTO atom_types
-           (tier, ordinal, atom_id, name, description, system_prompt, tools_json, params_json, created_by, created_at, version)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`
+           (owner_key, tier, ordinal, atom_id, name, description, system_prompt, tools_json, params_json, created_by, created_at, version)
+           VALUES (@owner, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`
         )
         .run(
           tier,
@@ -439,11 +468,11 @@ export class AtomRegistry {
       const nextVersion = current.version + 1;
       const now = new Date().toISOString();
 
-      this.db
+      this
         .prepare(
           `INSERT INTO atom_type_versions
-           (tier, ordinal, version, system_prompt, tools_json, params_json, modified_by, modified_at, reason)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (owner_key, tier, ordinal, version, system_prompt, tools_json, params_json, modified_by, modified_at, reason)
+           VALUES (@owner, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           current.tier,
@@ -460,12 +489,12 @@ export class AtomRegistry {
       // Patch resets counters: the type's behaviour has changed, so past
       // successes no longer guarantee anything about the new version. Trust
       // must be earned again.
-      this.db
+      this
         .prepare(
           `UPDATE atom_types
              SET description = ?, system_prompt = ?, tools_json = ?, params_json = ?, version = ?,
                  successes = 0, failures = 0
-           WHERE tier = ? AND ordinal = ?`
+           WHERE ${this.ownerPredicate} AND tier = ? AND ordinal = ?`
         )
         .run(
           merged.description,
@@ -491,12 +520,12 @@ export class AtomRegistry {
   listVersions(name: string): AtomVersionRow[] {
     const current = this.getByName(name);
     if (!current) throw new RegistryNotFoundError(name);
-    const rows = this.db
+    const rows = this
       .prepare(
         `SELECT version, system_prompt, tools_json, params_json,
                 modified_by, modified_at, reason
          FROM atom_type_versions
-         WHERE tier = ? AND ordinal = ?
+         WHERE ${this.ownerPredicate} AND tier = ? AND ordinal = ?
          ORDER BY version ASC`
       )
       .all(current.tier, current.ordinal) as {
@@ -547,11 +576,11 @@ export class AtomRegistry {
       if (toVersion === current.version) {
         throw new Error(`rollback: v${toVersion} is already the live version of ${name}`);
       }
-      const row = this.db
+      const row = this
         .prepare(
           `SELECT system_prompt, tools_json, params_json
            FROM atom_type_versions
-           WHERE tier = ? AND ordinal = ? AND version = ?`
+           WHERE ${this.ownerPredicate} AND tier = ? AND ordinal = ? AND version = ?`
         )
         .get(current.tier, current.ordinal, toVersion) as
         | { system_prompt: string; tools_json: string; params_json: string }
@@ -575,11 +604,11 @@ export class AtomRegistry {
 
       const now = new Date().toISOString();
       const nextVersion = current.version + 1;
-      this.db
+      this
         .prepare(
           `INSERT INTO atom_type_versions
-           (tier, ordinal, version, system_prompt, tools_json, params_json, modified_by, modified_at, reason)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (owner_key, tier, ordinal, version, system_prompt, tools_json, params_json, modified_by, modified_at, reason)
+           VALUES (@owner, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           current.tier,
@@ -592,12 +621,12 @@ export class AtomRegistry {
           now,
           `superseded by rollback to v${toVersion}`
         );
-      this.db
+      this
         .prepare(
           `UPDATE atom_types
              SET system_prompt = ?, tools_json = ?, params_json = ?, version = ?,
                  successes = 0, failures = 0
-           WHERE tier = ? AND ordinal = ?`
+           WHERE ${this.ownerPredicate} AND tier = ? AND ordinal = ?`
         )
         .run(
           row.system_prompt,
@@ -703,11 +732,11 @@ export class AtomRegistry {
       // inherit the source's. That is what keeps trust, skills and ledger
       // attribution from silently transferring to a derived atom.
       const atomId = newAtomId();
-      this.db
+      this
         .prepare(
           `INSERT INTO atom_types
-           (tier, ordinal, atom_id, name, description, system_prompt, tools_json, params_json, created_by, created_at, version)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`
+           (owner_key, tier, ordinal, atom_id, name, description, system_prompt, tools_json, params_json, created_by, created_at, version)
+           VALUES (@owner, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`
         )
         .run(
           source.tier,
@@ -761,11 +790,11 @@ export class AtomRegistry {
     return this.db.transaction((): AtomType | null => {
       const current = this.getByName(name);
       if (!current) return null;
-      this.db
+      this
         .prepare(
           `INSERT INTO atom_type_versions
-           (tier, ordinal, version, system_prompt, tools_json, params_json, modified_by, modified_at, reason)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (owner_key, tier, ordinal, version, system_prompt, tools_json, params_json, modified_by, modified_at, reason)
+           VALUES (@owner, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           current.tier,
@@ -778,8 +807,8 @@ export class AtomRegistry {
           new Date().toISOString(),
           `[removed] final state of ${current.name} (${current.successes}✓/${current.failures}✗, createdBy: ${current.createdBy})`
         );
-      this.db
-        .prepare('DELETE FROM atom_types WHERE tier = ? AND ordinal = ?')
+      this
+        .prepare(`DELETE FROM atom_types WHERE ${this.ownerPredicate} AND tier = ? AND ordinal = ?`)
         .run(current.tier, current.ordinal);
       return current;
     })();
@@ -804,7 +833,7 @@ export class AtomRegistry {
         entity: name,
         ...(by ? { detail: { by } } : {}),
       });
-      this.db.prepare('UPDATE atom_types SET successes = successes + 1 WHERE name = ?').run(name);
+      this.prepare(`UPDATE atom_types SET successes = successes + 1 WHERE ${this.ownerPredicate} AND name = ?`).run(name);
     })();
   }
 
@@ -820,7 +849,7 @@ export class AtomRegistry {
         entity: name,
         ...(by ? { detail: { by } } : {}),
       });
-      this.db.prepare('UPDATE atom_types SET failures = failures + 1 WHERE name = ?').run(name);
+      this.prepare(`UPDATE atom_types SET failures = failures + 1 WHERE ${this.ownerPredicate} AND name = ?`).run(name);
     })();
   }
 
@@ -861,9 +890,9 @@ export class AtomRegistry {
         entity: name,
         detail: { successes, failures, reason: args.reason.trim() },
       });
-      this.db
+      this
         .prepare(
-          'UPDATE atom_types SET successes = successes + ?, failures = failures + ? WHERE name = ?'
+          `UPDATE atom_types SET successes = successes + ?, failures = failures + ? WHERE ${this.ownerPredicate} AND name = ?`
         )
         .run(successes, failures, name);
       return this.getByName(name)!;
@@ -876,8 +905,8 @@ export class AtomRegistry {
    * without forcing callers to materialise the full row list.
    */
   private existingNormalizedNames(tier: Tier): Set<string> {
-    const rows = this.db
-      .prepare('SELECT name FROM atom_types WHERE tier = ?')
+    const rows = this
+      .prepare(`SELECT name FROM atom_types WHERE ${this.ownerPredicate} AND tier = ?`)
       .all(tier) as { name: string }[];
     return new Set(rows.map((r) => normalizeNameKey(r.name)));
   }
@@ -983,9 +1012,9 @@ export class AtomRegistry {
       if (!winner) throw new RegistryNotFoundError(winnerName);
       if (loserNames.length === 0) return winner;
       let nextVersion = winner.version;
-      const maxVersionRow = this.db
+      const maxVersionRow = this
         .prepare(
-          'SELECT MAX(version) as mv FROM atom_type_versions WHERE tier = ? AND ordinal = ?'
+          `SELECT MAX(version) as mv FROM atom_type_versions WHERE ${this.ownerPredicate} AND tier = ? AND ordinal = ?`
         )
         .get(winner.tier, winner.ordinal) as { mv: number | null } | undefined;
       if (maxVersionRow && typeof maxVersionRow.mv === 'number') {
@@ -1004,12 +1033,12 @@ export class AtomRegistry {
         if (loser.ordinal === winner.ordinal) continue;
         sumSucc += loser.successes;
         sumFail += loser.failures;
-        const hist = this.db
+        const hist = this
           .prepare(
             `SELECT version, system_prompt, tools_json, params_json,
                     modified_by, modified_at, reason
              FROM atom_type_versions
-             WHERE tier = ? AND ordinal = ?
+             WHERE ${this.ownerPredicate} AND tier = ? AND ordinal = ?
              ORDER BY version ASC`
           )
           .all(loser.tier, loser.ordinal) as {
@@ -1023,11 +1052,11 @@ export class AtomRegistry {
           }[];
         for (const h of hist) {
           nextVersion++;
-          this.db
+          this
             .prepare(
               `INSERT INTO atom_type_versions
-               (tier, ordinal, version, system_prompt, tools_json, params_json, modified_by, modified_at, reason)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+               (owner_key, tier, ordinal, version, system_prompt, tools_json, params_json, modified_by, modified_at, reason)
+               VALUES (@owner, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             )
             .run(
               winner.tier,
@@ -1044,11 +1073,11 @@ export class AtomRegistry {
         // Also archive the loser's CURRENT state as a version snapshot
         // under the winner, so the record is complete.
         nextVersion++;
-        this.db
+        this
           .prepare(
             `INSERT INTO atom_type_versions
-             (tier, ordinal, version, system_prompt, tools_json, params_json, modified_by, modified_at, reason)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+             (owner_key, tier, ordinal, version, system_prompt, tools_json, params_json, modified_by, modified_at, reason)
+             VALUES (@owner, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
           )
           .run(
             winner.tier,
@@ -1061,18 +1090,18 @@ export class AtomRegistry {
             loser.createdAt,
             `[merged from ${loser.name} current state]`
           );
-        this.db
-          .prepare('DELETE FROM atom_type_versions WHERE tier = ? AND ordinal = ?')
+        this
+          .prepare(`DELETE FROM atom_type_versions WHERE ${this.ownerPredicate} AND tier = ? AND ordinal = ?`)
           .run(loser.tier, loser.ordinal);
-        this.db
-          .prepare('DELETE FROM atom_types WHERE tier = ? AND ordinal = ?')
+        this
+          .prepare(`DELETE FROM atom_types WHERE ${this.ownerPredicate} AND tier = ? AND ordinal = ?`)
           .run(loser.tier, loser.ordinal);
       }
-      this.db
+      this
         .prepare(
           `UPDATE atom_types
              SET successes = successes + ?, failures = failures + ?
-           WHERE tier = ? AND ordinal = ?`
+           WHERE ${this.ownerPredicate} AND tier = ? AND ordinal = ?`
         )
         .run(sumSucc, sumFail, winner.tier, winner.ordinal);
       // A COUNTER MUTATION THE LEDGER USED TO MISS ENTIRELY. `mergeInto` moves
@@ -1103,11 +1132,11 @@ export class AtomRegistry {
     // TypeScript cast to `{modifiedAt}` silently produces `undefined` at
     // every call site — the CLI `show` printed `v1 @ undefined` for months
     // as a result.
-    return this.db
+    return this
       .prepare(
         `SELECT version, modified_at AS modifiedAt, reason
          FROM atom_type_versions
-         WHERE tier = ? AND ordinal = ?
+         WHERE ${this.ownerPredicate} AND tier = ? AND ordinal = ?
          ORDER BY version ASC`
       )
       .all(t.tier, t.ordinal) as { version: number; modifiedAt: string; reason: string | null }[];

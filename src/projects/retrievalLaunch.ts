@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdir, realpath, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { openStoreHandle } from '../core/stores.js';
-import { roleAtLeast, type OrgRole } from '../auth/store.js';
+import { eligibleProjectRun, projectRunPathsMatch } from './runAuthority.js';
 import { projectRunIdSchema, type ProjectRun } from '../contracts/projects.js';
 import { projectRetrievalLaunchSchema, type ProjectRetrievalLaunch } from '../contracts/projectRetrievalLaunch.js';
 import { projectRetrievalScopeSchema, type ProjectRetrievalScope } from '../contracts/projectRetrieval.js';
@@ -42,14 +42,7 @@ export class ProjectRetrievalLaunchStore {
   }
 
   private eligibleRun(runId: string): ProjectRun | null {
-    const run = this.projects.getProjectRunAnyOrg(projectRunIdSchema.parse(runId));
-    if (!run || run.status !== 'running') return null;
-    const project = this.projects.getProject(run.orgId, run.projectId);
-    if (project?.status !== 'active') return null;
-    const member = this.db.prepare(`SELECT role FROM auth_memberships
-      WHERE org_id = ? AND principal_id = ?`).get(run.orgId, run.requestedByPrincipalId) as { role: OrgRole } | undefined;
-    if (!member || !roleAtLeast(member.role, 'org:member')) return null;
-    return run;
+    return eligibleProjectRun(this.db, runId);
   }
 
   private read(runId: string): ProjectRetrievalLaunch | null {
@@ -153,9 +146,7 @@ export function openProjectRunRetrieval(input: {
     if (!receipt) throw new Error('missing or denied receipt');
     const run = new ProjectStore(db, { initialize: false }).getProjectRunAnyOrg(input.runId)!;
     db.pragma('busy_timeout = 0');
-    if (resolve(input.workspacePath) !== resolve(run.hostPaths.workspacePath) ||
-        resolve(input.runsPath) !== resolve(run.hostPaths.runsPath) ||
-        resolve(input.skillsPath) !== join(dirname(dirname(dirname(run.hostPaths.workspacePath))), 'skills')) {
+    if (!projectRunPathsMatch(run, input)) {
       throw new Error('inconsistent run paths');
     }
     // Preflight must not leave a connection behind if provider/workspace setup later fails.

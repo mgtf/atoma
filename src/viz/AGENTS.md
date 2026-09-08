@@ -505,15 +505,14 @@ npm run viz:mark-turn:analyze
   process-level tests spawn it from the repository cwd with a cleaned env.
 - Behind the gate the instance-global operator surfaces (`/api/registries`,
   `/api/registry/:id`, `/api/skills/*`, `/api/burnin`) answer ONLY the platform
-  admin (403 otherwise) — org runs mutate the shared registry, so an invitation
-  must not read operator-level state (review 2026-08-20 §2.2). The admin also
+  admin (403 otherwise) — an invitation must not read operator-level state (review 2026-08-20 §2.2). The admin also
   reads every organisation's projects and run traces, and manages organisations
   through `/api/admin/organisations` and `/api/admin/invitations` (same-origin
   POST). Writes (create project, start/cancel runs) stay bound to the viewer's
   ACTIVE organisation for admins too. `visibleViews` is the one nav definition:
   gated members get org surfaces only; the ungated developer path is unchanged.
-  True per-org registry scoping would need org-attributed registry rows — a
-  schema project, not a route guard.
+  Registry ownership is enforced in storage ([src/registry](../registry/AGENTS.md));
+  these operator readers show only operator-owned rows and history.
 - `/mcp` is the ONE MCP (contract in [src/mcp](../mcp/AGENTS.md)): OAuth or
   API bearer token behind the gate, the operator on the ungated loopback, Host
   pinned either way. `/api/tokens` mints (POST, same-origin, journaled
