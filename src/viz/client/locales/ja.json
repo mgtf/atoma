@@ -631,7 +631,7 @@
   "skillOp.demote": "skillをscriptからllmへ降格（fallbackを復元）",
   "skillOp.direct": "決定論的ディスパッチでスクリプトを実行（LLM呼び出し0回）",
   "skillOp.quarantine": "静的スキャンによりskillを隔離",
-  "skillOp.creditWithheld": "",
+  "skillOp.creditWithheld": "カウンターは変更されていません",
   "registry.none": "レジストリが設定されていません",
   "registry.missing": "欠落",
   "registry.successes": "成功",
@@ -1106,5 +1106,7 @@
   "settings.mcpAdvancedHint": "ブラウザでのサインインに対応していないスクリプトやクライアント専用です。既存のAPIトークンは引き続き使用でき、上のアクセス一覧から取り消せます。",
   "settings.mcpManualHeader": "このトークンを、クライアントのAuthorizationヘッダーでBearer認証情報として使用してください。",
   "settings.mcpHelpTitle": "接続ヘルプ",
-  "settings.mcpHelpHint": "アクセスできなくなった場合は、エージェントから再接続してください。アドレスが/mcpで終わっていることと、正しい組織を承認したことを確認してください。接続を確認するには、エージェントにAtomaプロジェクトの一覧を表示するよう依頼してください。"
+  "settings.mcpHelpHint": "アクセスできなくなった場合は、エージェントから再接続してください。アドレスが/mcpで終わっていることと、正しい組織を承認したことを確認してください。接続を確認するには、エージェントにAtomaプロジェクトの一覧を表示するよう依頼してください。",
+  "skillReason.successNotFollowed": "成功として計上されません—検証により、runがレシピに従っていないことが確認されました",
+  "skillReason.failureNotFollowed": "失敗として扱われません—検証により、runがレシピに従っていないことが確認されました"
 }

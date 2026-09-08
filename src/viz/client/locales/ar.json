@@ -631,7 +631,7 @@
   "skillOp.demote": "تم تخفيض skill من script إلى llm (تمت استعادة fallback)",
   "skillOp.direct": "تم تنفيذ script عبر توجيه حتمي (0 استدعاءات LLM)",
   "skillOp.quarantine": "تم عزل skill بواسطة الفحص الساكن",
-  "skillOp.creditWithheld": "",
+  "skillOp.creditWithheld": "لم تتغير العدادات",
   "registry.none": "لم يتم إعداد سجل",
   "registry.missing": "مفقود",
   "registry.successes": "النجاحات",
@@ -1106,5 +1106,7 @@
   "settings.mcpAdvancedHint": "مخصص فقط للبرامج النصية والعملاء الذين لا يدعمون تسجيل الدخول عبر المتصفح. تظل رموز API الحالية صالحة؛ ويمكنك إلغاؤها من قائمة الوصول أعلاه.",
   "settings.mcpManualHeader": "استخدم هذا الرمز بوصفه بيانات اعتماد Bearer في ترويسة Authorization لدى عميلك.",
   "settings.mcpHelpTitle": "مساعدة الاتصال",
-  "settings.mcpHelpHint": "أعد الاتصال من وكيلك إذا توقف الوصول عن العمل. تأكّد من أن العنوان ينتهي بـ /mcp وأنك وافقت على المؤسسة الصحيحة. للتحقق من الاتصال، اطلب من وكيلك عرض قائمة مشاريع Atoma لديك."
+  "settings.mcpHelpHint": "أعد الاتصال من وكيلك إذا توقف الوصول عن العمل. تأكّد من أن العنوان ينتهي بـ /mcp وأنك وافقت على المؤسسة الصحيحة. للتحقق من الاتصال، اطلب من وكيلك عرض قائمة مشاريع Atoma لديك.",
+  "skillReason.successNotFollowed": "لم يُحتسب النجاح — لاحظ أداة التحقق أن run لم يتبع الوصفة",
+  "skillReason.failureNotFollowed": "لم يُعزَ الفشل — لاحظ أداة التحقق أن run لم يتبع الوصفة"
 }

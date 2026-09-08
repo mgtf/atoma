@@ -631,7 +631,7 @@
   "skillOp.demote": "Skill degradado de script → LLM (fallback restaurado)",
   "skillOp.direct": "Script ejecutado mediante despacho determinista (0 llamadas al LLM)",
   "skillOp.quarantine": "Skill puesto EN CUARENTENA por el análisis estático",
-  "skillOp.creditWithheld": "",
+  "skillOp.creditWithheld": "Contadores sin cambios",
   "registry.none": "No hay ningún registro configurado",
   "registry.missing": "no disponible",
   "registry.successes": "Éxitos",
@@ -1106,5 +1106,7 @@
   "settings.mcpAdvancedHint": "Solo para scripts y clientes sin inicio de sesión en el navegador. Los tokens de API existentes siguen funcionando; puedes revocarlos en la lista de accesos anterior.",
   "settings.mcpManualHeader": "Usa este token como credencial Bearer en el encabezado Authorization de tu cliente.",
   "settings.mcpHelpTitle": "Ayuda para la conexión",
-  "settings.mcpHelpHint": "Vuelve a conectarte desde tu agente si el acceso deja de funcionar. Comprueba que la dirección termine en /mcp y que hayas aprobado la organización correcta. Para verificar la conexión, pide a tu agente que enumere tus proyectos de Atoma."
+  "settings.mcpHelpHint": "Vuelve a conectarte desde tu agente si el acceso deja de funcionar. Comprueba que la dirección termine en /mcp y que hayas aprobado la organización correcta. Para verificar la conexión, pide a tu agente que enumere tus proyectos de Atoma.",
+  "skillReason.successNotFollowed": "Éxito no reconocido: el validador observó que el run no siguió la receta",
+  "skillReason.failureNotFollowed": "Fallo no atribuido: el validador observó que el run no siguió la receta"
 }
