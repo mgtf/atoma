@@ -2,6 +2,7 @@ import { dirname, resolve } from 'node:path';
 import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { setMaxListeners } from 'node:events';
 import { RunnerConfigError } from '../core/errors.js';
+import { containerImageDigestSchema } from '../contracts/containerImage.js';
 import { applyTierPins } from '../core/models.js';
 import {
   ModelSelectorError,
@@ -94,6 +95,8 @@ export interface RunnerArgs {
    * which is the shape we already measured four times.
    */
   seed?: string;
+  /** Optional immutable worker identity, used by registered experiments. */
+  workerImage?: string;
 }
 
 export type SkillPromotionSource =
@@ -196,6 +199,7 @@ export function formatUsage(profile: TaskProfile): string {
     ...RUNNER_BOOLEAN_FLAGS,
     ...RUNNER_NEGATABLE_FLAGS.flatMap((flag) => [flag, `--no-${stripDashes(flag)}`]),
     '--seed <dir>',
+    '--worker-image <sha256:digest> (requires container mode)',
   ];
   return [
     `Usage: ${profile.id} [flags] "<goal>"`,
@@ -226,7 +230,7 @@ export function parseRunnerArgs(argv: readonly string[]): RunnerArgs {
     negatableFlags: RUNNER_NEGATABLE_FLAGS.map(stripDashes),
     // `--seed` consumes the next token UNCONDITIONALLY (historical contract);
     // a trailing `--seed` records '' and deliberately clobbers ATOMA_SEED.
-    valueFlags: ['seed'],
+    valueFlags: ['seed', 'worker-image'],
     undeclared: 'discard',
   });
   for (const token of undeclaredFlags) console.warn(`unknown flag: ${token}`);
@@ -236,6 +240,11 @@ export function parseRunnerArgs(argv: readonly string[]): RunnerArgs {
     flags['baseline'] !== undefined
       ? flags['baseline'] === 'true'
       : process.env['ATOMA_BASELINE'] === '1';
+  const workerImage = flags['worker-image'];
+  if (workerImage !== undefined &&
+      (!backendMode.container || !containerImageDigestSchema.safeParse(workerImage).success)) {
+    throw new RunnerConfigError('--worker-image requires container mode and a sha256 image digest');
+  }
   return {
     goal: command ?? undefined,
     noLearnSkills: flags['no-learn-skills'] === 'true',
@@ -245,6 +254,7 @@ export function parseRunnerArgs(argv: readonly string[]): RunnerArgs {
     ...backendMode,
     baseline,
     ...(seed ? { seed } : {}),
+    ...(workerImage ? { workerImage } : {}),
   };
 }
 
@@ -644,6 +654,7 @@ export async function startTask(
   const backend = args.container
     ? await containerToolBackend({
         workspaceRoot,
+        ...(args.workerImage ? { image: args.workerImage } : {}),
         egress: args.egress,
         runId: `${profile.id}-${process.pid}`,
       })

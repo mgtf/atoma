@@ -1,10 +1,11 @@
 # Project retrieval experiment protocol
 
-Status: instruments frozen; no live campaign registered or executed.
+Status: instruments, registration and A/C characterization driver implemented;
+no live campaign registered or executed.
 
 This experiment is separate from the historical
 [cost-amortisation benchmark](../PROTOCOL.md). The existing benchmark CLI owns
-the offline `retrieval` subcommand; existing `--baseline` semantics and the
+the `retrieval` subcommand; existing `--baseline` semantics and the
 shared runner are unchanged. No new supervision loop is introduced.
 
 ## Before the first live measurement
@@ -15,7 +16,10 @@ repetitions, ordered arm schedule, all three model selectors, frontier-direct
 selector, sandbox and tool capabilities, deadlines, budgets, stopping rules,
 threshold environment values, and provider accounting configuration. Record
 the starting stores, skill/trust state, learning policy and cache treatment.
-The current lock is insufficient for a live comparison on its own.
+The instrument lock is insufficient for a live comparison on its own.
+`retrieval register` now freezes these inputs for an A/C development
+characterization, and `inspect` prints it offline. See the
+[operator commands and exact supported policies](README.md#registered-characterization-campaigns).
 
 Use three arms:
 
@@ -74,9 +78,11 @@ This small corpus cannot justify a vector service or a scale threshold.
 
 ## Next implementation increment
 
-Add campaign registration and explicit retrieval conditions through the
-existing benchmark driver and runner. Register and measure A/C to identify
-actual failure classes. Then implement and test the scoped host execution
+Register and measure A/C with the implemented driver to identify actual
+failure classes. The initial driver uses host subscriptions, empty starting
+state and development questions; treatment B, paid API campaigns and the
+confirmatory statistical report remain later increments.
+Then implement and test the scoped host execution
 contract and SQLite FTS5 backend before the paired A/B/C comparison.
 Keep production tenant authorization, worker protocol isolation, indexing and
 operational lifecycle tests separate from the fixture scorer's guarantees.

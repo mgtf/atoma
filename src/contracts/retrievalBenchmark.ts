@@ -116,3 +116,10 @@ export type RetrievalCorpus = z.infer<typeof retrievalCorpusSchema>;
 export type RetrievalQuestion = z.infer<typeof retrievalQuestionSchema>;
 export type RetrievalAnswer = z.infer<typeof retrievalAnswerSchema>;
 export type RetrievalEvidence = z.infer<typeof retrievalEvidenceSchema>;
+
+export const retrievalScoreSchema = z.object({
+  questionId: id, full: z.boolean(),
+  checks: z.array(z.object({ id: z.string(), ok: z.boolean() }).strict()),
+}).strict();
+export type RetrievalScore = z.infer<typeof retrievalScoreSchema>;
+export type RetrievalCheck = RetrievalScore['checks'][number];

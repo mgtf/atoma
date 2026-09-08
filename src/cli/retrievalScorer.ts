@@ -3,18 +3,15 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { retrievalAnswerSchema, type RetrievalAnswer } from '../contracts/retrievalBenchmark.js';
+import {
+  retrievalAnswerSchema, type RetrievalAnswer, type RetrievalCheck, type RetrievalScore,
+} from '../contracts/retrievalBenchmark.js';
 import {
   questionFor, readRetrievalFile, RETRIEVAL_ANSWER_FILE, RETRIEVAL_INVENTORY_FILE,
   retrievalDocumentKey, retrievalInventory, retrievalSha256, snapshotFor, type RetrievalDataset,
 } from './retrievalDataset.js';
 
-export interface RetrievalCheck { readonly id: string; readonly ok: boolean }
-export interface RetrievalScore {
-  readonly questionId: string;
-  readonly full: boolean;
-  readonly checks: readonly RetrievalCheck[];
-}
+export type { RetrievalCheck, RetrievalScore } from '../contracts/retrievalBenchmark.js';
 
 function result(questionId: string, checks: RetrievalCheck[]): RetrievalScore {
   return { questionId, full: checks.length > 0 && checks.every(c => c.ok), checks };

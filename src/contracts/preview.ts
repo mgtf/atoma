@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { containerImageDigestSchema as previewImageDigestSchema } from './containerImage.js';
 import {
   organisationIdSchema,
   principalIdSchema,
@@ -273,7 +274,7 @@ export const previewRuntimeSchema = z.enum(['runsc', 'runc']);
 export const previewSourceSchema = z.enum(['delivered', 'in-flight']);
 
 /** A pinned image, by digest. A mutable tag is not an identity. */
-export const previewImageDigestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
+export { previewImageDigestSchema };
 
 /**
  * The live row. At most one per run, compare-and-set only.

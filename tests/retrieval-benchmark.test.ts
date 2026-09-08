@@ -317,7 +317,7 @@ describe('retrieval benchmark CLI — actual child process', () => {
     writeFileSync(join(out, 'package.json'), '{"type":"module"}');
     symlinkSync(join(repo, 'node_modules'), join(out, 'node_modules'), 'dir');
     const run = spawnSync(process.execPath, ['--input-type=module', '-e',
-      "import { retrievalBenchmarkMain } from './cli/retrievalBenchmark.js'; process.exitCode = retrievalBenchmarkMain(['validate', '--dataset', process.argv[1]]);",
+      "import { retrievalBenchmarkMain } from './cli/retrievalBenchmark.js'; process.exitCode = await retrievalBenchmarkMain(['validate', '--dataset', process.argv[1]]);",
       root,
     ], { cwd: out, encoding: 'utf8', timeout: 15_000 });
     expect(run.status, run.stderr).toBe(0);

@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "id": "agentic-development-pilot",
+  "purpose": "Characterize source-supported answers and a maintenance task before implementing retrieval; this pilot makes no comparative gain claim.",
+  "kind": "agentic-characterization",
+  "questionIds": ["northstar-01", "northstar-13"],
+  "repetitions": 1,
+  "firstArm": "atoma",
+  "models": {
+    "l1": "sub:anthropic:haiku",
+    "l2": "sub:anthropic:sonnet",
+    "l3": "sub:anthropic:opus",
+    "frontier": "sub:anthropic:opus"
+  },
+  "workerImage": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "timeoutMs": 180000,
+  "maxWallMs": 1200000,
+  "stopAfterConsecutiveInfrastructureFailures": 1,
+  "thresholds": { "trust": 3, "promote": 3, "demote": 2 }
+}

@@ -1,6 +1,7 @@
 # Project retrieval evaluation instruments
 
-Status: offline instruments implemented; live campaign unregistered. These
+Status: instruments and characterization campaign driver implemented; no live
+campaign registered or measured. These
 fixtures and scorers implement the first increment of the
 [retrieval action plan](../../docs/project-retrieval-action-plan-2026-09-08.md).
 They do not enable search in Atoma or establish a retrieval benefit.
@@ -121,8 +122,8 @@ returns structured checks and `full`. It exits 0 on full success, 1 on a failed
 answer/deliverable, and 2 on broken instruments or invalid arguments. A fresh
 workspace without an answer is expected to fail scoring.
 
-All commands accept `--dataset <directory>`. They require no model pins or
-credentials, call no providers, and use no product store. `node --import tsx
+The offline commands above accept `--dataset <directory>`. They require no
+model pins or credentials, call no providers, and use no product store. `node --import tsx
 src/cli/benchmark.ts retrieval validate` is the equivalent source invocation
 when a restricted environment prevents the `tsx` wrapper's IPC socket.
 The fixtures remain external to emitted TypeScript; compiled-module behavior
@@ -134,4 +135,70 @@ sources, maintenance probes and reference fixes. It does not register a live
 campaign, pin evaluator source code or report any model results. There is no
 automatic lock repair: a changed corpus or score rule needs review and a new
 registration before measurement. See [the protocol](PROTOCOL.md) for that next
-step.
+step. The characterization driver below performs that registration and runs
+the existing agentic paths; it does not add a search backend.
+
+## Registered characterization campaigns
+
+Start from [campaign.example.json](campaign.example.json) in a separate file.
+Its selectors illustrate the syntax, not an endorsed or measured model
+choice. Replace the zero worker digest with an installed worker image's actual
+ID, and set all four model selectors explicitly. The first driver supports
+host subscription selectors (`sub:`) only, through the existing provider
+router. API-funded and personal-subscription campaigns are not implemented.
+The frontier selector must use a transport constructed by the three tiers.
+
+```bash
+docker image inspect --format '{{.Id}}' atoma-worker:latest
+npm run benchmark -- retrieval register --spec /tmp/retrieval-spec.json --out /tmp/retrieval-registration.json
+npm run benchmark -- retrieval inspect --registration /tmp/retrieval-registration.json
+npm run benchmark -- retrieval run --registration /tmp/retrieval-registration.json --out /tmp/retrieval-campaign-result
+```
+
+Only `run` executes models and consumes subscription quota. Registration needs
+committed, tracked runtime/scorer source and the pinned Node version. It fixes
+the instrument hash, source revision and bytes, Node/platform identity, exact
+question/repetition order, model selectors, worker digest, thresholds, deadline
+and infrastructure stopping rule. `inspect` is offline and prints the registered
+schedule; it does not certify that credentials, the image or the host are ready.
+The example is a four-attempt development pilot, not a sample-size justification.
+
+Execution admits development questions only and alternates A/C ordering for
+adjacent pairs. A is normal Atoma; C is the existing `--baseline` runner.
+Every attempt uses `spawnRun` and the build profile with container isolation,
+no worker egress, a new seed/workspace and empty pre-bootstrap store/skills.
+Learning, promotion, direct skills, event skills and the prefilter cache are
+off. The runner still performs its normal per-arm bootstrap and may write
+within-run trust state; those changes never enter another attempt. Tool and
+supervision budgets otherwise come from the registered source revision.
+
+The optional shared runner flag `--worker-image <sha256:digest>` pins the exact
+image selected by the campaign. It requires container mode; ordinary run
+defaults are unchanged. The campaign verifies source bytes and image/CLI
+versions between runs and source bytes after each run. Host CLI versions are
+observed in `host.json`; remote served-model identities and cache usage remain
+trace evidence. Provider cache/profile state is not claimed to be reproducibly
+cold or frozen by this harness.
+
+The whole campaign holds the existing machine-global run lease. An occupied
+slot is refused without stale recovery, and each child's PGID is attached.
+Cancellation uses the launcher's existing process-group teardown. A surviving
+child keeps the lease and its PGID for operator recovery. Do not edit source
+or run another live workload during the campaign.
+
+`maxWallMs` aborts the active attempt and prevents the next one; mandatory
+teardown and read-only preflight may extend total wall time past that budget.
+Campaigns stop at a UTC day boundary and at the registered count of consecutive
+infrastructure failures. Missing epilogues, missing/mismatched completed
+traces and runner errors are infrastructure failures. Failed or cancelled
+runner outcomes cannot earn a full task pass, even if an answer file exists.
+
+The output directory must be new. It contains the registration, host versions,
+committed source archive, exact dataset, append-only result rows, report and
+per-attempt seed, workspace, state, log, trace and executable score. These are
+host-side evidence; only the workspace is mounted into the worker. Preserve
+the archive outside temporary/ignored paths before citing a measurement.
+Reports distinguish planned and attempted runs, failed scores, infrastructure
+failures and subscription price equivalents. They make no retrieval gain
+claim. Aborts preserve an `aborted.json` report and all preceding evidence;
+there is no overwrite or resume mode.

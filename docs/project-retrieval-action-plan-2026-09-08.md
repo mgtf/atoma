@@ -1,7 +1,7 @@
 # Project retrieval — implementation action plan
 
-Date: 2026-09-08. Status: first implementation increment delivered in source;
-offline corpus fixtures, questions, scorers and CLI are available. Production
+Date: 2026-09-08. Status: evaluation instruments and the A/C characterization
+campaign driver delivered in source. Production
 retrieval, live measurements and provider integrations remain unimplemented.
 
 ## Implementation progress
@@ -14,12 +14,15 @@ The existing benchmark CLI provides `retrieval validate`, `prepare`, and
 `score`, without provider calls. Typed contracts and executable scorer tests
 cover both source and compiled-module paths.
 
-This delivers the fixture portion of Steps 1–2. It does not implement project
-snapshot ingestion or prove production tenant isolation. The next increment
-is Step 3: extend the shared runner, register the campaign, and measure the
-agentic reference before introducing the production index. The
-[retrieval protocol](../benchmark/retrieval/PROTOCOL.md) states what remains
-to register; no live baseline result exists yet.
+This delivers the fixture portion of Steps 1–2 and the characterization driver
+in Step 3. Registration pins source/instruments/models/image and alternates
+Atoma/frontier-direct attempts. Execution uses `spawnRun`, the shared runner,
+the global lease, mandatory containers and independent fresh state. Its first
+supported mode is development characterization through host subscriptions.
+No project snapshot ingestion or production search element is implemented.
+The next measurement needs an explicit campaign configuration and an installed
+worker image. The [retrieval protocol](../benchmark/retrieval/PROTOCOL.md)
+states the limits; no live baseline result exists yet.
 
 ## Objective and implementation order
 
@@ -164,10 +167,13 @@ deficit.
 - [ ] Extend the existing benchmark driver and shared runner with an explicit
   retrieval condition. Do not replace the historical meaning of `--baseline`
   or build a second execution/supervision loop.
-- [ ] Reset each paired run to independently copied starting state. Prevent
+- [x] Implement A/C characterization registration and execution in the existing
+  benchmark CLI using `spawnRun` and the shared runner. Treatment B and the
+  confirmatory decision rule remain unimplemented.
+- [x] Reset each paired run to independently copied starting state. Prevent
   skill learning, trust changes, answers, or caches from one arm contaminating
   the next. Fix the learning policy before running the experiment.
-- [ ] Preserve provider-cache behavior honestly: local reset cannot guarantee
+- [x] Preserve provider-cache behavior honestly: local reset cannot guarantee
   a provider-side cold cache. Balance run ordering, record cache usage, and
   avoid describing unobservable provider state as controlled.
 - [ ] Run A and C initially to characterize errors. Once B exists, rerun the
@@ -184,13 +190,17 @@ deficit.
 - [ ] Record indexing time, CPU, memory, disk and rebuild frequency separately;
   report first-use cost and amortization at declared reuse counts. Agentic
   search has no new index service but still consumes model time and tokens.
-- [ ] Run campaigns serially under the existing machine-wide lease. Archive
+- [x] Run campaigns serially under the existing machine-wide lease. Archive
   starting/ending stores, skill state, traces, scorer outputs, configuration,
   and hashes outside ignored `runs/`, without disturbing live product state.
 
 **Read/extend:** [benchmark driver](../src/cli/benchmark.ts),
 [baseline executor](../src/run/baseline.ts),
 [shared runner](../src/run/runner.ts), and existing benchmark tests.
+Implemented characterization support:
+[registration](../src/cli/retrievalRegistration.ts),
+[campaign driver](../src/cli/retrievalCampaign.ts), and
+[contracts](../src/contracts/retrievalCampaign.ts).
 
 **Exit condition:** a registered experiment and baseline report identify the
 failure classes worth testing. Paid campaigns are explicit experiment work;
