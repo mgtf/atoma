@@ -1,0 +1,6 @@
+Orchard operations
+
+Failed pickup attempts are retried once on the next business day.
+Keep the pickup audit record for 90 days after collection.
+An emailed receipt link expires 168 hours after creation.
+An incident involving a damaged parcel goes to parcel-damage-review.

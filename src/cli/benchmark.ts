@@ -371,6 +371,11 @@ function armsContext(): ArmsContext {
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
+  if (argv[0] === 'retrieval') {
+    const { retrievalBenchmarkMain } = await import('./retrievalBenchmark.js');
+    process.exitCode = retrievalBenchmarkMain(argv.slice(1));
+    return;
+  }
   const dryRun = argv.includes('--dry-run');
   const cfgIdx = argv.indexOf('--config');
   const cfgPath = resolve(cfgIdx >= 0 ? argv[cfgIdx + 1]! : 'benchmark/experiment.json');

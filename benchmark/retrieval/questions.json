@@ -1,0 +1,963 @@
+{
+  "version": 1,
+  "questions": [
+    {
+      "id": "northstar-01",
+      "snapshotId": "northstar-v1",
+      "category": "exact",
+      "language": "en",
+      "prompt": "What is the accepted annual subscription price per seat, in euro cents?",
+      "requestedFacts": [
+        {
+          "key": "annual-price-cents",
+          "valueType": "number"
+        }
+      ],
+      "answerable": true,
+      "expected": [
+        {
+          "key": "annual-price-cents",
+          "value": 19000,
+          "evidence": [
+            {
+              "path": "docs/billing.md",
+              "sha256": "98efd32bfe73a29b17086fc9be347ae3acfa5b5f061d1b17561295a85fe51e9b",
+              "startByte": 95,
+              "endByte": 169
+            },
+            {
+              "path": "docs/decisions.md",
+              "sha256": "e843ca885f0c1f5363a5f9b20a5292a6a225a9ceccb4250bc97306a20b52c953",
+              "startByte": 232,
+              "endByte": 304
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "northstar-02",
+      "snapshotId": "northstar-v1",
+      "category": "exact",
+      "language": "en",
+      "prompt": "Which configuration key identifies the annual Stripe offer?",
+      "requestedFacts": [
+        {
+          "key": "provider-key",
+          "valueType": "string"
+        }
+      ],
+      "answerable": true,
+      "expected": [
+        {
+          "key": "provider-key",
+          "value": "stripe_price_annual_studio",
+          "evidence": [
+            {
+              "path": "docs/billing.md",
+              "sha256": "98efd32bfe73a29b17086fc9be347ae3acfa5b5f061d1b17561295a85fe51e9b",
+              "startByte": 170,
+              "endByte": 241
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "northstar-03",
+      "snapshotId": "northstar-v1",
+      "category": "paraphrase",
+      "language": "en",
+      "prompt": "When does a customer moving from monthly payments to a twelve-month term start paying on the new schedule?",
+      "requestedFacts": [
+        {
+          "key": "switch-at-next-renewal",
+          "valueType": "boolean"
+        }
+      ],
+      "answerable": true,
+      "expected": [
+        {
+          "key": "switch-at-next-renewal",
+          "value": true,
+          "evidence": [
+            {
+              "path": "docs/decisions.md",
+              "sha256": "e843ca885f0c1f5363a5f9b20a5292a6a225a9ceccb4250bc97306a20b52c953",
+              "startByte": 389,
+              "endByte": 460
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "northstar-04",
+      "snapshotId": "northstar-v1",
+      "category": "paraphrase",
+      "language": "en",
+      "prompt": "How many hours can a customer use a newly created download link for their export?",
+      "requestedFacts": [
+        {
+          "key": "export-link-hours",
+          "valueType": "number"
+        }
+      ],
+      "answerable": true,
+      "expected": [
+        {
+          "key": "export-link-hours",
+          "value": 72,
+          "evidence": [
+            {
+              "path": "docs/operations.txt",
+              "sha256": "5bb63ca0601025dd6cf45f2bbcc3f3bcda9839eba8cbf61e53f5501fc68435d6",
+              "startByte": 103,
+              "endByte": 150
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "northstar-05",
+      "snapshotId": "northstar-v1",
+      "category": "cross-language",
+      "language": "fr",
+      "prompt": "Combien de jours le client a-t-il pour demander le remboursement du premier paiement ?",
+      "requestedFacts": [
+        {
+          "key": "refund-days",
+          "valueType": "number"
+        }
+      ],
+      "answerable": true,
+      "expected": [
+        {
+          "key": "refund-days",
+          "value": 14,
+          "evidence": [
+            {
+              "path": "docs/billing.md",
+              "sha256": "98efd32bfe73a29b17086fc9be347ae3acfa5b5f061d1b17561295a85fe51e9b",
+              "startByte": 387,
+              "endByte": 459
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "northstar-06",
+      "snapshotId": "northstar-v1",
+      "category": "cross-language",
+      "language": "fr",
+      "prompt": "Combien de nouvelles tentatives suivent un paiement raté, et de combien d’heures sont-elles espacées ?",
+      "requestedFacts": [
+        {
+          "key": "retry-count",
+          "valueType": "number"
+        },
+        {
+          "key": "retry-hours",
+          "valueType": "number"
+        }
+      ],
+      "answerable": true,
+      "expected": [
+        {
+          "key": "retry-count",
+          "value": 3,
+          "evidence": [
+            {
+              "path": "docs/billing.md",
+              "sha256": "98efd32bfe73a29b17086fc9be347ae3acfa5b5f061d1b17561295a85fe51e9b",
+              "startByte": 544,
+              "endByte": 607
+            }
+          ]
+        },
+        {
+          "key": "retry-hours",
+          "value": 48,
+          "evidence": [
+            {
+              "path": "docs/billing.md",
+              "sha256": "98efd32bfe73a29b17086fc9be347ae3acfa5b5f061d1b17561295a85fe51e9b",
+              "startByte": 544,
+              "endByte": 607
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "northstar-07",
+      "snapshotId": "northstar-v1",
+      "category": "superseded",
+      "language": "en",
+      "prompt": "The archive prices a year at 22800 cents. What annual price was actually accepted to replace that proposal?",
+      "requestedFacts": [
+        {
+          "key": "annual-price-cents",
+          "valueType": "number"
+        }
+      ],
+      "answerable": true,
+      "expected": [
+        {
+          "key": "annual-price-cents",
+          "value": 19000,
+          "evidence": [
+            {
+              "path": "docs/billing.md",
+              "sha256": "98efd32bfe73a29b17086fc9be347ae3acfa5b5f061d1b17561295a85fe51e9b",
+              "startByte": 95,
+              "endByte": 169
+            },
+            {
+              "path": "docs/decisions.md",
+              "sha256": "e843ca885f0c1f5363a5f9b20a5292a6a225a9ceccb4250bc97306a20b52c953",
+              "startByte": 232,
+              "endByte": 304
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "northstar-08",
+      "snapshotId": "northstar-v1",
+      "category": "superseded",
+      "language": "en",
+      "prompt": "According to the accepted replacement of D-001, after which failed retry is the customer emailed?",
+      "requestedFacts": [
+        {
+          "key": "email-after-retry",
+          "valueType": "number"
+        }
+      ],
+      "answerable": true,
+      "expected": [
+        {
+          "key": "email-after-retry",
+          "value": 3,
+          "evidence": [
+            {
+              "path": "docs/decisions.md",
+              "sha256": "e843ca885f0c1f5363a5f9b20a5292a6a225a9ceccb4250bc97306a20b52c953",
+              "startByte": 305,
+              "endByte": 388
+            },
+            {
+              "path": "docs/billing.md",
+              "sha256": "98efd32bfe73a29b17086fc9be347ae3acfa5b5f061d1b17561295a85fe51e9b",
+              "startByte": 608,
+              "endByte": 668
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "northstar-09",
+      "snapshotId": "northstar-v1",
+      "category": "multi-source",
+      "language": "en",
+      "prompt": "Give the annual price per seat in cents and the retention duration in days for payment webhook IDs.",
+      "requestedFacts": [
+        {
+          "key": "annual-price-cents",
+          "valueType": "number"
+        },
+        {
+          "key": "event-retention-days",
+          "valueType": "number"
+        }
+      ],
+      "answerable": true,
+      "expected": [
+        {
+          "key": "annual-price-cents",
+          "value": 19000,
+          "evidence": [
+            {
+              "path": "docs/billing.md",
+              "sha256": "98efd32bfe73a29b17086fc9be347ae3acfa5b5f061d1b17561295a85fe51e9b",
+              "startByte": 95,
+              "endByte": 169
+            },
+            {
+              "path": "docs/decisions.md",
+              "sha256": "e843ca885f0c1f5363a5f9b20a5292a6a225a9ceccb4250bc97306a20b52c953",
+              "startByte": 232,
+              "endByte": 304
+            }
+          ]
+        },
+        {
+          "key": "event-retention-days",
+          "value": 45,
+          "evidence": [
+            {
+              "path": "docs/operations.txt",
+              "sha256": "5bb63ca0601025dd6cf45f2bbcc3f3bcda9839eba8cbf61e53f5501fc68435d6",
+              "startByte": 22,
+              "endByte": 102
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "northstar-10",
+      "snapshotId": "northstar-v1",
+      "category": "multi-source",
+      "language": "fr",
+      "prompt": "Une annulation coupe-t-elle immédiatement l’accès, et quelle file traite les escalades de facturation ?",
+      "requestedFacts": [
+        {
+          "key": "access-until-paid-term-end",
+          "valueType": "boolean"
+        },
+        {
+          "key": "support-queue",
+          "valueType": "string"
+        }
+      ],
+      "answerable": true,
+      "expected": [
+        {
+          "key": "access-until-paid-term-end",
+          "value": true,
+          "evidence": [
+            {
+              "path": "docs/billing.md",
+              "sha256": "98efd32bfe73a29b17086fc9be347ae3acfa5b5f061d1b17561295a85fe51e9b",
+              "startByte": 307,
+              "endByte": 386
+            }
+          ]
+        },
+        {
+          "key": "support-queue",
+          "value": "studio-billing-review",
+          "evidence": [
+            {
+              "path": "docs/operations.txt",
+              "sha256": "5bb63ca0601025dd6cf45f2bbcc3f3bcda9839eba8cbf61e53f5501fc68435d6",
+              "startByte": 220,
+              "endByte": 280
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "northstar-11",
+      "snapshotId": "northstar-v1",
+      "category": "absent",
+      "language": "en",
+      "prompt": "Which cloud region stores the payment database? State the exact region identifier.",
+      "requestedFacts": [
+        {
+          "key": "database-region",
+          "valueType": "string"
+        }
+      ],
+      "answerable": false,
+      "expected": []
+    },
+    {
+      "id": "northstar-12",
+      "snapshotId": "northstar-v1",
+      "category": "absent",
+      "language": "en",
+      "prompt": "What private billing support route is used by the enterprise sibling project? Answer only from the supplied project corpus.",
+      "requestedFacts": [
+        {
+          "key": "sibling-support-route",
+          "valueType": "string"
+        }
+      ],
+      "answerable": false,
+      "expected": []
+    },
+    {
+      "id": "northstar-13",
+      "snapshotId": "northstar-v1",
+      "category": "maintenance",
+      "language": "en",
+      "prompt": "Enable the documented annual offer by changing pricing.json only. Preserve the monthly offer, currency, and refund policy. Leave preview.mjs and all documentation unchanged. Also return the annual price, monthly price, and refund window with source citations.",
+      "requestedFacts": [
+        {
+          "key": "annual-price-cents",
+          "valueType": "number"
+        },
+        {
+          "key": "monthly-price-cents",
+          "valueType": "number"
+        },
+        {
+          "key": "refund-days",
+          "valueType": "number"
+        }
+      ],
+      "answerable": true,
+      "expected": [
+        {
+          "key": "annual-price-cents",
+          "value": 19000,
+          "evidence": [
+            {
+              "path": "docs/billing.md",
+              "sha256": "98efd32bfe73a29b17086fc9be347ae3acfa5b5f061d1b17561295a85fe51e9b",
+              "startByte": 95,
+              "endByte": 169
+            },
+            {
+              "path": "docs/decisions.md",
+              "sha256": "e843ca885f0c1f5363a5f9b20a5292a6a225a9ceccb4250bc97306a20b52c953",
+              "startByte": 232,
+              "endByte": 304
+            }
+          ]
+        },
+        {
+          "key": "monthly-price-cents",
+          "value": 1900,
+          "evidence": [
+            {
+              "path": "docs/billing.md",
+              "sha256": "98efd32bfe73a29b17086fc9be347ae3acfa5b5f061d1b17561295a85fe51e9b",
+              "startByte": 38,
+              "endByte": 94
+            }
+          ]
+        },
+        {
+          "key": "refund-days",
+          "value": 14,
+          "evidence": [
+            {
+              "path": "docs/billing.md",
+              "sha256": "98efd32bfe73a29b17086fc9be347ae3acfa5b5f061d1b17561295a85fe51e9b",
+              "startByte": 387,
+              "endByte": 459
+            }
+          ]
+        }
+      ],
+      "maintenance": {
+        "configPath": "pricing.json",
+        "probePath": "preview.mjs",
+        "referencePath": "references/northstar-pricing.json",
+        "referenceSha256": "9172fad38c1055bebbeeabf59a2e5b7f85d6168433016848c25ca38fcdef771c",
+        "expectedPreview": {
+          "monthlyOne": {
+            "available": true,
+            "totalCents": 1900,
+            "currency": "EUR",
+            "refundWindowDays": 14
+          },
+          "monthlyThree": {
+            "available": true,
+            "totalCents": 5700,
+            "currency": "EUR",
+            "refundWindowDays": 14
+          },
+          "annualOne": {
+            "available": true,
+            "totalCents": 19000,
+            "currency": "EUR",
+            "refundWindowDays": 14
+          },
+          "annualThree": {
+            "available": true,
+            "totalCents": 57000,
+            "currency": "EUR",
+            "refundWindowDays": 14
+          }
+        }
+      }
+    },
+    {
+      "id": "orchard-01",
+      "snapshotId": "orchard-v1",
+      "category": "exact",
+      "language": "en",
+      "prompt": "Which lookup key identifies the parcel label?",
+      "requestedFacts": [
+        {
+          "key": "label-key",
+          "valueType": "string"
+        }
+      ],
+      "answerable": true,
+      "expected": [
+        {
+          "key": "label-key",
+          "value": "orchard_collection_reference",
+          "evidence": [
+            {
+              "path": "docs/collection.md",
+              "sha256": "07becd6235e4f6edf2e14e33713bc03083cc0137f805ab1b3a618b682ee9f9a6",
+              "startByte": 451,
+              "endByte": 511
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "orchard-02",
+      "snapshotId": "orchard-v1",
+      "category": "exact",
+      "language": "en",
+      "prompt": "What time zone governs local pickup times?",
+      "requestedFacts": [
+        {
+          "key": "time-zone",
+          "valueType": "string"
+        }
+      ],
+      "answerable": true,
+      "expected": [
+        {
+          "key": "time-zone",
+          "value": "Europe/Paris",
+          "evidence": [
+            {
+              "path": "docs/collection.md",
+              "sha256": "07becd6235e4f6edf2e14e33713bc03083cc0137f805ab1b3a618b682ee9f9a6",
+              "startByte": 183,
+              "endByte": 233
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "orchard-03",
+      "snapshotId": "orchard-v1",
+      "category": "paraphrase",
+      "language": "en",
+      "prompt": "How far ahead must a shop reserve a pickup, expressed in elapsed hours?",
+      "requestedFacts": [
+        {
+          "key": "notice-hours",
+          "valueType": "number"
+        }
+      ],
+      "answerable": true,
+      "expected": [
+        {
+          "key": "notice-hours",
+          "value": 24,
+          "evidence": [
+            {
+              "path": "docs/collection.md",
+              "sha256": "07becd6235e4f6edf2e14e33713bc03083cc0137f805ab1b3a618b682ee9f9a6",
+              "startByte": 33,
+              "endByte": 93
+            },
+            {
+              "path": "docs/decisions.md",
+              "sha256": "abdda591ad88c9101dcd3c9efcd7f0b8fca5665b14436a68518a19dfc835bf78",
+              "startByte": 227,
+              "endByte": 292
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "orchard-04",
+      "snapshotId": "orchard-v1",
+      "category": "paraphrase",
+      "language": "en",
+      "prompt": "A receipt was sent by email. How many hours does its link remain usable?",
+      "requestedFacts": [
+        {
+          "key": "receipt-link-hours",
+          "valueType": "number"
+        }
+      ],
+      "answerable": true,
+      "expected": [
+        {
+          "key": "receipt-link-hours",
+          "value": 168,
+          "evidence": [
+            {
+              "path": "docs/operations.txt",
+              "sha256": "d607bbdeaffbdadcb51bc32997f923cd5b36e796c6417d38b420b75fbd6798d4",
+              "startByte": 145,
+              "endByte": 202
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "orchard-05",
+      "snapshotId": "orchard-v1",
+      "category": "cross-language",
+      "language": "fr",
+      "prompt": "Combien de colis peut-on remettre dans une seule réservation ?",
+      "requestedFacts": [
+        {
+          "key": "max-parcels",
+          "valueType": "number"
+        }
+      ],
+      "answerable": true,
+      "expected": [
+        {
+          "key": "max-parcels",
+          "value": 5,
+          "evidence": [
+            {
+              "path": "docs/collection.md",
+              "sha256": "07becd6235e4f6edf2e14e33713bc03083cc0137f805ab1b3a618b682ee9f9a6",
+              "startByte": 94,
+              "endByte": 136
+            },
+            {
+              "path": "docs/decisions.md",
+              "sha256": "abdda591ad88c9101dcd3c9efcd7f0b8fca5665b14436a68518a19dfc835bf78",
+              "startByte": 227,
+              "endByte": 292
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "orchard-06",
+      "snapshotId": "orchard-v1",
+      "category": "cross-language",
+      "language": "fr",
+      "prompt": "Combien d’heures avant l’enlèvement peut-on encore annuler sa réservation ?",
+      "requestedFacts": [
+        {
+          "key": "cancellation-hours",
+          "valueType": "number"
+        }
+      ],
+      "answerable": true,
+      "expected": [
+        {
+          "key": "cancellation-hours",
+          "value": 12,
+          "evidence": [
+            {
+              "path": "docs/collection.md",
+              "sha256": "07becd6235e4f6edf2e14e33713bc03083cc0137f805ab1b3a618b682ee9f9a6",
+              "startByte": 247,
+              "endByte": 303
+            },
+            {
+              "path": "docs/decisions.md",
+              "sha256": "abdda591ad88c9101dcd3c9efcd7f0b8fca5665b14436a68518a19dfc835bf78",
+              "startByte": 430,
+              "endByte": 487
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "orchard-07",
+      "snapshotId": "orchard-v1",
+      "category": "superseded",
+      "language": "en",
+      "prompt": "The pilot used a 48-hour notice period. What notice duration replaces it in accepted O-011?",
+      "requestedFacts": [
+        {
+          "key": "notice-hours",
+          "valueType": "number"
+        }
+      ],
+      "answerable": true,
+      "expected": [
+        {
+          "key": "notice-hours",
+          "value": 24,
+          "evidence": [
+            {
+              "path": "docs/collection.md",
+              "sha256": "07becd6235e4f6edf2e14e33713bc03083cc0137f805ab1b3a618b682ee9f9a6",
+              "startByte": 33,
+              "endByte": 93
+            },
+            {
+              "path": "docs/decisions.md",
+              "sha256": "abdda591ad88c9101dcd3c9efcd7f0b8fca5665b14436a68518a19dfc835bf78",
+              "startByte": 227,
+              "endByte": 292
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "orchard-08",
+      "snapshotId": "orchard-v1",
+      "category": "superseded",
+      "language": "en",
+      "prompt": "What notification channel replaced the pilot email when the carrier cancels?",
+      "requestedFacts": [
+        {
+          "key": "carrier-alert-channel",
+          "valueType": "string"
+        }
+      ],
+      "answerable": true,
+      "expected": [
+        {
+          "key": "carrier-alert-channel",
+          "value": "SMS",
+          "evidence": [
+            {
+              "path": "docs/decisions.md",
+              "sha256": "abdda591ad88c9101dcd3c9efcd7f0b8fca5665b14436a68518a19dfc835bf78",
+              "startByte": 293,
+              "endByte": 365
+            },
+            {
+              "path": "docs/collection.md",
+              "sha256": "07becd6235e4f6edf2e14e33713bc03083cc0137f805ab1b3a618b682ee9f9a6",
+              "startByte": 372,
+              "endByte": 438
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "orchard-09",
+      "snapshotId": "orchard-v1",
+      "category": "multi-source",
+      "language": "en",
+      "prompt": "State the maximum parcels in a booking and how many days pickup audit records are retained.",
+      "requestedFacts": [
+        {
+          "key": "max-parcels",
+          "valueType": "number"
+        },
+        {
+          "key": "audit-retention-days",
+          "valueType": "number"
+        }
+      ],
+      "answerable": true,
+      "expected": [
+        {
+          "key": "max-parcels",
+          "value": 5,
+          "evidence": [
+            {
+              "path": "docs/collection.md",
+              "sha256": "07becd6235e4f6edf2e14e33713bc03083cc0137f805ab1b3a618b682ee9f9a6",
+              "startByte": 94,
+              "endByte": 136
+            },
+            {
+              "path": "docs/decisions.md",
+              "sha256": "abdda591ad88c9101dcd3c9efcd7f0b8fca5665b14436a68518a19dfc835bf78",
+              "startByte": 227,
+              "endByte": 292
+            }
+          ]
+        },
+        {
+          "key": "audit-retention-days",
+          "value": 90,
+          "evidence": [
+            {
+              "path": "docs/operations.txt",
+              "sha256": "d607bbdeaffbdadcb51bc32997f923cd5b36e796c6417d38b420b75fbd6798d4",
+              "startByte": 86,
+              "endByte": 144
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "orchard-10",
+      "snapshotId": "orchard-v1",
+      "category": "multi-source",
+      "language": "fr",
+      "prompt": "Quelle est la limite d’annulation en heures et quelle file reçoit un incident de colis endommagé ?",
+      "requestedFacts": [
+        {
+          "key": "cancellation-hours",
+          "valueType": "number"
+        },
+        {
+          "key": "damage-queue",
+          "valueType": "string"
+        }
+      ],
+      "answerable": true,
+      "expected": [
+        {
+          "key": "cancellation-hours",
+          "value": 12,
+          "evidence": [
+            {
+              "path": "docs/collection.md",
+              "sha256": "07becd6235e4f6edf2e14e33713bc03083cc0137f805ab1b3a618b682ee9f9a6",
+              "startByte": 247,
+              "endByte": 303
+            },
+            {
+              "path": "docs/decisions.md",
+              "sha256": "abdda591ad88c9101dcd3c9efcd7f0b8fca5665b14436a68518a19dfc835bf78",
+              "startByte": 430,
+              "endByte": 487
+            }
+          ]
+        },
+        {
+          "key": "damage-queue",
+          "value": "parcel-damage-review",
+          "evidence": [
+            {
+              "path": "docs/operations.txt",
+              "sha256": "d607bbdeaffbdadcb51bc32997f923cd5b36e796c6417d38b420b75fbd6798d4",
+              "startByte": 203,
+              "endByte": 271
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "orchard-11",
+      "snapshotId": "orchard-v1",
+      "category": "absent",
+      "language": "en",
+      "prompt": "What is the exact kilogram limit for one parcel?",
+      "requestedFacts": [
+        {
+          "key": "max-weight-kg",
+          "valueType": "number"
+        }
+      ],
+      "answerable": false,
+      "expected": []
+    },
+    {
+      "id": "orchard-12",
+      "snapshotId": "orchard-v1",
+      "category": "absent",
+      "language": "en",
+      "prompt": "Which insurance provider underwrites parcel damage?",
+      "requestedFacts": [
+        {
+          "key": "insurance-provider",
+          "valueType": "string"
+        }
+      ],
+      "answerable": false,
+      "expected": []
+    },
+    {
+      "id": "orchard-13",
+      "snapshotId": "orchard-v1",
+      "category": "maintenance",
+      "language": "en",
+      "prompt": "Update dispatch.json to enforce the accepted collection notice policy. Preserve the parcel limit, cancellation deadline and time zone. Leave preview.mjs and all documentation unchanged. Return the notice period, parcel limit and cancellation deadline with source citations.",
+      "requestedFacts": [
+        {
+          "key": "notice-hours",
+          "valueType": "number"
+        },
+        {
+          "key": "max-parcels",
+          "valueType": "number"
+        },
+        {
+          "key": "cancellation-hours",
+          "valueType": "number"
+        }
+      ],
+      "answerable": true,
+      "expected": [
+        {
+          "key": "notice-hours",
+          "value": 24,
+          "evidence": [
+            {
+              "path": "docs/collection.md",
+              "sha256": "07becd6235e4f6edf2e14e33713bc03083cc0137f805ab1b3a618b682ee9f9a6",
+              "startByte": 33,
+              "endByte": 93
+            },
+            {
+              "path": "docs/decisions.md",
+              "sha256": "abdda591ad88c9101dcd3c9efcd7f0b8fca5665b14436a68518a19dfc835bf78",
+              "startByte": 227,
+              "endByte": 292
+            }
+          ]
+        },
+        {
+          "key": "max-parcels",
+          "value": 5,
+          "evidence": [
+            {
+              "path": "docs/collection.md",
+              "sha256": "07becd6235e4f6edf2e14e33713bc03083cc0137f805ab1b3a618b682ee9f9a6",
+              "startByte": 94,
+              "endByte": 136
+            },
+            {
+              "path": "docs/decisions.md",
+              "sha256": "abdda591ad88c9101dcd3c9efcd7f0b8fca5665b14436a68518a19dfc835bf78",
+              "startByte": 227,
+              "endByte": 292
+            }
+          ]
+        },
+        {
+          "key": "cancellation-hours",
+          "value": 12,
+          "evidence": [
+            {
+              "path": "docs/collection.md",
+              "sha256": "07becd6235e4f6edf2e14e33713bc03083cc0137f805ab1b3a618b682ee9f9a6",
+              "startByte": 247,
+              "endByte": 303
+            },
+            {
+              "path": "docs/decisions.md",
+              "sha256": "abdda591ad88c9101dcd3c9efcd7f0b8fca5665b14436a68518a19dfc835bf78",
+              "startByte": 430,
+              "endByte": 487
+            }
+          ]
+        }
+      ],
+      "maintenance": {
+        "configPath": "dispatch.json",
+        "probePath": "preview.mjs",
+        "referencePath": "references/orchard-dispatch.json",
+        "referenceSha256": "b9ef7358109cb902383d57a33aaa96d689c74994f64f0e48e165565698cd3074",
+        "expectedPreview": {
+          "atNotice": true,
+          "beforeNotice": false,
+          "fifthParcel": true,
+          "sixthParcel": false,
+          "oldNotice": true,
+          "emptyBooking": false,
+          "cancellationHours": 12,
+          "timeZone": "Europe/Paris"
+        }
+      }
+    }
+  ]
+}

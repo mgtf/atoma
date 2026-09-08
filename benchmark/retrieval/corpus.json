@@ -1,0 +1,123 @@
+{
+  "version": 1,
+  "provenance": "synthetic; authored for Atoma; no tenant data",
+  "license": "AGPL-3.0-only",
+  "snapshots": [
+    {
+      "id": "northstar-v1",
+      "orgId": "studio-org",
+      "projectId": "subscriptions",
+      "split": "development",
+      "root": "snapshots/northstar",
+      "documents": [
+        {
+          "path": "README.md",
+          "sha256": "ee0e218b9b5bdccf78675687d0caae18b8f92f3dc656bde84813645bc2b03c0e",
+          "bytes": 465
+        },
+        {
+          "path": "docs/billing.md",
+          "sha256": "98efd32bfe73a29b17086fc9be347ae3acfa5b5f061d1b17561295a85fe51e9b",
+          "bytes": 757
+        },
+        {
+          "path": "docs/decisions.md",
+          "sha256": "e843ca885f0c1f5363a5f9b20a5292a6a225a9ceccb4250bc97306a20b52c953",
+          "bytes": 668
+        },
+        {
+          "path": "docs/operations.txt",
+          "sha256": "5bb63ca0601025dd6cf45f2bbcc3f3bcda9839eba8cbf61e53f5501fc68435d6",
+          "bytes": 281
+        }
+      ],
+      "assets": [
+        {
+          "path": "pricing.json",
+          "sha256": "5ba5aa63601beb25009bfd2f00893c3a1b4ad494eba4ad75116c003cd851eed4",
+          "bytes": 97
+        },
+        {
+          "path": "preview.mjs",
+          "sha256": "d4240f9af9f5315b9a1685db52004e17575f8fa426abe115aa5224c1f4642b3f",
+          "bytes": 963
+        }
+      ],
+      "sha256": "31d63c88fa2aac63a8220091713f04c30b50a29a40019b4839b21e72d289654c"
+    },
+    {
+      "id": "orchard-v1",
+      "orgId": "orchard-org",
+      "projectId": "collections",
+      "split": "held-out",
+      "root": "snapshots/orchard",
+      "documents": [
+        {
+          "path": "README.md",
+          "sha256": "c6da2f54b93d8a69b1a86336d026a1aeecbaf86e4f75a8d56ee736252eb696c2",
+          "bytes": 459
+        },
+        {
+          "path": "docs/collection.md",
+          "sha256": "07becd6235e4f6edf2e14e33713bc03083cc0137f805ab1b3a618b682ee9f9a6",
+          "bytes": 588
+        },
+        {
+          "path": "docs/decisions.md",
+          "sha256": "abdda591ad88c9101dcd3c9efcd7f0b8fca5665b14436a68518a19dfc835bf78",
+          "bytes": 627
+        },
+        {
+          "path": "docs/operations.txt",
+          "sha256": "d607bbdeaffbdadcb51bc32997f923cd5b36e796c6417d38b420b75fbd6798d4",
+          "bytes": 272
+        }
+      ],
+      "assets": [
+        {
+          "path": "dispatch.json",
+          "sha256": "5b267b5ebcc678c7e23dba14601c42e6125934e2aabf6957b2f813696a2680e3",
+          "bytes": 100
+        },
+        {
+          "path": "preview.mjs",
+          "sha256": "e87484fda80ddb6fa5a43a06c53efa3465f9b2cff7f57d403c9ab76422a58ed8",
+          "bytes": 753
+        }
+      ],
+      "sha256": "6bb97d9160ee510a36cc43c500a949470b2651ef015b63dd5093cd438e8f8312"
+    },
+    {
+      "id": "sibling-v1",
+      "orgId": "studio-org",
+      "projectId": "enterprise",
+      "split": "isolation",
+      "root": "snapshots/sibling",
+      "documents": [
+        {
+          "path": "docs/billing.md",
+          "sha256": "4fefe822af54d3206e8c6f282a9f88425a2d1b120bec5f0688270c9468e27906",
+          "bytes": 204
+        }
+      ],
+      "assets": [],
+      "sha256": "f286c109f957e8aae47bd1cd6442d2da9960c39c3801c8c5e39380b382f26728"
+    },
+    {
+      "id": "foreign-v1",
+      "orgId": "foreign-org",
+      "projectId": "subscriptions",
+      "split": "isolation",
+      "root": "snapshots/foreign",
+      "documents": [
+        {
+          "path": "docs/billing.md",
+          "sha256": "9a97eddeafd906606d3230f59a08fb5b806affa722fbbe1591e08f39102d60e4",
+          "bytes": 183
+        }
+      ],
+      "assets": [],
+      "sha256": "fdd687831171473d335ebf90f1ceb518442af0859fbbc30d64a103c42e01e16a"
+    }
+  ]
+}

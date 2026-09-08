@@ -1,0 +1,6 @@
+Northstar operations
+
+Payment webhook event IDs are retained for 45 days to reject duplicate delivery.
+An export link expires 72 hours after creation.
+Customer-visible invoice labels are available in English and French.
+The support escalation queue is named studio-billing-review.
