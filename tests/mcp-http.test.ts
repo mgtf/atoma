@@ -16,6 +16,11 @@ import { buildServer } from '../src/mcp/server.js';
 import { MCP_TOOL_NAMES, MCP_TOOLS, visibleTools, type McpToolDeps } from '../src/mcp/tools.js';
 import { SessionTaskStore, projectRunTaskHandler, type RunTaskHost } from '../src/mcp/tasks.js';
 import { CallToolResultSchema, CreateTaskResultSchema, LoggingMessageNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
+import { ProjectStore } from '../src/projects/store.js';
+import { ProjectRunCoordinator } from '../src/projects/coordinator.js';
+import { ProjectService } from '../src/projects/service.js';
+import { acquireRunLease } from '../src/mcp/runLock.js';
+import { ANTHROPIC_PINS } from './tier-pins.js';
 
 /**
  * ONE MCP FOR EVERYONE, OVER HTTP. What these hold, through the real SDK
@@ -94,6 +99,69 @@ async function connect(url: string, bearer?: string): Promise<Client> {
 async function toolNames(client: Client): Promise<string[]> {
   return (await client.listTools()).tools.map((tool) => tool.name).sort();
 }
+
+it('reuses a project run across MCP sessions while its real lease is held', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'atoma-mcp-idempotence-'));
+  dirs.push(root);
+  const dbPath = join(root, 'store.db');
+  const auth = AuthStore.open(dbPath);
+  const login = auth.completeLogin({
+    provider: 'github', subject: 'owner', displayName: 'Owner',
+    email: null, emailVerified: false,
+  }, null)!;
+  const store = ProjectStore.open(dbPath);
+  const project = store.createProject({
+    orgId: login.viewer.orgId, principalId: login.viewer.principalId,
+    project: { name: 'Board', slug: 'board', repositoryTarget: {
+      installationId: '123', owner: 'owner', name: 'board', visibility: 'private',
+    } },
+  });
+  let launches = 0;
+  let finish: (output: string) => void = () => undefined;
+  const coordinator = new ProjectRunCoordinator({
+    store, dbPath, projectsRoot: root,
+    hostEnv: { PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'test-key' },
+    acquireLease: (id) => acquireRunLease(id, join(root, 'lease.db')),
+    driver: () => {
+      launches++;
+      return new Promise<string>((resolve) => { finish = resolve; });
+    },
+  });
+  const service = new ProjectService({ store, coordinator, github: null });
+  const { url } = await listen(
+    () => ({ kind: 'principal', viewer: login.viewer, tokenId: 'owner' }),
+    { ...NO_TENANT, projects: { store, service }, auth },
+  );
+  const first = await connect(url);
+  const second = await connect(url);
+  const args = { projectId: project.projectId, goal: 'Build a board.', idempotencyKey: 'same-request' };
+  const start = (client: Client, goal = args.goal, idempotencyKey = args.idempotencyKey) => client.request(
+    { method: 'tools/call', params: { name: 'atoma_run_start', arguments: { ...args, goal, idempotencyKey } } },
+    CreateTaskResultSchema, { task: { ttl: 60_000 } },
+  );
+  try {
+    const original = await start(first);
+    expect(original.task.status).toBe('working');
+    const retry = await start(second);
+    expect(retry.task.status).toBe('working');
+    expect(retry.task.statusMessage).toBe(original.task.statusMessage);
+    expect(launches).toBe(1);
+    expect(store.listProjectRuns(login.viewer.orgId, project.projectId)).toHaveLength(1);
+
+    const conflict = await start(second, 'Different goal.');
+    expect(conflict.task.status).toBe('failed');
+    const conflictResult = await second.experimental.tasks.getTaskResult(conflict.task.taskId, CallToolResultSchema);
+    expect(JSON.stringify(conflictResult.content)).toContain('different input');
+    const concurrent = await start(second, args.goal, 'new-request');
+    expect(concurrent.task.status).toBe('failed');
+    expect(store.listProjectRuns(login.viewer.orgId, project.projectId)).toHaveLength(1);
+  } finally {
+    finish('--- run failed ---\n');
+    await coordinator.waitForIdle();
+    await first.close();
+    await second.close();
+  }
+});
 
 describe('the catalogue by tier', () => {
   it('shows each caller its ladder and nothing above it', () => {

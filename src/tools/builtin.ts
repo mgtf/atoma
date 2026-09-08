@@ -2013,6 +2013,10 @@ async function resolveInteractionCoords(
       }
     }
     if (!el) throw new Error(`selector ${it.selector} not found`);
+    // Mouse coordinates are viewport-relative. Without scrolling first,
+    // a below-fold target leaves focus on the preceding field while typing
+    // still reports success. Resolve the box only after the target is visible.
+    await el.scrollIntoView();
     const box = await el.boundingBox();
     if (!box) throw new Error(`selector ${resolvedSelector} has no bounding box`);
     const offsetX = typeof it.x === 'number' ? it.x : box.width / 2;

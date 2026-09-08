@@ -134,8 +134,10 @@ describe('structured detail presentation', () => {
     };
     expect(skillEventTitle(event, en)).toBe('Skill body injected into the molecule prompt');
     expect(skillEventSubtitle(event)).toBe('Idioblast / write-doc-and-config-files');
-    expect(skillEventTitle({ kind: 'skill', op: 'credit-withheld' }, fr))
-      .toBe('Compteurs NON modifiés (recette non suivie)');
+    // Target catalogs may be blank until CI translates changed English copy.
+    // Verify the supplied translator and semantic key independently of that job.
+    expect(skillEventTitle({ kind: 'skill', op: 'credit-withheld' }, (key) => `translated:${key}`))
+      .toBe('translated:skillOp.creditWithheld');
 
     const withoutCatalog = buildSkillEventDetail(event, null, en) as StructuredDetailField[];
     expect(withoutCatalog.map((node) => node.label)).toEqual([

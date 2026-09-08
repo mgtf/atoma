@@ -944,6 +944,30 @@ export class ProjectStore {
     return this.getProject(orgId, projectId)!;
   }
 
+  /** Read an exact retry without reserving another run or taking its lease. */
+  findProjectRunForRequest(
+    orgIdInput: string,
+    projectIdInput: string,
+    principalIdInput: string,
+    requestInput: CreateProjectRunInput
+  ): ProjectRun | null {
+    const orgId = organisationIdSchema.parse(orgIdInput);
+    const projectId = projectIdSchema.parse(projectIdInput);
+    const principalId = principalIdSchema.parse(principalIdInput);
+    const request = createProjectRunInputSchema.parse(requestInput);
+    const project = this.getProject(orgId, projectId);
+    if (!project) return null;
+    if (project.status !== 'active') throw new ProjectStateConflict('cannot run an archived project');
+    const existing = this.db
+      .prepare('SELECT * FROM project_runs WHERE project_id = ? AND request_key = ? AND org_id = ?')
+      .get(projectId, request.idempotencyKey, orgId) as ProjectRunRow | undefined;
+    if (!existing) return null;
+    if (existing.requested_by_principal_id !== principalId || existing.goal !== request.goal) {
+      throw new ProjectStateConflict('run idempotency key was already used for different input');
+    }
+    return runFromRow(existing);
+  }
+
   createProjectRun(input: {
     readonly orgId: string;
     readonly projectId: string;
@@ -963,15 +987,9 @@ export class ProjectStore {
       if (!project) return null;
       if (project.status !== 'active') throw new ProjectStateConflict('cannot run an archived project');
       const goal = request.goal;
-      const existing = this.db
-        .prepare('SELECT * FROM project_runs WHERE project_id = ? AND request_key = ?')
-        .get(projectId, request.idempotencyKey) as ProjectRunRow | undefined;
+      const existing = this.findProjectRunForRequest(orgId, projectId, principalId, request);
       if (existing) {
-        if (existing.org_id !== orgId) return null;
-        if (existing.requested_by_principal_id !== principalId || existing.goal !== goal) {
-          throw new ProjectStateConflict('run idempotency key was already used for different input');
-        }
-        return { run: runFromRow(existing), created: false } as const;
+        return { run: existing, created: false } as const;
       }
       const now = new Date().toISOString();
       this.db

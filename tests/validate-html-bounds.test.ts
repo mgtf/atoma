@@ -59,6 +59,28 @@ async function serve(sandbox: ToolSandbox): Promise<string> {
 }
 
 describe('validate_html form input', () => {
+  it('scrolls selector targets into view before typing and clicking', async () => {
+    const sandbox = makeWorkspace({
+      'index.html': '<input id="name" value="old"><div style="height:1800px"></div><input id="quantity" type="number" value="0"><div style="height:1800px"></div><button id="save" onclick="document.getElementById(\'result\').textContent=document.getElementById(\'quantity\').value">Save</button><p id="result"></p>',
+    });
+    const url = await serve(sandbox);
+    const result = await validateHtmlTool({ sandbox }).execute({
+      url,
+      interactions: [
+        { type: 'type', selector: '#name', text: 'preserved' },
+        { type: 'type', selector: '#quantity', text: '375' },
+        { type: 'click', selector: '#save' },
+      ],
+      smoke: '(() => ({ok: document.getElementById("result").textContent === "375" && document.getElementById("name").value === "preserved", quantity: document.getElementById("quantity").value, name: document.getElementById("name").value}))()',
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      errors: [],
+      requestedInteractions: 3,
+      smokeResult: { ok: true, quantity: '375', name: 'preserved' },
+    });
+  });
+
   it('replaces existing text before submitting through the page control', async () => {
     const sandbox = makeWorkspace({
       'index.html': '<input id="note" value="old text"><button id="add" onclick="document.getElementById(\'result\').textContent=document.getElementById(\'note\').value">Add</button><p id="result"></p>',

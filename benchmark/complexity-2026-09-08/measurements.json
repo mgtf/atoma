@@ -1,0 +1,92 @@
+[
+  {
+    "case": "kanban-1",
+    "runId": "2026-09-08T18-40-38-212-357b3372",
+    "durationMs": 901679,
+    "llmCalls": 48,
+    "equivalentApiUsd": 1.4325702499999997,
+    "passed": 18,
+    "checks": 18,
+    "failures": [],
+    "toolCalls": {
+      "validate_html": 14,
+      "fetch_url": 39,
+      "read_file": 34,
+      "write_file": 11,
+      "edit_file": 0
+    },
+    "outcome": "Timeout"
+  },
+  {
+    "case": "mcp-kanban-2",
+    "runId": "d6008e90-457a-4609-a198-63d2e6e33f9d",
+    "durationMs": 899347,
+    "llmCalls": 34,
+    "equivalentApiUsd": 1.4834450500000003,
+    "passed": 17,
+    "checks": 18,
+    "failures": [
+      {
+        "name": "UI edits title and priority through real API",
+        "pass": false,
+        "error": "No control to edit an existing task title and priority"
+      }
+    ],
+    "toolCalls": {
+      "validate_html": 27,
+      "fetch_url": 64,
+      "read_file": 24,
+      "write_file": 9,
+      "edit_file": 10
+    },
+    "outcome": "Annulé au plafond"
+  },
+  {
+    "case": "mcp-inventory-1",
+    "runId": "a3ec503e-89b9-4326-94e2-2723a774aa48",
+    "durationMs": 899540,
+    "llmCalls": 23,
+    "equivalentApiUsd": 1.3727141,
+    "passed": 14,
+    "checks": 15,
+    "failures": [
+      {
+        "name": "Mobile layout without overflow",
+        "pass": false,
+        "error": "The expression evaluated to a falsy value:\n\n  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1))\n"
+      }
+    ],
+    "toolCalls": {
+      "validate_html": 45,
+      "fetch_url": 42,
+      "read_file": 19,
+      "write_file": 9,
+      "edit_file": 9
+    },
+    "outcome": "Annulé au plafond"
+  },
+  {
+    "case": "mcp-inventory-2",
+    "runId": "04595ae2-f627-4019-b826-d561502dc844",
+    "durationMs": 899552,
+    "llmCalls": 24,
+    "equivalentApiUsd": 1.2820759000000002,
+    "passed": 14,
+    "checks": 15,
+    "failures": [
+      {
+        "name": "Browser search filters inventory rows",
+        "pass": false,
+        "error": "No element found for selector: #search-input"
+      }
+    ],
+    "toolCalls": {
+      "validate_html": 28,
+      "fetch_url": 81,
+      "read_file": 20,
+      "write_file": 19,
+      "edit_file": 2
+    },
+    "outcome": "Annulé au plafond"
+  }
+]

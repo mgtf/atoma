@@ -1028,6 +1028,11 @@ export class ProjectRunCoordinator {
     readonly projectId: string;
     readonly request: CreateProjectRunInput;
   }): Promise<ProjectRun> {
+    const findRetry = () => this.store.findProjectRunForRequest(
+      input.orgId, input.projectId, input.principalId, input.request
+    );
+    const existing = findRetry();
+    if (existing) return existing;
     const candidateRunId = randomUUID();
     const candidatePaths = projectRunHostLayout(
       this.root,
@@ -1039,7 +1044,13 @@ export class ProjectRunCoordinator {
     try {
       lease = await this.acquireLease(`project:${candidateRunId}`);
     } catch (error) {
-      if (error instanceof RunLockBusyError) throw new ProjectRunBusy(error.message);
+      if (error instanceof RunLockBusyError) {
+        // A concurrent identical request may have reserved its row while
+        // this caller waited for the lease. It is a read, not a second run.
+        const retry = findRetry();
+        if (retry) return retry;
+        throw new ProjectRunBusy(error.message);
+      }
       throw error;
     }
     let reservation: { readonly run: ProjectRun; readonly created: boolean } | null;
