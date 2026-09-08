@@ -49,9 +49,13 @@ an immutable source archive and receipt, a read-only child resolver against
 current project/principal/run state, and a dedicated L1 canonical scope.
 `ATOMA_PROJECT_RETRIEVAL=1` on the coordinator host enables this path for new
 project runs. The compiled process smoke covers coordinator → child → L1 →
-FTS5, live revocation and the real isolated worker. The benchmark treatment,
-downstream distillation/catalogue privacy audit and operational lifecycle are
-still pending; this is not default activation or evidence of an A/B gain.
+FTS5, live revocation and the real isolated worker. The benchmark treatment and
+operational lifecycle are still pending; this is not default activation or
+evidence of an A/B gain. The [downstream privacy audit](project-retrieval-privacy-audit-2026-09-09.md)
+is now reproducible and finds a blocker: common registry prompts, descriptions
+and branch names can carry private facts into another project. The next
+corrective increment is registry ownership, before real-document activation
+or a treatment intended to justify rollout.
 
 ## Objective and implementation order
 
@@ -442,11 +446,16 @@ the supervision protocol.
   Do not expand the closed attestation vocabulary just to record retrieval.
 - [x] Preserve normal validation and usage-conditioned skill credit. A
   retrieved document never grants earned trust or deterministic dispatch.
-- [ ] Audit downstream distillation and catalogue offers with tenant-document
-  fixtures. Source excerpts, private facts and tenant-specific references must
-  not escape through a learned skill, shared cache or catalogue export. Reuse
-  the skills' generalization and sharing contracts; search authorization alone
-  does not establish that a derived recipe is safe to share.
+- [x] Audit downstream distillation and catalogue offers with tenant-document
+  fixtures. The [audit](project-retrieval-privacy-audit-2026-09-09.md) reproduces
+  private facts in learned bodies, confirms their project-directory containment,
+  and exposes the independent common-registry channel across a process reload.
+- [ ] Close the audited common-registry disclosure. Source excerpts, private
+  facts and tenant-specific references must not escape through persistent
+  metadata, learned skills, shared caches or catalogue export. Reuse the skills'
+  generalization and sharing contracts; search authorization alone does not
+  establish that a derived recipe is safe to share. Follow the audit's coherent
+  ownership correction instead of adding a lexical privacy detector.
 - [ ] Ensure cached queries/results include tenant/project scope, snapshot,
   generation and retrieval settings, and recheck authorization on a cache hit.
   Do not reuse the strategy prefilter cache or add semantic fast-path caching.
@@ -466,7 +475,9 @@ modes; undeclared calls fail; ordinary file/shell calls retain their original
 execution boundary; branch recording has no duplicate observations.
 
 **Implemented increment:** [activation and current limits](project-retrieval-activation-2026-09-09.md).
-The downstream tenant-data audit remains a separate, unfinished condition.
+The downstream audit is complete; its reproduced confidentiality blocker
+remains an unfinished exit condition, with a concrete correction sequence in
+the [audit record](project-retrieval-privacy-audit-2026-09-09.md).
 
 ### Step 9 — prove the container and compiled-process boundaries
 

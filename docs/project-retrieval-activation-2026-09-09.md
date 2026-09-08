@@ -6,6 +6,11 @@ This follows the [host boundary](project-retrieval-host-contract-2026-09-09.md)
 and [SQLite ingestion/backend](project-retrieval-sqlite-2026-09-09.md).
 Retrieval remains opt-in; no embedding, reranking or LLM context call is added.
 
+**Subsequent audit:** the [downstream privacy audit](project-retrieval-privacy-audit-2026-09-09.md)
+reproduces cross-project disclosure through common registry metadata. Keep this
+path limited to synthetic, isolated evaluation until registry ownership is
+corrected. The query boundary passing its tests is not a tenant-rollout approval.
+
 ## Activation and source admission
 
 Set `ATOMA_PROJECT_RETRIEVAL=1` in the host environment of the project
@@ -96,12 +101,13 @@ workspace before editing it. Supervisors, validation, observations and skill
 credit retain their existing execution paths.
 
 Existing project-local skill storage and lifecycle restrictions are preserved.
-This does **not** complete the planned tenant-fixture audit of distillation,
-shared registry content and catalogue export. Search isolation alone cannot
-certify the safety of derived recipes or prompt-injection resistance. Broader
-activation must also finish the registered A/B treatment, operational
-diagnostics/rebuild/retention and that downstream privacy audit. No production
-environment is enabled by this code change.
+The subsequent [tenant-fixture audit](project-retrieval-privacy-audit-2026-09-09.md)
+confirms skill-directory containment but reproduces disclosure through common
+registry prompts, descriptions and branch names. Search isolation alone cannot
+certify downstream confidentiality or prompt-injection resistance. Broader
+activation requires the registry ownership correction, registered A/B treatment
+and operational diagnostics/rebuild/retention. No production environment is
+enabled by this code change.
 
 ## Verification and rollback
 
