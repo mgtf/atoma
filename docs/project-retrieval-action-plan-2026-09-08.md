@@ -1,9 +1,9 @@
 # Project retrieval — implementation action plan
 
 Date: 2026-09-08, progress updated 2026-09-09. Status: evaluation instruments,
-A/C characterization driver, archived development pilot and the typed host
-retrieval boundary delivered.
-Production retrieval and retrieval-provider integrations remain unimplemented.
+A/C characterization driver, archived development pilot, typed host boundary,
+deterministic document ingestion and SQLite FTS5 backend delivered.
+Tenant/CLI activation and retrieval-provider integrations remain unimplemented.
 
 ## Implementation progress
 
@@ -20,7 +20,7 @@ in Step 3. Registration pins source/instruments/models/image and alternates
 Atoma/frontier-direct attempts. Execution uses `spawnRun`, the shared runner,
 the global lease, mandatory containers and independent fresh state. Its first
 supported mode is development characterization through host subscriptions.
-No project snapshot ingestion or production search element is implemented.
+The CLI does not yet activate the project search element.
 The [four-attempt development pilot](../benchmark/retrieval-pilot-2026-09-09/README.md)
 completed on one source revision and UTC day. Frontier-direct passed both
 tasks; Atoma reached both registered deadlines, with correct pricing facts or
@@ -34,9 +34,16 @@ and an opt-in `startTask` library binding. `search_project_docs` is intercepted
 before the worker, with strict query-only arguments, pre/post authorization,
 bounded exact-source results, cancellation and run-owned cleanup. The worker
 handshake and default tool list remain unchanged. Mocked service, L1 transport,
-runner and container integration tests exercise the boundary. Production
-corpus ingestion, the current-access store resolver, cross-process coordinator
-activation and FTS5 are still to implement; the CLI does not enable search.
+runner and container integration tests exercise the boundary.
+
+Steps 6–7 now have a [deterministic ingestion and private FTS5 backend](project-retrieval-sqlite-2026-09-09.md).
+It reads only manifest-admitted immutable sources, preserves exact byte spans,
+builds independent project indexes in the existing product store and publishes
+them atomically. Tests cover cancellation, revocation, corruption, writer
+contention and a crashed builder process. Compiled smokes and a reproducible
+20,000-passage capacity probe exercise the real SQLite runtime. The current-access
+store resolver, authoritative snapshot lifecycle and cross-process coordinator
+activation remain to implement; the CLI does not enable search.
 
 ## Objective and implementation order
 
@@ -314,28 +321,28 @@ No new proof obligation or trust fast path is introduced.
 **Purpose:** turn the frozen corpus into reproducible passages without LLM
 calls.
 
-- [ ] Enumerate only the paths admitted by Step 1's manifest. Resolve paths
+- [x] Enumerate only the paths admitted by Step 1's manifest. Resolve paths
   through the appropriate sandbox/source boundary; refuse traversal and
   symlinks escaping that boundary. Never execute repository code to ingest docs.
-- [ ] Capture and digest the source bytes consistently. A file changing during
+- [x] Capture and digest the source bytes consistently. A file changing during
   ingestion must not produce a digest from one version and passages from another.
-- [ ] Split Markdown on structural headings, preserving fenced blocks and
+- [x] Split Markdown on structural headings, preserving fenced blocks and
   related text where possible. Use a deterministic bounded fallback for long
   sections and plain text. Record overlap and normalization rules.
-- [ ] Preserve exact offsets into original bytes despite normalization and
+- [x] Preserve exact offsets into original bytes despite normalization and
   line-ending differences. Display excerpts from original text, not a
   reconstructed or summarized version.
-- [ ] Construct context from relative path, heading ancestry, source version
+- [x] Construct context from relative path, heading ancestry, source version
   and known source identity. No generated description and no per-chunk model
   call in this phase.
-- [ ] Define a generation fingerprint containing source manifest hash,
+- [x] Define a generation fingerprint containing source manifest hash,
   extraction version, chunker version/settings, context-builder version,
   tokenizer/index configuration, and storage schema version.
 - [ ] Reserve explicit optional identity fields for embedding provider/model,
   dimensions and preprocessing. If generated context is later enabled, include
   its prompt, model and generation parameters too. Retrieval-only reranker
   changes version the query pipeline and result caches, not unchanged embeddings.
-- [ ] Persist derived passages through the existing product-store mechanism.
+- [x] Persist derived passages through the existing product-store mechanism.
   An immutable source snapshot or existing source archive remains authority;
   losing the index must never lose the only copy of a document.
 
@@ -348,38 +355,53 @@ add its guidance and root-map entry deliberately rather than create an orphan.
 changes invalidate only the appropriate generation. Tests cover Unicode,
 CRLF, headings, long sections, code fences, exclusions and path escape.
 
+The first backend explicitly reserves disabled `embedding: null` and
+`generatedContext: null` identity slots. Detailed non-null provider/model/prompt
+schemas remain with the future backend; no unsupported configuration is accepted.
+Source roots must be host-owned immutable snapshots, not live worker workspaces.
+
 ### Step 7 — implement tenant-private FTS5/BM25 in SQLite
 
 **Purpose:** add useful lexical retrieval with no new service or API spend.
 
-- [ ] Verify FTS5 availability in the pinned `better-sqlite3` runtime and
+- [x] Verify FTS5 availability in the pinned `better-sqlite3` runtime and
   packaged environment with an actual create/index/query exercise.
-- [ ] Use the existing product SQLite file and explicit cache lifecycle.
+- [x] Use the existing product SQLite file and explicit cache lifecycle.
   Do not create a second product database or silently migrate disposable rows.
-- [ ] Build independent FTS indexes per project namespace and generation,
+- [x] Build independent FTS indexes per project namespace and generation,
   within that SQLite file. This is stronger than organisation separation and
   keeps ranking statistics and candidates inside the permitted corpus.
   A single global FTS table plus a final `WHERE org_id = ...` is insufficient.
-- [ ] Generate internal namespace/table identifiers from trusted internal IDs
+- [x] Generate internal namespace/table identifiers from trusted internal IDs
   using a closed format; bind all query values. Never interpolate model input
   or user-facing project names into SQL identifiers or expressions.
-- [ ] Index deterministic context and original passage text with development-
-  set weights. Keep original evidence separate from searchable decoration.
+- [x] Index deterministic context and original passage text with explicit initial
+  weights (1:1, not yet relevance-tuned). Keep original evidence separate from
+  searchable decoration; evaluation must precede any tuning or gain claim.
 - [ ] Perform bounded BM25 retrieval, deterministic tie-breaking and duplicate
   handling; preserve necessary multi-passage evidence. Freeze weights and
   candidate limits before the held-out run.
-- [ ] Build a new generation in bounded transactions, then atomically publish
+- [x] Build a new generation in bounded transactions, then atomically publish
   its ready pointer. Readers must never see half an index or a generation from
   another namespace. Respect SQLite writer contention and event-loop latency.
 - [ ] Invalidate access immediately on revocation/deletion. Garbage-collect
   unreferenced generations according to retention, without serving revoked
   passages while physical cleanup is pending.
-- [ ] Fail with a typed unavailable result if the pinned snapshot has no valid
+- [x] Fail with a typed unavailable result if the pinned snapshot has no valid
   index. Never substitute another project's index or an older snapshot while
   claiming to search the requested one.
-- [ ] Measure index size, namespace/table count, query latency, rebuild cost,
+- [x] Measure index size, namespace/table count, query latency, rebuild cost,
   writer contention and memory. These measurements decide whether the chosen
   SQLite partitioning remains operationally acceptable.
+
+The backend implements bounded BM25 candidates, stable tie-breaking, whole-span
+excerpt limits, invalidation and bounded garbage collection. The unchecked
+items retain the evaluation freeze and live revocation/retention integration:
+the host must still connect lifecycle methods to authoritative project records.
+Only the active generation is served; older pinned runs receive unavailable
+after replacement. Native SQLite statements are synchronous and cannot be
+preempted mid-statement, although late results are discarded. The capacity probe
+covers one local host, not concurrent production deployment.
 
 **Exit condition:** isolated-index behavioral tests pass, including identical
 queries in different tenants and projects, empty namespaces, atomic generation

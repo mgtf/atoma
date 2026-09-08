@@ -3,7 +3,8 @@ import { HOST_TOOL_NAMES } from './toolTaxonomy.js';
 
 export const PROJECT_RETRIEVAL_TOOL_NAME = HOST_TOOL_NAMES[0];
 export const projectDocumentDigestSchema = z.string().regex(/^[a-f0-9]{64}$/);
-const identity = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/);
+export const projectRetrievalIdentitySchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/);
+const identity = projectRetrievalIdentitySchema;
 const sourceBinding = {
   corpusId: identity,
   snapshotId: identity,
@@ -64,7 +65,7 @@ export function parseProjectRetrievalQuery(
   return query.success ? query.data : null;
 }
 
-const relativeDocumentPath = z.string().min(1).max(512).refine(path =>
+export const projectDocumentPathSchema = z.string().min(1).max(512).refine(path =>
   !/[\\:]/.test(path) &&
   !Array.from(path).some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127) &&
   path.split('/').every(part => part !== '' && part !== '.' && part !== '..'),
@@ -74,7 +75,7 @@ const line = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 
 export const projectRetrievalPassageSchema = z.object({
   documentId: projectDocumentDigestSchema,
-  path: relativeDocumentPath,
+  path: projectDocumentPathSchema,
   sha256: projectDocumentDigestSchema,
   startByte: offset, endByte: offset,
   startLine: line, endLine: line,

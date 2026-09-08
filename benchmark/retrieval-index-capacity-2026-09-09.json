@@ -1,0 +1,86 @@
+{
+  "kind": "mechanical-capacity-probe; synthetic; no relevance or RAG gain claim",
+  "measuredAt": "2026-09-08T22:34:41.328Z",
+  "node": "v24.20.0",
+  "platform": "darwin",
+  "arch": "arm64",
+  "sqlite": "3.53.4",
+  "fixture": {
+    "generator": "synthetic-200x100-v1",
+    "documents": 200,
+    "sourceBytes": 2845000,
+    "passages": 20000,
+    "generation": "6dc798fd2e4c5b00991399e1845a7526b58ba88ddf2d398af08e2c290621a036"
+  },
+  "config": {
+    "storageVersion": 1,
+    "extractionVersion": "utf8-files-v1",
+    "chunkerVersion": "markdown-lines-v1",
+    "chunks": {
+      "maxBytes": 1400,
+      "maxLines": 16
+    },
+    "contextVersion": "path-headings-source-v1",
+    "tokenizer": "unicode61 remove_diacritics 2",
+    "normalization": "original-bytes; no overlap",
+    "embedding": null,
+    "generatedContext": null
+  },
+  "queryLimits": {
+    "maxQueryBytes": 2048,
+    "maxResults": 5,
+    "maxCandidates": 50,
+    "maxExcerptBytes": 1600,
+    "maxResponseBytes": 12000,
+    "timeoutMs": 2000
+  },
+  "ingestionMs": 120.53720800000002,
+  "buildMs": 302.751166,
+  "rebuildMs": 321.02479100000005,
+  "secondNamespaceBuildMs": 331.33349999999996,
+  "firstIndexAllocatedBytes": 23805952,
+  "ftsTablesPerGeneration": 6,
+  "samples": [
+    {
+      "query": "annual price",
+      "n": 30,
+      "minMs": 10.11895800000002,
+      "p50Ms": 10.908374999999978,
+      "p95Ms": 11.563624999999945,
+      "maxMs": 11.621374999999944
+    },
+    {
+      "query": "sku101item42",
+      "n": 30,
+      "minMs": 4.665750000000003,
+      "p50Ms": 5.250832999999943,
+      "p95Ms": 6.004083000000037,
+      "maxMs": 6.734291999999982
+    },
+    {
+      "query": "price annual delivery regional storage support replies business days",
+      "n": 30,
+      "minMs": 16.25029100000006,
+      "p50Ms": 17.02433300000007,
+      "p95Ms": 17.949458999999933,
+      "maxMs": 17.997833000000128
+    }
+  ],
+  "contention": {
+    "releaseScheduledAfterMs": 40,
+    "contendedEmptyBuildMs": 43.618417000000136
+  },
+  "memory": {
+    "initialRss": 56344576,
+    "maxSampledRss": 297713664,
+    "sampledIncreaseBytes": 241369088,
+    "samplingMs": 10
+  },
+  "eventLoop": {
+    "resolutionMs": 10,
+    "p95DelayMs": 17.825791,
+    "maxDelayMs": 68.616191
+  },
+  "finalNamespaces": 3,
+  "finalAllocatedStoreBytes": 47636480
+}

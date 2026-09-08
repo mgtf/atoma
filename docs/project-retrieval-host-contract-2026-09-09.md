@@ -64,9 +64,10 @@ UTF-8 excerpts, source SHA-256, zero-based half-open byte spans, one-based
 inclusive line spans, relative paths and deterministic heading ancestry.
 Document IDs identify sources, not tool names or executable instructions.
 Excerpts and headings remain untrusted tenant data even if their text looks
-like a system message or tool request. The future ingestion/backend must
-construct spans and quotes from the same immutable bytes; schema validation
-alone cannot prove that a quote exists in an original document.
+like a system message or tool request. The
+[ingestion/backend](project-retrieval-sqlite-2026-09-09.md) constructs spans and
+quotes from the same immutable bytes; schema validation alone cannot prove that
+a quote exists in an original document.
 
 The wrapper never cuts a quote and leaves its old coordinates attached.
 Overlong passages and passages beyond the serialized-response budget are
@@ -107,9 +108,10 @@ activation, the coordinator must pass immutable scope through its existing
 allowlisted launch snapshot; the child must resolve it against the current
 project/run/principal and immutable corpus records in the existing product
 store. The authoritative resolver must enforce revocation/deletion again on
-each query. A stored launch grant is insufficient. Those store/corpus records,
-their resolver and SQLite FTS5 are later increments, with process-boundary
-tests before enabling any tenant launch. Operator activation likewise requires
+each query. A stored launch grant is insufficient. The SQLite FTS5 backend now
+exists as a host library; authoritative store/corpus records and their resolver
+remain later increments, with process-boundary tests before enabling any tenant
+launch. Operator activation likewise requires
 an explicitly supplied immutable corpus, never a scan of arbitrary host files.
 
 ## Verification of this increment
@@ -121,5 +123,6 @@ full mocked-provider suite, audit, build and compiled smokes. After
 closure/lifecycle tests. It verifies host dispatch, absent worker capability,
 inaccessible host source files/environment and no dispatch from worker data.
 The L1 transport tests also preserve branch-labelled tool traces and reject
-off-scope calls. These checks do not certify a production corpus backend or
-tenant store resolver, which are not implemented in this increment.
+off-scope calls. These checks originally certified the host boundary alone.
+The [subsequent backend record](project-retrieval-sqlite-2026-09-09.md) covers
+ingestion and FTS5; the tenant store resolver remains unimplemented.
