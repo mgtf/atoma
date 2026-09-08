@@ -1,7 +1,8 @@
 # Project retrieval evaluation instruments
 
-Status: instruments and characterization campaign driver implemented; no live
-campaign registered or measured. These
+Status: instruments and characterization campaign driver implemented; the
+[four-attempt development pilot](../retrieval-pilot-2026-09-09/README.md) is
+registered, measured and archived. These
 fixtures and scorers implement the first increment of the
 [retrieval action plan](../../docs/project-retrieval-action-plan-2026-09-08.md).
 They do not enable search in Atoma or establish a retrieval benefit.

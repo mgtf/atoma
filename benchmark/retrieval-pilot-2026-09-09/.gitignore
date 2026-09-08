@@ -1,0 +1,5 @@
+# Byte-exact raw outputs are preserved in the checked-in evidence.tar.gz.
+/evidence/
+/evidence-r2/
+/driver.log
+/driver-r2.log

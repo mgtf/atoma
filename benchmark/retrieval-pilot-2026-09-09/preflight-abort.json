@@ -1,0 +1,31 @@
+{
+  "campaignId": "agentic-development-pilot-2026-09-09",
+  "kind": "agentic-characterization",
+  "reason": "aborted",
+  "planned": 4,
+  "attempted": 0,
+  "apiSpendUsd": 0,
+  "subscriptionPriceEquivalentUsd": 0,
+  "arms": [
+    {
+      "arm": "atoma",
+      "planned": 2,
+      "attempted": 0,
+      "full": 0,
+      "infrastructureFailures": 0,
+      "elapsedMs": 0,
+      "llmCalls": 0
+    },
+    {
+      "arm": "frontier-direct",
+      "planned": 2,
+      "attempted": 0,
+      "full": 0,
+      "infrastructureFailures": 0,
+      "elapsedMs": 0,
+      "llmCalls": 0
+    }
+  ],
+  "claim": "characterization only; no retrieval treatment or improvement claim",
+  "error": "Command failed: git archive --format=tar b618962a2e50f750dc6a0fbb56793b311fc10154 -- src scripts docker package.json package-lock.json .nvmrc tsconfig.json .dockerignore\nfatal: pathspec '.dockerignore' did not match any files\n"
+}

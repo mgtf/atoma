@@ -1,7 +1,8 @@
 # Project retrieval experiment protocol
 
 Status: instruments, registration and A/C characterization driver implemented;
-no live campaign registered or executed.
+the [initial development pilot](../retrieval-pilot-2026-09-09/README.md) completed.
+No retrieval treatment has been measured.
 
 This experiment is separate from the historical
 [cost-amortisation benchmark](../PROTOCOL.md). The existing benchmark CLI owns
@@ -78,9 +79,11 @@ This small corpus cannot justify a vector service or a scale threshold.
 
 ## Next implementation increment
 
-Register and measure A/C with the implemented driver to identify actual
-failure classes. The initial driver uses host subscriptions, empty starting
-state and development questions; treatment B, paid API campaigns and the
+The initial A/C pilot identified citation and task-completion failures under
+the registered deadlines; it does not establish a retrieval benefit. Preserve
+those cases when evaluating the next increment. The driver uses host
+subscriptions, empty starting state and development questions; treatment B,
+paid API campaigns and the
 confirmatory statistical report remain later increments.
 Then implement and test the scoped host execution
 contract and SQLite FTS5 backend before the paired A/B/C comparison.

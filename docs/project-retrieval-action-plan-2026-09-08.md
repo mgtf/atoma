@@ -1,8 +1,8 @@
 # Project retrieval — implementation action plan
 
-Date: 2026-09-08. Status: evaluation instruments and the A/C characterization
-campaign driver delivered in source. Production
-retrieval, live measurements and provider integrations remain unimplemented.
+Date: 2026-09-08, progress updated 2026-09-09. Status: evaluation instruments,
+A/C characterization driver and an archived development pilot delivered.
+Production retrieval and retrieval-provider integrations remain unimplemented.
 
 ## Implementation progress
 
@@ -20,9 +20,13 @@ Atoma/frontier-direct attempts. Execution uses `spawnRun`, the shared runner,
 the global lease, mandatory containers and independent fresh state. Its first
 supported mode is development characterization through host subscriptions.
 No project snapshot ingestion or production search element is implemented.
-The next measurement needs an explicit campaign configuration and an installed
-worker image. The [retrieval protocol](../benchmark/retrieval/PROTOCOL.md)
-states the limits; no live baseline result exists yet.
+The [four-attempt development pilot](../benchmark/retrieval-pilot-2026-09-09/README.md)
+completed on one source revision and UTC day. Frontier-direct passed both
+tasks; Atoma reached both registered deadlines, with correct pricing facts or
+maintenance behavior but incomplete source-supported delivery. This tiny
+sample identifies development failure cases, not a retrieval benefit. The
+[retrieval protocol](../benchmark/retrieval/PROTOCOL.md) still requires a new
+paired control when the search treatment exists.
 
 ## Objective and implementation order
 
@@ -142,7 +146,7 @@ until this specification and Step 2's instruments are frozen.
 [contracts](../src/contracts/retrievalBenchmark.ts),
 [scorer](../src/cli/retrievalScorer.ts), and
 [behavioral tests](../tests/retrieval-benchmark.test.ts).
-The live campaign's registration file is still Step 3 work.
+The first live characterization registration is linked in Step 3.
 
 **Exit condition:** the questions, held-out split, and executable scoring
 rules exist before the first line of production index code.
@@ -179,6 +183,10 @@ deficit.
 - [ ] Run A and C initially to characterize errors. Once B exists, rerun the
   registered arms on the same revision and day. The earlier characterization
   is not a valid final control for a later treatment.
+- [x] Complete and archive the initial two-question, four-attempt A/C
+  development pilot, including failed task outcomes and the pre-model archive
+  failure. See the [pilot report](../benchmark/retrieval-pilot-2026-09-09/README.md).
+  Broader coverage, held-out confirmation and the later paired rerun remain.
 - [ ] Register a primary decision rule: constraint-correct, source-supported
   outcomes on held-out tasks, with a minimum useful improvement and explicit
   cost/latency ceilings. Alternatively pre-register a cost-saving objective

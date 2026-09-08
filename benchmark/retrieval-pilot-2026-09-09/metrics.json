@@ -1,0 +1,164 @@
+[
+  {
+    "entry": {
+      "ordinal": 1,
+      "questionId": "northstar-01",
+      "repetition": 1,
+      "arm": "atoma"
+    },
+    "startedAt": "2026-09-08T21:14:10.506Z",
+    "endedAt": "2026-09-08T21:17:13.142Z",
+    "elapsedMs": 183549,
+    "full": false,
+    "runnerOutcome": "failed",
+    "failingChecks": [
+      "evidence:annual-price-cents"
+    ],
+    "traceTotals": {
+      "calls": 20,
+      "inputTokens": 10012,
+      "outputTokens": 10484,
+      "cacheReadInputTokens": 155572,
+      "cacheCreationInputTokens": 162541,
+      "costUsd": 0.35909845000000007,
+      "perModel": [
+        {
+          "model": "sub:anthropic:haiku",
+          "calls": 19,
+          "inputTokens": 10010,
+          "outputTokens": 8946,
+          "costUsd": 0.2616822
+        },
+        {
+          "model": "sub:anthropic:opus",
+          "calls": 1,
+          "inputTokens": 2,
+          "outputTokens": 1538,
+          "costUsd": 0.09741625
+        }
+      ]
+    },
+    "toolCalls": 16,
+    "observedServedModels": [
+      "haiku",
+      "opus",
+      null
+    ]
+  },
+  {
+    "entry": {
+      "ordinal": 2,
+      "questionId": "northstar-01",
+      "repetition": 1,
+      "arm": "frontier-direct"
+    },
+    "startedAt": "2026-09-08T21:17:14.668Z",
+    "endedAt": "2026-09-08T21:18:03.400Z",
+    "elapsedMs": 50500,
+    "full": true,
+    "runnerOutcome": "delivered",
+    "failingChecks": [],
+    "traceTotals": {
+      "calls": 1,
+      "inputTokens": 14,
+      "outputTokens": 3049,
+      "cacheReadInputTokens": 161175,
+      "cacheCreationInputTokens": 59148,
+      "costUsd": 0.5265575,
+      "perModel": [
+        {
+          "model": "sub:anthropic:opus",
+          "calls": 1,
+          "inputTokens": 14,
+          "outputTokens": 3049,
+          "costUsd": 0.5265575
+        }
+      ]
+    },
+    "toolCalls": 11,
+    "observedServedModels": [
+      "opus"
+    ]
+  },
+  {
+    "entry": {
+      "ordinal": 3,
+      "questionId": "northstar-13",
+      "repetition": 1,
+      "arm": "frontier-direct"
+    },
+    "startedAt": "2026-09-08T21:18:05.783Z",
+    "endedAt": "2026-09-08T21:18:55.889Z",
+    "elapsedMs": 51917,
+    "full": true,
+    "runnerOutcome": "delivered",
+    "failingChecks": [],
+    "traceTotals": {
+      "calls": 1,
+      "inputTokens": 14,
+      "outputTokens": 3563,
+      "cacheReadInputTokens": 203194,
+      "cacheCreationInputTokens": 22085,
+      "costUsd": 0.32877325,
+      "perModel": [
+        {
+          "model": "sub:anthropic:opus",
+          "calls": 1,
+          "inputTokens": 14,
+          "outputTokens": 3563,
+          "costUsd": 0.32877325
+        }
+      ]
+    },
+    "toolCalls": 14,
+    "observedServedModels": [
+      "opus"
+    ]
+  },
+  {
+    "entry": {
+      "ordinal": 4,
+      "questionId": "northstar-13",
+      "repetition": 1,
+      "arm": "atoma"
+    },
+    "startedAt": "2026-09-08T21:18:58.259Z",
+    "endedAt": "2026-09-08T21:22:00.980Z",
+    "elapsedMs": 182998,
+    "full": false,
+    "runnerOutcome": "failed",
+    "failingChecks": [
+      "answer-schema"
+    ],
+    "traceTotals": {
+      "calls": 22,
+      "inputTokens": 6800,
+      "outputTokens": 10481,
+      "cacheReadInputTokens": 203819,
+      "cacheCreationInputTokens": 131099,
+      "costUsd": 0.32163365000000005,
+      "perModel": [
+        {
+          "model": "sub:anthropic:haiku",
+          "calls": 21,
+          "inputTokens": 6798,
+          "outputTokens": 8956,
+          "costUsd": 0.22391739999999996
+        },
+        {
+          "model": "sub:anthropic:opus",
+          "calls": 1,
+          "inputTokens": 2,
+          "outputTokens": 1525,
+          "costUsd": 0.09771625
+        }
+      ]
+    },
+    "toolCalls": 20,
+    "observedServedModels": [
+      "haiku",
+      "opus",
+      null
+    ]
+  }
+]
