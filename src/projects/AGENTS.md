@@ -284,8 +284,8 @@ Neighbours:
   environment, so an exported one is overwritten. That is why "raise the
   timeout", which run `949ecd5d`'s post-mortem advised after dying at 900s on
   68 tool calls and $0.96, was unreachable advice until the lever existed.
-- The DEFAULT is unchanged at 15 minutes. What a tenant run may spend is a
-  product decision; only its reachability was a defect.
+- The DEFAULT is 30 minutes, allowing project runs on small production hosts
+  more wall-clock time. Explicit operator budgets still take precedence.
 
 ## What a published commit says
 

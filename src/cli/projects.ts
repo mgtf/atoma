@@ -24,7 +24,7 @@ import {
   resolveSecretEncryption,
   SECRET_ENCRYPTION_ENV,
 } from '../auth/secretEncryption.js';
-import { hostSubscriptionPinsOf, ProjectRunCoordinator } from '../projects/coordinator.js';
+import { DEFAULT_PROJECT_RUN_TIMEOUT_MS, hostSubscriptionPinsOf, ProjectRunCoordinator } from '../projects/coordinator.js';
 import { PreviewStore } from '../preview/store.js';
 import { recordDeliveredPreview } from '../preview/service.js';
 import { GitHubPublisher } from '../projects/publisher.js';
@@ -101,7 +101,7 @@ flags:
   --project <slug-or-id>     target project (required for run and publish)
   --as <id-or-email>         principal the run is attributed to (required)
   --run <run-id>             the delivered run to publish (publish only)
-  --timeout <seconds>        run budget, 60..7200, default 900 (run only)
+  --timeout <seconds>        run budget, 60..7200, default ${DEFAULT_PROJECT_RUN_TIMEOUT_MS / 1000} (run only)
   --help                     show this help`;
 
 function safeTerminal(value: string): string {
@@ -482,7 +482,7 @@ async function main(): Promise<void> {
   // THE OPERATOR'S BUDGET, said out loud. Seconds on the command line because
   // that is how the runner prints it; milliseconds across the boundary because
   // that is what every deadline downstream is in. An unparsable value is a
-  // refusal here rather than a silent 15 minutes.
+  // refusal here rather than a silent default budget.
   const timeoutFlag = args.flags['timeout'];
   let timeoutMs: number | undefined;
   if (typeof timeoutFlag === 'string' && timeoutFlag.trim().length > 0) {

@@ -792,14 +792,14 @@ export function runnerFailureDetail(log: string, outcome: string): string {
  * `949ecd5d` died at 900s after 68 tool calls and $0.96, and its own post-mortem
  * advised raising a variable that could not be raised.
  *
- * The DEFAULT IS UNCHANGED at 15 minutes: what a tenant run may spend is a
- * product decision, not a refactor. What changes is that it can be said.
+ * The default is 30 minutes, allowing project runs on small production hosts
+ * enough wall-clock time. Explicit operator budgets still take precedence.
  *
  * Bounded on both ends because the child derives two later deadlines from it:
  * the runner's watchdog fires at budget + 60s and the harness hard-reaps at
  * budget + 180s, so an absurd value moves those too.
  */
-export const DEFAULT_PROJECT_RUN_TIMEOUT_MS = 15 * 60 * 1_000;
+export const DEFAULT_PROJECT_RUN_TIMEOUT_MS = 30 * 60 * 1_000;
 export const MIN_PROJECT_RUN_TIMEOUT_MS = 60 * 1_000;
 export const MAX_PROJECT_RUN_TIMEOUT_MS = 2 * 60 * 60 * 1_000;
 export const PROJECT_RUN_TIMEOUT_ENV = 'ATOMA_PROJECT_TIMEOUT_MS';
@@ -807,7 +807,7 @@ export const PROJECT_RUN_TIMEOUT_ENV = 'ATOMA_PROJECT_TIMEOUT_MS';
 /**
  * Resolve the budget: an explicit argument wins over the host environment,
  * which wins over the default. A malformed or out-of-range value is a REFUSAL,
- * never a silent fallback — a run that quietly gets 15 minutes when the
+ * never a silent fallback — a run that quietly gets the default when the
  * operator asked for 40 is the defect this replaces, wearing a different hat.
  *
  * Deliberately NOT named `ATOMA_BUILD_TIMEOUT_MS`: that variable belongs to the

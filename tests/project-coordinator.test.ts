@@ -1681,13 +1681,13 @@ describe('ProjectRunCoordinator — a large trace is evidence, not a refusal', (
  * `timeoutMs`, and `projects run` had no flag.
  */
 describe('a project run has a budget an operator can set', () => {
-  it('defaults to 15 minutes, and reads the host environment', () => {
+  it('defaults to 30 minutes, and reads the host environment', () => {
     expect(projectRunTimeoutMs({})).toBe(DEFAULT_PROJECT_RUN_TIMEOUT_MS);
-    expect(projectRunTimeoutMs({})).toBe(900_000);
+    expect(projectRunTimeoutMs({})).toBe(1_800_000);
     expect(projectRunTimeoutMs({ [PROJECT_RUN_TIMEOUT_ENV]: '2400000' })).toBe(2_400_000);
     // An empty value is absence, not an error: `export VAR=` is how a shell
     // unsets in practice.
-    expect(projectRunTimeoutMs({ [PROJECT_RUN_TIMEOUT_ENV]: '' })).toBe(900_000);
+    expect(projectRunTimeoutMs({ [PROJECT_RUN_TIMEOUT_ENV]: '' })).toBe(1_800_000);
   });
 
   it('lets an explicit argument win over the environment', () => {
@@ -1695,7 +1695,7 @@ describe('a project run has a budget an operator can set', () => {
   });
 
   it('REFUSES a malformed or out-of-range budget instead of falling back', () => {
-    // A run that quietly gets 15 minutes when the operator asked for 40 is the
+    // A run that quietly gets the default when the operator asked for 40 is the
     // defect this replaces, wearing a different hat.
     for (const bad of ['forty minutes', '2400000.5', '-1', 'NaN']) {
       expect(() => projectRunTimeoutMs({ [PROJECT_RUN_TIMEOUT_ENV]: bad })).toThrow(
@@ -1708,7 +1708,10 @@ describe('a project run has a budget an operator can set', () => {
     expect(projectRunTimeoutMs({}, MAX_PROJECT_RUN_TIMEOUT_MS)).toBe(7_200_000);
   });
 
-  it('carries the resolved budget to the driver, and ATOMA_BUILD_TIMEOUT_MS stays inert', async () => {
+  it.each([
+    { configured: undefined, expected: 1_800_000 },
+    { configured: '2400000', expected: 2_400_000 },
+  ])('carries the resolved $expected ms budget to the driver, and ATOMA_BUILD_TIMEOUT_MS stays inert', async ({ configured, expected }) => {
     const f = fixture();
     const driver = vi.fn(
       async (_spawn: SpawnRunOptions) =>
@@ -1726,7 +1729,7 @@ describe('a project run has a budget an operator can set', () => {
         // reaches the child only as whatever the coordinator decided, because
         // `spawnRun` overwrites it — so it must NOT be what sets the budget.
         ATOMA_BUILD_TIMEOUT_MS: '9999999',
-        [PROJECT_RUN_TIMEOUT_ENV]: '2400000',
+        [PROJECT_RUN_TIMEOUT_ENV]: configured,
       },
       driver,
       acquireLease: async () => lease(),
@@ -1739,7 +1742,7 @@ describe('a project run has a budget an operator can set', () => {
     });
     await coordinator.waitForIdle();
     // The host's ATOMA_BUILD_TIMEOUT_MS did not win; the project budget did.
-    expect(driver.mock.calls[0]?.[0].timeoutMs).toBe(2_400_000);
+    expect(driver.mock.calls[0]?.[0].timeoutMs).toBe(expected);
   });
 
   it('refuses to start at all when the configured budget is nonsense', () => {
