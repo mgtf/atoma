@@ -4,8 +4,8 @@ import { verdictsDirPath } from './paths.js';
 import type { PlatformEventSink } from '../contracts/platformEvents.js';
 import {
   FINDING_SEVERITY,
-  SUPERVISOR_VERDICT_JSON_SCHEMA,
-  supervisorVerdictSchema,
+  ANALYST_VERDICT_JSON_SCHEMA,
+  analystVerdictSchema,
   worstFindingKind,
   type FindingKind,
   type StoredVerdict,
@@ -138,7 +138,7 @@ export function analystSessionArgs(prompt: string, provider: SupervisorProvider,
   return [
     '-p',
     '--output-format', 'json',
-    '--json-schema', JSON.stringify(SUPERVISOR_VERDICT_JSON_SCHEMA),
+    '--json-schema', JSON.stringify(ANALYST_VERDICT_JSON_SCHEMA),
     '--model', provider.model,
     '--tools', 'Read,Glob,Grep',
     '--allowedTools', 'Read Glob Grep',
@@ -306,7 +306,7 @@ export async function analyseTarget(target: AnalysisTarget, options: AnalystOpti
       command: options.codexCommand ?? process.env['ATOMA_SUPERVISOR_CMD_CODEX'] ?? 'codex',
       provider: options.provider, cwd: options.repoRoot, prompt,
       hardening: `${ANALYST_HARDENING} Use only read_evidence to list, search and read files; there is no shell. Empty path lists files.`,
-      schema: SUPERVISOR_VERDICT_JSON_SCHEMA, timeoutMs: options.timeoutMs, onLog: options.warn,
+      schema: ANALYST_VERDICT_JSON_SCHEMA, timeoutMs: options.timeoutMs, onLog: options.warn,
       readEvidence: createEvidenceReader(options.repoRoot, { 'digest.json': digestPaths.digestPath, 'events.jsonl': digestPaths.eventsPath, 'run.json': runFile }),
     }) : await runClaudeSession({
       claudeCommand: options.claudeCommand,
@@ -321,7 +321,7 @@ export async function analyseTarget(target: AnalysisTarget, options: AnalystOpti
       options.warn(`${codex ? 'codex' : 'claude'} exited ${session.code} for ${runId}: ${detail}`);
       return { runId, outcome: 'session-failed', verdictPath: null, detail };
     }
-    const parsed = supervisorVerdictSchema.safeParse(session.structured);
+    const parsed = analystVerdictSchema.safeParse(session.structured);
     if (!parsed.success) {
       mkdirSync(paths.verdictsDir, { recursive: true });
       const rawPath = join(paths.verdictsDir, `${runId}.raw.txt`);

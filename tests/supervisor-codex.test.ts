@@ -125,6 +125,7 @@ describe.skipIf(process.platform === 'win32')('Codex supervisor process boundari
     expect(result.outcome).toBe('analysed');
     expect(dispatched.length).toBeGreaterThan(0);
     const saved = JSON.parse(readFileSync(result.verdictPath!, 'utf8'));
+    expect(saved.stageReviews).toEqual(EXAMPLE_SUPERVISOR_VERDICT.stageReviews);
     expect(saved._meta.analysisCostUsd).toBeNull();
     expect(saved._meta.modelsServed[0]).toMatchObject({ model: 'gpt-5.6-sol', inputTokens: 40, cacheReadInputTokens: 60, outputTokens: 20 });
     expect(readFileSync(join(root, 'auth/auth.json'), 'utf8')).toContain('rotated');
@@ -132,5 +133,8 @@ describe.skipIf(process.platform === 'win32')('Codex supervisor process boundari
     expect(messages.find((m) => m.id === 10).result.success).toBe(true);
     expect(messages.find((m) => m.id === 11).result.success).toBe(false);
     expect(messages.find((m) => m.method === 'thread/start').params.dynamicTools).toHaveLength(1);
+    const outputSchema = messages.find((m) => m.method === 'turn/start').params.outputSchema;
+    expect(outputSchema.required).toContain('stageReviews');
+    expect(outputSchema.properties.stageReviews.required).toEqual(Object.keys(EXAMPLE_SUPERVISOR_VERDICT.stageReviews!));
   }, 15_000);
 });

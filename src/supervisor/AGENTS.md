@@ -111,6 +111,13 @@ Neighbours:
   atoma MCP surface. The same verdict schema derives Codex's nullable optionals.
 - A run with no `endedAt` is refused, never analysed: the digest of a live
   trace is a partial view and the session would spend beside the run.
+- New verdicts require an evidence-cited review of planning, delegation,
+  execution, validation, recovery and learning, including delivered runs.
+  Each stage reports reviewed, insufficient evidence (also budget-limited
+  coverage), or not applicable. This is an analyst assessment, not an execution
+  attestation. Historical verdicts without coverage remain readable; generation
+  requires it through the same contract's stricter schema. Session budgets and
+  finding eligibility are unchanged.
 - Routing reads FINDINGS, never the grade: `mechanism_candidate` → the dated
   backlog (`supervisor/backlog.jsonl`, COOLING-OFF: never same-day),
   `security_incident` → `supervisor/ALERTS.jsonl` plus a console warning,

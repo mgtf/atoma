@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { stageReviewsSchema } from '../src/contracts/supervisorVerdict.js';
 import { closeStoreHandles } from '../src/core/stores.js';
 import { PlatformEventLog } from '../src/platform/events.js';
 import { analyseRun, analyseTarget, pendingRuns, pendingTargets, resolveTarget, type AnalystOptions } from '../src/supervisor/analyst.js';
@@ -27,7 +28,16 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
+const stageReviews = stageReviewsSchema.parse(Object.fromEntries(
+  ['planning', 'delegation', 'execution', 'validation', 'recovery', 'learning'].map((stage) => [stage, {
+    status: 'insufficient_evidence',
+    summary: 'The synthetic trace does not establish this stage completely.',
+    evidence: [{ ref: 'digest.json:1' }],
+  }])
+));
+
 const verdict = {
+  stageReviews,
   schema: 'atoma.supervisor.verdict/v1',
   runId: 'echoed-wrong-on-purpose',
   runStatus: 'failed',
@@ -133,6 +143,34 @@ describe('digestRun', () => {
 });
 
 describe('analyseRun', () => {
+  it('keeps stage coverage and improvement findings on a delivered run', async () => {
+    const trace = finishedTrace();
+    delete trace['error'];
+    const f = fixture(trace);
+    process.env['STUB_VERDICT'] = JSON.stringify({
+      ...verdict, runStatus: 'delivered',
+      runAssessment: { grade: 'sound', summary: 'Delivered with an improvement to investigate.' },
+    });
+    const result = await analyseRun(RUN_ID, f.options());
+    expect(result.outcome).toBe('analysed');
+    const saved = JSON.parse(readFileSync(result.verdictPath!, 'utf8')) as Record<string, unknown>;
+    expect(saved).toMatchObject({ runStatus: 'delivered', stageReviews, findings: verdict.findings });
+  });
+
+  it.each(['missing', 'partial', 'uncited'] as const)('rejects %s stage coverage from the model without journaling a verdict', async (mode) => {
+    const f = fixture();
+    const incomplete: Record<string, unknown> = { ...verdict };
+    if (mode === 'missing') delete incomplete['stageReviews'];
+    if (mode === 'partial') incomplete['stageReviews'] = { planning: stageReviews.planning };
+    if (mode === 'uncited') incomplete['stageReviews'] = {
+      ...stageReviews, learning: { ...stageReviews.learning, evidence: [] },
+    };
+    process.env['STUB_VERDICT'] = JSON.stringify(incomplete);
+    const result = await analyseRun(RUN_ID, f.options());
+    expect(result.outcome).toBe('invalid-verdict');
+    expect(f.journal.list({ kind: 'supervisor.verdict' }).events).toHaveLength(0);
+  });
+
   it('holds the product slot until the verdict is journaled and defers behind the mender', async () => {
     const f = fixture();
     process.env['STUB_VERDICT'] = JSON.stringify(verdict);
@@ -159,6 +197,7 @@ describe('analyseRun', () => {
     expect(result.outcome).toBe('analysed');
 
     const stored = JSON.parse(readFileSync(result.verdictPath!, 'utf8')) as Record<string, unknown>;
+    expect(stored['stageReviews']).toEqual(stageReviews);
     expect(stored['runId']).toBe(RUN_ID); // never trusted to echo
     expect(stored['_meta']).toMatchObject({
       modelRequested: 'api:zai:glm-5.3',
@@ -187,6 +226,12 @@ describe('analyseRun', () => {
     expect(args).toContain('--no-session-persistence');
     expect(args[args.indexOf('--model') + 1]).toBe('glm-5.3');
     expect(args.at(-1)).toContain('supervisor/work/');
+    expect(args.at(-1)).toContain('Required review of every stage');
+    const outputSchema = JSON.parse(args[args.indexOf('--json-schema') + 1]!) as {
+      required: string[]; properties: { stageReviews: { required: string[] } };
+    };
+    expect(outputSchema.required).toContain('stageReviews');
+    expect(outputSchema.properties.stageReviews.required).toEqual(Object.keys(stageReviews));
 
     // One journal row, facts only.
     const rows = f.journal.list({ kind: 'supervisor.verdict' }).events;

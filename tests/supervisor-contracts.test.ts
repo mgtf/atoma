@@ -60,6 +60,12 @@ describe('jsonSchemaFromZod', () => {
 });
 
 describe('the verdict contract', () => {
+  it('keeps historical verdicts readable without inventing stage coverage', () => {
+    const historical = { ...EXAMPLE_SUPERVISOR_VERDICT };
+    delete historical.stageReviews;
+    expect(supervisorVerdictSchema.parse(historical)).not.toHaveProperty('stageReviews');
+  });
+
   it('parses its example and derives the session schema from the same shape', () => {
     expect(supervisorVerdictSchema.parse(EXAMPLE_SUPERVISOR_VERDICT)).toEqual(EXAMPLE_SUPERVISOR_VERDICT);
     expect(SUPERVISOR_VERDICT_JSON_SCHEMA).toMatchObject({

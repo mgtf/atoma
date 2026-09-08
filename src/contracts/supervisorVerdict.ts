@@ -47,6 +47,22 @@ export const verdictEvidenceSchema = z
   })
   .strict();
 
+/** Coverage is a model-authored assessment, never proof of tool execution. */
+export const stageReviewSchema = z.object({
+  status: z.enum(['reviewed', 'insufficient_evidence', 'not_applicable']),
+  summary: z.string().min(1).max(2000),
+  evidence: z.array(verdictEvidenceSchema).min(1),
+}).strict();
+
+export const stageReviewsSchema = z.object({
+  planning: stageReviewSchema,
+  delegation: stageReviewSchema,
+  execution: stageReviewSchema,
+  validation: stageReviewSchema,
+  recovery: stageReviewSchema,
+  learning: stageReviewSchema,
+}).strict();
+
 export const proposedFixSchema = z
   .object({
     where: z.string().min(1).max(300),
@@ -78,8 +94,16 @@ export const supervisorVerdictSchema = z
       })
       .strict(),
     findings: z.array(verdictFindingSchema),
+    // Historical v1 verdicts remain readable; new analyses require coverage below.
+    stageReviews: stageReviewsSchema.optional(),
   })
   .strict();
+
+/** Same stored shape, with coverage required at the generation boundary. */
+export const analystVerdictSchema = supervisorVerdictSchema.extend({
+  stageReviews: stageReviewsSchema,
+});
+export const ANALYST_VERDICT_JSON_SCHEMA = jsonSchemaFromZod(analystVerdictSchema);
 
 export type VerdictRunStatus = z.infer<typeof verdictRunStatusSchema>;
 export type VerdictGrade = z.infer<typeof verdictGradeSchema>;
@@ -144,7 +168,12 @@ export interface VerdictMeta {
 export type StoredVerdict = SupervisorVerdict & { readonly _meta: VerdictMeta };
 
 /** Schema-validated example, parsed at module load (contracts convention). */
-export const EXAMPLE_SUPERVISOR_VERDICT: SupervisorVerdict = supervisorVerdictSchema.parse({
+export const EXAMPLE_SUPERVISOR_VERDICT: SupervisorVerdict = analystVerdictSchema.parse({
+  stageReviews: Object.fromEntries(Object.keys(stageReviewsSchema.shape).map((stage) => [stage, {
+    status: 'insufficient_evidence',
+    summary: 'This illustrative verdict does not establish full stage coverage.',
+    evidence: [{ ref: 'digest.json:1' }],
+  }])),
   schema: SUPERVISOR_VERDICT_SCHEMA_TAG,
   runId: '2026-08-21T11-02-26-148-48faa963',
   runStatus: 'failed',
