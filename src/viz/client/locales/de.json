@@ -631,7 +631,7 @@
   "skillOp.demote": "Skill von Skript → LLM herabgestuft (Fallback wiederhergestellt)",
   "skillOp.direct": "Skript per deterministischem Dispatch ausgeführt (0 LLM-Aufrufe)",
   "skillOp.quarantine": "Skill durch statische Prüfung UNTER QUARANTÄNE GESTELLT",
-  "skillOp.creditWithheld": "",
+  "skillOp.creditWithheld": "Zähler nicht geändert",
   "registry.none": "Kein Register konfiguriert",
   "registry.missing": "fehlt",
   "registry.successes": "Erfolge",
@@ -1106,5 +1106,7 @@
   "settings.mcpAdvancedHint": "Nur für Skripte und Clients ohne Browser-Anmeldung. Bestehende API-Tokens funktionieren weiterhin und können in der obigen Zugriffsliste widerrufen werden.",
   "settings.mcpManualHeader": "Verwenden Sie dieses Token als Bearer-Anmeldedaten im Authorization-Header Ihres Clients.",
   "settings.mcpHelpTitle": "Hilfe zur Verbindung",
-  "settings.mcpHelpHint": "Stellen Sie die Verbindung über Ihren Agenten erneut her, falls der Zugriff nicht mehr funktioniert. Prüfen Sie, ob die Adresse auf /mcp endet und Sie die richtige Organisation genehmigt haben. Bitten Sie Ihren Agenten, Ihre Atoma-Projekte aufzulisten, um die Verbindung zu prüfen."
+  "settings.mcpHelpHint": "Stellen Sie die Verbindung über Ihren Agenten erneut her, falls der Zugriff nicht mehr funktioniert. Prüfen Sie, ob die Adresse auf /mcp endet und Sie die richtige Organisation genehmigt haben. Bitten Sie Ihren Agenten, Ihre Atoma-Projekte aufzulisten, um die Verbindung zu prüfen.",
+  "skillReason.successNotFollowed": "Erfolg nicht angerechnet — der Validator hat festgestellt, dass der run dem Rezept nicht gefolgt ist",
+  "skillReason.failureNotFollowed": "Fehlschlag nicht zugerechnet — der Validator hat festgestellt, dass der run dem Rezept nicht gefolgt ist"
 }

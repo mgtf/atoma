@@ -631,7 +631,7 @@
   "skillOp.demote": "Skill diturunkan skrip → llm (fallback dipulihkan)",
   "skillOp.direct": "Skrip dijalankan melalui pengiriman deterministik (0 panggilan LLM)",
   "skillOp.quarantine": "Skill DIKARANTINA oleh pemindaian statis",
-  "skillOp.creditWithheld": "",
+  "skillOp.creditWithheld": "Penghitung tidak diubah",
   "registry.none": "Tidak ada registri yang dikonfigurasi",
   "registry.missing": "tidak ada",
   "registry.successes": "Keberhasilan",
@@ -1106,5 +1106,7 @@
   "settings.mcpAdvancedHint": "Hanya untuk skrip dan klien tanpa fitur masuk melalui browser. Token API yang ada tetap berfungsi; Anda dapat mencabutnya di daftar akses di atas.",
   "settings.mcpManualHeader": "Gunakan token ini sebagai kredensial Bearer pada header Authorization klien Anda.",
   "settings.mcpHelpTitle": "Bantuan koneksi",
-  "settings.mcpHelpHint": "Hubungkan kembali dari agen Anda jika akses berhenti berfungsi. Pastikan alamat diakhiri dengan /mcp dan Anda menyetujui organisasi yang benar. Untuk memverifikasi koneksi, minta agen Anda mencantumkan proyek Atoma Anda."
+  "settings.mcpHelpHint": "Hubungkan kembali dari agen Anda jika akses berhenti berfungsi. Pastikan alamat diakhiri dengan /mcp dan Anda menyetujui organisasi yang benar. Untuk memverifikasi koneksi, minta agen Anda mencantumkan proyek Atoma Anda.",
+  "skillReason.successNotFollowed": "Keberhasilan tidak diakui — validator mengamati bahwa run tidak mengikuti resep",
+  "skillReason.failureNotFollowed": "Kegagalan tidak diatribusikan — validator mengamati bahwa run tidak mengikuti resep"
 }

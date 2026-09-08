@@ -631,7 +631,7 @@
   "skillOp.demote": "skill 已从脚本降级为 llm（已恢复 fallback）",
   "skillOp.direct": "已通过确定性分派执行脚本（0 次 LLM 调用）",
   "skillOp.quarantine": "skill 已被静态扫描隔离",
-  "skillOp.creditWithheld": "",
+  "skillOp.creditWithheld": "计数器未更改",
   "registry.none": "未配置注册表",
   "registry.missing": "缺失",
   "registry.successes": "成功次数",
@@ -1106,5 +1106,7 @@
   "settings.mcpAdvancedHint": "仅用于脚本和不支持浏览器登录的客户端。现有 API 令牌可继续使用；你可以在上方访问列表中撤销它们。",
   "settings.mcpManualHeader": "在客户端的 Authorization 标头中将此令牌用作 Bearer 凭据。",
   "settings.mcpHelpTitle": "连接帮助",
-  "settings.mcpHelpHint": "如果访问失效，请从智能体重新连接。检查地址是否以 /mcp 结尾，并确认你批准了正确的组织。要验证连接，请让智能体列出你的 Atoma 项目。"
+  "settings.mcpHelpHint": "如果访问失效，请从智能体重新连接。检查地址是否以 /mcp 结尾，并确认你批准了正确的组织。要验证连接，请让智能体列出你的 Atoma 项目。",
+  "skillReason.successNotFollowed": "成功未计入——验证器发现该 run 未遵循操作流程",
+  "skillReason.failureNotFollowed": "失败未归因——验证器发现该 run 未遵循操作流程"
 }
