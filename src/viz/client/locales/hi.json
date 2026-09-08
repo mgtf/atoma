@@ -631,7 +631,7 @@
   "skillOp.demote": "Skill को script → llm में पदावनत किया गया (fallback बहाल)",
   "skillOp.direct": "निर्धारित डिस्पैच के ज़रिए script निष्पादित हुई (0 LLM कॉल)",
   "skillOp.quarantine": "स्थिर स्कैन द्वारा skill को क्वारंटीन किया गया",
-  "skillOp.creditWithheld": "काउंटर नहीं बदले गए (रेसिपी का पालन नहीं हुआ)",
+  "skillOp.creditWithheld": "",
   "registry.none": "कोई रजिस्ट्री कॉन्फ़िगर नहीं है",
   "registry.missing": "अनुपलब्ध",
   "registry.successes": "सफलताएँ",

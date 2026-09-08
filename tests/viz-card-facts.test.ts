@@ -7,6 +7,7 @@ import {
   modelPairLabel,
   stopReasonLabel,
 } from '../src/viz/client-gl/renderer/copy.js';
+import { buildSkillEventDetail } from '../src/viz/client/structured-detail.js';
 import { translate } from '../src/viz/client/i18n-catalog.js';
 import type { VizEvent } from '../src/viz/client/types.js';
 
@@ -199,5 +200,34 @@ describe('gpuEventCardCopy for registry counters', () => {
     }, t);
     expect(footer).not.toContain('v?');
     expect(footer).not.toMatch(/(^| · )v\d/);
+  });
+});
+
+
+describe('skill card locale', () => {
+  it('does not attribute missing proof to a recipe violation', () => {
+    const reasoning = 'success NOT credited — a declared proof obligation has no transport-observed attestation';
+    const event: VizEvent = { id: 'missing-proof', ts: 0, kind: 'skill', op: 'credit-withheld', reasoning };
+    const copy = gpuEventCardCopy(event, t);
+    expect(copy.title).toBe('Counters not changed');
+    expect(copy.body).toBe(reasoning);
+    expect(JSON.stringify(buildSkillEventDetail(event, null, t))).toContain(reasoning);
+    expect(event.reasoning).toBe(reasoning);
+  });
+
+  it('localizes legacy credit messages in the card and detail without changing evidence', () => {
+    const reasoning = "succès NON crédité — le validateur a observé que le run n'a pas suivi la recette";
+    const event: VizEvent = { id: 'legacy', ts: 0, kind: 'skill', op: 'credit-withheld', reasoning };
+    const copy = gpuEventCardCopy(event, t);
+    expect(copy.title).toBe(t('skillOp.creditWithheld'));
+    expect(copy.body).toBe(t('skillReason.successNotFollowed'));
+    expect(JSON.stringify(buildSkillEventDetail(event, null, t))).toContain(copy.body);
+    expect(event.reasoning).toBe(reasoning);
+    const alternate = (key: string) => `translated:${key}`;
+    expect(gpuEventCardCopy(event, alternate).body).toBe('translated:skillReason.successNotFollowed');
+    const failure = { ...event, reasoning: "échec NON imputé — le validateur a observé que le run n'a pas suivi la recette" };
+    expect(gpuEventCardCopy(failure, t).body).toBe(t('skillReason.failureNotFollowed'));
+    const custom = { ...event, reasoning: 'Une observation libre du modèle' };
+    expect(gpuEventCardCopy(custom, t).body).toBe(custom.reasoning);
   });
 });

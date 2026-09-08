@@ -631,7 +631,7 @@
   "skillOp.demote": "skill 已从脚本降级为 llm（已恢复 fallback）",
   "skillOp.direct": "已通过确定性分派执行脚本（0 次 LLM 调用）",
   "skillOp.quarantine": "skill 已被静态扫描隔离",
-  "skillOp.creditWithheld": "计数器未更改（未遵循方案）",
+  "skillOp.creditWithheld": "",
   "registry.none": "未配置注册表",
   "registry.missing": "缺失",
   "registry.successes": "成功次数",

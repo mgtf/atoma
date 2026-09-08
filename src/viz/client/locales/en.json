@@ -1,4 +1,6 @@
 {
+  "skillReason.successNotFollowed": "Success not credited — the validator observed that the run did not follow the recipe",
+  "skillReason.failureNotFollowed": "Failure not attributed — the validator observed that the run did not follow the recipe",
   "lang.name": "English",
   "lang.switch": "Français",
   "time.secondsAgo": "a few seconds ago",
@@ -983,7 +985,7 @@
   "skillOp.demote": "Skill demoted script → llm (fallback restored)",
   "skillOp.direct": "Script executed via deterministic dispatch (0 LLM calls)",
   "skillOp.quarantine": "Skill QUARANTINED by the static scan",
-  "skillOp.creditWithheld": "Counters NOT changed (recipe not followed)",
+  "skillOp.creditWithheld": "Counters not changed",
   "registry.none": "No registry configured",
   "registry.missing": "missing",
   "registry.successes": "Successes",

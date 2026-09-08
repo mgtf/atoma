@@ -631,7 +631,7 @@
   "skillOp.demote": "Skill rétrogradée script → llm (fallback restauré)",
   "skillOp.direct": "Script exécuté en dispatch déterministe (0 appel LLM)",
   "skillOp.quarantine": "Skill mise en QUARANTAINE par le scan statique",
-  "skillOp.creditWithheld": "Compteurs NON modifiés (recette non suivie)",
+  "skillOp.creditWithheld": "",
   "registry.none": "Aucun registre configuré",
   "registry.missing": "absent",
   "registry.successes": "Succès",

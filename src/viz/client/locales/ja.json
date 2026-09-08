@@ -631,7 +631,7 @@
   "skillOp.demote": "skillをscriptからllmへ降格（fallbackを復元）",
   "skillOp.direct": "決定論的ディスパッチでスクリプトを実行（LLM呼び出し0回）",
   "skillOp.quarantine": "静的スキャンによりskillを隔離",
-  "skillOp.creditWithheld": "カウンターは変更なし（レシピ不遵守）",
+  "skillOp.creditWithheld": "",
   "registry.none": "レジストリが設定されていません",
   "registry.missing": "欠落",
   "registry.successes": "成功",

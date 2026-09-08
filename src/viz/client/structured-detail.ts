@@ -480,6 +480,19 @@ export function skillEventTitle(
   return translated === key ? op : translated;
 }
 
+/** Localize known runtime messages without rewriting trace evidence or model prose. */
+export function skillEventReasoning(event: { kind?: string; op?: string; reasoning?: string }, t: Translator): string | undefined {
+  if (event.kind !== 'skill' || event.op !== 'credit-withheld') return event.reasoning;
+  const messages: Record<string, string> = {
+    "succès NON crédité — le validateur a observé que le run n'a pas suivi la recette": 'skillReason.successNotFollowed',
+    "échec NON imputé — le validateur a observé que le run n'a pas suivi la recette": 'skillReason.failureNotFollowed',
+    'success NOT credited — the validator observed that the run did not follow the recipe': 'skillReason.successNotFollowed',
+    'failure NOT attributed — the validator observed that the run did not follow the recipe': 'skillReason.failureNotFollowed',
+  };
+  const key = event.reasoning && Object.hasOwn(messages, event.reasoning) ? messages[event.reasoning] : undefined;
+  return key ? t(key) : event.reasoning;
+}
+
 export function skillEventSubtitle(event: {
   l1Name?: string;
   skillId?: string;
@@ -535,7 +548,7 @@ export function buildSkillEventDetail(
     shareability: catalog?.shareability
       ? t(`skill.share.${catalog.shareability.verdict}`)
       : undefined,
-    reasoning: event.reasoning,
+    reasoning: skillEventReasoning(event, t),
     recipe: catalog?.body ? catalog.body.slice(0, 4000) : undefined,
   };
   return buildStructuredDetail(

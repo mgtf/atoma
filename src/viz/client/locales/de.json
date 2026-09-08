@@ -631,7 +631,7 @@
   "skillOp.demote": "Skill von Skript → LLM herabgestuft (Fallback wiederhergestellt)",
   "skillOp.direct": "Skript per deterministischem Dispatch ausgeführt (0 LLM-Aufrufe)",
   "skillOp.quarantine": "Skill durch statische Prüfung UNTER QUARANTÄNE GESTELLT",
-  "skillOp.creditWithheld": "Zähler NICHT geändert (Rezept nicht befolgt)",
+  "skillOp.creditWithheld": "",
   "registry.none": "Kein Register konfiguriert",
   "registry.missing": "fehlt",
   "registry.successes": "Erfolge",

@@ -631,7 +631,7 @@
   "skillOp.demote": "Skill diturunkan skrip → llm (fallback dipulihkan)",
   "skillOp.direct": "Skrip dijalankan melalui pengiriman deterministik (0 panggilan LLM)",
   "skillOp.quarantine": "Skill DIKARANTINA oleh pemindaian statis",
-  "skillOp.creditWithheld": "Penghitung TIDAK diubah (resep tidak diikuti)",
+  "skillOp.creditWithheld": "",
   "registry.none": "Tidak ada registri yang dikonfigurasi",
   "registry.missing": "tidak ada",
   "registry.successes": "Keberhasilan",

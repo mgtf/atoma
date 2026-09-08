@@ -2,7 +2,7 @@ import { elementForTool } from '../../../contracts/toolTaxonomy.js';
 import { fmtCost, fmtMs, toolArgSummary, tryParseJson } from '../../client/run-utils.js';
 import { timelineBranchHeading, type TimelineBranch } from '../../client/timeline-layout.js';
 import type { VizEvent } from '../../client/types.js';
-import type { DetailTone } from '../../client/structured-detail.js';
+import { skillEventTitle, skillEventReasoning, type DetailTone } from '../../client/structured-detail.js';
 import { GPU_COLORS } from '../theme.js';
 import { eventKindColor, llmRoleColor } from './event-palette.js';
 
@@ -209,7 +209,7 @@ export function gpuEventCardCopy(event: VizEvent, t: GpuTranslate): GpuEventCard
           ? `${toolElement.symbol} · ${event.name}`
           : event.name ?? 'tool'
         : event.kind === 'skill'
-          ? event.op ?? 'skill'
+          ? skillEventTitle(event, t)
           : `${event.kind}${event.op ? ` · ${event.op}` : ''}`;
   const meta = [
     event.actor?.name ? `L${event.actor.tier ?? '?'} ${event.actor.name}` : '',
@@ -217,7 +217,7 @@ export function gpuEventCardCopy(event: VizEvent, t: GpuTranslate): GpuEventCard
     event.subject ?? '',
     event.branchId ? `⑂ ${event.branchId.slice(0, 6)}` : '',
   ].filter(Boolean).join(' · ');
-  let body = event.error ?? event.reasoning ?? '';
+  let body = event.error ?? skillEventReasoning(event, t) ?? '';
   if (event.kind === 'tool' && !event.error) {
     body = [toolArgSummary(event.args), resultFacts(event.result)].filter(Boolean).join(' · ');
   } else if (

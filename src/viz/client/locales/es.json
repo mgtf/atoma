@@ -631,7 +631,7 @@
   "skillOp.demote": "Skill degradado de script → LLM (fallback restaurado)",
   "skillOp.direct": "Script ejecutado mediante despacho determinista (0 llamadas al LLM)",
   "skillOp.quarantine": "Skill puesto EN CUARENTENA por el análisis estático",
-  "skillOp.creditWithheld": "Contadores SIN cambios (no se siguió la receta)",
+  "skillOp.creditWithheld": "",
   "registry.none": "No hay ningún registro configurado",
   "registry.missing": "no disponible",
   "registry.successes": "Éxitos",

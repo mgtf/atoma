@@ -654,7 +654,7 @@
   "skillOp.demote": "Skill کو اسکرپٹ → llm پر تنزلی دی گئی (fallback بحال)",
   "skillOp.direct": "اسکرپٹ قطعی ڈسپیچ کے ذریعے چلایا گیا (0 LLM کالز)",
   "skillOp.quarantine": "جامد اسکین نے skill کو قرنطینہ کر دیا",
-  "skillOp.creditWithheld": "کاؤنٹر ہرگز تبدیل نہیں کیے گئے (ترکیب پر عمل نہیں ہوا)",
+  "skillOp.creditWithheld": "",
   "registry.none": "کوئی رجسٹری ترتیب نہیں دی گئی",
   "registry.missing": "غائب",
   "registry.successes": "کامیابیاں",

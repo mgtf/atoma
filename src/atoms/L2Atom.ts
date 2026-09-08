@@ -1596,7 +1596,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
             skillId,
             actorName: this.name,
             actorTier: 2,
-            reasoning: 'succès NON crédité — le validateur a observé que le run n\'a pas suivi la recette',
+            reasoning: 'success NOT credited — the validator observed that the run did not follow the recipe',
           });
         } else if (skillId && this.skillRegistry) {
           this.skillRegistry.recordSuccess(skillNs, skillId, { via: child.name });
@@ -1696,7 +1696,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
             skillId,
             actorName: this.name,
             actorTier: 2,
-            reasoning: 'échec NON imputé — le validateur a observé que le run n\'a pas suivi la recette',
+            reasoning: 'failure NOT attributed — the validator observed that the run did not follow the recipe',
           });
         } else if (skillId && this.skillRegistry) {
           this.skillRegistry.recordFailure(blameNs, skillId, { via: child.name });

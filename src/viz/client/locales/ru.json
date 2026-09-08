@@ -631,7 +631,7 @@
   "skillOp.demote": "Skill понижен: script → llm (fallback восстановлен)",
   "skillOp.direct": "Скрипт выполнен через детерминированную диспетчеризацию (0 вызовов LLM)",
   "skillOp.quarantine": "Skill ПОМЕЩЁН В КАРАНТИН статическим анализатором",
-  "skillOp.creditWithheld": "Счётчики НЕ изменены (рецепт не соблюдён)",
+  "skillOp.creditWithheld": "",
   "registry.none": "Реестр не настроен",
   "registry.missing": "отсутствует",
   "registry.successes": "Успехи",

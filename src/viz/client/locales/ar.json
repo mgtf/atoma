@@ -631,7 +631,7 @@
   "skillOp.demote": "تم تخفيض skill من script إلى llm (تمت استعادة fallback)",
   "skillOp.direct": "تم تنفيذ script عبر توجيه حتمي (0 استدعاءات LLM)",
   "skillOp.quarantine": "تم عزل skill بواسطة الفحص الساكن",
-  "skillOp.creditWithheld": "لم تتغير العدّادات (لم تُتبع الوصفة)",
+  "skillOp.creditWithheld": "",
   "registry.none": "لم يتم إعداد سجل",
   "registry.missing": "مفقود",
   "registry.successes": "النجاحات",
