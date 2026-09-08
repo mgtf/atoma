@@ -390,7 +390,7 @@ validates the IR, not the rendered SVG; rendering requires a separate Archify ch
 
 | Read out of this checkout | |
 | --- | --- |
-| Version | `0.2.0` |
+| Version | `0.3.0` |
 | Node | 24.20+ (`.nvmrc` 24.20.0, `engines` >=24) |
 | Subsystems under their own contract | 18 |
 | MCP tools | 37 |

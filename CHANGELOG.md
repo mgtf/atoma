@@ -2,6 +2,67 @@
 
 ## Unreleased
 
+## v0.3.0 — 2026-09-08
+
+One model selector for every tier, runs as MCP tasks over a replayable SSE
+stream, ChatGPT subscriptions on all three tiers, and a full-stack cell for
+pages served by a Node API. Everything landed since v0.2.0.
+
+### Added
+
+- A canonical full-stack cell and molecule: `start_node_server`, `fetch_url`
+  and `validate_html` in one L1, without a static server, seeded only when the
+  executor offers the combined capability. A phase that serves a page from a
+  Node API and proves it in a browser now has a home in the catalog instead
+  of being routed to a web-only cell (`docs/incidents/notes-app-browser-phase-2026-09-07.md`).
+- ChatGPT subscriptions (`sub:openai`, `own:openai`) serve L1 too. Codex stays
+  a text-only subprocess: tool-bearing calls run through a host-side JSON
+  action loop where only declared tools reach the sandbox executor, results
+  are observed before truncation, a finite budget allows one finalization, and
+  partial usage survives errors and cancellation.
+- The supervisor's new verdicts carry an evidence-cited review of every run
+  stage (planning, delegation, execution, validation, recovery, learning),
+  each marked reviewed, insufficient evidence or not applicable. Historical
+  verdicts without coverage stay readable.
+- The GPU client refreshes itself after a frontend deployment: it checks the
+  content-hashed bundle URLs every minute while visible, bypassing the service
+  worker, and reloads only after five idle seconds with no editable work or
+  pending mutation, restoring tab-local navigation once.
+- `build-app --help` (and `-h`) prints usage derived from the profile instead
+  of falling through to the default goal and starting a real run.
+- Settings shows the `[mcp_servers.atoma]` table for `~/.codex/config.toml`
+  beside the Claude Code registration line; the bearer reaches Codex through
+  `ATOMA_MCP_TOKEN` and never enters the file.
+
+### Changed
+
+- Project runs get 30 minutes by default instead of 15; explicit operator
+  budgets still take precedence.
+- L2 and L3 plan prompts list every cell and peer WITH the tools its L1s hold
+  and state that a `create` seed cannot add tools; ungrantable seed tools are
+  logged at plan time. L3 runs the envelope and explicit-failure result gates
+  on cell results before earned trust. Fallback recovery reads first, verifies
+  the actual deliverable, and reports a missing capability instead of
+  rewriting the artefact. L1 workers now see the declared `dom-interaction`
+  proof obligation.
+- A Claude CLI query that exhausts its tool budget is finalized once in its
+  own session with tools and MCP servers disabled; both usages are summed and
+  finalization never recurses.
+- GitHub connect discovers the viewer's existing App installations before
+  opening GitHub's install page, so an already-installed App is relinked
+  through the same verified setup callback instead of a dead Configure page.
+
+### Fixed
+
+- `validate_html` replaces an input's existing text with Chromium's
+  `selectAll` command before typing; `Meta+A` did not select in headless
+  Chromium on macOS, so a "type" interaction appended instead of replacing.
+- A missing or retired `ATOMA_ANALYST_MODEL` switches the analyst off with a
+  visible reason in the banner instead of crash-looping the viz server.
+- GPU visualizer: camera zoom rasterizes at native pixels, rasterized text is
+  sharp, crystal caustics stay visible with the navigation collapsed, timeline
+  scroll windows are retained and idle controls settle.
+
 ### Changed
 
 - The MCP start tools are MCP TASKS (spec 2025-11-25): `atoma_run_start` and
@@ -80,8 +141,7 @@
 
 - `api:openai:<model>`: OpenAI by API (Responses API, function tools), so
   GPT models can serve every tier, L1 included, from `OPENAI_API_KEY` or an
-  organisation key. The Codex CLI (`sub:openai`, `own:openai`) stays
-  supervisor-only.
+  organisation key.
 
 ## v0.2.0 — 2026-09-07
 
