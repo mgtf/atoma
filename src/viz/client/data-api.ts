@@ -28,6 +28,15 @@ import type {
 } from './types.js';
 import { redirectIfAuthenticationRequired } from './session-guard.js';
 
+let activeMutations = 0;
+export function pendingApiMutations(): number { return activeMutations; }
+
+async function trackMutation<T>(work: () => Promise<T>): Promise<T> {
+  activeMutations += 1;
+  try { return await work(); }
+  finally { activeMutations -= 1; }
+}
+
 export class ApiHttpError extends Error {
   constructor(readonly status: number, path: string, detail?: string) {
     super(detail ?? `HTTP ${status} for ${path}`);
@@ -182,7 +191,7 @@ export const api = {
   apiTokens: () => fetchJson<VizApiTokens>('/api/tokens'),
   createApiToken: (label: string) =>
     mutateJson<{ tokenId: string; token: string; createdAt: string; mcpUrl: string }>('/api/tokens', { label }),
-  revokeApiToken: async (tokenId: string): Promise<{ revoked: boolean }> => {
+  revokeApiToken: (tokenId: string): Promise<{ revoked: boolean }> => trackMutation(async () => {
     const response = await fetch(`/api/tokens/${encodeURIComponent(tokenId)}`, {
       method: 'DELETE',
       credentials: 'same-origin',
@@ -191,7 +200,7 @@ export const api = {
     redirectIfAuthenticationRequired(response.status);
     if (!response.ok) throw new ApiHttpError(response.status, '/api/tokens');
     return (await response.json()) as { revoked: boolean };
-  },
+  }),
   orgModels: () => fetchJson<VizOrgModels>('/api/org/models'),
   // PUT/PATCH rather than POST: these replace one account/org-scoped resource.
   saveAccountModels: (pins: VizAccountModels['pins']) =>
@@ -204,7 +213,7 @@ export const api = {
       { key },
       'PUT'
     ),
-  removeOrgProviderKey: async (provider: string): Promise<{ keys: VizOrgProviderKeyStatus[] }> => {
+  removeOrgProviderKey: (provider: string): Promise<{ keys: VizOrgProviderKeyStatus[] }> => trackMutation(async () => {
     const response = await fetch(
       `/api/org/provider-keys/${encodeURIComponent(provider)}`,
       {
@@ -215,7 +224,7 @@ export const api = {
     );
     if (!response.ok) throw new Error(`HTTP ${response.status} for provider-keys`);
     return (await response.json()) as { keys: VizOrgProviderKeyStatus[] };
-  },
+  }),
   renameAccount: (displayName: string) =>
     mutateJson<{ displayName: string; displayNameSource: string }>(
       '/api/account',
@@ -229,32 +238,36 @@ async function mutateJson<T>(
   body: unknown,
   method: 'POST' | 'PUT' | 'PATCH' = 'POST'
 ): Promise<T> {
-  const response = await fetch(path, {
-    method,
-    credentials: 'same-origin',
-    headers: {
-      accept: 'application/json',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify(body),
+  return trackMutation(async () => {
+    const response = await fetch(path, {
+      method,
+      credentials: 'same-origin',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    await assertMutationSucceeded(response, path);
+    return (await response.json()) as T;
   });
-  await assertMutationSucceeded(response, path);
-  return (await response.json()) as T;
 }
 
 /** Subscription mutations expose their fresh state through the following GET. */
 async function mutateWithoutResult(path: string, method: 'POST' | 'DELETE'): Promise<void> {
-  const response = await fetch(path, {
-    method,
-    credentials: 'same-origin',
-    headers: {
-      accept: 'application/json',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({}),
+  return trackMutation(async () => {
+    const response = await fetch(path, {
+      method,
+      credentials: 'same-origin',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    });
+    await assertMutationSucceeded(response, path);
+    await response.arrayBuffer();
   });
-  await assertMutationSucceeded(response, path);
-  await response.arrayBuffer();
 }
 
 async function assertMutationSucceeded(response: Response, path: string): Promise<void> {

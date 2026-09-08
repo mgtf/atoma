@@ -252,21 +252,21 @@ npm run viz:mark-turn:analyze
   `/webhooks/*`, and every response marked `Cache-Control: no-store` stay
   outside the cache so live data, identity state and GitHub deliveries cannot
   be hidden by an offline shell.
-- REJECTED, and why: `vite-plugin-pwa`'s `devOptions`. It serves a dev worker,
-  which is the easy half; it does not UNREGISTER one, and the docs are explicit
-  that in dev "the PWA will not be registered, only the service worker logic" —
-  so the origin-scope cleanup above stays our code either way. `generateSW`
-  cannot emit the `push`/`notificationclick` handlers this worker exists for,
-  so the route would be `injectManifest`: our `sw.js` stays the source, a
-  `workbox-precaching` import joins the SHIPPED bundle, and `viz:build` stops
-  being a `publicDir` copy the smoke asserts. Its two documented hazards —
-  workbox-window's one-minute update heuristic, and route interception bounded
-  by `navigateFallbackAllowlist` — are the class our own bypass list already
-  answers against the real server surface. WHAT WOULD REOPEN IT: precaching.
-  `SHELL_ASSETS` is seven hand-written entries, so hashed bundles are cached
-  only after a first successful fetch, never at install. If offline becomes a
-  product goal rather than a side effect of being a PWA, `injectManifest` is
-  the door, and it is one injection line in the file we already own.
+- The GPU production client checks content-hashed entry/CSS URLs every minute
+  while visible and on focus/visibility return. Fetches use `no-store`, which
+  the worker bypasses entirely: offline cache is never update evidence. A new
+  build reloads only after five seconds without interaction, no editable work
+  or pending API mutation, and outside settings, announcements, admin admission
+  and tuning. Tab-local navigation is restored once for the same principal/org;
+  no drafts or secrets are persisted. A failed/stale reload is rate-limited.
+  Existing clients need one ordinary reload to acquire this updater.
+- `vite-plugin-pwa` remains rejected: `devOptions` does not unregister workers,
+  and `generateSW` cannot emit our push/click handlers. `injectManifest` would
+  retain `sw.js` but add Workbox to the shipped bundle and change the build's
+  tested publicDir-copy contract. Its update heuristic and navigation fallback
+  hazards are already handled by our bypass list. Reconsider it for deliberate
+  offline precaching: today's hand-written shell list caches hashed bundles
+  only after successful fetches, never at install.
 - Do not name a root client module `api.ts`; Vite's `/api` proxy can intercept it.
 - ONE frame style, and ONE definition for the SINGLE-COLUMN views:
   `renderer/view-frame.ts`. Projects/Admin/Settings/Burn-in use its elevation-2

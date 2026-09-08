@@ -2049,8 +2049,17 @@ try {
           ollamaAvailable: false,
         },
       };
+      let updateBuildAvailable = false;
+      let updateProbes = 0;
+      const updateShell = await (await fetch(`http://127.0.0.1:${port}/`)).text();
       accountPage.on('request', (request) => {
         const path = new URL(request.url()).pathname;
+        if (updateBuildAvailable && path === '/' && !request.isNavigationRequest()) {
+          updateProbes += 1;
+          void request.respond({ status: 200, contentType: 'text/html', headers: { 'cache-control': 'no-store' },
+            body: updateShell.replace(/\/assets\/index-[\w-]+\.js/, '/assets/index-update-smoke.js') });
+          return;
+        }
         const stub = stubs[path];
         if (stub !== undefined) {
           void request.respond({
@@ -2159,6 +2168,47 @@ try {
           `account scenario: project-row click navigated ${accountUrlBeforeProjectClick} -> ${accountPage.url()}`
         );
       }
+      // A real production page detects a new bundle without a SW change, keeps
+      // a draft, then reloads automatically and restores the selected project.
+      updateBuildAvailable = true;
+      await accountPage.waitForSelector('textarea', { timeout: READY_TIMEOUT_MS });
+      await accountPage.type('textarea', 'Keep this unsent goal');
+      await accountPage.evaluate(() => { window.__updateSmokeMarker = true; document.activeElement?.blur(); });
+      await new Promise((resolve) => setTimeout(resolve, 5500));
+      const probesBefore = updateProbes;
+      const updateProbe = accountPage.waitForResponse((response) => new URL(response.url()).pathname === '/' && !response.request().isNavigationRequest());
+      await accountPage.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await updateProbe;
+      if (updateProbes <= probesBefore || !(await accountPage.evaluate(() =>
+        window.__updateSmokeMarker && document.querySelector('textarea')?.value === 'Keep this unsent goal'))) {
+        throw new Error('automatic update lost an unsent project goal');
+      }
+      await accountPage.focus('textarea');
+      // Use the native setter + input event: selection shortcuts differ by OS,
+      // while React consumes the same production input event on both hosts.
+      await accountPage.evaluate(() => {
+        const field = document.querySelector('textarea');
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(field, '');
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+        field.blur();
+      });
+      await new Promise((resolve) => setTimeout(resolve, 5500));
+      const updated = accountPage.waitForNavigation({ waitUntil: 'load', timeout: READY_TIMEOUT_MS });
+      await accountPage.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await updated;
+      await accountPage.waitForSelector('.gpu-ui-host[data-gpu-backend]', { timeout: READY_TIMEOUT_MS });
+      updateBuildAvailable = false;
+      await accountPage.waitForSelector('textarea', { timeout: READY_TIMEOUT_MS });
+      const restoredUpdate = await accountPage.evaluate(() => ({
+        reloaded: !window.__updateSmokeMarker,
+        selectedProject: !!document.querySelector('.gpu-project-form--run'),
+        draft: document.querySelector('textarea')?.value,
+      }));
+      if (!restoredUpdate.reloaded || !restoredUpdate.selectedProject || restoredUpdate.draft !== '') {
+        throw new Error(`automatic update did not restore project navigation: ${JSON.stringify(restoredUpdate)}`);
+      }
+      console.log('viz automatic update ok: draft preserved, idle reload, project restored');
+
       // SETTLED, not merely present. These labels are measured off the live
       // Pixi text nodes, and a node that has been created but not yet laid out
       // reports width 0 — which reads as a bounding failure rather than as a

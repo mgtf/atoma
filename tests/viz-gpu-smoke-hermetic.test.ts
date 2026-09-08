@@ -39,7 +39,7 @@ describe('viz GPU smoke — what CI can actually observe', () => {
   });
 
   it('gates every navigation on load, and none on anything else', () => {
-    const navigations = smoke.match(/\.goto\(/g) ?? [];
+    const navigations = smoke.match(/\.(?:goto|waitForNavigation)\(/g) ?? [];
     const loadGates = smoke.match(/waitUntil:\s*'load'/g) ?? [];
     expect(navigations.length).toBeGreaterThan(0);
     expect(loadGates).toHaveLength(navigations.length);

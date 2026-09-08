@@ -189,7 +189,8 @@ function isDevModuleGraph(url) {
 
 globalThis.addEventListener('fetch', (event) => {
   const request = event.request;
-  if (request.method !== 'GET') return;
+  // Explicit freshness checks must never fall back to an offline cached build.
+  if (request.method !== 'GET' || request.cache === 'no-store') return;
   const url = new URL(request.url);
   if (
     url.origin !== globalThis.location.origin ||

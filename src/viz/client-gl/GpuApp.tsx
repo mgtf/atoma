@@ -34,7 +34,8 @@ import { GpuSurface } from './GpuSurface.js';
 import { SceneCameraPlane } from './SceneCameraPlane.js';
 import { SceneTuningPanel } from './SceneTuningPanel.js';
 import { useQueryClient } from '@tanstack/react-query';
-import { api } from '../client/data-api.js';
+import { api, pendingApiMutations } from '../client/data-api.js';
+import { startAutoUpdate, restoreUpdateNavigation, saveUpdateNavigation } from './auto-update.js';
 import {
   useAccountModels,
   useAdminEventsPages,
@@ -433,6 +434,36 @@ function GpuAppContent({
   }, [notificationsQuery]);
   const [adminInvitation, setAdminInvitation] = useState<VizAdminInvitation | null>(null);
   const [adminError, setAdminError] = useState<string | null>(null);
+  const updateState = useRef({ apiReady, projectBusy, pendingLoginProvider, authSnapshot, adminInvitation });
+  updateState.current = { apiReady, projectBusy, pendingLoginProvider, authSnapshot, adminInvitation };
+  const restoredNavigation = useRef(false);
+  useEffect(() => {
+    if (!apiReady || restoredNavigation.current) return;
+    restoredNavigation.current = true;
+    const scope = authSnapshot
+      ? `${authSnapshot.viewer.principalId}:${authSnapshot.viewer.activeOrganisation?.id ?? 'none'}` : 'ungated';
+    restoreUpdateNavigation(scope, visibleViews(authSnapshot));
+  }, [apiReady, authSnapshot]);
+  useEffect(() => {
+    if (!import.meta.env.PROD) return;
+    const updater = startAutoUpdate({
+      canReload: () => {
+        const latest = updateState.current;
+        const ui = useGpuStore.getState();
+        return latest.apiReady && !latest.authSnapshot?.signingOut && !latest.authSnapshot?.switchingOrganisationId &&
+          !ui.accountMenuOpen && !ui.localeMenuOpen && !ui.notificationsMenuOpen && !latest.projectBusy && !latest.pendingLoginProvider && !latest.adminInvitation &&
+          pendingApiMutations() === 0 && queryClient.isMutating() === 0 &&
+          !['settings', 'announce', 'admin'].includes(ui.view) && !ui.tuningPanelOpen &&
+          !ui.search.projectName && !ui.search.projectPrompt && !ui.search.projectRepository && !ui.search.displayName;
+      },
+      beforeReload: () => {
+        const auth = updateState.current.authSnapshot;
+        saveUpdateNavigation(auth ? `${auth.viewer.principalId}:${auth.viewer.activeOrganisation?.id ?? 'none'}` : 'ungated');
+      },
+    });
+    return () => updater.stop();
+  }, [queryClient]);
+
   const mintInvitation = useCallback(async (orgId: string, role: string) => {
     setAdminError(null);
     try {
@@ -500,7 +531,7 @@ function GpuAppContent({
   // selection whose project is gone falls back to the first that exists.
   useEffect(() => {
     const projects = projectsQuery.data ?? [];
-    if (state.view !== 'projects') return;
+    if (state.view !== 'projects' || !projectsQuery.data) return;
     const nextSelection = projectSelectionAfterProjects(
       state.selectedProjectId,
       projects.map((project) => project.projectId)
@@ -1208,7 +1239,7 @@ function GpuAppContent({
                 }
               >
                 <McpAccess
-                  key={`${authSnapshot.viewer.principalId}:${authSnapshot.viewer.activeOrganisation.id}`}
+                  key={`${authSnapshot.viewer.principalId}:${authSnapshot.viewer.activeOrganisation?.id ?? 'none'}`}
                   t={t}
                   locale={state.locale}
                   onError={setAccountError}

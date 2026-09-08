@@ -89,7 +89,7 @@ async function dispatchLifecycle(harness: WorkerHarness, name: 'install' | 'acti
 
 function dispatchFetch(
   harness: WorkerHarness,
-  request: { method: string; url: string; mode: string }
+  request: { method: string; url: string; mode: string; cache?: string }
 ): Promise<Response> | undefined {
   let response: Promise<Response> | undefined;
   harness.handlers.get('fetch')?.({
@@ -170,6 +170,15 @@ describe('viz service worker cache boundary', () => {
       expect(harness.caches.open).not.toHaveBeenCalled();
     }
   );
+
+  it('bypasses offline caches for an explicit build freshness check', () => {
+    const response = dispatchFetch(harness, {
+      method: 'GET', url: 'https://viz.example/', mode: 'cors', cache: 'no-store',
+    });
+    expect(response).toBeUndefined();
+    expect(harness.fetch).not.toHaveBeenCalled();
+    expect(harness.caches.open).not.toHaveBeenCalled();
+  });
 
   it('deletes a stale offline shell when a navigation becomes no-store', async () => {
     harness.fetch.mockResolvedValueOnce(
