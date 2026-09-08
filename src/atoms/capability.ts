@@ -339,16 +339,9 @@ const HTTP_L1_TOOL_SCOPE: readonly string[] = [
 const FULL_STACK_TOOL_SCOPE = [...HTTP_L1_TOOL_SCOPE, 'validate_html'];
 export const CANONICAL_FULL_STACK_BOOTSTRAP_MARKER = 'bootstrap-canonical-full-stack';
 
-/** The combined capability has its own identity; narrow HTTP/web rows stay scoped. */
-export function ensureCanonicalFullStack(
-  registry: AtomRegistry,
-  tools: readonly Tool[],
-  tier: 1 | 2
-): AtomType | undefined {
-  const names = new Set(tools.map(tool => tool.name));
-  if (!bucketRequiredToolNames('full-stack-build+probe')!.every(name => names.has(name))) return undefined;
-  const scoped = pickTools(tools, FULL_STACK_TOOL_SCOPE);
-  const systemPrompt = (tier === 1 ? [
+/** Shared full-stack role for canonical and recovery workers. */
+export function canonicalFullStackPrompt(tier: 1 | 2): string {
+  return (tier === 1 ? [
     'You build and verify Node applications whose API and HTML/JavaScript front-end are served by the SAME Node process.',
     'Create each file the task names on disk. Serve the HTML and JavaScript from those files; inline response strings do not create files.',
     'For a verification or maintenance phase, read existing files and probe them FIRST. Preserve verified behaviour and repair only observed defects; do not rebuild an already working app.',
@@ -364,6 +357,18 @@ export function ensureCanonicalFullStack(
     'A coupled build or verification against one live server may be ONE leaf task. Its ordered tool calls are not parallel branches. Reuse the existing full-stack molecule when suitable; do not route combined verification to the narrower HTTP-only or static-web molecule.',
     'For verification of an existing app, require read-only probes first and repairs only for observed defects. Preserve task constraints and files from prior phases.',
   ]).join('\n');
+}
+
+/** The combined capability has its own identity; narrow HTTP/web rows stay scoped. */
+export function ensureCanonicalFullStack(
+  registry: AtomRegistry,
+  tools: readonly Tool[],
+  tier: 1 | 2
+): AtomType | undefined {
+  const names = new Set(tools.map(tool => tool.name));
+  if (!bucketRequiredToolNames('full-stack-build+probe')!.every(name => names.has(name))) return undefined;
+  const scoped = pickTools(tools, FULL_STACK_TOOL_SCOPE);
+  const systemPrompt = canonicalFullStackPrompt(tier);
   const existing = registry.listByTier(tier).find(type => type.createdBy === CANONICAL_FULL_STACK_BOOTSTRAP_MARKER);
   if (existing) {
     return registry.patch(existing.name, {
@@ -569,9 +574,9 @@ export const CANONICAL_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
   `the FIRST version of a file or a genuine full rewrite.`,
   ``,
   `Scope boundary: if the subtask seems to require coordinating with other`,
-  `subtasks (reading their outputs, sharing state) — that's a planning bug at`,
-  `L2/L3, not an excuse to expand scope. Surface it in your summary instead of`,
-  `silently growing your remit.`,
+  `parallel subtasks through UNDECLARED dependencies, report the planning issue.`,
+  `In sequential phases, read and preserve the prior outputs supplied in your`,
+  `inputs: consuming them is expected and does not expand your write scope.`,
   ``,
   `RESULT-REPORTING CONTRACT (mandatory): the {"output", "summary"} envelope`,
   `you return MUST embed a verbatim "== GROUND TRUTH ==" block inside`,
@@ -602,7 +607,9 @@ export const CANONICAL_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
 export const CANONICAL_L2_SYSTEM_PROMPT_LINES: readonly string[] = [
   `You are a domain-neutral L2 cell for single-file web builds.`,
   `DELEGATION DISCIPLINE: you NEVER invoke elements yourself. Decompose the task`,
-  `into AT MOST one L1 molecule (the write + serve + validate loop) and delegate.`,
+  `into AT MOST one L1 molecule per coupled artefact (write + serve + validate).`,
+  `Independent artefacts may use separate parallel molecules; dependent phases`,
+  `are sequential and may consume prior outputs.`,
   `Prefer reusing the existing canonical L1 via prefilter — only request a`,
   `new L1 when the element set genuinely diverges.`,
   ``,
@@ -654,8 +661,9 @@ export const CANONICAL_HTTP_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
   `  });`,
   ``,
   `Scope boundary: if the subtask seems to require coordinating with other`,
-  `subtasks (reading their outputs, sharing state) — that is a planning bug`,
-  `at L2/L3, not an excuse to expand scope. Surface it in your summary.`,
+  `parallel subtasks through UNDECLARED dependencies, report the planning issue.`,
+  `Sequential phases may read prior outputs and share the evolving workspace;`,
+  `preserve them and limit changes to your assigned scope.`,
   ``,
   `RESULT-REPORTING CONTRACT (mandatory): the {"output", "summary"} envelope`,
   `you return MUST embed a verbatim "== GROUND TRUTH ==" block.`,

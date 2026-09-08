@@ -51,12 +51,15 @@ import {
 } from './cost.js';
 import {
   bucketIdForTools,
+  canonicalFullStackPrompt,
   extractBranchDiagnostic,
   resolveCreationDescription,
 } from './capability.js';
 import {
   HTTP_PORTABLE_DOC_GUIDANCE,
   FALLBACK_VERIFICATION_GUIDANCE,
+  FALLBACK_SYSTEM_PROMPT,
+  recoveryContext,
   LITERAL_CONTRACT_PRESERVATION_GUIDANCE,
   MUTATING_SUBTASK_FILE_GUIDANCE,
   PROOF_OBLIGATION_GUIDANCE,
@@ -82,7 +85,9 @@ export function buildNarrowL2Prompt(
   // to buildNarrowL1Prompt — see there for the full rationale (fix #8b).
   const bucket = bucketIdForTools(childTools);
   const bucketHint =
-    bucket === 'http-server-build+probe'
+    bucket === 'full-stack-build+probe'
+      ? canonicalFullStackPrompt(2)
+      : bucket === 'http-server-build+probe'
       ? `Your leaf tier-1 will write Node HTTP server code, boot it via start_node_server, and probe endpoints with fetch_url — do NOT ask it to run validate_html or start_static_server.`
       : bucket === 'web-artefact-build+validate'
         ? `Your leaf tier-1 will write a single-file web artefact, serve it via start_static_server, and validate via headless browser (validate_html).`
@@ -91,7 +96,7 @@ export function buildNarrowL2Prompt(
     `You are an L2 cell that decomposes a single-purpose task into`,
     `orthogonal L1 molecule subtasks and supervises their parallel execution.`,
     ``,
-    `Your current subtask: ${subtaskDescription}`,
+    ...(subtaskDescription ? [`Your current subtask: ${subtaskDescription}`] : []),
     ``,
     `Do NOT import assumptions from other domains — the parent type you`,
     `were branched from may have been narrowly specialised for a`,
@@ -149,6 +154,7 @@ export function routeCrossBucketVerification(plan: Plan, registry: AtomRegistry)
     // inherits the tissue's tools. Replacing it with the first web cell
     // discards the server capability needed by a combined proof phase.
     if (!subtask.preferredChild) return [subtask];
+    if (supportsBrowser(subtask.preferredChild) && supportsShellHarness(subtask.preferredChild)) return [subtask];
     const browser = taskRequiresRealBrowser(subtask.description);
     const commands = requiredPassingCommands(subtask.description);
     const webL2 = supportsBrowser(subtask.preferredChild)
@@ -209,6 +215,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
   private pendingStrategy: L3Strategy | null = null;
   private l2Peers: L2Atom[] = [];
   private triedChildren = new TaskChildrenMemo();
+  private pendingSeedContext = new Map<string, string>();
   /** SkillRegistry threaded down to every L2 instance L3 creates. */
   readonly skillRegistry: SkillRegistry | null;
 
@@ -448,8 +455,9 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       `== VERIFICATION MATCHES THE ARTEFACT ==`,
       `Every phase that verifies work MUST use the probe matching the`,
       `deliverable's NATURE — never default to the web pattern:`,
-      `  - browser-rendered artefact (index.html page, canvas game, UI):`,
-      `    start_static_server + validate_html smoke. A separate final`,
+      `  - static browser-rendered artefact (standalone page or canvas game):`,
+      `    start_static_server + validate_html smoke. For a Node-backed UI,`,
+      `    use validate_html on the SAME start_node_server URL as the API. A final`,
       `    validation phase is the norm here.`,
       `  - HTTP server / API: start_node_server + fetch_url probes against`,
       `    the endpoints. No browser, no validate_html.`,
@@ -468,10 +476,10 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       `probe right after writing the files); add a separate verification`,
       `phase only when it needs different expertise or tooling than the`,
       `build.`,
-      `FULL-STACK CROSS-BUCKET RULE: a real-browser UI check and a finite`,
-      `Node/API harness do NOT belong in one subtask. Emit two sequential`,
-      `phases: browser/selector/window.__test verification to the web L2, then`,
-      `the exact node test/probe command to the HTTP L2. Never route real`,
+      `FULL-STACK CAPABILITY RULE: checks against the SAME Node server may`,
+      `remain ONE leaf task on a cell with server, HTTP and browser tools.`,
+      `Split only when dependencies or capabilities require separate phases;`,
+      `keep browser checks on the actual server-served URL. Never route real`,
       `browser work to an HTTP-only child or replace it with source inspection.`,
       `Tool families above pick the verification NATURE — but write the`,
       `SUBTASK DESCRIPTIONS as OUTCOMES ("boot the app's server on an`,
@@ -542,8 +550,8 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       `== AGGREGATION ==`,
       `Pick how the sub-results combine — must match decomposition shape:`,
       `  - "concat": mechanical array join (no extra LLM call). For ORTHOGONAL.`,
-      `  - "llm-synthesize": one more call to merge sub-results into a unified`,
-      `    deliverable (provide an "instruction" string). For ORTHOGONAL when`,
+      `  - "llm-synthesize": a tools-disabled call merging TEXT results only`,
+      `    (provide an "instruction" string). It cannot create files. For ORTHOGONAL when`,
       `    sub-results need synthesis.`,
       `  - "sequential": phases run one-at-a-time on a shared workspace; final`,
       `    phase's output is the deliverable. For PHASED.`,
@@ -619,7 +627,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       `of TWO objects, with no prose before or after, no markdown fences, no tool calls.`,
       `Shape:`,
       `[`,
-      `  {"strategy": "reuse"|"create", "target": "<name>"?, "seed"?: {"description": "...", "systemPrompt": "...", "tools": [], "params": {}}, "reasoning": "..."},`,
+      `  {"strategy": "reuse"|"create", "target": "<name>"?, "seed"?: {"description": "...", "tools": [], "params": {}}, "reasoning": "..."},`,
       `  {"reasoning": "...", "subtasks": [{"description": "...", "preferredChild": "<L2-name>"?, "inputs": {}?, "outputs": ["<file the subtask creates/modifies>", ...]}, ...], "aggregation": {"mode": "concat"|"llm-synthesize"|"sequential", "instruction": "..."?}, "expectedOutput": "..."}`,
       `]`,
       `Every file-mutating subtask MUST include "outputs". Omit the key only on read-only phases.`,
@@ -760,6 +768,11 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     const l2Type = this.resolveL2ForSubtask(subtask, strategy, parentTask, idx, ctx);
     this.triedChildren.mark(l2Type.name);
     const l2 = L2Atom.fromType(l2Type, this.registry, this.l2Peers, this.skillRegistry);
+    const seedContext = this.pendingSeedContext.get(l2Type.atomId);
+    if (seedContext) {
+      l2.injectContext({ source: 'coaching', text: seedContext });
+      this.pendingSeedContext.delete(l2Type.atomId);
+    }
     for (const p of this.l2Peers) l2.addPeer(p);
     this.l2Peers.push(l2);
     const subTask: Task = {
@@ -870,24 +883,21 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     const seed: NonNullable<typeof strategy.seed> =
       strategy.seed ?? ({ tools: [], params: {} });
     const mergedTools = mergeTools(this.tools, (seed.tools ?? []));
+    void subtask;
+    void parentTask;
     // Registry description is a CAPABILITY label, not a task narrative —
     // see `src/atoms/capability.ts` for why. Same motivation as
     // `L2Atom.createSubtaskL1`: prevent per-task L2 singletons from
     // poisoning L3's prefilter catalog.
-    return this.registry.create(2, {
+    const created = this.registry.create(2, {
       description: resolveCreationDescription(seed.description, mergedTools, 2),
-      systemPrompt:
-        seed.systemPrompt ??
-        [
-          `You are an L2 cell created by ${this.name}.`,
-          `Decompose sub-tasks into L1 molecules and supervise them.`,
-          `Subtask you were handed: ${subtask.description}`,
-          `Parent task (for context only): ${parentTask.description}`,
-        ].join('\n'),
+      systemPrompt: buildNarrowL2Prompt('', mergedTools),
       tools: mergedTools,
       params: (seed.params ?? this.params),
       createdBy: this.name,
     });
+    if (seed.systemPrompt) this.pendingSeedContext.set(created.atomId, seed.systemPrompt);
+    return created;
   }
 
   private makeL2Hooks(ctx: RunContext, subtaskDescription: string): SupervisionHooks<L2Atom> {
@@ -897,24 +907,27 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
           child.applyModifications(verdict.modifications);
           return child;
         }
+        const { additionalContext, ...persistentModifications } = verdict.modifications;
         if (verdict.scope === 'patch') {
           const patched = this.registry.patch(
             child.name,
-            verdict.modifications,
+            persistentModifications,
             this.name,
             verdict.reasoning
           );
           const fresh = L2Atom.fromType(patched, this.registry, this.l2Peers, this.skillRegistry);
+          if (additionalContext) fresh.injectContext({ source: 'coaching', text: additionalContext });
           return fresh;
         }
         const branched = this.registry.branch(
           child.name,
-          verdict.modifications,
+          persistentModifications,
           this.name,
           verdict.branchName
         );
         ctx.logger.info(`[${this.name}] branched L2 ${child.name} → ${branched.name}`);
         const fresh = L2Atom.fromType(branched, this.registry, this.l2Peers, this.skillRegistry);
+        if (additionalContext) fresh.injectContext({ source: 'coaching', text: additionalContext });
         this.l2Peers.push(fresh);
         return fresh;
       },
@@ -929,14 +942,10 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
         const childType = this.registry.getByName(child.name);
         const childTools = childType?.tools ?? [];
         const diagnostic = extractBranchDiagnostic(trace);
-        const narrowPrompt = buildNarrowL2Prompt(
-          subtaskDescription,
-          childTools,
-          diagnostic
-        );
+        const narrowPrompt = buildNarrowL2Prompt('', childTools);
         // Capability-first description — match the rule enforced in
-        // createSubtaskL2. The task narrative lives in narrowPrompt
-        // (systemPromptReplace); the registry must stay tier/tool-
+        // createSubtaskL2. The task and diagnosis live only in the recovery instance;
+        // the registry must stay tier/tool-
         // scoped so prefilter cross-domain reuse stays clean.
         // Atom.tools is protected — pull the tool signature via the
         // registry, which is the authoritative source anyway.
@@ -946,12 +955,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
           {
             systemPromptReplace: narrowPrompt,
             descriptionReplace: narrowDesc,
-            additionalContext:
-              `Branched after escalation. Prior L2 flow failed because the inherited prompt was` +
-              ` misaligned with this subtask.` +
-              (diagnostic.length > 0
-                ? `\nVALIDATOR DIAGNOSIS (injected into the new system prompt too):\n${diagnostic}`
-                : ''),
+
           },
           this.name,
           undefined
@@ -964,7 +968,9 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
         // the narrow-template branch exists specifically to fix the failure
         // that just escalated — letting it try in-flight is strictly more
         // informative than recording it and never exercising it.
-        return L2Atom.fromType(branched, this.registry, [], this.skillRegistry);
+        const fresh = L2Atom.fromType(branched, this.registry, [], this.skillRegistry);
+        fresh.injectContext({ source: 'coaching', text: recoveryContext(subtaskDescription, diagnostic) });
+        return fresh;
       },
       onApproved: async (child, _result) => {
         this.registry.recordSuccess(child.name, this.name);
@@ -1036,6 +1042,8 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
           }`
       ),
       ``,
+      `This is TEXT synthesis only: no tools are available and no file is written.`,
+      `Preserve evidence provenance and unresolved failures; never claim an unwritten artifact exists.`,
       `Return JSON: {"output": <any>, "summary": "<one sentence>"}`,
     ].join('\n');
     const resp = await ctx.llm.complete(
@@ -1083,6 +1091,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       .join('\n');
     const resp = await ctx.llm.complete(
       this.toLlmRequest('fallback-plan', {
+        systemPromptOverride: FALLBACK_SYSTEM_PROMPT,
         userContent,
         params: this.params,
         signal: ctx.signal,
@@ -1125,6 +1134,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       .join('\n');
     const resp = await ctx.llm.complete(
       this.toLlmRequest('fallback-execute', {
+        systemPromptOverride: FALLBACK_SYSTEM_PROMPT,
         // A tool-bearing last resort still needs the sandboxed L1 transport.
         // Tier-3 Codex can plan this fallback but cannot safely execute tools.
         model: hasTools ? modelForTier(1) : this.model,
@@ -1140,7 +1150,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       output,
       summary,
       trace: [],
-      producedBy: { tier: 3, name: this.name, viaFallback: this.isFallbackMode() },
+      producedBy: { tier: 3, name: this.name, viaFallback: true },
     };
   }
 

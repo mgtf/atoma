@@ -68,7 +68,7 @@ describe('plan prompts — VERIFICATION MATCHES THE ARTEFACT', () => {
     expect(planPrompt).toMatch(/http:\/\/localhost:<port>/);
     expect(planPrompt).toMatch(/LISTENING_ON_PORT=<port>/);
     expect(planPrompt).toMatch(/PRESERVE LITERAL CONTRACTS ACROSS DECOMPOSITION/);
-    expect(planPrompt).toMatch(/FULL-STACK CROSS-BUCKET RULE/);
+    expect(planPrompt).toMatch(/FULL-STACK CAPABILITY RULE/);
     expect(planPrompt).toMatch(/never rename, replace or summarise away/);
   });
 

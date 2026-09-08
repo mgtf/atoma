@@ -321,7 +321,7 @@ export class L1Atom extends Atom {
         ? `  actually changed. Example smoke for a clickable grid:`
         : null,
       hasValidator
-        ? `    "document.body.innerText.includes('Mine') || document.querySelectorAll('.revealed').length > 0 || (window.revealed && window.revealed.flat().some(v=>v))"`
+        ? `    "(() => { const revealed = document.querySelectorAll('.revealed').length; return { ok: revealed > 0, revealed }; })()"`
         : null,
       hasValidator
         ? `  To expose internal game state to your smoke test, attach it to window`
@@ -339,11 +339,14 @@ export class L1Atom extends Atom {
         ? `  coords, shader version mismatch...), rewrite with write_file, and`
         : null,
       hasValidator
-        ? `  re-validate. Loop up to 5 times. Only return success when ok:true.`
+        ? `  re-validate the SAME required behaviour. Loop up to 5 times. Return success`
+        : null,
+      hasValidator
+        ? `  only when required claims pass; otherwise report what failed or remains unverified.`
         : null,
       ``,
       `When and only when the work is truly done, produce the final result as JSON:`,
-      `{"output": <any>, "summary": "<one sentence>"}`,
+      `{"output": <any>, "summary": "<headline plus observed evidence and any unverified requirements>"}`,
       `This final JSON is ASSISTANT TEXT, not a tool call. There is no "return"`,
       `or "output" tool: stop calling tools and emit the JSON object directly.`,
     ]

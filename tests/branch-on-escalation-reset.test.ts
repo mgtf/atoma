@@ -152,8 +152,8 @@ describe('createSubtaskL1 — fresh-L1 system prompt carries the same smoke guid
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/MUTUALLY EXCLUSIVE/);
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/interactions: \[\]/);
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/class\/style\/color.*labels alone are insufficient/s);
-    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/for \(let i = 0; i < thresholdFromSource/);
-    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/Never query an id or expect a label you did not read/);
+    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/for \(let i = 0; i < thresholdFromContract/);
+    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/derive thresholds\s+and required labels from the task/);
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/Object\.values\(checks\)\.every\(Boolean\)/);
     // Reworded 2026-08-21: the rule survived, the vague half did not. The
     // guidance now names the MECHANISM (a synchronous computed read on a
@@ -198,11 +198,9 @@ describe('createSubtaskL1 — fresh-L1 system prompt carries the same smoke guid
     // And the fresh-L1 preamble is still present — we ADDED the
     // guidance, we did not replace the original contract.
     expect(created.systemPrompt).toContain(
-      'You are an L1 molecule with ONE narrow responsibility.'
+      'You are an L1 molecule builder with ONE narrow responsibility.'
     );
-    expect(created.systemPrompt).toContain(
-      'Subtask you were handed: build a chess puzzle grid'
-    );
+    expect(created.systemPrompt).not.toContain('build a chess puzzle grid');
   });
 });
 
@@ -302,15 +300,18 @@ describe('L2 branchOnEscalation — resets the L1 prompt to the current subtask'
 
     // Invoke the hook directly — simulating superviseLoop's escalation path.
     const child = L1Atom.fromType(parent);
-    await hooks.branchOnEscalation(child, [], 'escalation-plan');
+    const recovery = await hooks.branchOnEscalation(child, [], 'escalation-plan');
 
     // The registry should now contain a NEW L1 with a fresh narrow prompt
-    // that mentions the subtask description, NOT the parent's platformer
+    // that does not persist the subtask or the parent's platformer
     // instructions.
     const allL1 = reg.listByTier(1);
     expect(allL1.length).toBe(2); // original + branch
     const branched = allL1.find((t) => t.name !== parent.name)!;
-    expect(branched.systemPrompt).toContain('Your current subtask: build a Tetris grid with scoring');
+    expect(branched.systemPrompt).not.toContain('build a Tetris grid with scoring');
+    expect(recovery?.contextBlocks().map(b => b.text).join('\n')).toContain('build a Tetris grid with scoring');
+    const reused = L1Atom.fromType(branched);
+    expect(reused.toLlmRequest('plan', { userContent: 'build a clock' }).systemPrompt).not.toContain('Tetris');
     expect(branched.systemPrompt).toMatch(/IGNORE its[\s\S]*domain/);
     // The PARENT-specific Frankenstein content must be absent from the
     // branched child. Parent's prompt was about Mario-style platformers
@@ -322,8 +323,7 @@ describe('L2 branchOnEscalation — resets the L1 prompt to the current subtask'
     // label is gone from the description body.
     // Fix 2: the branch path now writes a capability-first description
     // so escalations can't re-theme the registry with whatever task
-    // happened to trigger them. The task narrative stays in
-    // systemPromptReplace (asserted above), not in the registry row.
+    // happened to trigger them. The task narrative now lives only in the recovery instance context.
     expect(branched.description).not.toMatch(/Tetris|platformer|Goomba|Mario/i);
     expect(branched.description).not.toMatch(/narrow builder for:/);
     expect(branched.description).toMatch(/builder|scribe|toolset/);
@@ -355,12 +355,11 @@ describe('L3 branchOnEscalation — resets the L2 prompt to the current subtask'
       'orchestrate a dashboard build'
     );
     const child = L2Atom.fromType(parent, reg);
-    await hooks.branchOnEscalation(child, [], 'escalation-plan');
+    const recovery = await hooks.branchOnEscalation(child, [], 'escalation-plan');
 
     const branchedL2 = reg.listByTier(2).find((t) => t.name !== 'Tracheid')!;
-    expect(branchedL2.systemPrompt).toContain(
-      'Your current subtask: orchestrate a dashboard build'
-    );
+    expect(branchedL2.systemPrompt).not.toContain('orchestrate a dashboard build');
+    expect(recovery?.contextBlocks().map(b => b.text).join('\n')).toContain('orchestrate a dashboard build');
     expect(branchedL2.systemPrompt).not.toContain('platformer');
     expect(branchedL2.description).not.toMatch(/dashboard|platformer/i);
     expect(branchedL2.description).not.toMatch(/narrow orchestrator for:/);
@@ -434,11 +433,10 @@ describe('superviseLoop → branchOnEscalation integration', () => {
     // Restore original (hygiene).
     (water as unknown as { validatePlan: typeof origValidate }).validatePlan = origValidate;
 
-    // A new L1 was branched with a reset prompt that mentions the
-    // subtask description passed to makeL1Hooks.
+    // The branch is reusable; the current subtask is not persisted.
     const branched = reg.listByTier(1).find((t) => t.name !== parent.name);
     expect(branched).toBeDefined();
-    expect(branched!.systemPrompt).toContain('make a snake game');
+    expect(branched!.systemPrompt).not.toContain('make a snake game');
     expect(branched!.systemPrompt).not.toMatch(/Do platformer things/);
   });
 });

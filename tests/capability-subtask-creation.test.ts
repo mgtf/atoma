@@ -43,8 +43,8 @@ describe('L2Atom.createSubtaskL1 — capability-first description', () => {
     expect(created.description).toBe(capabilityDescription(webTools, 1));
     expect(created.description).toMatch(/builder/);
     expect(created.description).not.toMatch(/chess|mate|8x8|drag-and-drop/i);
-    // The subtask description still reaches the prompt (via the fresh-L1 template).
-    expect(created.systemPrompt).toContain('Subtask you were handed: build a chess puzzle');
+    // Task text travels in the request, never in the reusable registry prompt.
+    expect(created.systemPrompt).not.toContain('build a chess puzzle');
   });
 
   it('falls back to the capability label when no seed.description is provided', () => {

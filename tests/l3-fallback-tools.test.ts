@@ -54,7 +54,7 @@ function makeL3WithTools(tools: Tool[]): L3Atom {
   const reg = new AtomRegistry(openDb(':memory:'));
   const type = reg.create(3, {
     description: 'd',
-    systemPrompt: 'sys',
+    systemPrompt: 'You NEVER invoke elements yourself. Delegate all work.',
     tools,
     params: {},
     createdBy: 't',
@@ -78,6 +78,10 @@ describe('L3 fallback execute — tool access', () => {
     );
 
     const call = ctx.llm.calls[0]!;
+    expect(call.systemPrompt).not.toContain('You NEVER invoke elements yourself');
+    expect(call.systemPrompt).toContain('direct executor in a recovery turn');
+    expect(call.userContent).not.toContain('direct executor in a recovery turn');
+    expect(call.userContent).not.toContain('function recoveryContext');
     expect(call.model).toBe(modelForTier(1));
     expect(call.tools).toEqual([sampleTool]);
     expect(call.executor).toBe(executor);

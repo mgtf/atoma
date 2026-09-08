@@ -46,7 +46,7 @@ describe('VALIDATION_SYSTEM_PROMPT — L1 plan shape clause (#10)', () => {
     // Regression guard: the #10 clarification lives ALONGSIDE the
     // existing L2/L3-must-delegate clause, not instead of it.
     expect(VALIDATION_SYSTEM_PROMPT).toMatch(
-      /If a supervisor at L2 or L3 proposes calling tools directly, THAT is the violation/
+      /If a supervisor at L2 or L3 proposes calling tools directly in normal DELEGATION mode, that is a violation/
     );
   });
 

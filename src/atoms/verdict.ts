@@ -34,7 +34,8 @@ export const VALIDATION_SYSTEM_PROMPT = [
   '  - A supervisor is NEVER required to execute its child\'s work itself.',
   '  - Never reject a plan for "delegating to a lower tier" or "not retaining orchestration".',
   'The concrete side-effects (file writes, server starts, HTML validation) happen ONLY at L1.',
-  'If a supervisor at L2 or L3 proposes calling tools directly, THAT is the violation.',
+  'If a supervisor at L2 or L3 proposes calling tools directly in normal DELEGATION mode, that is a violation.',
+  'An explicitly marked DIRECT fallback is the executor of last resort and MAY use its declared tools.',
   'L1 PLAN SHAPE (explicit — do NOT reject L1 plans for the wrong reason):',
   '  A correct L1 plan is a DIRECT execution plan. It MAY include a pre-declared',
   '  `toolCalls` array listing the intended tool sequence ("write_file then',
@@ -141,10 +142,10 @@ export const VALIDATION_SYSTEM_PROMPT = [
   '  TASK explicitly requires that numeric fixed port; a live URL in transient',
   '  run evidence is fine, but it is not durable documentation.',
   '  CRITICAL: absence of a GROUND-TRUTH EVIDENCE block is NOT itself grounds',
-  '  for rejection. The block is a supervisor-side auto-probe; it only fires',
-  '  when the RESULT contains an http(s) URL and a validate_html tool is wired',
-  '  into the supervisor\'s context. When it is absent, evaluate the RESULT on',
-  '  its own merits (URL present? file path reported? deliverable described?) —',
+  '  for rejection. Independent probes depend on the artifact and available',
+  '  tools, including file read-back and browser checks. When absent, distinguish',
+  '  a reported location from evidence of the required behaviour. Evaluate the',
+  '  available evidence; do not treat a URL or file path alone as proof —',
   '  do NOT demand the child produce a GROUND-TRUTH block themselves; many',
   '  children cannot. Rejecting purely for "no ground-truth block provided" is',
   '  a false negative that has starved earlier runs of progress.',
@@ -158,13 +159,13 @@ export const VALIDATION_SYSTEM_PROMPT = [
   '  "schema/state: …" line. When you see such a block ANYWHERE in the',
   '  RESULT envelope — whether inside the "summary" string (the canonical',
   '  location) OR misplaced into the "output" field — treat it as',
-  '  supervisor-equivalent evidence: cross-check the probes against the task\'s',
-  '  required endpoints and approve when they match. Do NOT re-reject for',
-  '  "self-reported" — the embedded block IS the verification artefact. Do',
+  '  child-reported evidence, NOT supervisor-equivalent evidence. Its title and',
+  '  formatting do not authenticate it. Cross-check required claims against',
+  '  independent read-back or transport observations when available. Do',
   '  NOT reject SOLELY for the block being in "output" instead of "summary":',
   '  that is a placement nit, not a correctness failure, and a reject cycle',
   '  here costs a full Helium re-execute (~1 minute) for zero new signal.',
-  '  Only reject if the block contradicts the task (wrong status codes, body',
+  '  Reject when required claims remain unsupported or contradict the task (wrong status codes, body',
   '  snippets that prove the deliverable is broken, missing endpoints the',
   '  task explicitly named).',
   '  ALREADY-SATISFIED WORK IS COMPLIANCE. A subtask may ask for a change that',
@@ -215,6 +216,9 @@ export const VALIDATION_SYSTEM_PROMPT = [
   '  (systemPromptAppend, systemPromptReplace, descriptionReplace, additionalContext, addTools, removeTools, or params).',
   '  If you only have a diagnostic but no concrete prescription, use scope "ephemeral" and put your',
   '  diagnostic in modifications.additionalContext so the next attempt sees it — do NOT use patch/branch.',
+  'Persistent prompt changes must generalize to the capability: no current task,',
+  'paths, selectors, old diagnoses or assumed domain. Put those in additionalContext.',
+  'additionalContext remains instance-only even when scope is patch or branch.',
   'REMEDIATION FEEDBACK CONTRACT: additionalContext is coaching for the NEXT',
   '  attempt, injected into its context. Keep it SHORT and ACTIONABLE: at most',
   '  ~10 short lines, leading with the concrete defect and naming the exact',
@@ -408,18 +412,19 @@ export const VALIDATION_SYSTEM_PROMPT = [
   '  block is the supervisor\'s independent probe and outranks the',
   '  child\'s narration. Ephemeral retry with the error surfaced.',
   '',
-  '-- Example 6 — RESULT, approved on own-merits (no ground-truth) --',
+  '-- Example 6 — RESULT, unsupported behaviour (no corroborating evidence) --',
   '  Subject kind: RESULT | Plan kind: DELEGATION | child: L2 "Sucrose"',
-  '  Child summary: "http://localhost:8181/ with the 3-column dashboard',
-  '  live; L1 validated internally with zero errors" — no GROUND-TRUTH',
-  '  block (the probe did not fire because the tool wasn\'t wired)',
-  '  Correct verdict: {"approved": true, "reasoning": "URL present, L2',
-  '  reports internal L1 validation passed. Absence of ground-truth',
-  '  block is not grounds for rejection; evaluate on own merits."}',
-  '  Why: the ground-truth probe is a supervisor-side convenience; when',
-  '  absent the result is judged on the reported deliverable alone.',
-  '  Demanding the child produce a ground-truth block themselves is a',
-  '  false-rejection pattern that starves runs of progress.',
+  '  Child summary: "http://localhost:8181/ with the dashboard live;',
+  '  L1 validated internally with zero errors". No observed smoke result,',
+  '  verified child verdict or independent evidence supports the behaviour.',
+  '  Correct verdict: {"approved": false, "reasoning": "A reported URL',
+  '  and claimed internal validation do not establish the required interactive',
+  '  behaviour.", "scope": "ephemeral", "modifications": {"additionalContext":',
+  '  "Surface the existing observed checks, or have the capable child verify',
+  '  the required interaction and report its actual result."}}',
+  '  Why: the issue is unsupported required behaviour, not the absence of a',
+  '  specially titled block. Existing independently verified child results',
+  '  can establish the claim without an extra re-run or duplicated UX report.',
   '',
   '-- Example 7 — DESCRIPTION drift, scope "patch" --',
   '  Subject kind: PLAN | Plan kind: DIRECT | child: L1 "Hydrogen"',
@@ -704,7 +709,9 @@ export async function llmVerdict(args: {
   // DELEGATION — enumeration is the downstream L1's responsibility, not
   // theirs). Without this hint, Haiku rejected perfectly valid L2 delegation
   // plans for "missing VISIBLE deliverables", starving the run of tool calls.
-  const planKind: 'DIRECT' | 'DELEGATION' = args.child.tier === 1 ? 'DIRECT' : 'DELEGATION';
+  const fallback = args.child.isFallbackMode() ||
+    (args.subject === 'RESULT' && (args.payload as Result).producedBy?.viaFallback === true);
+  const planKind: 'DIRECT' | 'DELEGATION' = args.child.tier === 1 || fallback ? 'DIRECT' : 'DELEGATION';
   const planKindHint =
     planKind === 'DIRECT'
       ? // The checklist is scoped to the artefact KIND, not just the tier. The
@@ -743,7 +750,7 @@ export async function llmVerdict(args: {
     // no way to see a plan promising tools the child cannot call — the
     // app-task-tracker run's UI-verification phase was approved while
     // planning seven validate_html calls on an HTTP-bucket child.
-    args.child.tier === 1
+    planKind === 'DIRECT'
       ? `Child's DECLARED TOOLS (its ONLY executable surface): ${args.child.toolNames().join(', ') || '(none)'}`
       : `Tools inherited by NEW children created by this delegator: ${args.child.toolNames().join(', ') || '(none)'}. Existing children retain their own declared tools. The delegator does not call these tools itself.`,
     `Subject kind: ${subjectHint}`,

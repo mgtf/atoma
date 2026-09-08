@@ -106,14 +106,17 @@ export abstract class Atom {
     role: LlmCallRole,
     args: Omit<LlmCompletionRequest, 'systemPrompt' | 'role' | 'actor' | 'context' | 'model'> & {
       model?: string;
+      systemPromptOverride?: string;
     }
   ): LlmCompletionRequest {
-    const { model, ...rest } = args;
+    const { model, systemPromptOverride, ...rest } = args;
     const context = this.injectedContext;
     return {
       ...rest,
       model: model ?? this.model,
-      systemPrompt: this.effectiveSystemPrompt(),
+      systemPrompt: systemPromptOverride === undefined
+        ? this.effectiveSystemPrompt()
+        : foldContextBlocks(systemPromptOverride, context),
       role,
       actor: { name: this.name, tier: this.tier },
       ...(context.length > 0 ? { context: [...context] } : {}),

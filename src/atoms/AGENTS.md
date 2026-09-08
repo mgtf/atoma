@@ -26,6 +26,9 @@ Neighbours:
   L2 — child plans already go through FAN-OUT validation. Do not coerce
   an explicit L3 `concat` into `sequential`.
 - Escalation branches a type and toggles parent fallback in a `try/finally`.
+  Persist capability prompts only; task text, seed instructions and diagnostics
+  belong to the current instance. Validator diagnostics are fallible evidence.
+  Fallback uses an explicit direct-executor system role, not the delegator role.
 - `pendingStrategy` couples `plan()` and `execute()` on the same instance. Never
   call `execute()` without the corresponding plan.
 - `fallbackMode` bypasses registry delegation and calls self-plan/self-execute.
@@ -77,6 +80,7 @@ load-bearing.
 
 ## Aggregation and dispatch shape
 
+- `llm-synthesize` merges text without tools; file assembly requires an L1 phase.
 - Aggregation is behavioral: `concat` and `llm-synthesize` dispatch orthogonal
   subtasks in parallel; `sequential` dispatches shared-artifact phases in order
   and threads `previousStepSummary` plus declared `outputs` as
