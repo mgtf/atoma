@@ -174,6 +174,11 @@ Read the archived sections before changing something that merely looks odd.
 - Context injection appends and is composed later; do not mutate base prompts.
 - `Atom.toolNames()` is public while tool objects remain protected by design.
 - Capability bucket order is semantic; HTTP precedes web when signatures overlap.
+- Planning and validation prompts match children on CAPABILITY (tool
+  signature plus workflow shape), never on task domain, and validator-authored
+  `descriptionReplace` passes through `resolveCreationDescription`. The earlier
+  domain-match rule could only spawn identical clones once descriptions became
+  capability labels; the theme travels in the subtask description.
 - The full-stack canonical pairs Node-server and browser tools without a static
   server. It precedes HTTP in bucket selection; HTTP-only and static-web
   canonicals retain their narrower scopes and identities.

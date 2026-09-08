@@ -85,7 +85,7 @@ const CAPABILITY_BUCKETS: readonly CapabilityBucket[] = [
     id: 'web-artefact-build+validate',
     required: ['write_file', 'start_static_server', 'validate_html'],
     leafLabel:
-      'single-file web artefact builder: writes an index.html on disk, serves it locally, and iterates against headless-browser validation (validate_html) until zero console errors',
+      'single-file web artefact builder: writes an index.html on disk, serves it locally, and iterates against headless-browser validation (validate_html) until the required behaviour is proven by interactions and a smoke check',
     orchestratorLabel:
       'single-file web artefact orchestrator: routes a leaf task to a tier-1 builder that writes an index.html on disk, serves it, and validates via headless browser (validate_html)',
   },
@@ -562,22 +562,16 @@ export const CANONICAL_L2_WEB_DESCRIPTION =
 export const CANONICAL_L2_HTTP_DESCRIPTION =
   'Node HTTP server orchestrator: routes a leaf task to a tier-1 builder that writes server code, installs dependencies, boots a Node process, and probes endpoints via fetch_url';
 
-export const CANONICAL_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
-  `You are an L1 molecule with ONE narrow responsibility.`,
-  `DO NOT attempt to solve the whole task — only the specific subtask you are handed.`,
-  `Call tools sequentially to produce your single output. Return a structured`,
-  `{"output", "summary"} JSON at the end.`,
-  ``,
-  `EDIT DISCIPLINE: when FIXING or revising an existing file, use edit_file`,
-  `(exact str_replace) instead of re-emitting the whole file through`,
-  `write_file — you only pay for the changed span. Reserve write_file for`,
-  `the FIRST version of a file or a genuine full rewrite.`,
-  ``,
-  `Scope boundary: if the subtask seems to require coordinating with other`,
-  `parallel subtasks through UNDECLARED dependencies, report the planning issue.`,
-  `In sequential phases, read and preserve the prior outputs supplied in your`,
-  `inputs: consuming them is expected and does not expand your write scope.`,
-  ``,
+
+/**
+ * Browser-bucket evidence contract. ONE definition, consumed by the canonical
+ * web L1 and by the web branch of `buildNarrowL1Prompt`: the narrow web
+ * template used to end on `"summary": "<one sentence>"` with no reporting
+ * contract at all, so a branched web L1 obeyed its numbered sequence and was
+ * rejected for narrative self-reporting — while dynamically created web L1s
+ * received the SHELL contract (record_probe, {"cmd"} probes) on top.
+ */
+export const WEB_GROUND_TRUTH_EVIDENCE_LINES: readonly string[] = [
   `RESULT-REPORTING CONTRACT (mandatory): the {"output", "summary"} envelope`,
   `you return MUST embed a verbatim "== GROUND TRUTH ==" block inside`,
   `"summary" — one headline sentence, a real newline ("\\n"), then`,
@@ -597,11 +591,32 @@ export const CANONICAL_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
   `              "probes": [{"probe": "${WEB_PROBE_DISCRIMINANT}", "url": "<url>",`,
   `                          "ok": true, "consoleErrors": 0,`,
   `                          "failedRequests": 0, "smoke": "<expr>",`,
-  `                          "smokeResult": true}] }`,
-  `Worked example of a GOOD summary:`,
-  `  "summary": "Pomodoro timer built and validated.\\n== GROUND TRUTH ==\\nindex.html (14231 bytes) — list_files: index.html\\nserved at http://localhost:53311/\\nvalidate_html: ok=true, consoleErrors=0, failedRequests=0\\nsmoke: window.__pomo.remaining < 1500 after Start click -> true\\nwindow.__pomo = { remaining: 1497, running: true, cycles: 0, mode: 'WORK' }"`,
+  `                          "smokeResult": {"ok": true, "checks": {...}}}] }`,
+  `Worked example of a GOOD summary (the smoke is ONE structured object with`,
+  `an explicit ok, and it asserts state the page commits synchronously — it`,
+  `never waits for real time to pass):`,
+  `  "summary": "Pomodoro timer built and validated.\\n== GROUND TRUTH ==\\nindex.html (14231 bytes) — list_files: index.html\\nserved at http://localhost:53311/\\nvalidate_html: ok=true, consoleErrors=0, failedRequests=0\\ninteractions: [{type:'click', selector:'#start'}]\\nsmoke: (() => { const t = window.__pomo; const checks = { running: t.running === true, workMode: t.mode === 'WORK', startDisabled: document.getElementById('start').disabled }; return { ok: Object.values(checks).every(Boolean), checks }; })() -> {ok:true, checks:{running:true, workMode:true, startDisabled:true}}"`,
   ``,
 ...manifestWriterLines('web').map((l) => `${l}`),
+];
+
+export const CANONICAL_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
+  `You are an L1 molecule with ONE narrow responsibility.`,
+  `DO NOT attempt to solve the whole task — only the specific subtask you are handed.`,
+  `Call tools sequentially to produce your single output. Return a structured`,
+  `{"output", "summary"} JSON at the end.`,
+  ``,
+  `EDIT DISCIPLINE: when FIXING or revising an existing file, use edit_file`,
+  `(exact str_replace) instead of re-emitting the whole file through`,
+  `write_file — you only pay for the changed span. Reserve write_file for`,
+  `the FIRST version of a file or a genuine full rewrite.`,
+  ``,
+  `Scope boundary: if the subtask seems to require coordinating with other`,
+  `parallel subtasks through UNDECLARED dependencies, report the planning issue.`,
+  `In sequential phases, read and preserve the prior outputs supplied in your`,
+  `inputs: consuming them is expected and does not expand your write scope.`,
+  ``,
+  ...WEB_GROUND_TRUTH_EVIDENCE_LINES,
 ];
 
 export const CANONICAL_L2_SYSTEM_PROMPT_LINES: readonly string[] = [
@@ -637,7 +652,9 @@ export const CANONICAL_HTTP_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
   `     edit_file (exact str_replace — do NOT re-emit the whole file through`,
   `     write_file for a small fix), kill+respawn via a second`,
   `     start_node_server call. Up to 4 iterations.`,
-  `  7. return JSON {"output": <url or summary>, "summary": "<one sentence>"}`,
+  `  7. return the {"output", "summary"} envelope exactly as the`,
+  `     RESULT-REPORTING CONTRACT below specifies (structured output, headline`,
+  `     plus "== GROUND TRUTH ==" block in summary) — never a one-line summary.`,
   ``,
   `JSON.parse IS SYNTAX, NOT REQUEST VALIDATION. For every documented body`,
   `field, enforce the semantic contract the task/spec states: trim and reject`,
@@ -708,9 +725,11 @@ export const CANONICAL_HTTP_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
 
 export const CANONICAL_HTTP_L2_SYSTEM_PROMPT_LINES: readonly string[] = [
   `You are a domain-neutral L2 cell for Node HTTP server builds.`,
-  `DELEGATION DISCIPLINE: you NEVER invoke elements yourself. Decompose the task`,
-  `into orthogonal L1 molecules (server code, client stub, schema file, etc.)`,
-  `and delegate each to a tier-1 molecule.`,
+  `DELEGATION DISCIPLINE: you NEVER invoke elements yourself. Delegate the`,
+  `leaf work to tier-1 molecules. A server, the schema it loads and the client`,
+  `code that imports it are ONE coupled deliverable: keep them in ONE leaf`,
+  `task (or sequential phases), never in parallel molecules that must each`,
+  `guess the shared API surface. Split only genuinely orthogonal artefacts.`,
   `Prefer reusing the existing canonical HTTP L1 via prefilter — only`,
   `request a new L1 when the element set genuinely diverges.`,
   ``,
@@ -761,8 +780,11 @@ export const GROUND_TRUTH_EVIDENCE_LINES: readonly string[] = [
   `                 "stdout": "<verbatim>", "note": "missing-args case"}`,
   `              ] }`,
   `Rules for "probes":`,
-  `  - one entry per run_shell command you actually executed, with the`,
-  `    exit code you actually observed — never the one you expected.`,
+  `  - one entry per shell command that IS evidence (an invocation of the`,
+  `    artefact, a structural check of a file you wrote), with the exit code`,
+  `    you actually observed — never the one you expected. Scratch commands`,
+  `    (mkdir, ls, cat while exploring) are not evidence and are omitted, the`,
+  `    same split the probe manifest below applies.`,
   `  - if you compare against an expectation, report BOTH`,
   `    "expectedStdout" and "actualStdout" plus "match": true|false.`,
   `    Reporting "match": false is NOT a failure on your part; hiding a`,

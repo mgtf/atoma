@@ -251,9 +251,11 @@ export class L1Atom extends Atom {
       ``,
       `If the task produces a web artifact (HTML / JS) AND a validate_html tool is`,
       `available, your plan MUST include a final validation step: after writing`,
-      `files and starting the server, call validate_html on the server URL; if it`,
-      `returns errors, read the offending file, fix it, rewrite, and re-validate`,
-      `until validate_html reports no errors. Only then return success.`,
+      `files and starting the server, call validate_html on the server URL with`,
+      `interactions and/or a smoke check that PROVES the required behaviour; if a`,
+      `required claim fails, read the offending file, fix it with edit_file, and`,
+      `re-validate. A clean console alone is not success: return success only`,
+      `when the required claims pass.`,
       ``,
       `CRITICAL — plan shape (aspirational, no literal payloads):`,
       `Describe your intended tool sequence in the "proposedAction" field as PROSE`,
@@ -312,13 +314,19 @@ export class L1Atom extends Atom {
         ? `  does nothing has no errors either. If the app is interactive (clicks,`
         : null,
       hasValidator
-        ? `  forms, keys), you MUST pass an "interactions" array that exercises the`
+        ? `  forms, keys), PROVE the main user flow: either replay it through the`
         : null,
       hasValidator
-        ? `  main user flow AND a "smoke" JS expression that asserts the state`
+        ? `  "interactions" array (selector-based) and let "smoke" only READ the`
         : null,
       hasValidator
-        ? `  actually changed. Example smoke for a clickable grid:`
+        ? `  resulting state, or send interactions: [] and drive every step inside`
+        : null,
+      hasValidator
+        ? `  the smoke — never both, a self-driving smoke discards the interactions.`
+        : null,
+      hasValidator
+        ? `  The smoke asserts that state actually changed. Example for a grid:`
         : null,
       hasValidator
         ? `    "(() => { const revealed = document.querySelectorAll('.revealed').length; return { ok: revealed > 0, revealed }; })()"`
@@ -336,10 +344,10 @@ export class L1Atom extends Atom {
         ? `  cause (stacking contexts, pointer-events, missing listeners, wrong`
         : null,
       hasValidator
-        ? `  coords, shader version mismatch...), rewrite with write_file, and`
+        ? `  coords, shader version mismatch...), apply the fix with edit_file, and`
         : null,
       hasValidator
-        ? `  re-validate the SAME required behaviour. Loop up to 5 times. Return success`
+        ? `  re-validate the SAME required behaviour. Up to 4 iterations. Return success`
         : null,
       hasValidator
         ? `  only when required claims pass; otherwise report what failed or remains unverified.`

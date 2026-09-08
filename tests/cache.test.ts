@@ -267,6 +267,6 @@ describe('VALIDATION_SYSTEM_PROMPT — Haiku cache threshold', () => {
     expect(VALIDATION_SYSTEM_PROMPT).toMatch(/Example 1 — DELEGATION plan, approved/);
     expect(VALIDATION_SYSTEM_PROMPT).toMatch(/Example 4 — DIRECT plan, rejected for materially wrong artefact/);
     expect(VALIDATION_SYSTEM_PROMPT).toMatch(/Example 5 — RESULT, ground-truth evidence contradicts child/);
-    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/Example 8 — BRANCH across domain/);
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/Example 8 — BRANCH for a capability defect/);
   });
 });

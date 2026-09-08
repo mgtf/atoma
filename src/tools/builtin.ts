@@ -569,7 +569,7 @@ export function runShellTool(opts: BuiltinToolOptions): BuiltinTool {
       description: [
         'Run an allowlisted shell command inside the workspace and return stdout/stderr.',
         `Allowed executables: ${[...allowlist].join(', ')}.`,
-        'Do NOT use this for long-running processes (use start_static_server instead).',
+        'Do NOT use this for long-running processes (start_static_server or start_node_server own those).',
       ].join(' '),
       inputSchema: {
         type: 'object',

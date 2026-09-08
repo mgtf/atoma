@@ -70,9 +70,8 @@ import type { SkillRegistry } from '../skills/registry.js';
 /**
  * Fresh narrow-domain system prompt for an L2 branched after escalation.
  * Same purpose as `buildNarrowL1Prompt`: start the branch clean instead
- * of inheriting the failed parent's prompt. The branched atom's
- * rebrandPersona pass at `registry.branch` time will swap in the branch's
- * actual taxonomy name on the "You are {Name}" line.
+ * of inheriting the failed parent's prompt. The template is capability-only:
+ * it names no atom and no task, so nothing in it needs rebranding.
  */
 export function buildNarrowL2Prompt(
   subtaskDescription: string,
@@ -562,12 +561,14 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       `  - "reuse": pick an existing L2 cell from the catalog that fits`,
       `  - "create": design a new L2 cell and register it (provide a seed)`,
       ``,
-      `CRITICAL — domain-match rule:`,
-      `  ONLY "reuse" an L2 whose description matches the task's domain. If the`,
-      `  best candidate's description names a different domain than the task`,
-      `  (even when the workflow looks similar), DO NOT reuse it — its prompt`,
-      `  will bias downstream decisions and you'll escalate. Use "create" with a`,
-      `  fresh narrow seed instead.`,
+      `CRITICAL — capability-match rule:`,
+      `  Catalog descriptions are CAPABILITY labels (the tools a cell's molecules`,
+      `  can hold and the workflow they perform), never task themes. "reuse" the`,
+      `  L2 whose capability covers the phase; the task's domain travels in your`,
+      `  phase description. Do NOT "create" because the domain is new — that`,
+      `  spawns an identical clone with zero trust. "create" only when the`,
+      `  REQUIRED CAPABILITY diverges: a phase needs a tool no listed cell holds`,
+      `  (see the tools column below) or a workflow shape none performs.`,
       ``,
       `CRITICAL — "preferredChild" naming rule:`,
       `  - If you set "preferredChild" on a subtask, it MUST be the EXACT name of`,
@@ -908,6 +909,14 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
           return child;
         }
         const { additionalContext, ...persistentModifications } = verdict.modifications;
+        // Same rule as L2: the registry description stays a capability label.
+        if (persistentModifications.descriptionReplace !== undefined) {
+          persistentModifications.descriptionReplace = resolveCreationDescription(
+            persistentModifications.descriptionReplace,
+            this.registry.getByName(child.name)?.tools ?? [],
+            2
+          );
+        }
         if (verdict.scope === 'patch') {
           const patched = this.registry.patch(
             child.name,

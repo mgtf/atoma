@@ -53,6 +53,7 @@ import {
   CANONICAL_HTTP_L1_SYSTEM_PROMPT_LINES,
   extractBranchDiagnostic,
   GROUND_TRUTH_EVIDENCE_LINES,
+  WEB_GROUND_TRUTH_EVIDENCE_LINES,
   lastResultVerdictSkillFollowed,
   resolveCreationDescription,
 } from './capability.js';
@@ -196,7 +197,10 @@ export function buildNarrowL1Prompt(
       `  4. if validation fails: read_file, diagnose, apply the fix with`,
       `     edit_file (exact str_replace — no whole-file rewrite), re-validate.`,
       `     Up to 4 iterations.`,
-      `  5. return JSON {"output": <url or summary>, "summary": "<one sentence>"}`,
+      `  5. return the {"output", "summary"} envelope per the RESULT-REPORTING`,
+      `     CONTRACT below — never a one-line summary.`,
+      ``,
+      ...WEB_GROUND_TRUTH_EVIDENCE_LINES,
       ``,
       SMOKE_DESIGN_GUIDANCE,
     ];
@@ -489,15 +493,17 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       `  - "mutualize": delegate to a peer L2 cell when their specialty fits better`,
       `Prefer "reuse" over "create" whenever possible.`,
       ``,
-      `CRITICAL — domain-match rule:`,
-      `  ONLY "reuse" an L1 whose catalog description matches the task's domain.`,
-      `  If the best candidate's description names a DIFFERENT domain than the`,
-      `  task (e.g. you need a "dashboard builder" and the candidate is described`,
-      `  as a "Mario-like platformer builder"), DO NOT reuse it — even if its`,
-      `  toolset is the same and its workflow "looks similar". That atom's system`,
-      `  prompt is domain-biased and will fight your task for 5 iterations before`,
-      `  escalating. Use "create" with a fresh narrow seed instead. Cross-domain`,
-      `  reuse is the #1 failure mode in the training trace.`,
+      `CRITICAL — capability-match rule:`,
+      `  Catalog descriptions are CAPABILITY labels (tool signature + workflow`,
+      `  shape), never task themes. "reuse" an L1 whose capability covers the`,
+      `  subtask: a molecule that writes, serves and browser-validates a page`,
+      `  builds a dashboard as well as a game — the theme travels in your`,
+      `  subtask description, not in the molecule. Do NOT "create" a new L1`,
+      `  because the task's domain is new: that spawns an identical clone and`,
+      `  starts its trust from zero. "create" only when the REQUIRED CAPABILITY`,
+      `  diverges — a tool the subtask needs that no catalog L1 holds, or a`,
+      `  workflow shape (HTTP probe loop vs browser loop vs file authoring) that`,
+      `  no catalog L1 performs.`,
       ``,
       `CRITICAL — "preferredChild" naming rule:`,
       `  - If you set "preferredChild" on a subtask, it MUST be the EXACT name of`,
@@ -1203,12 +1209,12 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       // Default system prompt emphasises SINGLE-RESPONSIBILITY. A freshly
       // created L1 should be a narrow specialist — one concern, one output
       // shape — not a Swiss-army knife that tries to solve the whole task.
-      systemPrompt: [
-        basePrompt,
-        ``,
-        ...GROUND_TRUTH_EVIDENCE_LINES,
-
-      ].join('\n'),
+      // `buildNarrowL1Prompt` already carries the evidence contract that
+      // matches the bucket (web, http, full-stack or the generic shell one).
+      // Appending the shell contract again gave HTTP/generic L1s two
+      // reporting contracts and web L1s a record_probe instruction for a
+      // tool they do not hold, with two incompatible "probes" schemas.
+      systemPrompt: basePrompt,
       tools: mergedTools,
       params: (seed.params ?? this.params),
       createdBy: this.name,
@@ -1323,6 +1329,16 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           return fresh;
         };
         const { additionalContext, ...persistentModifications } = verdict.modifications;
+        // The registry description is the prefilter's routing key and must
+        // stay a capability label; a validator-authored theme ("Minesweeper
+        // builder") falls back to the tool-derived label like any seed.
+        if (persistentModifications.descriptionReplace !== undefined) {
+          persistentModifications.descriptionReplace = resolveCreationDescription(
+            persistentModifications.descriptionReplace,
+            this.registry.getByName(child.name)?.tools ?? [],
+            1
+          );
+        }
         if (verdict.scope === 'patch') {
           const patched = this.registry.patch(
             child.name,
