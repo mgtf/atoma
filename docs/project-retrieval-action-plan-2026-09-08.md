@@ -1,7 +1,8 @@
 # Project retrieval — implementation action plan
 
 Date: 2026-09-08, progress updated 2026-09-09. Status: evaluation instruments,
-A/C characterization driver and an archived development pilot delivered.
+A/C characterization driver, archived development pilot and the typed host
+retrieval boundary delivered.
 Production retrieval and retrieval-provider integrations remain unimplemented.
 
 ## Implementation progress
@@ -27,6 +28,15 @@ maintenance behavior but incomplete source-supported delivery. This tiny
 sample identifies development failure cases, not a retrieval benefit. The
 [retrieval protocol](../benchmark/retrieval/PROTOCOL.md) still requires a new
 paired control when the search treatment exists.
+
+Steps 4–5 now have a [reviewed host contract](project-retrieval-host-contract-2026-09-09.md)
+and an opt-in `startTask` library binding. `search_project_docs` is intercepted
+before the worker, with strict query-only arguments, pre/post authorization,
+bounded exact-source results, cancellation and run-owned cleanup. The worker
+handshake and default tool list remain unchanged. Mocked service, L1 transport,
+runner and container integration tests exercise the boundary. Production
+corpus ingestion, the current-access store resolver, cross-process coordinator
+activation and FTS5 are still to implement; the CLI does not enable search.
 
 ## Objective and implementation order
 
@@ -220,31 +230,31 @@ ordinary tests use mocks and never call paid providers.
 
 **Purpose:** add a narrow host capability without weakening worker isolation.
 
-- [ ] Document the actual process chain: project coordinator → host-side run
+- [x] Document the actual process chain: project coordinator → host-side run
   process → `ToolExecutor` → container worker. The host run process already
   receives the selected product-store path; the worker does not.
-- [ ] Define a composite executor in `src/tools/`, assembled by
+- [x] Define a composite executor in `src/tools/`, assembled by
   `src/run/toolBackend.ts`. It routes exactly the new search name to an
   injected host implementation and existing names to the selected backend.
-- [ ] Keep local and container modes on the same search implementation and
+- [x] Keep local and container modes on the same search implementation and
   shared request/response schemas. No worker callback protocol is required
   for this design: intercept the L1 call before sending anything to the worker.
-- [ ] Preserve the worker's handshake as the authority for worker tools.
+- [x] Preserve the worker's handshake as the authority for worker tools.
   Advertise host tools from a separate explicit declaration list and merge
   once. Reject duplicate names; never advertise host search as worker support.
 - [ ] Bind organisation, project, run, caller, snapshot and permitted corpus
   to trusted run construction. Pass the necessary immutable metadata across
   `spawnRun`; do not derive authority from task prose or mutable workspace files.
-- [ ] Define how current access is rechecked before dispatch and before an
+- [x] Define how current access is rechecked before dispatch and before an
   in-flight result is returned. A launch snapshot alone is insufficient for
   revocation. Prefer the existing authorization/store seam; do not introduce
   an unauthenticated host HTTP service for the worker.
-- [ ] Define the operator-local case explicitly: it can search only its
+- [x] Define the operator-local case explicitly: it can search only its
   supplied local corpus. Absence of tenant identity must never become a
   wildcard over organisation documents.
-- [ ] Preserve tool-scope enforcement, branch identity, recording wrappers,
+- [x] Preserve tool-scope enforcement, branch identity, recording wrappers,
   call budgets, deadlines, and cleanup around the composite executor.
-- [ ] Review adversarial cases before coding: forged scope, host path inputs,
+- [x] Review adversarial cases before coding: forged scope, host path inputs,
   duplicate tool names, calls originating from worker output, malicious source
   text, revocation races, and a backend unavailable during a run.
 
@@ -259,30 +269,36 @@ ordinary tests use mocks and never call paid providers.
 out of the worker, credential mount, store mount, or generic host execution
 surface is part of the implementation.
 
+**Implemented boundary:** [design and activation limits](project-retrieval-host-contract-2026-09-09.md),
+[host element](../src/tools/projectRetrieval.ts),
+[composite executor](../src/tools/projectRetrievalExecutor.ts), and optional
+`startTask` injection. The trusted library caller must supply an explicit
+matching run ID. The tenant coordinator/store resolver is not wired yet.
+
 ### Step 5 — define one typed search contract
 
 **Purpose:** allow backend changes without changing what L1 agents invoke.
 
-- [ ] Define a runtime schema once in a proposed
+- [x] Define a runtime schema once in
   `src/contracts/projectRetrieval.ts`; infer types from it everywhere.
-- [ ] Use `search_project_docs` as the proposed invocation name. Finalize it
-  before registration; afterwards treat it as an immutable wire contract.
-- [ ] Limit model input to a query and bounded result/excerpt requests.
+- [x] Register `search_project_docs` as the immutable invocation name, with
+  a separate host element identity; never add it to the worker handshake.
+- [x] Limit model input to a query and bounded result/excerpt requests.
   Tenant IDs, database paths, URLs, SQL, provider selectors, index names,
   credentials and raw backend filters are not model arguments.
-- [ ] Specify results with status, corpus/snapshot generation, truncation
+- [x] Specify results with status, corpus/snapshot generation, truncation
   information, and passages carrying document ID, relative path, source
   digest, source span, heading context and original excerpt.
-- [ ] Separate `ok` with zero matches from `unavailable`, invalid input, and
+- [x] Separate `ok` with zero matches from `unavailable`, invalid input, and
   denied access. Denials reveal no existence or counts for inaccessible data.
-- [ ] Treat ranking scores as optional diagnostics. Do not expose them as
+- [x] Treat ranking scores as optional diagnostics. Do not expose them as
   correctness probabilities or make cross-backend scores a public threshold.
-- [ ] Enforce query, candidate, excerpt, total-response and execution limits.
+- [x] Enforce query, candidate, excerpt, total-response and execution limits.
   Resolve limits once through trusted configuration and record them in the
   experiment. Caller-requested limits can only narrow the configured bounds.
-- [ ] Specify query parsing, punctuation and Unicode behavior. Plain text
+- [x] Specify query parsing, punctuation and Unicode behavior. Plain text
   queries must not become arbitrary SQL or an unrestricted FTS expression.
-- [ ] Define a host-only backend interface accepting the trusted scope,
+- [x] Define a host-only backend interface accepting the trusted scope,
   validated query, deadline and cancellation signal, returning the shared
   result shape. Lifecycle/index-building operations remain operator/runtime
   operations, not additional L1 elements.

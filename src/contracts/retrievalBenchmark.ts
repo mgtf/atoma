@@ -1,8 +1,9 @@
 import { z } from 'zod';
+import { projectDocumentDigestSchema } from './projectRetrieval.js';
 
 /** Evaluation-only contracts. These do not declare an L1 search element. */
 const id = z.string().regex(/^[a-z0-9][a-z0-9-]{0,79}$/);
-export const retrievalDigestSchema = z.string().regex(/^[a-f0-9]{64}$/);
+export const retrievalDigestSchema = projectDocumentDigestSchema;
 const relativePath = z.string().min(1).max(240).refine(
   value => /^[A-Za-z0-9_./-]+$/.test(value) &&
     value.split('/').every(part => part !== '' && part !== '.' && part !== '..'),

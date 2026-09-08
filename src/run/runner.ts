@@ -27,7 +27,8 @@ import { isTraceRunId, TraceRecorder, runLabelFromGoal } from '../viz/trace.js';
 import { formatDecompositionReport, formatTimeoutPostMortem } from '../viz/report.js';
 import { RecordingLlmClient } from '../viz/recordingLlm.js';
 import { RecordingRegistry } from '../viz/recordingRegistry.js';
-import { containerToolBackend, localToolBackend } from './toolBackend.js';
+import { containerToolBackend, localToolBackend, withProjectRetrievalBackend } from './toolBackend.js';
+import { validateProjectRetrievalBinding, type ProjectRetrievalBinding } from '../tools/projectRetrieval.js';
 import { baselineModel, runFrontierBaseline } from './baseline.js';
 import {
   assertIsolationBoundary,
@@ -414,6 +415,8 @@ export async function startTask(
     onWedged?: () => void;
     providerEnv?: NodeJS.ProcessEnv;
     requireIsolation?: boolean;
+    /** Trusted library injection; the CLI/coordinator do not construct one yet. */
+    projectRetrieval?: ProjectRetrievalBinding;
   }
 ): Promise<RunHandle> {
   // PROVIDER CREDENTIALS ARE A PER-RUN VALUE (invariant T10). `providerEnv`
@@ -484,6 +487,18 @@ export async function startTask(
     throw new RunnerConfigError(
       `${ARTIFACT_MANIFEST_PATH_ENV} requires ATOMA_RUN_ID for correlation`
     );
+  }
+  let retrievalBinding: ProjectRetrievalBinding | undefined;
+  if (opts?.projectRetrieval) {
+    try { retrievalBinding = validateProjectRetrievalBinding(opts.projectRetrieval); }
+    catch { throw new RunnerConfigError('invalid host project retrieval binding'); }
+    if (!requestedRunId || retrievalBinding.scope.runId !== requestedRunId) {
+      throw new RunnerConfigError('project retrieval requires a matching explicit ATOMA_RUN_ID');
+    }
+    if ((process.env['ATOMA_TENANT_RUN'] === '1' || providerEnv['ATOMA_TENANT_RUN'] === '1') &&
+        retrievalBinding.scope.kind !== 'tenant') {
+      throw new RunnerConfigError('tenant runs cannot use an operator retrieval scope');
+    }
   }
   // Validate every fallible launch argument BEFORE mutating the workspace,
   // opening stores or starting the container/egress backend. The old order
@@ -651,7 +666,7 @@ export async function startTask(
   // with only the workspace mounted and no route out. The swap is possible
   // at ONE point because `ToolExecutor` is two methods and nothing in the
   // control plane reads the workspace except through it.
-  const backend = args.container
+  const selectedBackend = args.container
     ? await containerToolBackend({
         workspaceRoot,
         ...(args.workerImage ? { image: args.workerImage } : {}),
@@ -659,6 +674,9 @@ export async function startTask(
         runId: `${profile.id}-${process.pid}`,
       })
     : localToolBackend({ workspaceRoot, logger: consoleLogger });
+  const backend = retrievalBinding
+    ? await withProjectRetrievalBackend(selectedBackend, retrievalBinding, { signal, deadlineAt })
+    : selectedBackend;
   const toolDecls = backend.toolDecls;
 
   console.log(`workspace: ${backend.rootLabel}`);

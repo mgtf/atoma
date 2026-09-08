@@ -14,6 +14,7 @@ import { manifestWriterLines } from '../src/contracts/probeManifest.js';
 import {
   BUILTIN_TOOL_ELEMENTS,
   BUILTIN_TOOL_NAMES,
+  HOST_TOOL_NAMES,
 } from '../src/contracts/toolTaxonomy.js';
 import { makeCtx, jsonText } from './helpers.js';
 import { makePlan } from './helpers/factories.js';
@@ -75,13 +76,13 @@ describe('undeclaredToolMentions', () => {
    * structural now. Order is compared too: both sides are literal lists, so
    * a mirrored order costs nothing and makes the drift readable in the diff.
    */
-  it('mirrors defaultBuiltinTools exactly — the sync is enforced, not documented', () => {
+  it('mirrors worker builtins plus the explicit opt-in host vocabulary', () => {
     const dir = mkdtempSync(join(tmpdir(), 'atoma-vocab-'));
     try {
       const declared = defaultBuiltinTools({ sandbox: new ToolSandbox(dir) }).map(
         (t) => t.declaration
       );
-      expect(BUILTIN_TOOL_VOCABULARY).toEqual(declared.map((tool) => tool.name));
+      expect(BUILTIN_TOOL_VOCABULARY).toEqual([...declared.map((tool) => tool.name), ...HOST_TOOL_NAMES]);
       expect(BUILTIN_TOOL_NAMES).toEqual(declared.map((tool) => tool.name));
       expect(declared.map((tool) => tool.element)).toEqual(
         BUILTIN_TOOL_ELEMENTS.map(({ number, name, symbol }) => ({ number, name, symbol }))

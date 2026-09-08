@@ -4,19 +4,16 @@ import { defaultBuiltinTools } from '../tools/builtin.js';
 import { ContainerToolExecutor, DEFAULT_WORKER_IMAGE } from '../tools/containerExecutor.js';
 import { startEgressSidecar } from '../tools/egressSidecar.js';
 import type { Logger, Tool, ToolExecutor } from '../core/types.js';
+import { createProjectRetrievalTool, type ProjectRetrievalBinding, type ProjectRetrievalCallContext } from '../tools/projectRetrieval.js';
+import { projectRetrievalExecutor } from '../tools/projectRetrievalExecutor.js';
 
 /**
  * Where a run's side effects happen.
  *
- * Two backends behind one shape, because the choice touches five lines of
- * `runTask` and nothing else — the architecture already made this cheap:
- * `ToolExecutor` is two methods, the tool layer touches NO store (verified:
- * `src/tools/*` imports only node builtins, puppeteer and its own siblings),
- * and no part of the control plane reads the workspace directly — every
- * access, including the ground-truth read-back probe, goes through
- * `ctx.tools`. So moving the tool layer into a container moves exactly the
- * side-effecting half and leaves the supervise loop, the LLM calls, the atom
- * registry and the skill store untouched.
+ * Both worker backends implement ToolExecutor. Ground-truth probes use that
+ * same interface; supervision and provider calls stay on the host. Optional
+ * host retrieval is composed separately and receives its authority/service
+ * by injection, without giving the worker store or credential access.
  */
 export interface ToolBackend {
   /** Passed to `RunContext.tools`. */
@@ -27,6 +24,32 @@ export interface ToolBackend {
   readonly rootLabel: string;
   /** Release children/containers. Must be safe to call twice. */
   cleanup(): Promise<void>;
+}
+
+/** Assemble the host capability around either backend, before L1/trace wrappers. */
+export async function withProjectRetrievalBackend(
+  backend: ToolBackend, binding: ProjectRetrievalBinding, context: ProjectRetrievalCallContext
+): Promise<ToolBackend> {
+  let retrieval: ReturnType<typeof createProjectRetrievalTool> | undefined;
+  let cleanup: Promise<void> | undefined;
+  const close = (): Promise<void> => {
+    cleanup ??= (async () => {
+      const results = await Promise.allSettled([
+        Promise.resolve().then(() => retrieval?.close()),
+        Promise.resolve().then(() => backend.cleanup()),
+      ]);
+      if (results.some(r => r.status === 'rejected')) throw new Error('project retrieval backend cleanup failed');
+    })();
+    return cleanup;
+  };
+  try {
+    retrieval = createProjectRetrievalTool(binding, context);
+    const composite = projectRetrievalExecutor(backend.executor, backend.toolDecls, retrieval);
+    return { ...backend, ...composite, cleanup: close };
+  } catch (error) {
+    await close();
+    throw error;
+  }
 }
 
 /** In-process tools against a local sandbox. The historical behaviour. */

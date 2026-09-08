@@ -157,8 +157,14 @@ export const BUILTIN_TOOL_ELEMENTS: readonly ToolElement[] = BUILTIN_TOOL_NAMES.
   }
 );
 
+/** Host capabilities are opt-in and never part of the worker handshake. */
+export const HOST_TOOL_NAMES = ['search_project_docs'] as const;
+export const HOST_TOOL_ELEMENTS: readonly ToolElement[] = HOST_TOOL_NAMES.map(
+  (toolName, index) => ({ ...ELEMENTS[BUILTIN_TOOL_NAMES.length + index]!, toolName })
+);
+
 const TOOL_ELEMENTS_BY_NAME = new Map(
-  BUILTIN_TOOL_ELEMENTS.map((element) => [element.toolName, element] as const)
+  [...BUILTIN_TOOL_ELEMENTS, ...HOST_TOOL_ELEMENTS].map((element) => [element.toolName, element] as const)
 );
 
 export function elementForTool(toolName: string): ToolElement | undefined {

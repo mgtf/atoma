@@ -85,7 +85,9 @@ those cases when evaluating the next increment. The driver uses host
 subscriptions, empty starting state and development questions; treatment B,
 paid API campaigns and the
 confirmatory statistical report remain later increments.
-Then implement and test the scoped host execution
-contract and SQLite FTS5 backend before the paired A/B/C comparison.
+The [scoped host execution contract](../../docs/project-retrieval-host-contract-2026-09-09.md)
+and optional library executor are now implemented with injected services.
+Next implement source ingestion, the current-access store resolver and SQLite
+FTS5 before activating a retrieval treatment and the paired A/B/C comparison.
 Keep production tenant authorization, worker protocol isolation, indexing and
 operational lifecycle tests separate from the fixture scorer's guarantees.

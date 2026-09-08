@@ -2,6 +2,7 @@ import type { GenerationParams, Result, RunContext, Task, Tier, Verdict } from '
 import type { Atom } from '../core/atom.js';
 import { parseVerdict } from './json.js';
 import { probeGroundTruth } from './groundTruth.js';
+import { BUILTIN_TOOL_NAMES, HOST_TOOL_NAMES } from '../contracts/toolTaxonomy.js';
 
 /**
  * VERDICT ENGINE — extracted from L2Atom (structural slice 2b).
@@ -567,16 +568,7 @@ export const ADHERENCE_BODY_MAX_CHARS = 2000;
  * scanned — only plans and skill bodies are.
  */
 export const BUILTIN_TOOL_VOCABULARY: readonly string[] = [
-  'write_file',
-  'edit_file',
-  'read_file',
-  'list_files',
-  'run_shell',
-  'record_probe',
-  'start_static_server',
-  'validate_html',
-  'fetch_url',
-  'start_node_server',
+  ...BUILTIN_TOOL_NAMES, ...HOST_TOOL_NAMES,
 ];
 
 const NEGATION_MARKERS =
