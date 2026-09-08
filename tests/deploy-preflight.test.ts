@@ -67,6 +67,9 @@ describe('deployment admission marker', () => {
     expect(requestWaitsForDeployment('POST', '/webhooks/github', env)).toBe(true);
     expect(requestWaitsForDeployment('GET', '/auth/login', env)).toBe(true);
     expect(requestWaitsForDeployment('GET', '/auth/callback', env)).toBe(true);
+    expect(requestWaitsForDeployment('GET', '/oauth/authorize', env)).toBe(true);
+    expect(requestWaitsForDeployment('POST', '/oauth/token', env)).toBe(true);
+    expect(requestWaitsForDeployment('GET', '/.well-known/oauth-authorization-server', env)).toBe(false);
     expect(requestWaitsForDeployment('GET', '/auth/github/connect', env)).toBe(true);
     expect(requestWaitsForDeployment('GET', '/auth/github/authorize', env)).toBe(true);
     expect(requestWaitsForDeployment('GET', '/auth/github/setup', env)).toBe(true);

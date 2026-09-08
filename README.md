@@ -300,30 +300,34 @@ prediction for a fresh checkout or different models.
 
 atoma exposes itself as an [MCP](https://modelcontextprotocol.io) server on the same origin as
 the console, so an existing agent can hand it a task and read back what the system has learned. One
-line registers it — a URL and a bearer:
+URL registers it; the client opens the browser to sign in and approve access for your
+active organisation. Codex stores and refreshes the OAuth credentials itself:
 
 ```bash
-claude mcp add atoma --transport http https://<your-instance>/mcp \
-  --header "Authorization: Bearer <token from Settings, or npm run auth -- token>"
-# locally, ungated: npm run viz, then http://127.0.0.1:4111/mcp with no token
+codex mcp add atoma --url https://<your-instance>/mcp
+codex mcp login atoma
 ```
 
-Codex CLI (OpenAI) reads the same URL from `~/.codex/config.toml` and the bearer from an
-environment variable, so the secret never enters the file:
+Codex desktop uses the same personal configuration, with no shell variable:
 
 ```toml
 [mcp_servers.atoma]
 url = "https://<your-instance>/mcp"
-bearer_token_env_var = "ATOMA_MCP_TOKEN"   # omit on the local ungated instance
 ```
 
-```bash
-export ATOMA_MCP_TOKEN='<token>'   # in the shell profile Codex starts from
-# or, in one line: codex mcp add atoma --url https://<your-instance>/mcp --bearer-token-env-var ATOMA_MCP_TOKEN
-```
+Claude Code can register the same endpoint with
+`claude mcp add atoma --transport http https://<your-instance>/mcp`, then authenticate
+from its MCP controls. Locally, `npm run viz` serves the ungated operator endpoint
+at `http://127.0.0.1:4111/mcp` with no login.
 
-Settings shows both snippets, filled in, when a token is created. Either client then lists the
-`atoma_*` tools your role admits under `/mcp`.
+OAuth uses authorization code + S256 PKCE, dynamic public-client registration,
+one-hour access tokens and rotating refresh tokens with an absolute 30-day lifetime.
+The consent page names the account, active organisation and requested access.
+Settings → MCP access lists each connection as `OAuth: <client>`; revoking it also
+revokes renewal. Existing API tokens remain supported for scripts through the advanced
+section in Settings. When migrating a client to OAuth, remove
+its `bearer_token_env_var` and static `Authorization` header so they do not override login.
+See [the OAuth contract](docs/mcp-oauth.md) for endpoints and storage details.
 
 **Thirty-seven tools.** ONE MCP for everyone, and what you see depends on who you are. An organisation member
 sees its projects and runs — start one as an MCP task and drive it through `tasks/get`, `tasks/result`

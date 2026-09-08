@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { createElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { translate } from '../src/viz/client/i18n-catalog.js';
-import { claudeMcpCommand, codexMcpConfig, codexTokenExport, McpAccess, McpAccessPanel, type McpAccessPanelProps } from '../src/viz/client-gl/McpAccessPanel.js';
+import { claudeMcpCommand, codexMcpCommand, codexMcpConfig, McpAccess, McpAccessPanel, type McpAccessPanelProps } from '../src/viz/client-gl/McpAccessPanel.js';
 
 /**
  * The Settings panel that turns "atoma has an MCP" into a procedure. What it
@@ -40,59 +40,56 @@ function panel(overrides: Partial<McpAccessPanelProps> = {}) {
   return { ...render(createElement(McpAccessPanel, props)), props };
 }
 
+async function openManual() {
+  await userEvent.click(screen.getByText('Advanced · API tokens'));
+}
+
 describe('McpAccessPanel', () => {
-  it('shows the address, the three steps and a creation form when nothing is minted', async () => {
+  it('leads with the URL and browser sign-in, keeping client setup and manual tokens collapsed', async () => {
+    const onCopy = vi.fn(async () => undefined);
+    panel({ onCopy });
+    expect(screen.getByTestId('mcp-url')).toHaveTextContent('https://atoma.example.com/mcp');
+    expect(screen.getByText(/No API token is needed/)).toBeInTheDocument();
+    expect(screen.getByTestId('mcp-manual-access')).not.toHaveAttribute('open');
+    expect(screen.getByTestId('mcp-oauth-config').closest('details')).not.toHaveAttribute('open');
+    expect(screen.getByText('No agent connected yet. Start the connection from your agent.')).toBeInTheDocument();
+    await userEvent.click(within(screen.getByTestId('mcp-url').parentElement!).getByRole('button', { name: 'Copy' }));
+    expect(onCopy).toHaveBeenCalledWith('https://atoma.example.com/mcp');
+  });
+
+  it('creates a named or default token only through the advanced section', async () => {
     const onCreate = vi.fn(async () => undefined);
     panel({ onCreate });
-    expect(screen.getByTestId('mcp-url')).toHaveTextContent('https://atoma.example.com/mcp');
-    expect(screen.getAllByRole('listitem')).toHaveLength(3);
-    expect(screen.getByText('No token yet.')).toBeInTheDocument();
+    await openManual();
+    await userEvent.click(screen.getByRole('button', { name: 'Create token' }));
+    expect(onCreate).toHaveBeenLastCalledWith('MCP token');
     await userEvent.type(screen.getByLabelText('Token name'), 'my laptop');
     await userEvent.click(screen.getByRole('button', { name: 'Create token' }));
-    expect(onCreate).toHaveBeenCalledWith('my laptop');
+    expect(onCreate).toHaveBeenLastCalledWith('my laptop');
   });
 
-  it('uses a default label when the field is left empty', async () => {
-    const onCreate = vi.fn(async () => undefined);
-    panel({ onCreate });
-    await userEvent.click(screen.getByRole('button', { name: 'Create token' }));
-    expect(onCreate).toHaveBeenCalledWith('MCP token');
-  });
-
-  it('shows a minted token once, with the exact Claude Code line, and hides it on dismiss', async () => {
+  it('opens advanced access for a newly minted token and copies only on request', async () => {
     const onCopy = vi.fn(async () => undefined);
     const onDismissMinted = vi.fn();
     panel({ minted: { tokenId: 't1', token: 'atoma_secret' }, onCopy, onDismissMinted });
+    const advanced = screen.getByTestId('mcp-manual-access');
+    expect(advanced).toHaveAttribute('open');
     expect(screen.getByTestId('mcp-token')).toHaveTextContent('atoma_secret');
-    const command = screen.getByTestId('mcp-claude-command');
-    expect(command).toHaveTextContent(claudeMcpCommand('https://atoma.example.com/mcp', 'atoma_secret'));
-    expect(command).toHaveTextContent("--transport http --scope user atoma 'https://atoma.example.com/mcp' --header 'Authorization: Bearer atoma_secret'");
-    // Codex: the config.toml table names the env var, and the export line carries the secret — never the table.
-    const codex = screen.getByTestId('mcp-codex-config');
-    expect(codex.textContent).toBe(codexMcpConfig('https://atoma.example.com/mcp', true));
-    expect(codex.textContent).toBe('[mcp_servers.atoma]\nurl = "https://atoma.example.com/mcp"\nbearer_token_env_var = "ATOMA_MCP_TOKEN"');
-    expect(screen.getByTestId('mcp-codex-export').textContent).toBe(codexTokenExport('atoma_secret'));
-    expect(screen.getByTestId('mcp-codex-export')).toHaveTextContent("export ATOMA_MCP_TOKEN='atoma_secret'");
-    // No creation form while the secret is on screen: one token at a time.
     expect(screen.queryByRole('button', { name: 'Create token' })).toBeNull();
-    const copies = screen.getAllByRole('button', { name: 'Copy' });
-    expect(copies).toHaveLength(5); // address, token, Claude line, Codex table, Codex export
-    await userEvent.click(copies[2]!); // the Claude command's copy
-    expect(onCopy).toHaveBeenCalledWith(expect.stringContaining('claude mcp add --transport http'));
+    expect(onCopy).not.toHaveBeenCalled();
+    await userEvent.click(within(advanced).getByRole('button', { name: 'Copy' }));
+    expect(onCopy).toHaveBeenCalledWith('atoma_secret');
     await userEvent.click(screen.getByRole('button', { name: 'Done, I copied it' }));
     expect(onDismissMinted).toHaveBeenCalled();
   });
 
-  it('lists live tokens without any secret and revokes through the handler; revoked ones are hidden', async () => {
+  it('lists authorized access without secrets and revokes through the handler', async () => {
     const onRevoke = vi.fn(async () => undefined);
-    const { container } = panel({
-      tokens: [
-        { tokenId: 'live', orgId: 'o', orgName: 'Org One', label: 'laptop', createdAt: '2026-09-05T10:00:00.000Z', lastUsedAt: null, revokedAt: null },
-        { tokenId: 'dead', orgId: 'o', orgName: 'Org One', label: 'old phone', createdAt: '2026-09-01T10:00:00.000Z', lastUsedAt: null, revokedAt: '2026-09-02T10:00:00.000Z' },
-      ],
-      onRevoke,
-    });
-    expect(screen.getByText('laptop')).toBeInTheDocument();
+    const { container } = panel({ tokens: [
+      { tokenId: 'live', orgId: 'o', orgName: 'Org One', label: 'OAuth: Codex', createdAt: '2026-09-05T10:00:00.000Z', lastUsedAt: null, revokedAt: null },
+      { tokenId: 'dead', orgId: 'o', orgName: 'Org One', label: 'old phone', createdAt: '2026-09-01T10:00:00.000Z', lastUsedAt: null, revokedAt: '2026-09-02T10:00:00.000Z' },
+    ], onRevoke });
+    expect(screen.getByRole('list', { name: 'Authorized access' })).toHaveTextContent('OAuth: Codex');
     expect(screen.queryByText('old phone')).toBeNull();
     expect(screen.getByText(/Org One · created .* · last used never/)).toBeInTheDocument();
     expect(container.textContent).not.toContain('atoma_');
@@ -100,31 +97,41 @@ describe('McpAccessPanel', () => {
     expect(onRevoke).toHaveBeenCalledWith('live');
   });
 
-  it('reports a load failure and a missing address without hiding the procedure', () => {
+  it('reports a load failure without presenting an empty access list as success', async () => {
     panel({ error: 'HTTP 500', mcpUrl: null });
-    expect(screen.getByRole('alert')).toHaveTextContent('Could not load your MCP tokens: HTTP 500');
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not load your connections: HTTP 500');
     expect(screen.getByText('This deployment did not publish an MCP address.')).toBeInTheDocument();
-    expect(screen.getAllByRole('listitem')).toHaveLength(3);
+    expect(screen.queryByTestId('mcp-oauth-config')).toBeNull();
+    await openManual();
     expect(screen.getByRole('button', { name: 'Create token' })).toBeDisabled();
-    expect(screen.queryByText('No token yet.')).toBeNull();
+    expect(screen.queryByText(/No agent connected yet/)).toBeNull();
   });
 
-  it('explains Bearer compatibility, the terminal step and connection verification', () => {
-    panel();
-    expect(screen.getByText(/A client that only offers OAuth connection/)).toBeInTheDocument();
-    expect(screen.getByText(/not a web page/)).toBeInTheDocument();
-    expect(screen.getByText(/Creating a token alone does not establish a connection/)).toBeInTheDocument();
+  it('provides token-free Codex and Claude setup on demand', async () => {
+    const onCopy = vi.fn(async () => undefined);
+    panel({ onCopy });
+    await userEvent.click(screen.getByText('Setup help for Codex and Claude Code'));
+    const codex = screen.getByTestId('mcp-oauth-config');
+    expect(codex.textContent).toBe(codexMcpConfig('https://atoma.example.com/mcp'));
+    await userEvent.click(within(codex.parentElement!).getByRole('button', { name: 'Copy' }));
+    expect(onCopy).toHaveBeenCalledWith(codex.textContent);
+    const command = screen.getByTestId('mcp-connect-command');
+    expect(command.textContent).toBe(codexMcpCommand('https://atoma.example.com/mcp'));
+    await userEvent.selectOptions(screen.getByRole('combobox'), 'codex-macos');
+    await userEvent.click(within(command.parentElement!).getByRole('button', { name: 'Copy' }));
+    expect(onCopy).toHaveBeenLastCalledWith(codexMcpCommand('https://atoma.example.com/mcp', true));
+    await userEvent.selectOptions(screen.getByRole('combobox'), 'claude');
+    expect(command.textContent).toBe(claudeMcpCommand('https://atoma.example.com/mcp'));
+    expect(screen.getByText(/select this server and choose Authenticate/)).toBeInTheDocument();
   });
 
-  it('shows the local operator procedure without token creation or a Bearer header', () => {
+  it('keeps the local operator procedure free of authentication and token creation', async () => {
     panel({ mode: 'operator', mcpUrl: 'http://127.0.0.1:4111/mcp' });
-    expect(screen.queryByRole('button', { name: 'Create token' })).toBeNull();
-    expect(screen.queryByText('No token yet.')).toBeNull();
-    expect(screen.getByTestId('mcp-claude-command')).not.toHaveTextContent('--header');
-    // The operator instance needs no bearer: the Codex table has no env-var line and no export line is shown.
-    expect(screen.getByTestId('mcp-codex-config').textContent).toBe('[mcp_servers.atoma]\nurl = "http://127.0.0.1:4111/mcp"');
-    expect(screen.queryByTestId('mcp-codex-export')).toBeNull();
-    expect(screen.getByText(/A remote or cloud client cannot reach this loopback address/)).toBeInTheDocument();
+    expect(screen.queryByTestId('mcp-manual-access')).toBeNull();
+    expect(screen.getByTestId('mcp-connect-command')).not.toHaveTextContent('mcp login');
+    await userEvent.click(screen.getByText('Setup help for Codex and Claude Code'));
+    expect(screen.getByTestId('mcp-connect-command')).not.toHaveTextContent('--header');
+    expect(screen.getByTestId('mcp-oauth-config').textContent).toBe('[mcp_servers.atoma-local]\nurl = "http://127.0.0.1:4111/mcp"');
   });
 });
 
@@ -141,6 +148,7 @@ describe('McpAccess API lifecycle', () => {
       .mockResolvedValueOnce(reply(tokenList));
     vi.stubGlobal('fetch', fetcher);
     render(createElement(McpAccess, { t, locale: 'en', onError: vi.fn() }));
+    await openManual();
     expect(await screen.findByRole('alert')).toHaveTextContent('The server did not find the token API (404)');
     expect(fetcher).toHaveBeenCalledWith('/api/tokens');
     expect(screen.getByRole('button', { name: 'Create token' })).toBeDisabled();
@@ -158,13 +166,14 @@ describe('McpAccess API lifecycle', () => {
       .mockResolvedValueOnce(reply(tokenList));
     vi.stubGlobal('fetch', fetcher);
     render(createElement(McpAccess, { t, locale: 'en', onError: vi.fn() }));
+    await openManual();
     await waitFor(() => expect(screen.getByRole('button', { name: 'Create token' })).toBeEnabled());
     await userEvent.type(screen.getByLabelText('Token name'), 'laptop');
     await userEvent.click(screen.getByRole('button', { name: 'Create token' }));
     expect(await screen.findByTestId('mcp-token')).toHaveTextContent(minted.token);
     expect(await screen.findByText(/The change was saved, but the token list/)).toBeInTheDocument();
     expect(fetcher).toHaveBeenNthCalledWith(2, '/api/tokens', expect.objectContaining({ method: 'POST', body: JSON.stringify({ label: 'laptop' }) }));
-    expect(screen.getByTestId('mcp-claude-command')).toHaveTextContent(minted.mcpUrl);
+    expect(screen.getByTestId('mcp-url')).toHaveTextContent(minted.mcpUrl);
     await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
     await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
     expect(screen.queryByText(/The change was saved, but the token list/)).toBeNull();
@@ -181,6 +190,7 @@ describe('McpAccess API lifecycle', () => {
       .mockResolvedValueOnce(reply({ error: 'unavailable' }, 503));
     vi.stubGlobal('fetch', fetcher);
     render(createElement(McpAccess, { t, locale: 'en', onError: vi.fn() }));
+    await openManual();
     await userEvent.click(await screen.findByRole('button', { name: 'Revoke' }));
     expect(await screen.findByText(/The change was saved, but the token list/)).toBeInTheDocument();
     expect(screen.queryByText('laptop')).toBeNull();
@@ -195,11 +205,13 @@ describe('McpAccess API lifecycle', () => {
     vi.stubGlobal('fetch', fetcher);
     const props = { t, locale: 'en', onError: vi.fn() };
     const view = render(createElement(McpAccess, { ...props, key: 'principal:org-one' }));
+    await openManual();
     await waitFor(() => expect(screen.getByRole('button', { name: 'Create token' })).toBeEnabled());
     await userEvent.click(screen.getByRole('button', { name: 'Create token' }));
     expect(await screen.findByTestId('mcp-token')).toHaveTextContent(minted.token);
     await screen.findByText('Token created — copy it now, it will not be shown again.');
     view.rerender(createElement(McpAccess, { ...props, key: 'principal:org-two' }));
+    await openManual();
     await waitFor(() => expect(screen.getByRole('button', { name: 'Create token' })).toBeEnabled());
     expect(screen.queryByTestId('mcp-token')).toBeNull();
   });

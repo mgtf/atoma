@@ -62,3 +62,22 @@ Neighbours:
 - Personal Claude/claude.ai login is unavailable until Anthropic grants the
   third-party approval its SDK terms require. Keep that a server-owned disabled
   capability, not a client flag or an emulated OAuth flow.
+
+## MCP OAuth authorization server
+
+- `mcpOAuth.ts` owns OAuth discovery, public-client registration, consent and
+  token endpoints, mounted only behind the deployment gate. The existing web
+  login returns through an opaque, expiring request id; consent binds the
+  displayed principal and active organisation to the exact browser session,
+  and only a same-origin POST grants access. No arbitrary login return URL.
+- S256 PKCE, exact registered redirects (HTTPS or HTTP loopback), resource
+  binding to the canonical `/mcp`, one-use codes and rotating refresh tokens
+  are mandatory. DCR is supported; client metadata URL fetching is not
+  advertised. Names supplied by a client are not verified identities.
+- `mcpOAuthStore.ts` extends the PRIMARY store with clients, hashed codes,
+  grants and hashed refresh history. API-token rows remain the authority for
+  principal/org identity, live roles, listing and revocation. Access expires
+  after one hour; renewal has an absolute 30-day lifetime. Valid code/refresh
+  replay revokes the grant; every issuance/revocation uses the existing token
+  journal events. Temporary consent state is bounded and dies on restart;
+  issued grants survive. Details: [OAuth contract](../../docs/mcp-oauth.md).

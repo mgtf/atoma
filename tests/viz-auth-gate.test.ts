@@ -547,6 +547,55 @@ describe('viz auth gate (process level)', () => {
     );
   }, 120_000);
 
+  it('resumes MCP consent after upstream login and exchanges the code on the production router', async () => {
+    const instance = tempInstance();
+    const provider = await startFakeProvider({ port: await freePort(), subject: 191 });
+    const port = await freePort();
+    const base = `http://127.0.0.1:${port}`;
+    const running = startViz([...instance.args, '--port', String(port)], providerEnv(provider, base));
+    await waitReady(running, `${base}/auth/whoami`);
+    const registered = await fetch(`${base}/oauth/register`, { method: 'POST',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+        client_name: 'Codex', redirect_uris: ['http://127.0.0.1:54545/callback'], token_endpoint_auth_method: 'none',
+      }) });
+    expect(registered.status).toBe(201);
+    const { client_id: clientId } = await registered.json() as { client_id: string };
+    const verifier = randomBytes(32).toString('base64url');
+    const query = new URLSearchParams({ client_id: clientId, redirect_uri: 'http://127.0.0.1:54545/callback',
+      response_type: 'code', code_challenge: pkceChallenge(verifier), code_challenge_method: 'S256',
+      resource: `${base}/mcp`, state: 'codex-state', scope: 'mcp' });
+    const jar = new CookieJar();
+    const loginPage = await fetchWithJar(jar, `${base}/oauth/authorize?${query}`);
+    expect(loginPage.status).toBe(200);
+    expect(jar.header(`${base}/auth/callback`)).toContain('atoma_mcp_return=');
+    expect(jar.header(`${base}/mcp`)).toBeNull();
+    const consent = await fetchWithJar(jar, `${base}/auth/login?provider=github`);
+    const html = await consent.text();
+    expect(html).toContain('Connect to Atoma');
+    expect(jar.header(`${base}/auth/callback`)).not.toContain('atoma_mcp_return=');
+    const request = /name="request" value="([^"]+)"/.exec(html)![1]!;
+    const allowed = await fetch(`${base}/oauth/authorize`, { method: 'POST', redirect: 'manual',
+      headers: { cookie: jar.header(base)!, origin: base, 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ request, decision: 'allow' }) });
+    expect(allowed.status).toBe(302);
+    const redirect = new URL(allowed.headers.get('location')!);
+    expect(redirect.searchParams.get('state')).toBe('codex-state');
+    const exchanged = await fetch(`${base}/oauth/token`, { method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({
+        grant_type: 'authorization_code', code: redirect.searchParams.get('code')!, client_id: clientId,
+        redirect_uri: 'http://127.0.0.1:54545/callback', code_verifier: verifier, resource: `${base}/mcp`,
+      }) });
+    expect(exchanged.status).toBe(200);
+    const tokens = await exchanged.json() as { access_token: string };
+    const mcp = await fetch(`${base}/mcp`, { method: 'POST',
+      headers: { authorization: `Bearer ${tokens.access_token}`, 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {
+        protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'oauth-test', version: '1' },
+      } }) });
+    expect(mcp.status).toBe(200);
+    expect(await mcp.text()).toContain('serverInfo');
+  });
+
   it('creates an owner organisation for an unknown identity without an invitation', async () => {
     const instance = tempInstance();
     const provider = await startFakeProvider({ port: await freePort(), subject: 101 });

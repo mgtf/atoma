@@ -5,6 +5,7 @@ export const DEPLOYMENT_LOCK_ENV = 'ATOMA_DEPLOY_LOCK_PATH';
 
 const STATEFUL_GET_PATHS = new Set([
   '/auth/login',
+  '/oauth/authorize',
   '/auth/callback',
   '/auth/github/connect',
   '/auth/github/authorize',

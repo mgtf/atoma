@@ -5,9 +5,9 @@ import type { VizApiToken, VizApiTokens } from '../client/types.js';
 
 /**
  * CONNECT YOUR AGENT — the Settings panel that turns "atoma has an MCP" into a
- * procedure a signed-in member can follow in a minute: what the MCP is, the
- * address, a token created here and shown ONCE, the exact line to paste into
- * Claude Code and the exact table to paste into Codex's config.toml. The panel is the client half of `/api/tokens`
+ * short browser-sign-in procedure. Client-specific commands are selected in place; manual API
+ * tokens remain in an advanced disclosure.
+ * The panel is the client half of `/api/tokens`
  * (`src/viz/AGENTS.md`); the tiering — what the agent will actually see — is
  * decided server-side from the role and never described here as a promise.
  *
@@ -40,29 +40,26 @@ function shellQuote(value: string): string {
   return "'" + value.replaceAll("'", "'\"'\"'") + "'";
 }
 
-export function claudeMcpCommand(mcpUrl: string, token?: string): string {
-  const command = `claude mcp add --transport http --scope user atoma ${shellQuote(mcpUrl)}`;
-  return token ? `${command} --header ${shellQuote(`Authorization: Bearer ${token}`)}` : command;
+type McpClient = 'codex' | 'codex-macos' | 'claude';
+
+function serverName(mcpUrl: string): string {
+  return ['localhost', '127.0.0.1', '[::1]'].includes(new URL(mcpUrl).hostname) ? 'atoma-local' : 'atoma';
 }
 
-/** The environment variable Codex reads the bearer from; the token itself never enters config.toml. */
-export const CODEX_TOKEN_ENV = 'ATOMA_MCP_TOKEN';
-
-/**
- * Codex CLI registers MCP servers in `~/.codex/config.toml`. Streamable HTTP
- * is a `url`; the bearer is read from an environment variable named in the
- * table, which keeps the secret out of a file that is easy to share. The
- * ungated operator instance needs no bearer line.
- */
-export function codexMcpConfig(mcpUrl: string, withToken: boolean): string {
-  const lines = ['[mcp_servers.atoma]', `url = ${JSON.stringify(mcpUrl)}`];
-  if (withToken) lines.push(`bearer_token_env_var = "${CODEX_TOKEN_ENV}"`);
-  return lines.join('\n');
+export function codexMcpCommand(mcpUrl: string, desktop = false, oauth = true): string {
+  const executable = desktop ? shellQuote('/Applications/ChatGPT.app/Contents/Resources/codex') : 'codex';
+  const name = serverName(mcpUrl);
+  const add = `${executable} mcp add ${name} --url ${shellQuote(mcpUrl)}`;
+  return oauth ? `${add} &&\n${executable} mcp login ${name}` : add;
 }
 
-/** The shell line that hands Codex the token, for the same terminal profile the CLI starts from. */
-export function codexTokenExport(token: string): string {
-  return `export ${CODEX_TOKEN_ENV}=${shellQuote(token)}`;
+export function claudeMcpCommand(mcpUrl: string): string {
+  return `claude mcp add --transport http --scope user ${serverName(mcpUrl)} ${shellQuote(mcpUrl)}`;
+}
+
+/** Both browser OAuth and the local operator endpoint need only the URL. */
+export function codexMcpConfig(mcpUrl: string): string {
+  return [`[mcp_servers.${serverName(mcpUrl)}]`, `url = ${JSON.stringify(mcpUrl)}`].join('\n');
 }
 
 function errorMessage(failure: unknown, t: McpAccessPanelProps['t']): string {
@@ -92,12 +89,10 @@ export function McpAccessPanel({
   onDismissMinted,
 }: McpAccessPanelProps) {
   const [label, setLabel] = useState('');
+  const [client, setClient] = useState<McpClient>('codex');
   const operator = mode === 'operator';
   const ready = !loading && !error && Boolean(mcpUrl);
   const live = tokens.filter((token) => token.revokedAt === null);
-  const command = mcpUrl && (minted || operator)
-    ? claudeMcpCommand(mcpUrl, operator ? undefined : minted?.token) : null;
-  const codexConfig = mcpUrl && (minted || operator) ? codexMcpConfig(mcpUrl, !operator) : null;
 
   return (
     <section className="gpu-mcp-access" aria-labelledby="mcp-access-title">
@@ -128,141 +123,108 @@ export function McpAccessPanel({
         ) : (
           <p>{loading ? t('settings.subscriptionState.loading') : t('settings.mcpAddressUnknown')}</p>
         )}
-        {!operator ? (
-          <ol className="gpu-mcp-steps">
-            <li>{t('settings.mcpStepCreate')}</li>
-            <li>{t('settings.mcpStepCopy')}</li>
-            <li>{t('settings.mcpStepRegister')}</li>
-          </ol>
-        ) : <p>{t('settings.mcpLocalSteps')}</p>}
-        <p>{t('settings.mcpTransportHint')}</p>
-        {!operator ? <p>{t('settings.mcpCompatibility')}</p> : null}
+        <p>{t(operator ? 'settings.mcpLocalSteps' : 'settings.mcpConnectSteps')}</p>
       </article>
 
-      {minted || (operator && command) ? (
-        <article className="gpu-subscription-card gpu-mcp-minted" role="status" aria-live="polite">
-          {minted ? (
-            <>
-              <div className="gpu-subscription-card-head">
-                <span className="gpu-subscription-name">{t('settings.mcpMintedTitle')}</span>
-                <span className="gpu-subscription-state" data-state="connected">
-                  {t('settings.mcpMintedOnce')}
-                </span>
-              </div>
-              <p>{t('settings.mcpMintedHint')}</p>
-              <div className="gpu-subscription-code-row">
-                <code data-testid="mcp-token">{minted.token}</code>
-                <button type="button" disabled={busy} onClick={() => void onCopy(minted.token)}>
-                  {t('settings.mcpCopy')}
-                </button>
-              </div>
-            </>
-          ) : null}
-          {command ? (
-            <>
-              <p>{t('settings.mcpClaudeCodeHint')}</p>
-              <div className="gpu-subscription-code-row">
-                <code className="gpu-mcp-command" data-testid="mcp-claude-command">{command}</code>
-                <button type="button" disabled={busy} onClick={() => void onCopy(command)}>
-                  {t('settings.mcpCopy')}
-                </button>
-              </div>
-              {codexConfig ? (
-                <>
-                  <p>{t('settings.mcpCodexHint')}</p>
-                  <div className="gpu-subscription-code-row">
-                    <code className="gpu-mcp-command" data-testid="mcp-codex-config">{codexConfig}</code>
-                    <button type="button" disabled={busy} onClick={() => void onCopy(codexConfig)}>
-                      {t('settings.mcpCopy')}
+      {ready && mcpUrl ? (
+        <article className="gpu-subscription-card">
+          <label className="gpu-mcp-label">
+            <span>{t('settings.mcpChooseClient')}</span>
+            <select className="gpu-dom-input" value={client} onChange={event => setClient(event.target.value as McpClient)}>
+              <option value="codex">Codex CLI</option>
+              <option value="codex-macos">{t('settings.mcpCodexMac')}</option>
+              <option value="claude">Claude Code</option>
+            </select>
+          </label>
+          <p>{t('settings.mcpRunTerminal')}</p>
+          <div className="gpu-subscription-code-row">
+            <code className="gpu-mcp-command" data-testid="mcp-connect-command">{
+              client === 'claude' ? claudeMcpCommand(mcpUrl) : codexMcpCommand(mcpUrl, client === 'codex-macos', !operator)
+            }</code>
+            <button type="button" disabled={busy} onClick={() => void onCopy(
+              client === 'claude' ? claudeMcpCommand(mcpUrl) : codexMcpCommand(mcpUrl, client === 'codex-macos', !operator)
+            )}>{t('settings.mcpCopy')}</button>
+          </div>
+          {client === 'codex-macos' ? <p>{t('settings.mcpMacHint')}</p> : null}
+          {!operator ? <p>{t(client === 'claude' ? 'settings.mcpClaudeFinish' : 'settings.mcpCodexFinish')}</p> : null}
+          <p>{t('settings.mcpVerify')}</p>
+          <details>
+            <summary>{t('settings.mcpClientSetup')}</summary>
+            <p>{t('settings.mcpCodexSetup')}</p>
+            <div className="gpu-subscription-code-row">
+              <code className="gpu-mcp-command" data-testid="mcp-oauth-config">{codexMcpConfig(mcpUrl)}</code>
+              <button type="button" disabled={busy} onClick={() => void onCopy(codexMcpConfig(mcpUrl))}>
+                {t('settings.mcpCopy')}
+              </button>
+            </div>
+            {!operator ? <p>{t('settings.mcpOAuthMigration')}</p> : null}
+          </details>
+        </article>
+      ) : null}
+
+      {!operator ? (
+        <>
+          <p className="gpu-org-models-title">{t('settings.mcpConnections')}</p>
+          {live.length > 0 ? (
+            <ul className="gpu-mcp-tokens" aria-label={t('settings.mcpConnections')}>
+              {live.map((token) => (
+                <li key={token.tokenId} className="gpu-subscription-card">
+                  <div className="gpu-subscription-card-head">
+                    <span className="gpu-subscription-name">{token.label}</span>
+                    <button type="button" disabled={busy} onClick={() => void onRevoke(token.tokenId)}>
+                      {t('settings.mcpRevoke')}
                     </button>
                   </div>
-                  {minted ? (
-                    <>
-                      <p>{t('settings.mcpCodexEnvHint', { env: CODEX_TOKEN_ENV })}</p>
-                      <div className="gpu-subscription-code-row">
-                        <code className="gpu-mcp-command" data-testid="mcp-codex-export">{codexTokenExport(minted.token)}</code>
-                        <button type="button" disabled={busy} onClick={() => void onCopy(codexTokenExport(minted.token))}>
-                          {t('settings.mcpCopy')}
-                        </button>
-                      </div>
-                    </>
-                  ) : null}
-                </>
-              ) : null}
-              {!operator ? <p>{t('settings.mcpOtherClientsHint')}</p> : null}
-            </>
-          ) : null}
-          {minted ? <div className="gpu-subscription-actions">
-            <button type="button" onClick={onDismissMinted}>
-              {t('settings.mcpMintedDone')}
-            </button>
-          </div> : null}
-        </article>
-      ) : !operator ? (
-        <form
-          className="gpu-mcp-create"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (!ready || busy) return;
-            const trimmed = label.trim();
-            void onCreate(trimmed.length > 0 ? trimmed : t('settings.mcpDefaultLabel'));
-          }}
-        >
-          <label className="gpu-mcp-label">
-            <span>{t('settings.mcpLabel')}</span>
-            <input
-              className="gpu-dom-input"
-              type="text"
-              maxLength={80}
-              placeholder={t('settings.mcpLabelPlaceholder')}
-              value={label}
-              disabled={busy}
-              onChange={(event) => setLabel(event.target.value)}
-            />
-          </label>
-          <div className="gpu-settings-actions">
-            <button type="submit" disabled={busy || !ready}>
-              {t('settings.mcpCreate')}
-            </button>
-          </div>
-        </form>
-      ) : null}
+                  <p>{t('settings.mcpTokenFacts', {
+                    org: token.orgName,
+                    created: formatDateTime(token.createdAt, locale),
+                    lastUsed: token.lastUsedAt ? formatDateTime(token.lastUsedAt, locale) : t('settings.mcpNeverUsed'),
+                  })}</p>
+                </li>
+              ))}
+            </ul>
+          ) : ready ? <p className="gpu-subscription-message">{t('settings.mcpNoConnections')}</p> : null}
 
-      {!operator ? <p className="gpu-subscription-message" role="note">
-        {t('settings.mcpWarning')}
-      </p> : null}
+          <details className="gpu-subscription-card" open={minted ? true : undefined} data-testid="mcp-manual-access">
+            <summary>{t('settings.mcpAdvancedTokens')}</summary>
+            <p>{t('settings.mcpAdvancedHint')}</p>
+            {minted ? (
+              <div className="gpu-mcp-minted" role="status" aria-live="polite">
+                <p>{t('settings.mcpMintedHint')}</p>
+                <div className="gpu-subscription-code-row">
+                  <code data-testid="mcp-token">{minted.token}</code>
+                  <button type="button" disabled={busy} onClick={() => void onCopy(minted.token)}>
+                    {t('settings.mcpCopy')}
+                  </button>
+                </div>
+                <p>{t('settings.mcpManualHeader')}</p>
+                <button type="button" onClick={onDismissMinted}>{t('settings.mcpMintedDone')}</button>
+              </div>
+            ) : (
+              <form className="gpu-mcp-create" onSubmit={(event) => {
+                event.preventDefault();
+                if (!ready || busy) return;
+                void onCreate(label.trim() || t('settings.mcpDefaultLabel'));
+              }}>
+                <label className="gpu-mcp-label">
+                  <span>{t('settings.mcpLabel')}</span>
+                  <input className="gpu-dom-input" type="text" maxLength={80}
+                    placeholder={t('settings.mcpLabelPlaceholder')} value={label} disabled={busy}
+                    onChange={(event) => setLabel(event.target.value)} />
+                </label>
+                <div className="gpu-settings-actions">
+                  <button type="submit" disabled={busy || !ready}>{t('settings.mcpCreate')}</button>
+                </div>
+              </form>
+            )}
+          </details>
+        </>
+      ) : null}
 
       <details className="gpu-subscription-card">
-        <summary>{t('settings.mcpCheckTitle')}</summary>
-        <p>{t('settings.mcpCheckSteps')}</p>
-        <p>{t('settings.mcpCheckUsage')}</p>
-        <p>{t('settings.mcpTroubleshootAuth')}</p>
-        <p>{t('settings.mcpTroubleshoot404')}</p>
+        <summary>{t('settings.mcpHelpTitle')}</summary>
+        <p>{t('settings.mcpHelpHint')}</p>
       </details>
-
-      {live.length > 0 ? (
-        <ul className="gpu-mcp-tokens" aria-label={t('settings.mcpTokens')}>
-          {live.map((token) => (
-            <li key={token.tokenId} className="gpu-subscription-card">
-              <div className="gpu-subscription-card-head">
-                <span className="gpu-subscription-name">{token.label}</span>
-                <button type="button" disabled={busy} onClick={() => void onRevoke(token.tokenId)}>
-                  {t('settings.mcpRevoke')}
-                </button>
-              </div>
-              <p>
-                {t('settings.mcpTokenFacts', {
-                  org: token.orgName,
-                  created: formatDateTime(token.createdAt, locale),
-                  lastUsed: token.lastUsedAt ? formatDateTime(token.lastUsedAt, locale) : t('settings.mcpNeverUsed'),
-                })}
-              </p>
-            </li>
-          ))}
-        </ul>
-      ) : ready && !operator ? (
-        <p className="gpu-subscription-message">{t('settings.mcpNoTokens')}</p>
-      ) : null}
 
       {status ? (
         <p className="gpu-subscription-message" role="status">

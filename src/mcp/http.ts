@@ -36,6 +36,7 @@ export interface McpHttpHostOptions {
   readonly buildServer: (caller: McpCaller) => McpServer;
   /** `Host` values this route answers; anything else is 403 by the transport. */
   readonly allowedHosts: readonly string[];
+  readonly resourceMetadataUrl?: string;
   readonly idleMs?: number;
   readonly now?: () => number;
   readonly logger?: (line: string) => void;
@@ -86,10 +87,12 @@ export class McpHttpHost {
       this.refused += 1;
       res.writeHead(401, {
         'content-type': 'application/json; charset=utf-8',
-        'www-authenticate': 'Bearer realm="atoma", error="invalid_token"',
+        'www-authenticate': this.options.resourceMetadataUrl
+          ? `Bearer realm="atoma", error="invalid_token", resource_metadata="${this.options.resourceMetadataUrl}", scope="mcp"`
+          : 'Bearer realm="atoma", error="invalid_token"',
         'cache-control': 'no-store',
       });
-      res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32001, message: 'a valid API token is required' }, id: null }));
+      res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32001, message: 'a valid access token is required' }, id: null }));
       return;
     }
     const header = req.headers[MCP_SESSION_HEADER];

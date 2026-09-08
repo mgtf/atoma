@@ -250,11 +250,10 @@ Neighbours:
   the SDK filters `tools/list` from what is registered, and a tool that is
   not registered cannot be called by name — two properties from one
   mechanism, where toggling would have been two.
-- OAuth for MCP clients was deferred, not refused. Bearer API tokens are what
-  Claude Code and Codex accept today with one flag; becoming an OAuth 2.1
-  authorization server is its own chantier, and the token store is shaped so
-  an OAuth-issued access token can later resolve through the same
-  `resolveApiToken` path.
+- OAuth clients and manually minted API tokens share `resolveApiToken`.
+  OAuth discovery, consent, PKCE, expiry and renewal belong to
+  [src/auth](../auth/AGENTS.md); the MCP remains the resource server and
+  advertises its metadata URL on authentication challenges.
 - A `waitMs` long-poll on the status tools, with `notifications/progress`,
   lived two days (2026-09-05 to 2026-09-07) and was removed when the start
   tools became tasks: two ways to follow a run is one too many, and the

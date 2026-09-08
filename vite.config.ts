@@ -12,6 +12,8 @@ if (typeof packageMetadata.version !== 'string' || packageMetadata.version.trim(
 export const ATOMA_RELEASE_VERSION = packageMetadata.version;
 
 const apiPort = Number(process.env['ATOMA_VIZ_API_PORT'] ?? 4111);
+// OAuth validates the configured public Host, not the backend's private port.
+const oauthProxy = { target: `http://127.0.0.1:${apiPort}`, changeOrigin: false };
 const devPort = Number(process.env['ATOMA_VIZ_DEV_PORT'] ?? 5173);
 const clientName = process.env['ATOMA_VIZ_UI'] === 'mui' ? 'client' : 'client-gl';
 // Off unless asked for, and asked for explicitly: a dev service worker's
@@ -43,6 +45,9 @@ export default defineConfig({
       },
       '/api': `http://127.0.0.1:${apiPort}`,
       '/auth': `http://127.0.0.1:${apiPort}`,
+      '/oauth': oauthProxy,
+      '/.well-known/oauth-authorization-server': oauthProxy,
+      '/.well-known/oauth-protected-resource': oauthProxy,
       '/webhooks': `http://127.0.0.1:${apiPort}`,
       '/robots.txt': `http://127.0.0.1:${apiPort}`,
       '/sitemap.xml': `http://127.0.0.1:${apiPort}`,

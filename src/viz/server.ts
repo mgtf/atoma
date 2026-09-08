@@ -170,6 +170,7 @@ import {
   type ResidentAnalyst,
 } from '../supervisor/resident.js';
 import { analystProvider } from '../supervisor/session.js';
+import { McpOAuth } from '../auth/mcpOAuth.js';
 import { McpHttpHost } from '../mcp/http.js';
 import type { McpCaller } from '../mcp/identity.js';
 import { buildServer as buildMcpServer } from '../mcp/server.js';
@@ -1185,7 +1186,14 @@ const MCP_DEPS: McpToolDeps = {
       }
     : {}),
 };
+const MCP_OAUTH = AUTH_RUNTIME && AUTH?.store ? new McpOAuth({
+  gate: AUTH,
+  origin: AUTH_RUNTIME.publicOrigin,
+  clientAddress: (req) => loginClientAddress(req, AUTH_RUNTIME.trustedProxies),
+  emit,
+}) : null;
 const MCP_HOST = new McpHttpHost({
+  ...(MCP_OAUTH ? { resourceMetadataUrl: MCP_OAUTH.metadataUrl } : {}),
   resolveCaller: (req): McpCaller | null => {
     if (!AUTH_RUNTIME || !AUTH?.store) return { kind: 'operator' };
     const header = req.headers.authorization;
@@ -2027,6 +2035,8 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
     return;
   }
 
+  if (MCP_OAUTH && await MCP_OAUTH.handle(req, res, url)) return;
+
   if (pathname === '/mcp') {
     await MCP_HOST.handle(req, res);
     return;
@@ -2327,8 +2337,10 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           }
         }
         const issued = issueSession(authStore, outcome.viewer, { secure: AUTH_RUNTIME.secureCookies });
-        writeAuthRedirect(res, '/', [
+        const mcpReturn = MCP_OAUTH?.loginReturn(req);
+        writeAuthRedirect(res, mcpReturn?.location ?? '/', [
           issued.setCookie,
+          ...(mcpReturn ? [mcpReturn.cookie] : []),
           clearCookie(OAUTH_TX_COOKIE, AUTH_RUNTIME.secureCookies, '/auth'),
         ]);
       } catch (error) {

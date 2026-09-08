@@ -21,6 +21,7 @@ import {
   encryptBoundSecret,
 } from '../core/secretCrypto.js';
 import { openStoreHandle, storeDbPath } from '../core/stores.js';
+import { MCP_OAUTH_DDL, McpOAuthStore } from './mcpOAuthStore.js';
 import type { AvatarMime } from './avatar.js';
 import type { SecretEncryptionContext } from './secretEncryption.js';
 import { providerKeyAad } from './secretEncryption.js';
@@ -600,15 +601,18 @@ function personalOrganisationName(displayName: string): string {
 }
 
 export class AuthStore {
+  readonly mcpOAuth: McpOAuthStore;
   private readonly db: Database.Database;
   private readonly closeOnClose: boolean;
 
   constructor(db: Database.Database, options: AuthStoreOptions = {}) {
     this.db = db;
+    this.mcpOAuth = new McpOAuthStore(db);
     this.closeOnClose = options.closeOnClose ?? false;
     this.db.pragma('foreign_keys = ON');
     if (options.initialize === false) return;
     this.db.exec(AUTH_TABLES_DDL);
+    this.db.exec(MCP_OAUTH_DDL);
 
     // The auth substrate was initially developed with no invitation column.
     // CREATE TABLE IF NOT EXISTS cannot upgrade that local pre-release shape,
@@ -1104,7 +1108,7 @@ export class AuthStore {
     const row = this.db
       .prepare('SELECT * FROM auth_api_tokens WHERE token_hash = ? AND revoked_at IS NULL')
       .get(sha256Hex(token)) as ApiTokenRow | undefined;
-    if (!row) return null;
+    if (!row || !this.mcpOAuth.accessCurrent(row.token_id)) return null;
     const now = new Date();
     const lastUsedMs = row.last_used_at ? storedInstantMs(row.last_used_at) : null;
     if (lastUsedMs === null || now.getTime() - lastUsedMs > 60_000) {
@@ -1311,6 +1315,7 @@ export class AuthStore {
   sweep(): { sessions: number; invitations: number; states: number } {
     const now = new Date().toISOString();
     const run = this.db.transaction(() => {
+      this.mcpOAuth.sweep();
       const sessions = this.db
         .prepare(`DELETE FROM auth_sessions WHERE ${STALE_SESSION_SQL}`)
         .run(now, now, now).changes;

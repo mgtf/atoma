@@ -498,7 +498,6 @@ npm run viz:mark-turn:analyze
   memory; `traceFields.ts` projects depth-1 members out of a FILE it must never
   hold. Neither may drift into the other's job — the second exists precisely
   because the first needs the whole document.
-
 ## Server and gated surfaces
 
 - Operator source launchers (`npm run viz`, `doctor:dev`, `auth:dev`) fill
@@ -515,17 +514,18 @@ npm run viz:mark-turn:analyze
   gated members get org surfaces only; the ungated developer path is unchanged.
   True per-org registry scoping would need org-attributed registry rows — a
   schema project, not a route guard.
-- `/mcp` is the ONE MCP (contract in [src/mcp](../mcp/AGENTS.md)): bearer
-  API token behind the gate, the operator on the ungated loopback, Host
+- `/mcp` is the ONE MCP (contract in [src/mcp](../mcp/AGENTS.md)): OAuth or
+  API bearer token behind the gate, the operator on the ungated loopback, Host
   pinned either way. `/api/tokens` mints (POST, same-origin, journaled
   `token.created`), lists (GET, secret-free) and revokes (DELETE, journaled
   `token.revoked`) the SESSION's principal's tokens for its ACTIVE
   organisation; the plaintext leaves the server once, in the POST response.
-  `McpAccessPanel` is that route's client: address, steps, token shown once with
-  the Claude Code line and the Codex table (bearer via env var), list, revoke.
-  It never re-reads a secret and resets when the active identity/org changes.
-  GET also describes ungated operator access (no token); token mutations there
-  return 409. A failed refresh preserves a newly minted secret for copying.
+  `McpAccessPanel` leads with the URL, browser sign-in and authorized access.
+  Client commands are selectable; config and manual tokens stay collapsed. A minted
+  token opens its disclosure and is shown once, with copy and revoke. It
+  resets when the active identity/org changes and never re-reads a secret.
+  GET describes ungated operator access; mutations there return 409. A failed
+  refresh preserves a newly minted secret for copying.
 - `/api/account/subscriptions*` is self-scoped from the resolved session and
   never accepts a principal id. Status is secret-free; device login material
   is memory-only; connect/cancel/disconnect are same-origin and require

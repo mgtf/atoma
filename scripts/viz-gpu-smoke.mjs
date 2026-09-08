@@ -1957,6 +1957,7 @@ try {
           projectCount: 0,
           pendingInvitations: 0,
         },
+        '/api/tokens': { mode: 'bearer', mcpUrl: 'https://atoma.example.com/mcp', tokens: [] },
         // Settings mounts the subscription reader even on its General tab.
         '/api/account/subscriptions': {
           claude: { provider: 'claude', state: 'unavailable', connectedAt: null, lastVerifiedAt: null, reason: 'provider-approval-required' },
@@ -2350,6 +2351,31 @@ try {
         accountPickers: document.querySelectorAll('[id^="accountmodel-"]').length,
         orgPickers: document.querySelectorAll('[id^="orgmodel-"]').length,
       }));
+      // MCP is a DOM settings tab. Native disclosures must actually hide the
+      // manual-token form, while remaining usable when explicitly opened.
+      await accountPage.click('#settings-tab-mcp');
+      await accountPage.waitForSelector('[data-testid="mcp-url"]', { visible: true });
+      const mcpCompact = await accountPage.evaluate(() => ({
+        open: document.querySelectorAll('.gpu-mcp-access details[open]').length,
+        manualVisible: document.querySelector('.gpu-mcp-create input')?.checkVisibility(),
+        url: document.querySelector('[data-testid="mcp-url"]')?.textContent,
+      }));
+      if (mcpCompact.open !== 0 || mcpCompact.manualVisible || mcpCompact.url !== 'https://atoma.example.com/mcp') {
+        throw new Error(`MCP default view is not the browser-sign-in path: ${JSON.stringify(mcpCompact)}`);
+      }
+      if (process.env.ATOMA_VIZ_MCP_SCREENSHOT) {
+        await accountPage.screenshot({ path: process.env.ATOMA_VIZ_MCP_SCREENSHOT });
+      }
+      await accountPage.click('[data-testid="mcp-manual-access"] summary');
+      await accountPage.waitForSelector('.gpu-mcp-create input', { visible: true });
+      await accountPage.type('.gpu-mcp-create input', 'script access');
+      await accountPage.click('[data-testid="mcp-manual-access"] summary');
+      if (await accountPage.$eval('.gpu-mcp-create input', input => input.checkVisibility())) {
+        throw new Error('MCP manual-token form remained visible after closing its disclosure');
+      }
+      await accountPage.click('#settings-tab-general');
+      console.log('viz MCP settings ok: URL visible, optional setup collapsed, manual access opens and closes');
+
       const countScene = () => accountPage.evaluate(() => {
         let orbs = 0;
         const walk = (node) => {

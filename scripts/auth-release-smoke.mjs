@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { smokeMcpOAuth } from './mcp-oauth-smoke.mjs';
 import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
@@ -477,6 +478,8 @@ try {
     throw new Error('compiled authenticated root did not serve the GPU app');
   }
 
+  await smokeMcpOAuth(baseUrl, authenticatedCookie);
+
   const logout = await request(jar, `${baseUrl}/auth/logout`, {
     method: 'POST',
     headers: { origin: baseUrl },
@@ -537,7 +540,7 @@ try {
   }
 
   process.stdout.write(
-    'auth release smoke ok: shell login, founder admission, CLI invite, member admission, PKCE, session gate, logout\n'
+    'auth release smoke ok: shell login, founder admission, CLI invite, member admission, PKCE, MCP OAuth, session gate, logout\n'
   );
 } finally {
   if (viz) await stopChild(viz);
