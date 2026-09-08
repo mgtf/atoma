@@ -253,6 +253,9 @@ export type PrincipalKind = 'human' | 'service' | 'system';
 export type OrgRole = 'org:owner' | 'org:admin' | 'org:member' | 'org:viewer';
 
 export const ORG_ROLES: readonly OrgRole[] = ['org:viewer', 'org:member', 'org:admin', 'org:owner'];
+export function roleAtLeast(role: OrgRole, minimum: OrgRole): boolean {
+  return ORG_ROLES.indexOf(role) >= ORG_ROLES.indexOf(minimum);
+}
 
 /** Bound pending login transactions so unauthenticated starts cannot grow the DB forever. */
 export const MAX_ACTIVE_OAUTH_STATES = 500;

@@ -59,7 +59,7 @@ export interface PreparedProjectRetrievalCorpus {
 }
 
 /** Source roots must be host-owned immutable snapshots, never a live worker workspace. */
-async function captureDocument(root: string, document: ProjectRetrievalManifest['documents'][number],
+export async function captureProjectDocument(root: string, document: ProjectRetrievalManifest['documents'][number],
   context: ProjectRetrievalCallContext): Promise<Buffer> {
   let file = root;
   for (const segment of document.path.split('/')) {
@@ -181,7 +181,7 @@ export async function prepareProjectRetrievalCorpus(root: string, input: unknown
     const passages: Readonly<ProjectRetrievalPassage>[] = [];
     for (const document of manifest.documents) {
       assertRetrievalTime(context);
-      const bytes = await captureDocument(canonicalRoot, document, context);
+      const bytes = await captureProjectDocument(canonicalRoot, document, context);
       passages.push(...chunkDocument(document, bytes, config.chunks));
       if (passages.length > PROJECT_RETRIEVAL_CORPUS_LIMITS.passages) throw new Error('too many passages');
     }

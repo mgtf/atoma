@@ -58,6 +58,8 @@ import {
 import { repoRoot } from '../mcp/run.js';
 import { buildArtifactManifest } from './artifacts.js';
 import { ProjectStateConflict, ProjectStore } from './store.js';
+import { ProjectRetrievalLaunchStore } from './retrievalLaunch.js';
+import { PROJECT_RETRIEVAL_ENV, projectRetrievalEnabled } from '../contracts/projectRetrievalLaunch.js';
 
 const MAX_CONTROL_JSON_BYTES = 512 * 1024;
 
@@ -656,18 +658,18 @@ export function projectRunEnvironment(input: {
   return { environment, payers };
 }
 
-function previousDeliveredWorkspace(
+function previousDeliveredRun(
   store: ProjectStore,
   orgId: string,
   projectId: string
-): string | null {
+): ProjectRun | null {
   const runs = store.listProjectRuns(orgId, projectId);
   if (!runs) return null;
   for (const run of runs) {
     if (run.status !== 'delivered') continue;
     try {
       if (lstatSync(run.hostPaths.workspacePath).isDirectory()) {
-        return run.hostPaths.workspacePath;
+        return run;
       }
     } catch {
       continue;
@@ -883,6 +885,7 @@ export class ProjectRunCoordinator {
   private readonly describeDeliveredPreview?: (input: DeliveredPreviewSubject) => void;
   private readonly cwd: string;
   private readonly timeoutMs: number;
+  private readonly retrievalEnabled: boolean;
   private readonly active = new Map<string, ActiveRun>();
   private readonly idleWaiters = new Set<() => void>();
 
@@ -910,6 +913,7 @@ export class ProjectRunCoordinator {
     }
     this.cwd = options.cwd ?? repoRoot();
     this.timeoutMs = projectRunTimeoutMs(this.hostEnv, options.timeoutMs);
+    this.retrievalEnabled = projectRetrievalEnabled(this.hostEnv);
   }
 
   /**
@@ -1165,12 +1169,14 @@ export class ProjectRunCoordinator {
       controller,
     });
 
-    const seedFrom = previousDeliveredWorkspace(this.store, input.orgId, input.projectId);
+    const seedRun = previousDeliveredRun(this.store, input.orgId, input.projectId);
+    const seedFrom = seedRun?.hostPaths.workspacePath;
     let driven: Promise<string>;
     try {
-      driven = this.driver({
+      const deadlineAt = Date.now() + this.timeoutMs;
+      const launch = () => this.driver({
         goal: run.goal,
-        timeoutMs: this.timeoutMs,
+        timeoutMs: this.retrievalEnabled ? Math.max(1, deadlineAt - Date.now()) : this.timeoutMs,
         logPath: paths.logPath,
         cwd: this.cwd,
         npmScript: 'run:build',
@@ -1189,6 +1195,14 @@ export class ProjectRunCoordinator {
         env: environment,
         onSpawn: (pid) => lease.attachChild(pid),
       });
+      driven = this.retrievalEnabled ? (async () => {
+        const preparationSignal = AbortSignal.any([controller.signal, AbortSignal.timeout(this.timeoutMs)]);
+        await ProjectRetrievalLaunchStore.open(this.dbPath).prepare(run.projectRunId,
+          seedRun?.projectRunId ?? null, { signal: preparationSignal, deadlineAt });
+        if (preparationSignal.aborted || Date.now() >= deadlineAt) throw new Error('project document preparation cancelled');
+        environment[PROJECT_RETRIEVAL_ENV] = '1';
+        return launch();
+      })() : launch();
     } catch (error) {
       driven = Promise.reject(error instanceof Error ? error : new Error(String(error)));
     }

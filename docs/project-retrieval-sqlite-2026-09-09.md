@@ -1,7 +1,8 @@
 # Project retrieval: deterministic ingestion and SQLite backend
 
-Date: 2026-09-09. Status: host library implementation; tenant/CLI activation
-remains pending. This extends the [host contract](project-retrieval-host-contract-2026-09-09.md)
+Date: 2026-09-09. Status: host library implementation, subsequently connected to
+[opt-in project activation](project-retrieval-activation-2026-09-09.md).
+This extends the [host contract](project-retrieval-host-contract-2026-09-09.md)
 and implements the lexical backend in [Steps 6–7](project-retrieval-action-plan-2026-09-08.md#phase-c--implement-the-first-backend).
 
 ## Ownership and use

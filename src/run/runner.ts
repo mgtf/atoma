@@ -29,6 +29,8 @@ import { RecordingLlmClient } from '../viz/recordingLlm.js';
 import { RecordingRegistry } from '../viz/recordingRegistry.js';
 import { containerToolBackend, localToolBackend, withProjectRetrievalBackend } from './toolBackend.js';
 import { validateProjectRetrievalBinding, type ProjectRetrievalBinding } from '../tools/projectRetrieval.js';
+import { projectRetrievalEnabled } from '../contracts/projectRetrievalLaunch.js';
+import { openProjectRunRetrieval } from '../projects/retrievalLaunch.js';
 import { baselineModel, runFrontierBaseline } from './baseline.js';
 import {
   assertIsolationBoundary,
@@ -415,7 +417,7 @@ export async function startTask(
     onWedged?: () => void;
     providerEnv?: NodeJS.ProcessEnv;
     requireIsolation?: boolean;
-    /** Trusted library injection; the CLI/coordinator do not construct one yet. */
+    /** Trusted library injection; marked project children resolve a stored receipt instead. */
     projectRetrieval?: ProjectRetrievalBinding;
   }
 ): Promise<RunHandle> {
@@ -489,6 +491,12 @@ export async function startTask(
     );
   }
   let retrievalBinding: ProjectRetrievalBinding | undefined;
+  let retrievalFromReceipt = false;
+  try { retrievalFromReceipt = projectRetrievalEnabled(process.env); }
+  catch { throw new RunnerConfigError('invalid project retrieval activation'); }
+  if (retrievalFromReceipt && (opts?.projectRetrieval || process.env['ATOMA_TENANT_RUN'] !== '1' || !requestedRunId)) {
+    throw new RunnerConfigError('project retrieval activation requires an exclusive tenant run receipt');
+  }
   if (opts?.projectRetrieval) {
     try { retrievalBinding = validateProjectRetrievalBinding(opts.projectRetrieval); }
     catch { throw new RunnerConfigError('invalid host project retrieval binding'); }
@@ -615,6 +623,17 @@ export async function startTask(
   );
 
   const runsDir = process.env['ATOMA_RUNS_DIR'] ?? './runs';
+  if (retrievalFromReceipt) {
+    // Even a forged launch switch cannot unlock local shell access to the control plane.
+    if (!args.container || process.env['ATOMA_PREFILTER_CACHE'] !== '0' ||
+        process.env['ATOMA_SKILL_PROMOTE'] !== '0' || process.env['ATOMA_SKILL_DIRECT'] !== '0') {
+      throw new RunnerConfigError('project retrieval requires container isolation and tenant lifecycle settings');
+    }
+    try {
+      retrievalBinding = openProjectRunRetrieval({ dbPath, runId: requestedRunId!, workspacePath: workspaceRoot,
+        skillsPath: skillsDirPath(), runsPath: runsDir });
+    } catch { throw new RunnerConfigError('project retrieval launch is unavailable or denied'); }
+  }
   const recorder = new TraceRecorder(runsDir);
   const db = openDb(dbPath);
   const registry = new RecordingRegistry(db, recorder);

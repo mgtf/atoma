@@ -80,7 +80,9 @@ async function writeBatch<T>(db: Database.Database, context: ProjectRetrievalCal
 
 /** Host-only cache over the primary product store. It owns no database lifetime. */
 export class ProjectRetrievalIndex {
-  constructor(private readonly db: Database.Database) { db.exec(PROJECT_RETRIEVAL_CACHE_DDL); }
+  constructor(private readonly db: Database.Database, options: { initialize?: boolean } = {}) {
+    if (options.initialize !== false) db.exec(PROJECT_RETRIEVAL_CACHE_DDL);
+  }
 
   static open(path = storeDbPath()): ProjectRetrievalIndex {
     return new ProjectRetrievalIndex(openStoreHandle(path, PROJECT_RETRIEVAL_CACHE_DDL));

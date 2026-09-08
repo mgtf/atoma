@@ -98,21 +98,17 @@ Ranking scores, when present, are diagnostics and never correctness scores.
 - Concurrent branches: retain their existing transport trace IDs and avoid
   ambient mutable caller/branch state in the service.
 
-## Activation still required
+## Subsequent activation
 
-The CLI, project coordinator and benchmark do not construct this binding yet.
-Existing canonical molecule declarations are not widened automatically; only
-an L1 explicitly declaring the capability may invoke it.
-No environment variable or model-authored manifest activates it. Before tenant
-activation, the coordinator must pass immutable scope through its existing
-allowlisted launch snapshot; the child must resolve it against the current
-project/run/principal and immutable corpus records in the existing product
-store. The authoritative resolver must enforce revocation/deletion again on
-each query. A stored launch grant is insufficient. The SQLite FTS5 backend now
-exists as a host library; authoritative store/corpus records and their resolver
-remain later increments, with process-boundary tests before enabling any tenant
-launch. Operator activation likewise requires
-an explicitly supplied immutable corpus, never a scan of arbitrary host files.
+The [SQLite backend](project-retrieval-sqlite-2026-09-09.md) and
+[opt-in project activation](project-retrieval-activation-2026-09-09.md) now
+implement source admission, authoritative receipts and a child resolver against
+current project/run/principal state in the existing product store. The host
+switch alone grants nothing; live authority is checked again on each query.
+A dedicated L1 scope receives search while existing unrelated canonical
+scopes stay unchanged. Operator/benchmark CLI activation, downstream privacy
+evaluation and operational rollout remain pending. Explicit library callers
+must still supply an immutable corpus, never a scan of arbitrary host files.
 
 ## Verification of this increment
 
@@ -125,4 +121,5 @@ inaccessible host source files/environment and no dispatch from worker data.
 The L1 transport tests also preserve branch-labelled tool traces and reject
 off-scope calls. These checks originally certified the host boundary alone.
 The [subsequent backend record](project-retrieval-sqlite-2026-09-09.md) covers
-ingestion and FTS5; the tenant store resolver remains unimplemented.
+ingestion and FTS5; the [activation record](project-retrieval-activation-2026-09-09.md)
+covers the current-access resolver and coordinator/child process tests.

@@ -1,6 +1,7 @@
 import type { IncomingMessage } from 'node:http';
 import type { Viewer } from '../auth/store.js';
-import { ORG_ROLES, type OrgRole } from '../auth/store.js';
+import { roleAtLeast } from '../auth/store.js';
+export { roleAtLeast } from '../auth/store.js';
 import {
   createProjectInputSchema,
   createProjectRunInputSchema,
@@ -42,9 +43,6 @@ export class ProjectHttpError extends Error {
   }
 }
 
-export function roleAtLeast(role: OrgRole, minimum: OrgRole): boolean {
-  return ORG_ROLES.indexOf(role) >= ORG_ROLES.indexOf(minimum);
-}
 
 export interface ProjectServiceDeps {
   readonly store: import('./store.js').ProjectStore;

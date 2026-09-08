@@ -10,6 +10,10 @@ import { buildTierClients } from '../src/run/providers.js';
 import { PROJECT_RETRIEVAL_TOOL_NAME as SEARCH } from '../src/contracts/projectRetrieval.js';
 import { retrievalTestBinding } from './helpers/projectRetrieval.js';
 import { silentLogger } from './helpers.js';
+import { projectRetrievalFixture } from './helpers/projectRetrievalLaunch.js';
+import { retrievalContext } from './helpers/projectRetrievalCorpus.js';
+import { ProjectRetrievalLaunchStore } from '../src/projects/retrievalLaunch.js';
+import { closeStoreHandles } from '../src/core/stores.js';
 
 vi.mock('../src/run/toolBackend.js', async original => ({
   ...await original<typeof import('../src/run/toolBackend.js')>(), containerToolBackend: vi.fn(),
@@ -21,6 +25,7 @@ vi.mock('../src/run/providers.js', async original => ({
 const roots: string[] = [];
 afterEach(() => {
   vi.unstubAllEnvs(); vi.restoreAllMocks(); resetHostLifecycleSnapshotForTests();
+  closeStoreHandles();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -39,6 +44,41 @@ function environment() {
 }
 
 describe('trusted retrieval injection through startTask', () => {
+  it('resolves the coordinator receipt through the real startTask path without a library injection', async () => {
+    const root = environment();
+    const f = projectRetrievalFixture(root);
+    const source = f.makeRun({ 'docs.md': 'Private price is 190 euros.\n' });
+    const current = f.makeRun();
+    await ProjectRetrievalLaunchStore.open(f.dbPath).prepare(current.run.projectRunId, source.run.projectRunId, retrievalContext());
+    for (const [key, value] of Object.entries({ ATOMA_PROJECT_RETRIEVAL: '1', ATOMA_TENANT_RUN: '1', ATOMA_RUN_ID: current.run.projectRunId,
+      ATOMA_DB_PATH: f.dbPath, ATOMA_BUILD_WORKSPACE: current.layout.workspacePath, ATOMA_RUNS_DIR: current.layout.runsPath,
+      ATOMA_SKILLS_DIR: current.layout.skillsPath, ATOMA_SKILL_PROMOTE: '0', ATOMA_SKILL_DIRECT: '0', ATOMA_PREFILTER_CACHE: '0' })) vi.stubEnv(key, value);
+    resetHostLifecycleSnapshotForTests();
+    const llm = new MockLlmClient();
+    let observed: unknown;
+    llm.enqueue(async req => {
+      observed = await req.executor!.execute(SEARCH, { query: 'price' });
+      return { text: 'Source consulted.', stopReason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 } };
+    });
+    vi.mocked(buildTierClients).mockReturnValue({ ollama: llm });
+    vi.mocked(containerToolBackend).mockImplementation(async opts => localToolBackend({ workspaceRoot: opts.workspaceRoot, logger: silentLogger() }));
+    const handle = await startTask(buildProfile, ['--container', '--baseline', '--no-learn-skills', '--no-promote-skills', '--no-direct-skills', 'Consult the source.']);
+    try {
+      expect((await handle.settled).outcome).toBe('delivered');
+      expect(observed).toMatchObject({ ok: true, passages: [expect.objectContaining({ excerpt: 'Private price is 190 euros.\n' })] });
+    } finally { await handle.shutdown(); }
+  });
+
+  it('refuses a marked child without a stored receipt before workspace or provider construction', async () => {
+    const root = environment();
+    vi.stubEnv('ATOMA_PROJECT_RETRIEVAL', '1'); vi.stubEnv('ATOMA_TENANT_RUN', '1');
+    vi.stubEnv('ATOMA_SKILL_PROMOTE', '0'); vi.stubEnv('ATOMA_SKILL_DIRECT', '0');
+    vi.stubEnv('ATOMA_PREFILTER_CACHE', '0'); resetHostLifecycleSnapshotForTests();
+    vi.mocked(buildTierClients).mockClear(); vi.mocked(containerToolBackend).mockClear();
+    await expect(startTask(buildProfile, ['--container', '--no-promote-skills', '--no-direct-skills', 'Consult source.'])).rejects.toThrow('unavailable or denied');
+    expect(buildTierClients).not.toHaveBeenCalled(); expect(containerToolBackend).not.toHaveBeenCalled();
+    expect(existsSync(join(root, 'workspace'))).toBe(false);
+  });
   it.each([false, true])('uses the same host service with container mode=%s and disposes it on shutdown', async container => {
     environment();
     const binding = retrievalTestBinding();

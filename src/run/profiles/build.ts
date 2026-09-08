@@ -6,7 +6,9 @@ import {
   ensureCanonicalHttpL2,
   ensureCanonicalFileScribeL1,
   ensureCanonicalFullStack,
+  ensureCanonicalProjectDocsL1,
 } from '../../atoms/capability.js';
+import { HOST_TOOL_NAMES } from '../../contracts/toolTaxonomy.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { prepareWorkspace } from '../workspace.js';
@@ -181,6 +183,7 @@ export const buildProfile: TaskProfile = {
         l3Type.name,
         {
           addTools: [...toolDecls],
+          removeTools: HOST_TOOL_NAMES.filter(name => !toolDecls.some(tool => tool.name === name)),
           ...(l3Type.systemPrompt !== MERISTEM_SYSTEM_PROMPT
             ? { systemPromptReplace: MERISTEM_SYSTEM_PROMPT }
             : {}),
@@ -222,6 +225,8 @@ export const buildProfile: TaskProfile = {
     log(
       `canonical L1 (file-scribe): ${canonicalL1FileScribe.name} (v${canonicalL1FileScribe.version}) — ${canonicalL1FileScribe.description.slice(0, 70)}…`
     );
+    const documentMolecule = ensureCanonicalProjectDocsL1(registry, toolDecls);
+    if (documentMolecule) log(`canonical L1 (project-docs): ${documentMolecule.name} (v${documentMolecule.version})`);
     for (const tier of [1, 2] as const) {
       const fullStack = ensureCanonicalFullStack(registry, toolDecls, tier);
       if (fullStack) log(`canonical L${tier} (full-stack): ${fullStack.name} (v${fullStack.version}) — ${fullStack.description}`);

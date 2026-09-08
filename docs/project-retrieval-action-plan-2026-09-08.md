@@ -2,8 +2,9 @@
 
 Date: 2026-09-08, progress updated 2026-09-09. Status: evaluation instruments,
 A/C characterization driver, archived development pilot, typed host boundary,
-deterministic document ingestion and SQLite FTS5 backend delivered.
-Tenant/CLI activation and retrieval-provider integrations remain unimplemented.
+deterministic document ingestion, SQLite FTS5 backend and opt-in project-run
+activation delivered. Paired treatment evaluation, operational rollout and
+retrieval-provider integrations remain pending.
 
 ## Implementation progress
 
@@ -41,9 +42,16 @@ It reads only manifest-admitted immutable sources, preserves exact byte spans,
 builds independent project indexes in the existing product store and publishes
 them atomically. Tests cover cancellation, revocation, corruption, writer
 contention and a crashed builder process. Compiled smokes and a reproducible
-20,000-passage capacity probe exercise the real SQLite runtime. The current-access
-store resolver, authoritative snapshot lifecycle and cross-process coordinator
-activation remain to implement; the CLI does not enable search.
+20,000-passage capacity probe exercise the real SQLite runtime.
+
+Steps 8–9 now have [opt-in project coordinator activation](project-retrieval-activation-2026-09-09.md):
+an immutable source archive and receipt, a read-only child resolver against
+current project/principal/run state, and a dedicated L1 canonical scope.
+`ATOMA_PROJECT_RETRIEVAL=1` on the coordinator host enables this path for new
+project runs. The compiled process smoke covers coordinator → child → L1 →
+FTS5, live revocation and the real isolated worker. The benchmark treatment,
+downstream distillation/catalogue privacy audit and operational lifecycle are
+still pending; this is not default activation or evidence of an A/B gain.
 
 ## Objective and implementation order
 
@@ -412,27 +420,27 @@ switching, crashes, corrupt caches, deletion and revocation during a query.
 **Purpose:** make retrieval reachable by authorized molecules without changing
 the supervision protocol.
 
-- [ ] Implement the composite executor and dedicated host element factory in
+- [x] Implement the composite executor and dedicated host element factory in
   `src/tools/`; inject the scoped retrieval service from run construction.
   Keep store construction and provider credentials out of worker imports.
-- [ ] Thread the authorized corpus binding from project coordinator to host
+- [x] Thread the authorized corpus binding from project coordinator to host
   run process. Validate it at launch and at the lookup boundary; tenant mode
   with missing or inconsistent binding cannot fall back to operator scope.
-- [ ] Wire declarations through `ToolBackend.toolDecls`, canonical bootstrap,
+- [x] Wire declarations through `ToolBackend.toolDecls`, canonical bootstrap,
   capability descriptions, and runtime tool-scope enforcement together.
   Give the element only to the intended L1 scopes; do not silently append it
   to every persisted molecule or alter unrelated capability buckets.
-- [ ] Add its metadata through
+- [x] Add its metadata through
   [tool taxonomy](../src/contracts/toolTaxonomy.ts) while preserving every
   existing invocation identity. Test both a clean bootstrap and an existing
   registry upgrade; reset trust only for types whose actual contract changes.
-- [ ] Keep the host element absent from the worker's builtins and handshake.
+- [x] Keep the host element absent from the worker's builtins and handshake.
   Update declaration consistency tests to distinguish worker declarations
   from the composite runtime catalogue through one explicit ownership model.
-- [ ] Integrate inside existing trace and branch wrappers. Search results are
+- [x] Integrate inside existing trace and branch wrappers. Search results are
   observed source data, not proof that an artifact satisfies a requirement.
   Do not expand the closed attestation vocabulary just to record retrieval.
-- [ ] Preserve normal validation and usage-conditioned skill credit. A
+- [x] Preserve normal validation and usage-conditioned skill credit. A
   retrieved document never grants earned trust or deterministic dispatch.
 - [ ] Audit downstream distillation and catalogue offers with tenant-document
   fixtures. Source excerpts, private facts and tenant-specific references must
@@ -442,6 +450,8 @@ the supervision protocol.
 - [ ] Ensure cached queries/results include tenant/project scope, snapshot,
   generation and retrieval settings, and recheck authorization on a cache hit.
   Do not reuse the strategy prefilter cache or add semantic fast-path caching.
+  Current implementation adds no query/result cache and requires the existing
+  project strategy prefilter cache to remain off.
 - [ ] Bound cancellation and cleanup of queries and index builds on success,
   failure, deadline, SIGTERM and shutdown. The run must not outlive its budget
   because a search is pending.
@@ -455,15 +465,18 @@ and new focused retrieval tests under `tests/`.
 modes; undeclared calls fail; ordinary file/shell calls retain their original
 execution boundary; branch recording has no duplicate observations.
 
+**Implemented increment:** [activation and current limits](project-retrieval-activation-2026-09-09.md).
+The downstream tenant-data audit remains a separate, unfinished condition.
+
 ### Step 9 — prove the container and compiled-process boundaries
 
 **Purpose:** test the boundary that the implementation actually crosses.
 
-- [ ] Run the packaged host process against a real worker image built from
+- [x] Run the packaged host process against a real worker image built from
   packaged `dist/`, with `network none` and the ordinary allowlisted worker
   environment. Exercise the normal coordinator/launcher binding in a compiled
   process test, not only direct constructor calls.
-- [ ] With mocked LLM decisions, prove that L1 search returns authorized
+- [x] With mocked LLM decisions, prove that L1 search returns authorized
   fixture passages while file/shell operations still execute in the worker.
 - [ ] Prove the worker cannot read the product store, host credentials, other
   workspaces, or another tenant's documents, and cannot reach host services.
