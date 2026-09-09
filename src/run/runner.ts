@@ -31,7 +31,7 @@ import { RecordingLlmClient } from '../viz/recordingLlm.js';
 import { RecordingRegistry } from '../viz/recordingRegistry.js';
 import { containerToolBackend, localToolBackend, withProjectRetrievalBackend } from './toolBackend.js';
 import { validateProjectRetrievalBinding, type ProjectRetrievalBinding } from '../tools/projectRetrieval.js';
-import { hasProjectRetrievalReceipt } from '../contracts/projectRetrievalLaunch.js';
+import { projectRunHasRetrievalReceipt } from '../projects/retrievalLaunch.js';
 import { HAYSTACK_LAUNCH_ENV, readHaystackLaunch } from '../contracts/retrievalHaystack.js';
 import { openProjectRunHaystack } from '../projects/retrievalHaystackLaunch.js';
 import { baselineModel, runFrontierBaseline } from './baseline.js';
@@ -495,14 +495,10 @@ export async function startTask(
   }
   let retrievalBinding: ProjectRetrievalBinding | undefined;
   let prepareRetrieval: ReturnType<typeof openProjectRunHaystack>['prepare'] | undefined;
-  let retrievalFromReceipt = false;
-  try { retrievalFromReceipt = hasProjectRetrievalReceipt(process.env); }
-  catch { throw new RunnerConfigError('invalid project retrieval receipt marker'); }
   let haystackLaunch: ReturnType<typeof readHaystackLaunch> | undefined;
-  try { if (retrievalFromReceipt || process.env[HAYSTACK_LAUNCH_ENV] !== undefined) haystackLaunch = readHaystackLaunch(process.env); }
-  catch { throw new RunnerConfigError('project retrieval requires a valid ATOMA_PROJECT_RETRIEVAL_HAYSTACK configuration'); }
-  if (haystackLaunch && !retrievalFromReceipt) throw new RunnerConfigError('Haystack requires a project retrieval receipt');
-  if (retrievalFromReceipt && (opts?.projectRetrieval || process.env['ATOMA_TENANT_RUN'] !== '1' || !requestedRunId)) {
+  try { if (process.env[HAYSTACK_LAUNCH_ENV] !== undefined) haystackLaunch = readHaystackLaunch(process.env); }
+  catch (error) { throw new RunnerConfigError((error as Error).message); }
+  if (haystackLaunch && (opts?.projectRetrieval || process.env['ATOMA_TENANT_RUN'] !== '1' || !requestedRunId)) {
     throw new RunnerConfigError('project retrieval requires an exclusive tenant run receipt');
   }
   if (opts?.projectRetrieval) {
@@ -631,19 +627,6 @@ export async function startTask(
   );
 
   const runsDir = process.env['ATOMA_RUNS_DIR'] ?? './runs';
-  if (retrievalFromReceipt) {
-    if (!haystackLaunch) throw new RunnerConfigError('project retrieval requires Haystack configuration');
-    // Even a forged launch switch cannot unlock local shell access to the control plane.
-    if (!args.container || process.env['ATOMA_PREFILTER_CACHE'] !== '0' ||
-        process.env['ATOMA_SKILL_PROMOTE'] !== '0' || process.env['ATOMA_SKILL_DIRECT'] !== '0') {
-      throw new RunnerConfigError('project retrieval requires container isolation and tenant lifecycle settings');
-    }
-    try {
-      const paths = { dbPath, runId: requestedRunId!, workspacePath: workspaceRoot, skillsPath: skillsDirPath(), runsPath: runsDir };
-      const prepared = openProjectRunHaystack(paths, haystackLaunch);
-      retrievalBinding = prepared.binding; prepareRetrieval = prepared.prepare;
-    } catch { throw new RunnerConfigError('project retrieval launch is unavailable or denied'); }
-  }
   const tenantRun = process.env['ATOMA_TENANT_RUN'] === '1';
   const projectPaths = { dbPath, runId: requestedRunId ?? '', workspacePath: workspaceRoot,
     skillsPath: skillsDirPath(), runsPath: runsDir };
@@ -654,6 +637,27 @@ export async function startTask(
     }
     try { registryOwner = resolveProjectRegistryOwner(projectPaths); }
     catch { throw new RunnerConfigError('project registry launch is unavailable or denied'); }
+  }
+  let recordedRetrieval = false;
+  if (tenantRun) {
+    try { recordedRetrieval = projectRunHasRetrievalReceipt(dbPath, projectPaths.runId); }
+    catch { throw new RunnerConfigError('project retrieval launch is unavailable or denied'); }
+  }
+  if (haystackLaunch || recordedRetrieval) {
+    if (opts?.projectRetrieval) throw new RunnerConfigError('project retrieval requires an exclusive tenant run receipt');
+    if (!haystackLaunch) {
+      try { haystackLaunch = readHaystackLaunch(process.env); }
+      catch (error) { throw new RunnerConfigError((error as Error).message); }
+    }
+    // Search never unlocks local shell access to the control plane.
+    if (!args.container || process.env['ATOMA_PREFILTER_CACHE'] !== '0' ||
+        process.env['ATOMA_SKILL_PROMOTE'] !== '0' || process.env['ATOMA_SKILL_DIRECT'] !== '0') {
+      throw new RunnerConfigError('project retrieval requires container isolation and tenant lifecycle settings');
+    }
+    try {
+      const prepared = openProjectRunHaystack(projectPaths, haystackLaunch);
+      retrievalBinding = prepared.binding; prepareRetrieval = prepared.prepare;
+    } catch { throw new RunnerConfigError('project retrieval launch is unavailable or denied'); }
   }
   const recorder = new TraceRecorder(runsDir);
   const db = openDb(dbPath);

@@ -58,8 +58,7 @@ export async function prepareRetrievalProjectAttempt(input: {
       subscriptionTransport: { principalId: viewer.principalId }, workspacePath: layout.workspacePath,
       runsPath: layout.runsPath, skillsPath: layout.skillsPath, artifactManifestPath: layout.artifactManifestPath });
     const treatment = entry.arm === 'atoma-haystack';
-    const env: NodeJS.ProcessEnv = { ...input.env, ...built.environment, ATOMA_SKILL_LEARN: '0', ATOMA_EVENT_SKILLS: '0',
-      ATOMA_PROJECT_RETRIEVAL_RECEIPT: treatment ? '1' : undefined };
+    const env: NodeJS.ProcessEnv = { ...input.env, ...built.environment, ATOMA_SKILL_LEARN: '0', ATOMA_EVENT_SKILLS: '0' };
     // Scientific controls bypass the product coordinator deliberately. Never
     // inherit the host's mandatory project runtime into a registered control.
     delete env[HAYSTACK_LAUNCH_ENV];

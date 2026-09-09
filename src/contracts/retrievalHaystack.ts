@@ -13,7 +13,7 @@ export const haystackSettingsSchema = z.discriminatedUnion('mode', [
     queryPrefix: z.string().max(1000),
     embeddingRevision: projectDocumentDigestSchema, rerankerRevision: projectDocumentDigestSchema }).strict(),
 ]);
-export const HAYSTACK_LAUNCH_ENV = 'ATOMA_PROJECT_RETRIEVAL_HAYSTACK';
+export const HAYSTACK_LAUNCH_ENV = 'ATOMA_HAYSTACK_CONFIG';
 export const haystackLaunchSchema = z.object({ python: localPath, settings: haystackSettingsSchema,
   runtimeSha256: projectDocumentDigestSchema }).strict();
 export type HaystackLaunch = z.infer<typeof haystackLaunchSchema>;
@@ -33,5 +33,5 @@ export function readHaystackLaunch(env: NodeJS.ProcessEnv): HaystackLaunch {
     const raw = env[HAYSTACK_LAUNCH_ENV];
     if (!raw || Buffer.byteLength(raw) > 8192) throw new Error('missing or oversized');
     return haystackLaunchSchema.parse(JSON.parse(raw));
-  } catch { throw new Error('project retrieval requires a valid ATOMA_PROJECT_RETRIEVAL_HAYSTACK configuration'); }
+  } catch { throw new Error('project retrieval requires a valid ATOMA_HAYSTACK_CONFIG configuration'); }
 }

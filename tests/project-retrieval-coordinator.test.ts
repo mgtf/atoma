@@ -17,7 +17,7 @@ const roots: string[] = [];
 afterEach(() => { vi.restoreAllMocks(); closeStoreHandles(); roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })); });
 
 describe('coordinator retrieval admission before spawn', () => {
-  it.each([{}, { ATOMA_PROJECT_RETRIEVAL: '0' }, { [HAYSTACK_LAUNCH_ENV]: 'invalid' }])('refuses new runs without valid Haystack configuration before reservation: %j', async hostEnv => {
+  it.each([{}, { [HAYSTACK_LAUNCH_ENV]: 'invalid' }])('refuses new runs without valid Haystack configuration before reservation: %j', async hostEnv => {
     const root = mkdtempSync(join(tmpdir(), 'atoma-retrieval-config-')); roots.push(root);
     const f = projectRetrievalFixture(root);
     const driver = vi.fn<ProjectRunDriver>();
@@ -29,12 +29,12 @@ describe('coordinator retrieval admission before spawn', () => {
     const input = { orgId: f.viewer.orgId, principalId: f.viewer.principalId,
       projectId: f.project.projectId, request: { idempotencyKey: 'missing-runtime', goal: 'Consult project docs.' } };
     await expect(coordinator.start(input)).rejects.toThrow(ProjectRunConfigurationError);
-    await expect(coordinator.start(input)).rejects.toThrow('ATOMA_PROJECT_RETRIEVAL_HAYSTACK');
+    await expect(coordinator.start(input)).rejects.toThrow('ATOMA_HAYSTACK_CONFIG');
     expect(f.projects.findProjectRunForRequest(input.orgId, input.projectId, input.principalId, input.request)).toBeNull();
     expect(acquireLease).not.toHaveBeenCalled();
     expect(driver).not.toHaveBeenCalled();
   });
-  it.each([undefined, '0'])('always prepares search and archives the delivered seed, even with obsolete switch=%s', async obsoleteSwitch => {
+  it('always prepares search and archives the delivered seed without an activation switch', async () => {
     const root = mkdtempSync(join(tmpdir(), 'atoma-retrieval-coordinator-')); roots.push(root);
     const f = projectRetrievalFixture(root);
     const source = f.makeRun({ 'docs.md': 'Private annual price: 190 euros.\n' });
@@ -54,17 +54,15 @@ describe('coordinator retrieval admission before spawn', () => {
     });
     const release = vi.fn();
     const coordinator = new ProjectRunCoordinator({ store: f.projects, dbPath: f.dbPath, projectsRoot: root,
-      hostEnv: { ATOMA_PROJECT_RETRIEVAL: obsoleteSwitch, ATOMA_PROJECT_RETRIEVAL_RECEIPT: '0', [HAYSTACK_LAUNCH_ENV]: JSON.stringify(haystackTestRuntime(root)), ATOMA_MODEL_L1: 'api:ollama:test', ATOMA_MODEL_L2: 'api:ollama:test', ATOMA_MODEL_L3: 'api:ollama:test',
+      hostEnv: { [HAYSTACK_LAUNCH_ENV]: JSON.stringify(haystackTestRuntime(root)), ATOMA_MODEL_L1: 'api:ollama:test', ATOMA_MODEL_L2: 'api:ollama:test', ATOMA_MODEL_L3: 'api:ollama:test',
         OLLAMA_BASE_URL: 'http://127.0.0.1:1' }, driver,
       acquireLease: async () => ({ path: 'test', attachChild: vi.fn(), release }) });
     const run = await coordinator.start({ orgId: f.viewer.orgId, principalId: f.viewer.principalId,
       projectId: f.project.projectId, request: { idempotencyKey: 'with-retrieval', goal: 'Consult the private project docs.' } });
     await coordinator.waitForIdle();
     expect(result).toMatchObject({ ok: true, passages: [expect.objectContaining({ excerpt: 'Private annual price: 190 euros.\n' })] });
-    expect(forwarded?.env?.['ATOMA_PROJECT_RETRIEVAL_RECEIPT']).toBe('1');
     expect(readHaystackLaunch(forwarded!.env!)).toEqual(haystackTestRuntime(root));
     expect(forwarded?.env?.['ATOMA_TENANT_RUN']).toBe('1');
-    expect(forwarded?.env?.['ATOMA_PROJECT_RETRIEVAL']).toBeUndefined();
     expect(forwarded?.extraArgs).toContain(source.layout.workspacePath);
     expect(Object.values(forwarded?.env ?? {}).some(value => value?.includes('Private annual'))).toBe(false);
     expect(ProjectRetrievalLaunchStore.open(f.dbPath).resolve(run.projectRunId)).toBe(null); // run is now terminal

@@ -25,25 +25,27 @@ current index is in memory and reconstructed for each run.
 
 Search is mandatory for every new project run launched through the project
 coordinator (browser, MCP or `projects run`). The host must supply
-`ATOMA_PROJECT_RETRIEVAL_HAYSTACK`: an explicit Python executable, pipeline
+`ATOMA_HAYSTACK_CONFIG`: an explicit Python executable, pipeline
 settings and Python/package metadata digest. Missing or malformed configuration
 fails before acquiring the run lease or reserving a run. Read-only server
 startup, publication retries and idempotent reads of existing runs remain
 available without this configuration.
 
-There is no activation switch. The former `ATOMA_PROJECT_RETRIEVAL` variable
-has no effect, including when set to `0`. Every new project run archives its
+There is no activation switch or child activation marker. Every new project run archives its
 admitted source documents, records its receipt and initializes Haystack before
 model execution. A first run still exposes search with an empty corpus. The
 corpus remains the previous delivered run's manifest-admitted Markdown/text
 artifacts; mandatory search does not expand which documents a tenant can read.
 
-The coordinator stamps `ATOMA_PROJECT_RETRIEVAL_RECEIPT=1` on the child after
-preparation; this is an internal assertion, not host configuration. A stamped
-child refuses a missing receipt or Haystack configuration. Neither that marker,
-the runtime settings nor source/store paths reach the worker. Preparation and
-warmup consume the existing run deadline. Failures stop the run; there is no
-fallback to a search-free project run.
+The child reads the recorded receipt directly from the product store after
+validating project authority. An existing receipt requires Haystack even when
+configuration is absent, the receipt is revoked or its contents are corrupt;
+these cases refuse startup rather than silently removing search. Only the
+engine configuration travels in `ATOMA_HAYSTACK_CONFIG`. It describes the
+Python runtime and pipeline settings, not whether search is enabled.
+The runtime settings and source/store paths never reach the worker.
+Preparation and warmup consume the existing run deadline. Failures stop the
+run; there is no fallback to a search-free project run.
 
 The element is always available to L1. The molecule chooses queries when they
 are relevant; no forced empty query or new model call is added. Ordinary file
@@ -55,7 +57,7 @@ For a lexical-only deployment, provision a host Python environment using
 paid retrieval API is needed. From the repository root, after provisioning:
 
 ```bash
-export ATOMA_PROJECT_RETRIEVAL_HAYSTACK="$(/absolute/venv/bin/python - <<'PY'
+export ATOMA_HAYSTACK_CONFIG="$(/absolute/venv/bin/python - <<'PY'
 import json, subprocess, sys
 identity = json.loads(subprocess.check_output([
     sys.executable, '-I', 'scripts/retrieval-haystack.py', '--identity'
@@ -118,10 +120,16 @@ observations replayed unchanged. The product build contains no SQLite retrieval
 backend module; its historical comparator remains independently executable.
 
 Mandatory-launch verification: `release:check` passes with the local Haystack
-runtime tests enabled. Coordinator regressions cover an absent or obsolete off
-switch, missing configuration before reservation, an empty first corpus,
+runtime tests enabled. Coordinator regressions cover launch without an activation switch,
+missing configuration before reservation, an empty first corpus,
 preparation inside the original deadline, cancellation and idempotent retries.
 The compiled `--container --haystack` smoke also passes against a worker image
 built from this output; it checks source retrieval, live revocation and absence
 of host source paths, store configuration and retrieval settings in the worker.
 No live model calls were made for this change.
+
+The launch marker and the old configuration prefix have been removed from
+source, tests and authored documentation. The runner also refuses a recorded
+receipt without engine configuration and a revoked receipt with or without
+configuration. Synthetic benchmark controls remain identifiable by their
+absence of a receipt; they cannot inherit the host engine configuration.

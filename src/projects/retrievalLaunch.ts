@@ -131,6 +131,20 @@ export class ProjectRetrievalLaunchStore {
   }
 }
 
+/**
+ * A recorded receipt makes retrieval mandatory, including when revoked or
+ * corrupt: resolution must fail, never turn a project run into a control arm.
+ * Read only; synthetic benchmark controls have no receipt or receipt table.
+ * The caller validates project authority before inspecting this launch state.
+ */
+export function projectRunHasRetrievalReceipt(dbPath: string, runId: string): boolean {
+  const db = new Database(dbPath, { readonly: true, fileMustExist: true, timeout: 0 });
+  try {
+    const table = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'project_retrieval_launches'").get();
+    return !!table && !!db.prepare('SELECT 1 FROM project_retrieval_launches WHERE run_id = ?').get(runId);
+  } finally { db.close(); }
+}
+
 /** Child host uses a separate read-only handle on the SAME product file; no DDL or worker imports. */
 export function openProjectRunRetrievalAuthority(input: {
   dbPath: string; runId: string; workspacePath: string; skillsPath: string; runsPath: string;

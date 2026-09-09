@@ -1,22 +1,18 @@
 # Project retrieval — implementation action plan
 
-Date: 2026-09-08, progress updated 2026-09-09. Status: evaluation instruments,
-A/C characterization driver, archived development pilot, typed host boundary,
-deterministic document ingestion, SQLite FTS5 backend and opt-in project-run
-activation delivered. The paired BM25 development pilot is archived and did
-not meet its benefit screen. Broader evaluation, operational rollout and
-production retrieval-provider integrations remain pending. An experimental
-Haystack backend is now available for component and shared-runner evaluation.
-Its six-attempt agent pilot is archived and did not meet its benefit screen.
+Date: 2026-09-08, progress updated 2026-09-09. Status: mandatory Haystack
+search for every new project run, a typed host boundary, deterministic source
+capture, evaluation instruments and archived development pilots are delivered.
+The paired BM25 and Haystack agent pilots did not meet their benefit screens.
+Broader evaluation and operational lifecycle work remain pending.
 
 **Current backend decision:** [Haystack is the only product retrieval backend](project-retrieval-haystack-only-2026-09-09.md),
 with BM25 and hybrid pipeline modes. SQLite FTS5 remains only in the development
-component comparator. Source preparation no longer builds its unused cache.
-The earlier steps below record implementation history; retrieval activation
-now requires explicit Haystack host configuration for every new project run.
-Search is mandatory by owner decision; the old activation switch has been
-removed. Read the current backend decision above for the supported launch
-contract. The earlier opt-in steps and negative measurements remain history.
+component comparator. Every project run prepares a source receipt, which the
+child reads from the store; no environment switch activates retrieval. The
+host supplies `ATOMA_HAYSTACK_CONFIG` to configure the required engine.
+The earlier phased proposal below records implementation history. Mandatory
+search is an owner decision, not evidence that the benefit screens passed.
 
 ## Implementation progress
 
@@ -58,17 +54,18 @@ them atomically. Tests cover cancellation, revocation, corruption, writer
 contention and a crashed builder process. Compiled smokes and a reproducible
 20,000-passage capacity probe exercise the real SQLite runtime.
 
-Steps 8–9 now have [opt-in project coordinator activation](project-retrieval-activation-2026-09-09.md):
+Steps 8–9 introduced [project coordinator integration](project-retrieval-activation-2026-09-09.md):
 an immutable source archive and receipt, a read-only child resolver against
 current project/principal/run state, and a dedicated L1 canonical scope.
-`ATOMA_PROJECT_RETRIEVAL=1` on the coordinator host enables this path for new
-project runs. The compiled process smoke covers coordinator → child → L1 →
-FTS5, live revocation and the real isolated worker. The benchmark treatment is
-implemented and its development pilot is archived; operational lifecycle remains pending. This is not default activation or
-evidence of an A/B gain. The [downstream privacy audit](project-retrieval-privacy-audit-2026-09-09.md)
+The initial opt-in has since been removed: every new project run prepares
+its receipt, and the child requires the configured Haystack engine. The current
+compiled smoke covers coordinator → child → L1 → Haystack, live revocation
+and the real isolated worker. The benchmark pilots remain archived evidence
+and do not establish an A/B quality gain. The
+[downstream privacy audit](project-retrieval-privacy-audit-2026-09-09.md)
 reproduced a common-registry disclosure. [Project registry ownership](project-registry-ownership-2026-09-09.md)
-now contains those prompts, descriptions, names, tools and history. Registered
-treatment evaluation and operational lifecycle remain before rollout.
+now contains those prompts, descriptions, names, tools and history.
+Operational lifecycle work remains pending.
 
 A [Haystack framework experiment](project-retrieval-haystack-2026-09-09.md) now
 adds native BM25 and local embeddings/fusion/reranking behind the same L1
@@ -79,7 +76,7 @@ records 0/2 full tasks for A and B, versus 1/2 for the frontier reference.
 Haystack returned the needed evidence on its one search; a wrong final
 citation and missing answer files still prevented completion. The second
 treatment task did not invoke retrieval. The component screen and this agent
-campaign are separate evidence; neither authorizes production activation.
+campaign are separate evidence; neither establishes a full-task quality gain.
 
 ## Objective and implementation order
 

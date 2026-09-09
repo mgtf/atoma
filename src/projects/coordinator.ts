@@ -60,7 +60,6 @@ import { buildArtifactManifest } from './artifacts.js';
 import { ProjectStateConflict, ProjectStore } from './store.js';
 import { ProjectRetrievalLaunchStore } from './retrievalLaunch.js';
 import { HAYSTACK_LAUNCH_ENV, readHaystackLaunch } from '../contracts/retrievalHaystack.js';
-import { PROJECT_RETRIEVAL_RECEIPT_ENV } from '../contracts/projectRetrievalLaunch.js';
 
 const MAX_CONTROL_JSON_BYTES = 512 * 1024;
 
@@ -1206,7 +1205,6 @@ export class ProjectRunCoordinator {
         await ProjectRetrievalLaunchStore.open(this.dbPath).prepare(run.projectRunId,
           seedRun?.projectRunId ?? null, { signal: preparationSignal, deadlineAt });
         if (preparationSignal.aborted || Date.now() >= deadlineAt) throw new Error('project document preparation cancelled');
-        environment[PROJECT_RETRIEVAL_RECEIPT_ENV] = '1';
         environment[HAYSTACK_LAUNCH_ENV] = JSON.stringify(retrievalLaunch);
         return launch();
       })();

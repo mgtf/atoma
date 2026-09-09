@@ -17,7 +17,7 @@ import { haystackTestRuntime } from './helpers/haystack.js';
 import { retrievalContext } from './helpers/projectRetrievalCorpus.js';
 import { closeStoreHandles } from '../src/core/stores.js';
 import { projectRetrievalFixture } from './helpers/projectRetrievalLaunch.js';
-import { ProjectRetrievalLaunchStore } from '../src/projects/retrievalLaunch.js';
+import { ProjectRetrievalLaunchStore, projectRunHasRetrievalReceipt } from '../src/projects/retrievalLaunch.js';
 import { existsSync } from 'node:fs';
 import { pairedRetrievalDecision } from '../src/cli/retrievalComparison.js';
 import { parseRunLog } from '../src/cli/burnin.js';
@@ -78,7 +78,7 @@ describe('registered Haystack agent treatment', () => {
       expect(env[HAYSTACK_LAUNCH_ENV]).toBeUndefined();
       const project = await prepareRetrievalProjectAttempt({ registration, entry, dataset, attempt, seed: prepared.workspace, runId, env: { ...env, [HAYSTACK_LAUNCH_ENV]: 'must not leak into controls' }, ...retrievalContext() });
       try {
-        expect(project.env['ATOMA_PROJECT_RETRIEVAL_RECEIPT']).toBe(entry.arm === 'atoma-haystack' ? '1' : undefined);
+        expect(projectRunHasRetrievalReceipt(project.env['ATOMA_DB_PATH']!, runId)).toBe(entry.arm === 'atoma-haystack');
         if (entry.arm !== 'atoma-haystack') expect(project.env[HAYSTACK_LAUNCH_ENV]).toBeUndefined();
         if (entry.arm === 'atoma-haystack') {
           expect(JSON.parse(project.env[HAYSTACK_LAUNCH_ENV]!)).toEqual(launch);

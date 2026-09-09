@@ -16,7 +16,7 @@ with local Haystack retrieval (B), and the existing frontier-direct reference
 accounting and unchanged executable scorers. Existing BM25 registrations keep
 their original arm names, settings and policy.
 
-The host-only `ATOMA_PROJECT_RETRIEVAL_HAYSTACK` JSON configuration contains
+The host-only `ATOMA_HAYSTACK_CONFIG` JSON configuration contains
 an absolute Python executable, Haystack settings and the SHA-256 of installed
 Python runtime/package metadata. It is only admitted with the existing tenant
 retrieval receipt and isolation/lifecycle checks. The benchmark injects it into
@@ -88,7 +88,7 @@ Optional tests exercise real Python and offline models. The existing compiled
 `scripts/retrieval-project-smoke.mjs --container --haystack` also tests live
 revocation and proves that neither source paths, store paths nor Haystack
 configuration enter the real worker. Its explicit test environment provides
-`ATOMA_PROJECT_RETRIEVAL_HAYSTACK` and optionally a pinned
+`ATOMA_HAYSTACK_CONFIG` and optionally a pinned
 `ATOMA_RETRIEVAL_SMOKE_IMAGE`.
 
 Register and execute with the existing CLI:

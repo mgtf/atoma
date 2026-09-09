@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { closeStoreHandles, openStoreHandle } from '../src/core/stores.js';
-import { hasProjectRetrievalReceipt } from '../src/contracts/projectRetrievalLaunch.js';
 import { ProjectRetrievalLaunchStore } from '../src/projects/retrievalLaunch.js';
 import { openProjectRunHaystack } from '../src/projects/retrievalHaystackLaunch.js';
 import { haystackTestRuntime } from './helpers/haystack.js';
@@ -29,13 +28,6 @@ async function preparedFixture() {
 }
 
 describe('authoritative project retrieval launch', () => {
-  it('reads only the internal receipt assertion and rejects a disabled marker', () => {
-    expect(hasProjectRetrievalReceipt({})).toBe(false);
-    expect(() => hasProjectRetrievalReceipt({ ATOMA_PROJECT_RETRIEVAL_RECEIPT: '0' })).toThrow();
-    expect(hasProjectRetrievalReceipt({ ATOMA_PROJECT_RETRIEVAL_RECEIPT: '1' })).toBe(true);
-    expect(() => hasProjectRetrievalReceipt({ ATOMA_PROJECT_RETRIEVAL_RECEIPT: 'yes' })).toThrow();
-  });
-
   it('freezes only admitted documentation and serves the archive after the original workspace changes', async () => {
     const f = await preparedFixture();
     expect(f.receipt.manifest.documents.map(d => d.path)).toEqual(['docs/pricing.md']);

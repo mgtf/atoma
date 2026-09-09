@@ -195,7 +195,7 @@ lists that organisation's project traces from
 `orgs/<orgId>/projects/<projectId>/runs/<runId>/`.
 
 Project runs always initialize document search through Haystack. Provision the
-host Python runtime and set `ATOMA_PROJECT_RETRIEVAL_HAYSTACK` before launching
+host Python runtime and set `ATOMA_HAYSTACK_CONFIG` before launching
 one; [the search setup](docs/project-retrieval-haystack-only-2026-09-09.md#activation)
 describes lexical and local hybrid configurations. Missing configuration
 refuses a new project run before reservation. No paid retrieval API is required.

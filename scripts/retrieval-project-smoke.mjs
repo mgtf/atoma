@@ -78,7 +78,7 @@ if (process.argv.includes('--child')) {
       content: [
         { type: 'tool_use', id: 'search', name: SEARCH, input: { query: 'annual price' } },
         realContainer ? { type: 'tool_use', id: 'worker', name: 'run_shell', input: { command: 'node', args: ['-e',
-          'console.log(JSON.stringify({source:require("node:fs").existsSync(process.argv[1]),db:process.env.ATOMA_DB_PATH??null,retrieval:process.env.ATOMA_PROJECT_RETRIEVAL_RECEIPT??null,haystack:process.env.ATOMA_PROJECT_RETRIEVAL_HAYSTACK??null}))',
+          'console.log(JSON.stringify({source:require("node:fs").existsSync(process.argv[1]),db:process.env.ATOMA_DB_PATH??null,haystack:process.env.ATOMA_HAYSTACK_CONFIG??null}))',
           join(dirname(workspace), 'retrieval-source/docs.md')] } } :
           { type: 'tool_use', id: 'worker', name: 'read_file', input: { path: 'probe.txt' } },
       ], stop_reason: 'tool_use', usage: { input_tokens: 1, output_tokens: 1 },
@@ -97,7 +97,7 @@ if (process.argv.includes('--child')) {
     assert.deepEqual(result.toolCallResults, [{ name: SEARCH, ok: true }, { name: realContainer ? 'run_shell' : 'read_file', ok: true }]);
     if (realContainer) {
       assert.ok(received[1], JSON.stringify({ result, received }));
-      assert.deepEqual(JSON.parse(received[1].stdout), { source: false, db: null, retrieval: null, haystack: null });
+      assert.deepEqual(JSON.parse(received[1].stdout), { source: false, db: null, haystack: null });
     }
     console.log('ATOMA_RETRIEVAL_SMOKE_READY');
     const tool = createProjectRetrievalTool(binding, run);

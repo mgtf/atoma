@@ -53,7 +53,7 @@ checkout and a WSL2 clone, or between host and container.
 Organisation-scoped project runs (browser, MCP or `projects run`) additionally
 require Docker and a provisioned host Haystack runtime. Follow the
 [search setup](project-retrieval-haystack-only-2026-09-09.md#activation) and set
-`ATOMA_PROJECT_RETRIEVAL_HAYSTACK` in the coordinator environment. Search is
+`ATOMA_HAYSTACK_CONFIG` in the coordinator environment. Search is
 mandatory for these runs, including an empty first corpus. The ordinary test
 suite uses a ranking process fixture and needs no Haystack installation;
 standalone operator runs have no tenant project corpus.

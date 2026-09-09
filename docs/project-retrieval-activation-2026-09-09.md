@@ -1,32 +1,34 @@
-# Project retrieval: opt-in coordinator activation
+# Project retrieval: coordinator integration history
 
 **Historical implementation record. Current activation:** [Haystack-only configuration](project-retrieval-haystack-only-2026-09-09.md#activation)
 supersedes the SQLite launch described in this implementation record.
 Every new project run now requires explicit Haystack host settings. The former
-`ATOMA_PROJECT_RETRIEVAL` switch is removed; the opt-in behavior below describes
+activation switch is removed; the opt-in behavior below describes
 the earlier implementation, not the current launch contract.
 
 Date: 2026-09-09. Implements the project launch portion of
 [Steps 8–9](project-retrieval-action-plan-2026-09-08.md#step-8--wire-the-element-through-the-real-atoma-execution-path).
 This follows the [host boundary](project-retrieval-host-contract-2026-09-09.md)
 and [SQLite ingestion/backend](project-retrieval-sqlite-2026-09-09.md).
-Retrieval remains opt-in; no embedding, reranking or LLM context call is added.
+At this stage retrieval was opt-in, with no embedding, reranking or LLM
+context call. The current mandatory Haystack contract is linked above.
 
 **Subsequent audit:** the [downstream privacy audit](project-retrieval-privacy-audit-2026-09-09.md)
 reproduces cross-project disclosure through common registry metadata. That
 finding is now corrected by [project registry ownership](project-registry-ownership-2026-09-09.md).
-Continue with the registered evaluation and operational lifecycle before rollout. The query boundary passing its tests is not a tenant-rollout approval.
+The original rollout assessment required further evaluation and operational
+lifecycle work. Mandatory search was subsequently adopted by owner decision;
+the query boundary tests do not establish a full-task quality gain.
 
 ## Activation and source admission
 
-Set `ATOMA_PROJECT_RETRIEVAL=1` in the host environment of the project
-coordinator, including the compiled `projects` CLI or viz server that owns it.
-The switch defaults to off; `0` disables it and any other defined value is a
-configuration error. It applies to all new project runs of that coordinator;
-there is no tenant-controlled switch or account/organisation inheritance yet.
-Restart a long-running coordinator to change its captured host configuration.
-Standalone operator runs and the benchmark CLI do not resolve project receipts.
-The existing explicit `startTask` library injection remains available.
+The original host opt-in has been removed. The current coordinator requires
+`ATOMA_HAYSTACK_CONFIG`, prepares a receipt for every new project run and
+forwards only the engine configuration. The child reads its receipt from the
+store; no environment flag activates or disables the search element. Restart
+a long-running coordinator after changing its captured engine configuration.
+The explicit `startTask` library injection and synthetic benchmark controls
+remain separate from the mandatory product coordinator path.
 
 The coordinator selects the same previous delivered run used to seed the new
 workspace. Only non-executable `.md` and `.txt` entries in that source run's
