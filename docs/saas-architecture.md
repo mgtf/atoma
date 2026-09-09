@@ -1,6 +1,6 @@
 # atoma SaaS architecture
 
-> **CURRENT REVIEW: 2026-09-06.**
+> **CURRENT REVIEW: 2026-09-08.**
 >
 > This document is the architecture boundary for hosted atoma. It is organised
 > in four layers on purpose:
@@ -24,7 +24,11 @@
 > rights, not knowledge. Today's project-local partitioning is containment on
 > the way there, not the design (§2, *Skills are a commons*).
 
-## 1. Current state — 2026-09-04
+## 1. Current state — 2026-09-08
+
+This reconciliation is based on source, schemas, contracts and test definitions
+at `6e9af3c`. It records implementation and available verification coverage,
+not a new test run or a hosted deployment acceptance.
 
 ### Status and claim boundary
 
@@ -65,7 +69,8 @@ The following claims are not supported:
 - safe or approved cross-organisation skill or atom-body sharing;
 - organisation-local atom trust;
 - an approved platform body catalogue;
-- metered platform-key rebilling or end-user provider-subscription passthrough.
+- metered platform-key rebilling or general end-user provider-subscription
+  passthrough beyond the explicit principal-owned Codex path below.
 
 ### Current ownership model
 
@@ -111,8 +116,8 @@ Current resource scopes:
 | Platform events | organisation/project/run-aware | The control-plane audit journal already carries nullable scope ids and retention. |
 | Prefilter decisions | instance SQLite table | Content-addressed and transactionally stored, but disabled for project runs because policy on the cross-org existence signal is not settled. |
 | Provider credentials | organisation or host, injected per run | Organisation keys are encrypted at rest. Selection follows account pin → organisation default → host default; the resolved run receives only its credential snapshot. |
-| Host subscription | operator exception | Whole-run and per-tier regimes exist only through the platform-admin door; the per-tier form is limited to one operator-declared organisation and re-authorised per run. |
-| Personal Codex subscription | principal | `org:member+` connects a private Codex profile. Only runs requested by that principal may resolve its exact profile generation; Codex remains L2/L3-only. |
+| Host subscription | operator exception | Per-tier `sub:` selectors require the platform-admin door, are limited to one operator-declared organisation and are re-authorised per run. |
+| Personal Codex subscription | principal | `org:member+` connects a private Codex profile. Only runs requested by that principal may resolve its exact profile generation; Codex is supported on L1/L2/L3. |
 | Operator CLI/MCP run corpus | instance operator scope | It remains separate from the gated project corpus and is not exposed as tenant data. |
 
 ### Implemented safeguards
@@ -145,25 +150,39 @@ resurrection are both fixed and regression-tested.
 Provider construction consumes a per-run environment snapshot. Configuration
 errors throw `RunnerConfigError` instead of exiting the process. Machine-bound
 transports are refused for tenant work unless the parent explicitly authorised
-the platform-admin host-subscription exception and the child receives the exact
-authorised tier set. `RunPayerLedger` computes the payer for base, L1, L2 and
-L3. Today that full ledger is persisted when a run touches the host or
-requesting principal's subscription; pure organisation-key or host-key
-attribution remains transient.
+the platform-admin host-subscription exception or resolved the requesting
+principal's private Codex generation, and the child receives the exact
+authorised tier set. `RunPayerLedger` contains exactly three rows, L1, L2 and
+L3, each with its resolved selector, transport and payer; there is no base
+transport row. Today that full ledger is journaled when a run touches the host
+or requesting principal's subscription; pure organisation-key or host-key
+attribution remains transient. The shape lives in
+[`src/contracts/runPayers.ts`](../src/contracts/runPayers.ts); the subscription
+journal trigger is in `ProjectRunCoordinator` and the viz server.
 
 Provider login remains identity only. It never grants inference entitlement.
 Per-run organisation or host API-key snapshots and the operator's deliberately
 narrow host-subscription exception are inference funding mechanisms. Personal
 Codex connection is a separate, explicit account-self-care flow: credentials
 remain in a principal-private provider profile and only that principal's runs
-may spend it. Personal Claude subscription login remains unavailable pending
+may spend it. Codex supports all three tiers; L1 uses Atoma's host-side tool
+loop through `ToolSandbox` and the configured Element executor. Personal Claude
+subscription login remains unavailable pending
 the third-party approval Anthropic requires.
 
 ### Missing production substrate
 
 The model-authored Element worker has an OS boundary. The production
-control-plane/launcher boundary does not: Docker lifecycle and host-path
-workspaces have not moved behind the separate launcher.
+control-plane/launcher boundary does not yet exist as a separate OS boundary.
+The closed `ContainerLauncher` contract and `DockerLauncher` backend are
+implemented for egress and preview profiles, including workspace issuance and
+orphan-removal primitives. The backend still runs inside the calling process;
+workspace handles still refer to host directories. The Element worker's
+attached stdio transport remains in `src/tools/containerExecutor.ts`, outside
+that launcher contract. These are implementation steps toward D1–D4, not
+evidence that the production boundary is satisfied. The current split and its
+limitations are recorded in
+[`src/launcher/AGENTS.md`](../src/launcher/AGENTS.md).
 
 The decided deployment target is Linux and Docker images with a separate
 launcher:
@@ -179,9 +198,10 @@ launcher:
   result-preview workloads.
 
 That direction is recorded in
-[the Docker launcher decision](deployment-docker-launcher-2026-08-28.md)
-and is not implemented. There is a worker image, but no web image, launcher
-image, reference stack or volume migration.
+[the Docker launcher decision](deployment-docker-launcher-2026-08-28.md).
+The separate launcher deployment is not implemented. Worker, preview and
+mender image definitions exist, but there is no web image, launcher image,
+reference hosted stack or migration to launcher-managed volumes.
 
 Other production gaps are:
 
@@ -194,8 +214,11 @@ Other production gaps are:
   or host API keys;
 - `platform:admin` cross-org read is ordinary operator power today, not a
   break-glass flow with customer notification;
-- no release acceptance covers the current auth/projects/BYO/host-subscription
-  control plane.
+- no full packaged-stack acceptance covers the hosted
+  auth/projects/BYO/host-subscription control plane. `release:check` does include
+  a compiled auth smoke covering founder login, CLI invitation, member
+  admission, PKCE, MCP OAuth, session gating and logout; this is narrower than
+  Track A or Track B acceptance.
 
 ### The next code decision
 
@@ -480,12 +503,12 @@ No `atom_trust`, `skill_trust`, platform-body, approval or redesigned
 | Phase | Current status | Remaining work |
 |---|---|---|
 | 0 — product decisions | partial | Storage backend is next. Reviewer staffing, dynamic-atom offers, break-glass, retention, quotas and platform-key rebilling remain open. |
-| 1 — OS boundary | Element sandbox implemented | Move Element worker/egress lifecycle behind the launcher/images/volumes boundary and add a hosted acceptance. |
+| 1 — OS boundary | Element sandbox implemented; egress/preview launcher in-process | Separate the launcher under its own OS identity, migrate the worker transport and workspaces, complete lifecycle ownership and add hosted acceptance. |
 | 2 — credentials per run | implemented | Preserve snapshot and child gates; close or explicitly bound SDK profile/WIF fallback outside tenant project runs. |
 | 3 — surrogate identity | implemented for atom and skill namespace | Move remaining identity-critical lifecycle attribution from names to stable ids during the trust/ledger schema change. |
 | 4 — bodies separated from trust | containment only | Implement scoped trust tables, atom scope and uniform home/donor policy after Gate 0. |
 | 5 — storage concurrency | not decided | Execute the chosen backend plan; remove filesystem trust counters. |
-| 6 — control plane | advanced locally | Add hosted deployment, lifecycle attribution, retention, quotas and release acceptance. |
+| 6 — control plane | advanced locally, with compiled auth/MCP OAuth smoke | Add hosted deployment, lifecycle attribution, trace/workspace retention, quotas, API-key payer persistence and packaged-stack acceptance. |
 | 7 — body offer/review | design only | Decide the staffed review contract, then build its approval record and platform catalogue after the trust split. |
 
 ### Track A — dedicated deployment exit criteria
@@ -495,8 +518,9 @@ learning, but it does require the production boundary:
 
 1. Choose the product-store backend. If SQLite wins, implement and test the
    one-node contract rather than relying on low traffic.
-2. Build the launcher, web/launcher images, pinned worker image and reference
-   stack. The web image has no Docker socket.
+2. Move the existing launcher backend into a separate service, complete the
+   worker transport boundary, and package web/launcher images, a pinned worker
+   image and a reference stack. The web image has no Docker socket.
 3. Move run workspaces to launcher-managed volumes and put lease, TTL, stop and
    orphan recovery behind the launcher.
 4. Make “one organisation per deployment” true at the admission boundary, or
@@ -533,7 +557,8 @@ coherent change, not a sequence of temporary schemas:
    no cross-org store/trace/workspace read, no transferred trust, no implicit
    body visibility, and an approved body arriving at zero trust.
 
-The launcher can be built in parallel with the selected database foundation.
+The launcher deployment boundary can be completed in parallel with the selected
+database foundation.
 The platform offer workflow cannot safely precede the trust split.
 
 ### Open owner decisions
@@ -579,9 +604,10 @@ resolve through the legacy map below.
 | 2026-08-20 | Auth/projects/GitHub gate landed while registry and trust remained instance-global. | Multi-org control plane is current; it is explicitly not Track B. | commit `4459dc0` and current subsystem contracts |
 | 2026-08-23 | Four-post offer workflow proposed: pre-screen, script attestation, powerless dossier, human approval. | Design only. Project-local learning, its independent first step, later landed. | [platform skill offer review](platform-skill-offer-review-2026-08-23.md), [session snapshot](decided-not-built-2026-08-23.md) |
 | 2026-08-27–28 | Encrypted BYO keys and per-tier model precedence landed. A narrow operator host-subscription exception was decided and implemented. | Current control-plane behavior; no consumer-subscription passthrough. | [subscription decision](subscription-per-tier-design-2026-08-28.md), commit `6a033b3` |
-| 2026-09-04 | Principal-scoped Codex device login, private provider profiles and personal payer rows landed. | ChatGPT personal subscriptions are requester-only and L2/L3-only; personal Claude login remains blocked pending Anthropic approval. | `src/auth/subscriptionProfiles.ts`, `src/contracts/runPayers.ts` |
-| 2026-08-28 | SaaS deployment selected Docker images plus one in-house launcher; Kubernetes deferred behind the interface. | Decided, not implemented. | [launcher decision](deployment-docker-launcher-2026-08-28.md) |
+| 2026-09-04 | Principal-scoped Codex device login, private provider profiles and personal payer rows landed. | Initially L2/L3-only; later extended to L1 too. Requester-only ownership remains; personal Claude login remains unavailable. | `src/auth/subscriptionProfiles.ts`, `src/contracts/runPayers.ts` |
+| 2026-08-28 | SaaS deployment selected Docker images plus one in-house launcher; Kubernetes deferred behind the interface. | Closed contract and in-process egress/preview backend now implemented; separate service, hosted stack and volume migration still missing. | [launcher decision](deployment-docker-launcher-2026-08-28.md), [current launcher contract](../src/launcher/AGENTS.md) |
 | 2026-09-06 | Premise changed: skills are a platform commons; the organisation bounds trust and execution rights, not knowledge. Track B named as the product target. | Documentation only. The body/trust split, the human gate on catalogue entry and the Track B build order are unchanged; owner decisions 7 and 8 added. | §2 *Skills are a commons*; [root contract](../AGENTS.md#skills-lifecycle); [projects contract](../src/projects/AGENTS.md) |
+| 2026-09-08 review | Current code supports Codex on all tiers, a three-row payer ledger and compiled auth/MCP OAuth smoke coverage. | Reconciled current-state claims; no new hosted acceptance or closure of Gate 0, trust splitting or body approval. | `src/contracts/runPayers.ts`, `tests/project-coordinator.test.ts`, `scripts/auth-release-smoke.mjs`, `package.json` |
 
 <a id="3-prerequisite-f1-the-sandbox-is-not-an-isolation-boundary"></a>
 
@@ -636,8 +662,12 @@ inheriting either behavior by accident.
 
 - **Accepted and implemented:** UUID atom identity; project-scoped learning;
   per-run credential snapshots; BYO keys; narrow per-tier host subscription;
-  Element-worker isolation and per-run egress topology.
-- **Accepted, not implemented:** Docker-image deployment with a sole launcher.
+  Element-worker isolation and per-run egress topology; the closed launcher
+  contract and in-process egress/preview backend; principal-owned Codex on all
+  tiers and the three-row payer contract.
+- **Accepted, not implemented:** the separate launcher service and complete
+  Docker-image hosted deployment, including the worker transport and volume
+  migration.
 - **Designed, not accepted as a shipped gate:** platform body offer workflow.
 - **Rejected:** cross-org trust corroboration; static scan as authorization;
   raw Docker options at the launcher boundary; mounting `docker.sock` in the
@@ -676,5 +706,14 @@ Release acceptances
 [v0.1.3](release-acceptance-v0.1.3.md) prove packaged MCP, worker/egress and
 compiled lifecycle properties from their dates. They predate the current
 multi-org/BYO/host-subscription control plane and are not its acceptance.
-Track A requires a new packaged-stack acceptance; Track B requires a separate
-two-organisation adversarial acceptance.
+The current `release:check` also runs
+[`scripts/auth-release-smoke.mjs`](../scripts/auth-release-smoke.mjs) against
+the compiled viz server and auth CLI: founder login, CLI invitation, member
+admission, PKCE, MCP OAuth, session gating and logout. Its loopback identity
+provider and temporary store verify the packaged auth path, not a hosted
+container stack or live inference funding.
+
+Track A still requires a new packaged-stack acceptance covering the remaining
+deployment and operational criteria above; Track B requires a separate
+two-organisation adversarial acceptance. The 2026-09-08 reconciliation inspected
+these scripts and tests without re-running them.
