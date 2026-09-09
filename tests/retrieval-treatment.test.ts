@@ -58,6 +58,8 @@ describe('registered Haystack treatment', () => {
     const changed = JSON.parse(JSON.stringify(r)); changed.spec.treatment.queryLimits.maxResults = 4;
     expect(() => validateRetrievalRegistration(changed, dataset)).toThrow('settings');
     expect(retrievalCampaignSpecSchema.safeParse({ ...r.spec, kind: 'agentic-characterization' }).success).toBe(false);
+    expect(retrievalCampaignSpecSchema.safeParse({ ...r.spec, kind: 'agentic-characterization',
+      treatment: undefined, decision: undefined, haystackInvocation: 'search-first' }).success).toBe(false);
   });
 
   it('preserves incomplete pairs and separates observed screening from a production claim', () => {
@@ -75,13 +77,19 @@ describe('registered Haystack treatment', () => {
     expect(pairedRetrievalDecision(r, rows)?.decision).toBe('screen-not-met');
   });
 
-  it('runs identical synthetic tenant paths and exposes the Haystack process protocol only to B in a new process', async () => {
+  it.each([undefined, 'available', 'search-first'] as const)('keeps invocation policy %s confined to treatment B through the launcher', async (policy) => {
     const r = registration(); const out = join(temp(), 'evidence'); const release = vi.fn();
+    r.spec.haystackInvocation = policy;
     const seen: string[] = [];
     const report = await runRetrievalCampaign(r, dataset, { repo, out }, {
       acquire: () => ({ path: join(out, 'test-lease'), release, attachChild: () => {} }), verify: () => {}, archiveSource: () => {}, preflight: () => ({}),
       spawn: async opts => {
         const env = opts.env!; seen.push(env['ATOMA_DB_PATH']!);
+        expect(opts.goal.includes('Search-first experiment instruction:'))
+          .toBe(policy === 'search-first' && env['ATOMA_HAYSTACK_CONFIG'] !== undefined);
+        const receipt = JSON.parse(readFileSync(join(out, 'attempts',
+          `${String(seen.length).padStart(4, '0')}-${r.schedule[seen.length - 1]!.arm}-${r.schedule[seen.length - 1]!.questionId}`, 'start.json'), 'utf8'));
+        expect(receipt.goal).toBe(opts.goal);
         expect(env['ATOMA_TENANT_RUN']).toBe('1'); expect(env['ATOMA_SUBSCRIPTION_TIERS']).toBe('l1,l2,l3');
         expect(env['ATOMA_SKILL_LEARN']).toBe('0'); expect(env['ATOMA_EVENT_SKILLS']).toBe('0');
         const input = { dbPath: env['ATOMA_DB_PATH'], runId: env['ATOMA_RUN_ID'], workspacePath: env['ATOMA_BUILD_WORKSPACE'],
@@ -121,6 +129,7 @@ describe('registered Haystack treatment', () => {
     });
     expect(report).toMatchObject({ attempted: 6, reason: 'completed' });
     expect(report.arms.every(arm => arm.full === 2)).toBe(true);
+    expect(report.arms.every(arm => arm.subscriptionPriceEquivalentUsd === 0.2)).toBe(true);
     expect(new Set(seen).size).toBe(6); expect(release).toHaveBeenCalledOnce();
     for (const entry of r.schedule) {
       const attempt = join(out, 'attempts', `${String(entry.ordinal).padStart(4, '0')}-${entry.arm}-${entry.questionId}`);

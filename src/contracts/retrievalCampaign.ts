@@ -39,6 +39,7 @@ export const retrievalCampaignSpecSchema = z.object({
   purpose: z.string().min(10).max(2000),
   kind: z.enum(['agentic-characterization', 'bm25-development', 'haystack-development']),
   treatment: retrievalTreatmentSchema.optional(),
+  haystackInvocation: z.enum(['available', 'search-first']).optional(),
   decision: retrievalDecisionSchema.optional(),
   questionIds: z.array(id).min(1).max(100),
   repetitions: positive.max(10),
@@ -52,6 +53,9 @@ export const retrievalCampaignSpecSchema = z.object({
   stopAfterConsecutiveInfrastructureFailures: positive.max(3),
   thresholds: z.object({ trust: positive, promote: positive, demote: positive }).strict(),
 }).strict().superRefine((spec, ctx) => {
+  if (spec.haystackInvocation !== undefined && spec.kind !== 'haystack-development') {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Haystack invocation policy requires a Haystack development campaign' });
+  }
   const expectedBackend = spec.kind === 'bm25-development' ? 'sqlite-fts5' : spec.kind === 'haystack-development' ? 'haystack' : null;
   const expectedArm = spec.kind === 'bm25-development' ? 'atoma-bm25' : 'atoma-haystack';
   if (expectedBackend ? spec.treatment?.backend !== expectedBackend || !spec.decision ||

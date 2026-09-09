@@ -517,6 +517,7 @@ export const DEFAULT_SHELL_ALLOWLIST: readonly string[] = [
   'head',
   'tail',
   'wc',
+  'sha256sum',
   // `od` joins on the CLASS rule, not on frequency: the list admits read-only
   // inspection utilities and a hex/octal dump is squarely one. Observed once
   // (round 5) with the model reaching for it despite the allowlist being

@@ -189,6 +189,20 @@ describe('runShellTool', () => {
     );
   });
 
+  it('admits sha256sum while preserving explicit command restrictions', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'atoma-checksum-'));
+    const sandbox = new ToolSandbox(root);
+    try {
+      const restricted = runShellTool({ sandbox, shellAllowlist: ['echo'] });
+      await expect(restricted.execute({ command: 'sha256sum', args: ['input.txt'] }))
+        .rejects.toThrow(/not in allowlist/);
+      expect(DEFAULT_SHELL_ALLOWLIST).toContain('sha256sum');
+    } finally {
+      await sandbox.cleanup();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('the default allowlist covers the measured friction, and states where network belongs', async () => {
     // grep (6 rejections), head (5) and chmod (3) were the measured
     // friction across archived traces; curl (3) is deliberately still

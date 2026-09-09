@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,9 +18,19 @@ try {
 
   backend = await containerToolBackend({
     workspaceRoot: workspace,
+    image: process.env.ATOMA_WORKER_IMAGE,
     egress: true,
     runId: `release-egress-${process.pid}`,
   });
+
+  writeFileSync(join(workspace, 'checksum.txt'), 'abc');
+  const checksum = await backend.executor.execute('run_shell', {
+    command: 'sha256sum', args: ['checksum.txt'],
+  });
+  if (checksum?.exitCode !== 0 || checksum.stdout?.trim() !==
+      'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  checksum.txt') {
+    throw new Error(`direct worker checksum failed: ${JSON.stringify(checksum)}`);
+  }
 
   const allowed = await backend.executor.execute('fetch_url', {
     url: 'https://registry.npmjs.org/left-pad',
