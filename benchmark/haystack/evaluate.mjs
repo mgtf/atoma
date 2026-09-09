@@ -9,7 +9,7 @@ import Database from 'better-sqlite3';
 import { loadRetrievalDataset, snapshotFor } from '../../dist/cli/retrievalDataset.js';
 import { retrievalObservations } from '../../dist/cli/retrievalObservations.js';
 import { prepareProjectRetrievalCorpus } from '../../dist/projects/retrievalCorpus.js';
-import { ProjectRetrievalIndex } from '../../dist/projects/retrievalIndex.js';
+import { ProjectRetrievalIndex } from './sqliteBaseline.ts';
 import { createHaystackRetrievalBinding } from '../../dist/projects/retrievalHaystack.js';
 import { haystackModelRevision } from '../../dist/projects/retrievalModelFiles.js';
 import { DEFAULT_PROJECT_RETRIEVAL_LIMITS, projectRetrievalScopeSchema } from '../../dist/contracts/projectRetrieval.js';
@@ -17,7 +17,7 @@ import { createProjectRetrievalTool } from '../../dist/tools/projectRetrieval.js
 
 const repo = fileURLToPath(new URL('../../', import.meta.url));
 const [command, outputArg, pythonArg, modelsArg] = process.argv.slice(2);
-if (!outputArg || !['register', 'run', 'replay'].includes(command ?? '')) throw new Error('Usage: node benchmark/haystack/evaluate.mjs <register|run|replay> <output> [absolute-python absolute-model-root]');
+if (!outputArg || !['register', 'run', 'replay'].includes(command ?? '')) throw new Error('Usage: node --import tsx benchmark/haystack/evaluate.mjs <register|run|replay> <output> [absolute-python absolute-model-root]');
 const output = resolve(outputArg);
 const context = () => ({ signal: new AbortController().signal, deadlineAt: Date.now() + 120_000 });
 const json = path => JSON.parse(readFileSync(path, 'utf8'));
@@ -90,12 +90,13 @@ if (command === 'replay') {
       snapshotSha256: corpus.manifest.snapshotSha256, generation: corpus.generation });
     for (const arm of arms) {
       const db = new Database(':memory:');
-      const index = new ProjectRetrievalIndex(db);
+      const index = arm === 'sqlite-fts5' ? new ProjectRetrievalIndex(db) : null;
       let binding;
       const begin = performance.now();
       try {
         const authority = { scope, limits: DEFAULT_PROJECT_RETRIEVAL_LIMITS,
-          service: index.createService(scope, async () => true) };
+          service: index ? index.createService(scope, async () => true) : {
+            authorize: async () => true, search: async () => ({ ok: false, status: 'unavailable' }), dispose: async () => {} } };
         if (arm === 'sqlite-fts5') { await index.build(scope, corpus, context()); binding = authority; }
         else binding = await createHaystackRetrievalBinding({ authority, corpus, python: pythonArg,
           settings: arm === 'haystack-bm25' ? { mode: 'bm25' } : settings, context: context() });

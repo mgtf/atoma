@@ -27,7 +27,8 @@ score returns exit 0 for full success, 1 for a failed answer/deliverable, and
 Only run executes models, using host subscriptions and the existing runner.
 It requires committed source, the pinned worker image and the global run slot.
 register, inspect and all other commands are offline and make no provider calls.
-BM25 and Haystack development campaigns register a paired A/B treatment and frontier reference.
+Haystack development campaigns register a paired A/B treatment and frontier reference.
+Historical SQLite BM25 registrations remain readable; new executions require their archived source.
 Paid API campaigns and confirmatory rollout decisions are not implemented here.
 Existing cost-amortisation benchmark options remain unchanged.
 `;

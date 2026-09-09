@@ -1,5 +1,9 @@
 # Project retrieval: deterministic ingestion and SQLite backend
 
+**Historical implementation:** [Haystack is now the only product retrieval backend](project-retrieval-haystack-only-2026-09-09.md).
+The SQLite implementation and measurement scripts now live under
+`benchmark/haystack/` for development comparison only.
+
 Date: 2026-09-09. Status: host library implementation, subsequently connected to
 [opt-in project activation](project-retrieval-activation-2026-09-09.md).
 This extends the [host contract](project-retrieval-host-contract-2026-09-09.md)

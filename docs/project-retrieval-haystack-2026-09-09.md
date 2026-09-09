@@ -1,5 +1,8 @@
 # Haystack retrieval experiment
 
+**Current runtime:** [Haystack is now the only project retrieval backend](project-retrieval-haystack-only-2026-09-09.md).
+The SQLite comparison below remains historical evidence and development tooling.
+
 Date: 2026-09-09. Status: experimental host library integration; no default or
 coordinator activation. This implements the owner's request to evaluate a
 maintained retrieval framework after the negative BM25 agent pilot.

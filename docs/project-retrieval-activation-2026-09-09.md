@@ -1,5 +1,9 @@
 # Project retrieval: opt-in coordinator activation
 
+**Current activation:** [Haystack-only configuration](project-retrieval-haystack-only-2026-09-09.md#activation)
+supersedes the SQLite launch described in this implementation record.
+`ATOMA_PROJECT_RETRIEVAL=1` now also requires explicit Haystack host settings.
+
 Date: 2026-09-09. Implements the project launch portion of
 [Steps 8–9](project-retrieval-action-plan-2026-09-08.md#step-8--wire-the-element-through-the-real-atoma-execution-path).
 This follows the [host boundary](project-retrieval-host-contract-2026-09-09.md)

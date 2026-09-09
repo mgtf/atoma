@@ -21,6 +21,7 @@ export function retrievalCampaignPolicy(spec: RetrievalCampaignSpec): RetrievalR
     'project-container-no-egress; fresh-authority-and-registry-per-attempt; learning-promotion-direct-event-skills-off; prefilter-cache-off; provider-cache-uncontrolled; bm25-only-treatment';
 }
 
+/** Historical SQLite settings retained solely to validate archived registrations. */
 export function retrievalTreatmentSettings(): Extract<NonNullable<RetrievalCampaignSpec['treatment']>, { backend: 'sqlite-fts5' }> {
   return { backend: 'sqlite-fts5', index: retrievalIndexConfig(), queryLimits: DEFAULT_PROJECT_RETRIEVAL_LIMITS, ranking: PROJECT_RETRIEVAL_BM25 };
 }
@@ -87,7 +88,7 @@ export function validateRetrievalRegistration(
   }
   if (registration.spec.kind === 'bm25-development' &&
       !isDeepStrictEqual(registration.spec.treatment, retrievalTreatmentSettings())) {
-    throw new Error('registered retrieval backend settings differ from the production defaults');
+    throw new Error('registered retrieval backend settings differ from the historical SQLite defaults');
   }
   const treatment = registration.spec.treatment;
   if (treatment?.backend === 'haystack' && (!isDeepStrictEqual(treatment.index, retrievalIndexConfig()) ||
@@ -106,10 +107,16 @@ export function validateRetrievalRegistration(
   return registration;
 }
 
+/** Historical protocols stay readable, but only current backends may execute. */
+export function assertRetrievalCampaignExecutable(spec: RetrievalCampaignSpec): void {
+  if (spec.kind === 'bm25-development') throw new Error('SQLite retrieval campaigns are historical; use haystack-development');
+}
+
 export function createRetrievalRegistration(
   input: unknown, dataset: RetrievalDataset, repo: string
 ): RetrievalRegistration {
   const spec = retrievalCampaignSpecSchema.parse(input);
+  assertRetrievalCampaignExecutable(spec);
   const runtime = retrievalRuntime();
   if (runtime.node !== `v${readRetrievalFile(repo, '.nvmrc').toString('utf8').trim()}`) {
     throw new Error('use the repository pinned Node version to register a campaign');

@@ -13,6 +13,7 @@
     "tests/**/*",
     "burnin/**/*.ts",
     "benchmark/**/*.mjs",
+    "benchmark/**/*.ts",
     "eslint.config.js",
     "*.config.ts"
   ],

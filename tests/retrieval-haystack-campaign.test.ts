@@ -2,7 +2,7 @@ import { readFileSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { retrievalCampaignSpecSchema, retrievalRegistrationSchema } from '../src/contracts/retrievalCampaign.js';
 import { DEFAULT_PROJECT_RETRIEVAL_LIMITS } from '../src/contracts/projectRetrieval.js';
 import { HAYSTACK_LAUNCH_ENV } from '../src/contracts/retrievalHaystack.js';
@@ -18,7 +18,6 @@ import { retrievalContext } from './helpers/projectRetrievalCorpus.js';
 import { closeStoreHandles } from '../src/core/stores.js';
 import { projectRetrievalFixture } from './helpers/projectRetrievalLaunch.js';
 import { ProjectRetrievalLaunchStore } from '../src/projects/retrievalLaunch.js';
-import { setTimeout as pause } from 'node:timers/promises';
 import { existsSync } from 'node:fs';
 import { pairedRetrievalDecision } from '../src/cli/retrievalComparison.js';
 import { parseRunLog } from '../src/cli/burnin.js';
@@ -62,9 +61,11 @@ describe('registered Haystack agent treatment', () => {
       skillsPath: run.layout.skillsPath, runsPath: run.layout.runsPath }, launch);
     const pending = prepared.prepare(retrievalContext());
     const rejected = expect(pending).rejects.toThrow('unavailable or denied');
-    for (let n = 0; n < 100 && !existsSync(join(root, 'haystack.pid')); n++) await pause(10);
-    const pid = Number(readFileSync(join(root, 'haystack.pid'), 'utf8'));
-    await prepared.binding.service.dispose(); await rejected;
+    let pid: number;
+    try {
+      await vi.waitFor(() => expect(existsSync(join(root, 'haystack.pid'))).toBe(true), { timeout: 3000 });
+      pid = Number(readFileSync(join(root, 'haystack.pid'), 'utf8'));
+    } finally { await prepared.binding.service.dispose(); await rejected; }
     expect(() => process.kill(pid, 0)).toThrow();
   });
   it('prepares the same tenant authority and activates the framework only for treatment B', async () => {

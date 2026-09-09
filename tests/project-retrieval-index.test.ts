@@ -6,7 +6,7 @@ import { setImmediate } from 'node:timers/promises';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_PROJECT_RETRIEVAL_LIMITS, parseProjectRetrievalQuery, type ProjectRetrievalScope } from '../src/contracts/projectRetrieval.js';
-import { ProjectRetrievalIndex } from '../src/projects/retrievalIndex.js';
+import { ProjectRetrievalIndex } from '../benchmark/haystack/sqliteBaseline.js';
 import { createProjectRetrievalTool } from '../src/tools/projectRetrieval.js';
 import { corpusScope, documentManifest, prepareTestCorpus, retrievalContext } from './helpers/projectRetrievalCorpus.js';
 
@@ -204,7 +204,7 @@ describe('project-private SQLite FTS5 backend', () => {
       import Database from 'better-sqlite3';
       import { readFileSync } from 'node:fs';
       import { prepareProjectRetrievalCorpus } from './src/projects/retrievalCorpus.ts';
-      import { ProjectRetrievalIndex } from './src/projects/retrievalIndex.ts';
+      import { ProjectRetrievalIndex } from './benchmark/haystack/sqliteBaseline.ts';
       const [root, file] = process.argv.slice(1);
       const db = new Database(file); db.pragma('journal_mode = WAL');
       const index = new ProjectRetrievalIndex(db);

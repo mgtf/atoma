@@ -59,6 +59,7 @@ import { repoRoot } from '../mcp/run.js';
 import { buildArtifactManifest } from './artifacts.js';
 import { ProjectStateConflict, ProjectStore } from './store.js';
 import { ProjectRetrievalLaunchStore } from './retrievalLaunch.js';
+import { HAYSTACK_LAUNCH_ENV, readHaystackLaunch, type HaystackLaunch } from '../contracts/retrievalHaystack.js';
 import { PROJECT_RETRIEVAL_ENV, projectRetrievalEnabled } from '../contracts/projectRetrievalLaunch.js';
 
 const MAX_CONTROL_JSON_BYTES = 512 * 1024;
@@ -886,6 +887,7 @@ export class ProjectRunCoordinator {
   private readonly cwd: string;
   private readonly timeoutMs: number;
   private readonly retrievalEnabled: boolean;
+  private readonly retrievalLaunch?: HaystackLaunch;
   private readonly active = new Map<string, ActiveRun>();
   private readonly idleWaiters = new Set<() => void>();
 
@@ -914,6 +916,7 @@ export class ProjectRunCoordinator {
     this.cwd = options.cwd ?? repoRoot();
     this.timeoutMs = projectRunTimeoutMs(this.hostEnv, options.timeoutMs);
     this.retrievalEnabled = projectRetrievalEnabled(this.hostEnv);
+    if (this.retrievalEnabled) this.retrievalLaunch = readHaystackLaunch(this.hostEnv);
   }
 
   /**
@@ -1201,6 +1204,7 @@ export class ProjectRunCoordinator {
           seedRun?.projectRunId ?? null, { signal: preparationSignal, deadlineAt });
         if (preparationSignal.aborted || Date.now() >= deadlineAt) throw new Error('project document preparation cancelled');
         environment[PROJECT_RETRIEVAL_ENV] = '1';
+        environment[HAYSTACK_LAUNCH_ENV] = JSON.stringify(this.retrievalLaunch);
         return launch();
       })() : launch();
     } catch (error) {

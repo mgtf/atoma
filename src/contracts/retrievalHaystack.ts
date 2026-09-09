@@ -26,3 +26,12 @@ export const haystackReplySchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('error'), id: z.number().int().nonnegative() }).strict(),
 ]);
 export type HaystackReply = z.infer<typeof haystackReplySchema>;
+
+/** A retrieval-enabled host must supply one explicit, pinned local runtime. */
+export function readHaystackLaunch(env: NodeJS.ProcessEnv): HaystackLaunch {
+  try {
+    const raw = env[HAYSTACK_LAUNCH_ENV];
+    if (!raw || Buffer.byteLength(raw) > 8192) throw new Error('missing or oversized');
+    return haystackLaunchSchema.parse(JSON.parse(raw));
+  } catch { throw new Error('project retrieval requires a valid ATOMA_PROJECT_RETRIEVAL_HAYSTACK configuration'); }
+}

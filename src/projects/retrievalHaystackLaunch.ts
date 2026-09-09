@@ -1,14 +1,14 @@
 import Database from 'better-sqlite3';
 import { haystackLaunchSchema, type HaystackLaunch } from '../contracts/retrievalHaystack.js';
-import { openProjectRunRetrieval, ProjectRetrievalLaunchStore } from './retrievalLaunch.js';
+import { openProjectRunRetrievalAuthority, ProjectRetrievalLaunchStore } from './retrievalLaunch.js';
 import { prepareProjectRetrievalCorpus, assertRetrievalTime } from './retrievalCorpus.js';
 import { createHaystackRetrievalBinding } from './retrievalHaystack.js';
 import type { ProjectRetrievalBinding, ProjectRetrievalCallContext } from '../tools/projectRetrieval.js';
 
 /** Read-only preflight; allocate Python only after the runner owns teardown and its watchdog. */
-export function openProjectRunHaystack(input: Parameters<typeof openProjectRunRetrieval>[0], config: HaystackLaunch) {
+export function openProjectRunHaystack(input: Parameters<typeof openProjectRunRetrievalAuthority>[0], config: HaystackLaunch) {
   const launch = haystackLaunchSchema.parse(config);
-  const authority = openProjectRunRetrieval(input);
+  const authority = openProjectRunRetrievalAuthority(input);
   const db = new Database(input.dbPath, { readonly: true, fileMustExist: true, timeout: 0 });
   let receipt;
   try { receipt = new ProjectRetrievalLaunchStore(db, { initialize: false }).resolve(input.runId); }

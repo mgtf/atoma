@@ -9,13 +9,18 @@ campaign. No answer model, subscription transport, API key or product store.
 All three backends receive the same prepared passages and the original query
 through `search_project_docs`, with its default five-result budget.
 
+SQLite FTS5 now exists only as `sqliteBaseline.ts` in this development
+directory. It is not compiled into `dist/` or selectable by a project run.
+Haystack is the only product retrieval backend. The historical agent
+registrations remain readable, while new agent treatments use Haystack.
+
 Build compiled modules, then register before querying:
 
 ```bash
 npm run build
-node benchmark/haystack/evaluate.mjs register /absolute/path/to/new-output /absolute/path/to/venv/bin/python /absolute/path/to/models
-node benchmark/haystack/evaluate.mjs run /absolute/path/to/new-output /absolute/path/to/venv/bin/python /absolute/path/to/models
-node benchmark/haystack/evaluate.mjs replay /absolute/path/to/output
+node --import tsx benchmark/haystack/evaluate.mjs register /absolute/path/to/new-output /absolute/path/to/venv/bin/python /absolute/path/to/models
+node --import tsx benchmark/haystack/evaluate.mjs run /absolute/path/to/new-output /absolute/path/to/venv/bin/python /absolute/path/to/models
+node --import tsx benchmark/haystack/evaluate.mjs replay /absolute/path/to/output
 ```
 
 The output directory must be new. `models/embedding` and `models/reranker`

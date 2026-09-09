@@ -9,6 +9,12 @@ production retrieval-provider integrations remain pending. An experimental
 Haystack backend is now available for component and shared-runner evaluation.
 Its six-attempt agent pilot is archived and did not meet its benefit screen.
 
+**Current backend decision:** [Haystack is the only product retrieval backend](project-retrieval-haystack-only-2026-09-09.md),
+with BM25 and hybrid pipeline modes. SQLite FTS5 remains only in the development
+component comparator. Source preparation no longer builds its unused cache.
+The earlier steps below record implementation history; retrieval activation
+now requires explicit Haystack host configuration and remains opt-in.
+
 ## Implementation progress
 
 The [evaluation instruments](../benchmark/retrieval/README.md) contain 26

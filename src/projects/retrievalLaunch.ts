@@ -8,12 +8,11 @@ import { projectRetrievalLaunchSchema, type ProjectRetrievalLaunch } from '../co
 import { projectRetrievalScopeSchema, type ProjectRetrievalScope } from '../contracts/projectRetrieval.js';
 import { canonicalRetrievalManifest, captureProjectDocument, assertRetrievalTime,
   prepareProjectRetrievalCorpus, projectRetrievalHash, retrievalGeneration, retrievalIndexConfig } from './retrievalCorpus.js';
-import { ProjectRetrievalIndex } from './retrievalIndex.js';
 import { ProjectStore } from './store.js';
 import { artifactManifestHash, assertPublishableArtifactPath } from './artifacts.js';
 import type { ProjectRetrievalBinding, ProjectRetrievalCallContext, ProjectRetrievalService } from '../tools/projectRetrieval.js';
 
-/** Source receipts are authoritative; derived FTS tables retain their separate disposable lifecycle. */
+/** Source receipts are authoritative; retrieval indexes belong to the run-owned Haystack process. */
 export const PROJECT_RETRIEVAL_LAUNCH_DDL = `
 CREATE TABLE IF NOT EXISTS project_retrieval_launches (
   run_id TEXT PRIMARY KEY REFERENCES project_runs(project_run_id),
@@ -118,7 +117,6 @@ export class ProjectRetrievalLaunchStore {
         snapshotSha256: manifest.snapshotSha256, generation: corpus.generation });
       const receipt = projectRetrievalLaunchSchema.parse({ version: 1, scope, manifest, sourceRoot,
         sourceRunId, sourceManifestHash: source?.artifactManifestHash ?? null });
-      await new ProjectRetrievalIndex(this.db).build(scope, corpus, context);
       this.db.transaction(() => {
         assertRetrievalTime(context);
         if (!this.eligibleRun(runId)) throw new Error('denied');
@@ -134,7 +132,7 @@ export class ProjectRetrievalLaunchStore {
 }
 
 /** Child host uses a separate read-only handle on the SAME product file; no DDL or worker imports. */
-export function openProjectRunRetrieval(input: {
+export function openProjectRunRetrievalAuthority(input: {
   dbPath: string; runId: string; workspacePath: string; skillsPath: string; runsPath: string;
 }): ProjectRetrievalBinding {
   let db: Database.Database | undefined;
@@ -161,8 +159,14 @@ export function openProjectRunRetrieval(input: {
         try {
           const live = new ProjectRetrievalLaunchStore(candidate, { initialize: false });
           candidate.pragma('busy_timeout = 0');
-          active = new ProjectRetrievalIndex(candidate, { initialize: false }).createService(receipt.scope,
-            async scope => live.authorize(scope));
+          active = {
+            authorize: async (scope, context) => {
+              assertRetrievalTime(context);
+              return JSON.stringify(scope) === JSON.stringify(receipt.scope) && live.authorize(scope);
+            },
+            search: async () => ({ ok: false, status: 'unavailable' }),
+            dispose: async () => {},
+          };
           connection = candidate;
         } catch (error) { candidate.close(); throw error; }
       }

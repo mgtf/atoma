@@ -20,7 +20,6 @@ if (!existsSync(mcpTools)) {
 }
 // Also runs on the production host after npm ci --omit=dev, before activation.
 await import('./sqlite-release-smoke.mjs');
-await import('./retrieval-index-smoke.mjs');
 await import('./retrieval-project-smoke.mjs');
 const smokeRoot = mkdtempSync(join(tmpdir(), 'atoma-release-smoke-'));
 

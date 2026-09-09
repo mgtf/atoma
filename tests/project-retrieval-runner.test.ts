@@ -52,7 +52,7 @@ function environment() {
 }
 
 describe('trusted retrieval injection through startTask', () => {
-  it.each(['fts5', 'haystack', 'broken-haystack', 'failed-model', 'cancelled-warmup'])('resolves the coordinator receipt through startTask with %s', async mode => {
+  it.each(['haystack', 'broken-haystack', 'failed-model', 'cancelled-warmup'])('resolves the coordinator receipt through startTask with %s', async mode => {
     const root = environment();
     const f = projectRetrievalFixture(root);
     const source = f.makeRun({ 'docs.md': 'Private price is 190 euros.\n' });
@@ -61,7 +61,7 @@ describe('trusted retrieval injection through startTask', () => {
     for (const [key, value] of Object.entries({ ATOMA_PROJECT_RETRIEVAL: '1', ATOMA_TENANT_RUN: '1', ATOMA_RUN_ID: current.run.projectRunId,
       ATOMA_DB_PATH: f.dbPath, ATOMA_BUILD_WORKSPACE: current.layout.workspacePath, ATOMA_RUNS_DIR: current.layout.runsPath,
       ATOMA_SKILLS_DIR: current.layout.skillsPath, ATOMA_SKILL_PROMOTE: '0', ATOMA_SKILL_DIRECT: '0', ATOMA_PREFILTER_CACHE: '0' })) vi.stubEnv(key, value);
-    if (mode !== 'fts5') {
+    {
       const config = haystackTestRuntime(root, mode === 'cancelled-warmup' ? 'hang' : 'valid');
       if (mode === 'broken-haystack') config.runtimeSha256 = 'e'.repeat(64);
       vi.stubEnv(HAYSTACK_LAUNCH_ENV, JSON.stringify(config));
@@ -93,7 +93,7 @@ describe('trusted retrieval injection through startTask', () => {
       } else if (['failed-model', 'cancelled-warmup'].includes(mode)) expect(observed).toBeUndefined();
       else expect(observed).toMatchObject({ ok: true, passages: [expect.objectContaining({ excerpt: 'Private price is 190 euros.\n' })] });
     } finally { await handle.shutdown(); }
-    if (mode !== 'fts5') expect(() => process.kill(Number(readFileSync(join(root, 'haystack.pid'), 'utf8')), 0)).toThrow();
+    expect(() => process.kill(Number(readFileSync(join(root, 'haystack.pid'), 'utf8')), 0)).toThrow();
   });
 
   it('constructs a private registry through startTask even with retrieval disabled', async () => {
@@ -139,13 +139,14 @@ describe('trusted retrieval injection through startTask', () => {
     expect(buildTierClients).not.toHaveBeenCalled(); expect(existsSync(join(root, 'wrong-workspace'))).toBe(false);
   });
 
-  it('refuses a marked child without a stored receipt before workspace or provider construction', async () => {
+  it.each(['missing-config', 'missing-receipt'])('refuses %s before workspace or provider construction', async missing => {
     const root = environment();
     vi.stubEnv('ATOMA_PROJECT_RETRIEVAL', '1'); vi.stubEnv('ATOMA_TENANT_RUN', '1');
+    vi.stubEnv(HAYSTACK_LAUNCH_ENV, missing === 'missing-config' ? undefined : JSON.stringify(haystackTestRuntime(root)));
     vi.stubEnv('ATOMA_SKILL_PROMOTE', '0'); vi.stubEnv('ATOMA_SKILL_DIRECT', '0');
     vi.stubEnv('ATOMA_PREFILTER_CACHE', '0'); resetHostLifecycleSnapshotForTests();
     vi.mocked(buildTierClients).mockClear(); vi.mocked(containerToolBackend).mockClear();
-    await expect(startTask(buildProfile, ['--container', '--no-promote-skills', '--no-direct-skills', 'Consult source.'])).rejects.toThrow('unavailable or denied');
+    await expect(startTask(buildProfile, ['--container', '--no-promote-skills', '--no-direct-skills', 'Consult source.'])).rejects.toThrow(missing === 'missing-config' ? 'ATOMA_PROJECT_RETRIEVAL_HAYSTACK' : 'unavailable or denied');
     expect(buildTierClients).not.toHaveBeenCalled(); expect(containerToolBackend).not.toHaveBeenCalled();
     expect(existsSync(join(root, 'workspace'))).toBe(false);
   });

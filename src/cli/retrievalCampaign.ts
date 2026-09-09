@@ -22,7 +22,7 @@ import { inspectHaystackRuntime } from '../projects/retrievalHaystackRuntime.js'
 import { pairedRetrievalDecision } from './retrievalComparison.js';
 import { scoreRetrievalWorkspace } from './retrievalScorer.js';
 import {
-  archiveRetrievalSource, assertRetrievalExecutionIdentity, validateRetrievalRegistration,
+  archiveRetrievalSource, assertRetrievalExecutionIdentity, assertRetrievalCampaignExecutable, validateRetrievalRegistration,
 } from './retrievalRegistration.js';
 
 type CampaignDeps = {
@@ -156,6 +156,7 @@ export async function runRetrievalCampaign(
     preflight: inspectRetrievalHost, ...overrides,
   };
   const registration = validateRetrievalRegistration(input, dataset);
+  assertRetrievalCampaignExecutable(registration.spec);
   deps.verify(registration, options.repo);
   if (options.signal?.aborted) throw new Error('campaign cancelled before launch');
   const host = { ...(options.hostEnv ?? process.env) };

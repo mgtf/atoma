@@ -16,7 +16,9 @@ import { assessShareability } from '../src/skills/shareability.js';
 import { exportSkillToSpec } from '../src/skills/exportSpec.js';
 import { namespaceOf } from '../src/skills/namespace.js';
 import { visibleSkillNamespaces } from '../src/skills/visibility.js';
-import { ProjectRetrievalLaunchStore, openProjectRunRetrieval } from '../src/projects/retrievalLaunch.js';
+import { ProjectRetrievalLaunchStore } from '../src/projects/retrievalLaunch.js';
+import { openProjectRunHaystack } from '../src/projects/retrievalHaystackLaunch.js';
+import { haystackTestRuntime } from './helpers/haystack.js';
 import { projectRunEnvironment } from '../src/projects/coordinator.js';
 import { localToolBackend, withProjectRetrievalBackend } from '../src/run/toolBackend.js';
 import { PROJECT_RETRIEVAL_TOOL_NAME as SEARCH } from '../src/contracts/projectRetrieval.js';
@@ -37,13 +39,15 @@ const RELOAD_IN_ANOTHER_PROCESS = String.raw`
   import { L2Atom } from './src/atoms/L2Atom.ts';
   import { L3Atom } from './src/atoms/L3Atom.ts';
   import { closeStoreHandles } from './src/core/stores.ts';
-  import { openProjectRunRetrieval } from './src/projects/retrievalLaunch.ts';
+  import { openProjectRunHaystack } from './src/projects/retrievalHaystackLaunch.ts';
   import { createProjectRetrievalTool } from './src/tools/projectRetrieval.ts';
   import { makeCtx, jsonText, jsonTextPair } from './tests/helpers.ts';
-  const { dbPath } = JSON.parse(readFileSync(0, 'utf8'));
-  const binding = openProjectRunRetrieval({ dbPath, runId: process.env.ATOMA_RUN_ID,
+  const { dbPath, launch } = JSON.parse(readFileSync(0, 'utf8'));
+  const prepared = openProjectRunHaystack({ dbPath, runId: process.env.ATOMA_RUN_ID,
     workspacePath: process.env.ATOMA_BUILD_WORKSPACE, skillsPath: process.env.ATOMA_SKILLS_DIR,
-    runsPath: process.env.ATOMA_RUNS_DIR });
+    runsPath: process.env.ATOMA_RUNS_DIR }, launch);
+  await prepared.prepare({ signal: new AbortController().signal, deadlineAt: Date.now() + 10000 });
+  const binding = prepared.binding;
   const search = createProjectRetrievalTool(binding, { signal: new AbortController().signal, deadlineAt: Date.now() + 10_000 });
   const ownSource = await search.execute({ query: 'annual price' });
   const registry = new AtomRegistry(openDb(dbPath), resolveProjectRegistryOwner({ dbPath,
@@ -80,7 +84,7 @@ async function readNextProject(dbPath: string, other: ReturnType<ReturnType<type
   await ProjectRetrievalLaunchStore.open(dbPath).prepare(other.run.projectRunId, null, retrievalContext());
   const result = JSON.parse(execFileSync(process.execPath,
     ['--import', 'tsx', '--input-type=module', '--eval', RELOAD_IN_ANOTHER_PROCESS], {
-      input: jsonText({ dbPath }), encoding: 'utf8', timeout: 10_000,
+      input: jsonText({ dbPath, launch: haystackTestRuntime(root) }), encoding: 'utf8', timeout: 10_000,
       env: { ...process.env, ATOMA_RUN_ID: other.run.projectRunId, ATOMA_SKILLS_DIR: other.layout.skillsPath,
         ATOMA_BUILD_WORKSPACE: other.layout.workspacePath, ATOMA_RUNS_DIR: other.layout.runsPath },
     }));
@@ -104,8 +108,10 @@ async function fixture() {
   const context = retrievalContext();
   await ProjectRetrievalLaunchStore.open(f.dbPath).prepare(run.run.projectRunId, source.run.projectRunId, context);
   vi.stubEnv('ATOMA_PROJECT_RETRIEVAL', '1');
-  const binding = openProjectRunRetrieval({ dbPath: f.dbPath, runId: run.run.projectRunId,
-    workspacePath: run.layout.workspacePath, skillsPath: run.layout.skillsPath, runsPath: run.layout.runsPath });
+  const prepared = openProjectRunHaystack({ dbPath: f.dbPath, runId: run.run.projectRunId,
+    workspacePath: run.layout.workspacePath, skillsPath: run.layout.skillsPath, runsPath: run.layout.runsPath }, haystackTestRuntime(root));
+  await prepared.prepare(context);
+  const binding = prepared.binding;
   const backend = await withProjectRetrievalBackend(localToolBackend({ workspaceRoot: run.layout.workspacePath, logger: silentLogger() }), binding, context);
   const owner = resolveProjectRegistryOwner({ dbPath: f.dbPath, runId: run.run.projectRunId,
     workspacePath: run.layout.workspacePath, skillsPath: run.layout.skillsPath, runsPath: run.layout.runsPath });

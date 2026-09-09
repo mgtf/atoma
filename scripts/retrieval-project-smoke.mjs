@@ -15,8 +15,9 @@ import { ProjectStore } from '../dist/projects/store.js';
 import { ProjectRunCoordinator, projectRunHostLayout } from '../dist/projects/coordinator.js';
 import { buildArtifactManifest } from '../dist/projects/artifacts.js';
 import { closeStoreHandles } from '../dist/core/stores.js';
-import { ProjectRetrievalLaunchStore, openProjectRunRetrieval } from '../dist/projects/retrievalLaunch.js';
+import { ProjectRetrievalLaunchStore } from '../dist/projects/retrievalLaunch.js';
 import { openProjectRunHaystack } from '../dist/projects/retrievalHaystackLaunch.js';
+import { haystackTestRuntime } from './fixtures/haystack-test-runtime.mjs';
 import { HAYSTACK_LAUNCH_ENV, haystackLaunchSchema } from '../dist/contracts/retrievalHaystack.js';
 import { parseRunLog, spawnRun } from '../dist/cli/burnin.js';
 import { L1Atom } from '../dist/atoms/L1Atom.js';
@@ -41,8 +42,8 @@ if (process.argv.includes('--child')) {
   env.ATOMA_BUILD_WORKSPACE = workspace;
   const paths = { dbPath: env.ATOMA_DB_PATH, runId: env.ATOMA_RUN_ID, workspacePath: workspace,
     skillsPath: env.ATOMA_SKILLS_DIR, runsPath: env.ATOMA_RUNS_DIR };
-  const prepared = env[HAYSTACK_LAUNCH_ENV] ? openProjectRunHaystack(paths, haystackLaunchSchema.parse(JSON.parse(env[HAYSTACK_LAUNCH_ENV]))) : null;
-  const binding = prepared?.binding ?? openProjectRunRetrieval(paths);
+  const prepared = openProjectRunHaystack(paths, haystackLaunchSchema.parse(JSON.parse(env[HAYSTACK_LAUNCH_ENV])));
+  const binding = prepared.binding;
   const owner = resolveProjectRegistryOwner({ dbPath: env.ATOMA_DB_PATH, runId: env.ATOMA_RUN_ID,
     workspacePath: workspace, skillsPath: env.ATOMA_SKILLS_DIR, runsPath: env.ATOMA_RUNS_DIR });
   const registryDb = openDb(env.ATOMA_DB_PATH);
@@ -88,7 +89,7 @@ if (process.argv.includes('--child')) {
   const llm = new AnthropicLlmClient(sdk);
   const atom = new L1Atom({ name: 'Ammonia', ordinal: 3, model: 'test', systemPrompt: 'Consult source data.', tools: backend.toolDecls, params: {} });
   try {
-    await prepared?.prepare(run);
+    await prepared.prepare(run);
     const result = await atom.execute({ description: 'Find the annual price.' },
       { reasoning: 'Read original evidence', subtasks: [], aggregation: { mode: 'concat' }, expectedOutput: 'Cited price' },
       { ...run, limits: DEFAULT_LIMITS, logger, llm, tools: backend.executor });
@@ -136,14 +137,14 @@ if (process.argv.includes('--child')) {
     projects.transitionProjectRun({ orgId: viewer.orgId, projectRunId: sourceId, from: 'running', to: 'delivered', traceId: sourceId, stats: parseRunLog('✓ build finished') });
     projects.saveArtifactManifest(viewer.orgId, sourceId, buildArtifactManifest({ workspaceRoot: source.workspacePath, declaredPaths: ['docs.md'] }).manifest);
     let childLog;
+    const haystack = process.argv.includes('--haystack') ? haystackLaunchSchema.parse(JSON.parse(process.env[HAYSTACK_LAUNCH_ENV])) : haystackTestRuntime(root);
     const coordinator = new ProjectRunCoordinator({ store: projects, dbPath, projectsRoot: root, cwd: root, timeoutMs: 60_000,
       hostEnv: { PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR,
-        ATOMA_PROJECT_RETRIEVAL: '1', ATOMA_MODEL_L1: 'api:ollama:test', ATOMA_MODEL_L2: 'api:ollama:test', ATOMA_MODEL_L3: 'api:ollama:test', OLLAMA_BASE_URL: 'http://127.0.0.1:1' },
+        ATOMA_PROJECT_RETRIEVAL: '1', [HAYSTACK_LAUNCH_ENV]: JSON.stringify(haystack), ATOMA_MODEL_L1: 'api:ollama:test', ATOMA_MODEL_L2: 'api:ollama:test', ATOMA_MODEL_L3: 'api:ollama:test', OLLAMA_BASE_URL: 'http://127.0.0.1:1' },
       driver: async options => {
         const launches = ProjectRetrievalLaunchStore.open(dbPath);
         childLog = await spawnRun({ ...options, env: { ...options.env, ATOMA_RETRIEVAL_SMOKE_CONTAINER: realContainer ? '1' : '0',
-          ATOMA_RETRIEVAL_SMOKE_IMAGE: process.env.ATOMA_RETRIEVAL_SMOKE_IMAGE,
-          ...(process.argv.includes('--haystack') ? { [HAYSTACK_LAUNCH_ENV]: JSON.stringify(haystackLaunchSchema.parse(JSON.parse(process.env[HAYSTACK_LAUNCH_ENV]))) } : {}) },
+          ATOMA_RETRIEVAL_SMOKE_IMAGE: process.env.ATOMA_RETRIEVAL_SMOKE_IMAGE },
           hardKillMarginMs: 0, onChunk: chunk => {
             if (chunk.includes('ATOMA_RETRIEVAL_SMOKE_READY')) launches.revoke(options.env.ATOMA_RUN_ID);
           } });
@@ -156,6 +157,6 @@ if (process.argv.includes('--child')) {
     assert.match(childLog, /ATOMA_RETRIEVAL_SMOKE_PASSED/);
     assert.equal(readFileSync(join(source.workspacePath, 'docs.md'), 'utf8'), SOURCE);
     // This is a boundary probe, not a delivery/quality run: the child supplies no delivery manifest.
-    console.log(`Project retrieval compiled process smoke passed (container=${realContainer})`);
+    console.log(`Project retrieval compiled process smoke passed (container=${realContainer}, Haystack=${process.argv.includes('--haystack') ? 'real' : 'protocol fixture'})`);
   } finally { closeStoreHandles(); rmSync(root, { recursive: true, force: true }); }
 }

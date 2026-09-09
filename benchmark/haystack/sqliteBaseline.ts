@@ -1,15 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { setImmediate, setTimeout } from 'node:timers/promises';
 import type Database from 'better-sqlite3';
-import { openStoreHandle, storeDbPath } from '../core/stores.js';
 import { PROJECT_RETRIEVAL_BM25, PROJECT_RETRIEVAL_CORPUS_LIMITS, PROJECT_RETRIEVAL_TOKENIZER,
-  projectRetrievalIndexConfigSchema } from '../contracts/projectRetrievalCorpus.js';
+  projectRetrievalIndexConfigSchema } from '../../src/contracts/projectRetrievalCorpus.js';
 import { projectDocumentDigestSchema, projectRetrievalPassageSchema, projectRetrievalQuerySchema,
   projectRetrievalScopeSchema, type ProjectRetrievalScope, type ProjectRetrievalQuery,
-  type ProjectRetrievalPassage, type ProjectRetrievalResponse } from '../contracts/projectRetrieval.js';
-import type { ProjectRetrievalCallContext, ProjectRetrievalService } from '../tools/projectRetrieval.js';
+  type ProjectRetrievalPassage, type ProjectRetrievalResponse } from '../../src/contracts/projectRetrieval.js';
+import type { ProjectRetrievalCallContext, ProjectRetrievalService } from '../../src/tools/projectRetrieval.js';
 import { assertRetrievalTime, canonicalRetrievalManifest, projectRetrievalHash, retrievalDocumentId,
-  retrievalGeneration, retrievalPassageContext, type PreparedProjectRetrievalCorpus } from './retrievalCorpus.js';
+  retrievalGeneration, retrievalPassageContext, type PreparedProjectRetrievalCorpus } from '../../src/projects/retrievalCorpus.js';
 
 /** Disposable v1 tables. A format change gets an explicit rebuild, never a migration. */
 export const PROJECT_RETRIEVAL_CACHE_DDL = `
@@ -78,14 +77,10 @@ async function writeBatch<T>(db: Database.Database, context: ProjectRetrievalCal
   }
 }
 
-/** Host-only cache over the primary product store. It owns no database lifetime. */
+/** Historical benchmark baseline only; never imported by the product runtime. */
 export class ProjectRetrievalIndex {
   constructor(private readonly db: Database.Database, options: { initialize?: boolean } = {}) {
     if (options.initialize !== false) db.exec(PROJECT_RETRIEVAL_CACHE_DDL);
-  }
-
-  static open(path = storeDbPath()): ProjectRetrievalIndex {
-    return new ProjectRetrievalIndex(openStoreHandle(path, PROJECT_RETRIEVAL_CACHE_DDL));
   }
 
   /** A cancelled/crashed build remains unreachable until explicit garbage collection. */

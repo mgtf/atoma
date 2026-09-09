@@ -7,7 +7,10 @@ import Database from 'better-sqlite3';
 import { retrievalCampaignSpecSchema, retrievalRegistrationSchema, retrievalCampaignResultSchema } from '../src/contracts/retrievalCampaign.js';
 import { formatRunStatsEpilogue } from '../src/contracts/runStats.js';
 import { loadRetrievalDataset, questionFor, retrievalDocumentKey, retrievalSha256 } from '../src/cli/retrievalDataset.js';
-import { retrievalCampaignPolicy, retrievalSchedule, retrievalTreatmentSettings, validateRetrievalRegistration } from '../src/cli/retrievalRegistration.js';
+import { retrievalCampaignPolicy, retrievalSchedule, validateRetrievalRegistration } from '../src/cli/retrievalRegistration.js';
+import { retrievalIndexConfig } from '../src/projects/retrievalCorpus.js';
+import { DEFAULT_PROJECT_RETRIEVAL_LIMITS } from '../src/contracts/projectRetrieval.js';
+import { haystackTestRuntime } from './helpers/haystack.js';
 import { runRetrievalCampaign } from '../src/cli/retrievalCampaign.js';
 import { pairedRetrievalDecision } from '../src/cli/retrievalComparison.js';
 import { retrievalObservations } from '../src/cli/retrievalObservations.js';
@@ -20,15 +23,15 @@ import { ProjectStore } from '../src/projects/store.js';
 const repo = resolve(import.meta.dirname, '..');
 const dataset = loadRetrievalDataset(join(repo, 'benchmark/retrieval'));
 const roots: string[] = [];
-function temp() { const root = mkdtempSync(join(tmpdir(), 'atoma-bm25-test-')); roots.push(root); return root; }
+function temp() { const root = mkdtempSync(join(tmpdir(), 'atoma-haystack-test-')); roots.push(root); return root; }
 afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function registration() {
   const spec = retrievalCampaignSpecSchema.parse({ version: 1, id: 'bm25-test', purpose: 'Compare the paired development treatment with fixed scoring.',
-    kind: 'bm25-development', questionIds: ['northstar-11', 'northstar-12'], repetitions: 1, firstArm: 'atoma',
+    kind: 'haystack-development', questionIds: ['northstar-11', 'northstar-12'], repetitions: 1, firstArm: 'atoma',
     models: { l1: 'sub:anthropic:haiku', l2: 'sub:anthropic:sonnet', l3: 'sub:anthropic:opus', frontier: 'sub:anthropic:opus' },
     workerImage: 'sha256:' + '1'.repeat(64), timeoutMs: 30_000, maxWallMs: 300_000,
     stopAfterConsecutiveInfrastructureFailures: 1, thresholds: { trust: 3, promote: 3, demote: 2 },
-    treatment: retrievalTreatmentSettings(), decision: { objective: 'paired-full-pass', minimumGain: 0.5, maxElapsedRatio: 1.25, maxPriceEquivalentRatio: 1.25 } });
+    treatment: { backend: 'haystack', index: retrievalIndexConfig(), queryLimits: DEFAULT_PROJECT_RETRIEVAL_LIMITS, launch: haystackTestRuntime(temp()) }, decision: { objective: 'paired-full-pass', minimumGain: 0.5, maxElapsedRatio: 1.25, maxPriceEquivalentRatio: 1.25 } });
   return retrievalRegistrationSchema.parse({ version: 1, registeredAt: new Date().toISOString(), spec,
     source: { revision: '1'.repeat(40), sha256: '2'.repeat(64) },
     instrumentsSha256: retrievalSha256(readFileSync(join(dataset.root, 'instruments.lock.json'))),
@@ -36,10 +39,19 @@ function registration() {
 }
 const delivered = { ...parseRunLog('--- spawn failed ---'), outcome: 'delivered' as const, costUsd: 0.1, llmCalls: 1 };
 
-describe('registered BM25 treatment', () => {
+describe('registered Haystack treatment', () => {
+  it('keeps archived SQLite registrations readable but refuses a new live execution before acquiring the lease', async () => {
+    const historical = validateRetrievalRegistration(JSON.parse(readFileSync(join(repo,
+      'benchmark/retrieval-bm25-pilot-2026-09-09/registration-r2.json'), 'utf8')), dataset);
+    const acquire = vi.fn();
+    await expect(runRetrievalCampaign(historical, dataset, { repo, out: join(temp(), 'historical') }, {
+      acquire, verify: () => {}, archiveSource: () => {}, preflight: () => ({}),
+    })).rejects.toThrow('historical');
+    expect(acquire).not.toHaveBeenCalled();
+  });
   it('requires frozen settings and a decision, balances three arms and refuses changed backend settings', () => {
     const r = registration();
-    expect(r.schedule.map(e => e.arm)).toEqual(['atoma', 'atoma-bm25', 'frontier-direct', 'frontier-direct', 'atoma-bm25', 'atoma']);
+    expect(r.schedule.map(e => e.arm)).toEqual(['atoma', 'atoma-haystack', 'frontier-direct', 'frontier-direct', 'atoma-haystack', 'atoma']);
     expect(validateRetrievalRegistration(r, dataset)).toEqual(r);
     expect(retrievalCampaignSpecSchema.safeParse({ ...r.spec, decision: undefined }).success).toBe(false);
     expect(retrievalCampaignSpecSchema.safeParse({ ...r.spec, treatment: undefined }).success).toBe(false);
@@ -59,11 +71,11 @@ describe('registered BM25 treatment', () => {
     rows[2]!.infrastructureFailure = true;
     expect(pairedRetrievalDecision(r, rows)?.decision).toBe('inconclusive');
     rows[2]!.infrastructureFailure = false;
-    for (const row of rows) if (row.entry.arm === 'atoma-bm25') row.elapsedMs = 2000;
+    for (const row of rows) if (row.entry.arm === 'atoma-haystack') row.elapsedMs = 2000;
     expect(pairedRetrievalDecision(r, rows)?.decision).toBe('screen-not-met');
   });
 
-  it('runs identical synthetic tenant paths and exposes real FTS only to B in a new process', async () => {
+  it('runs identical synthetic tenant paths and exposes the Haystack process protocol only to B in a new process', async () => {
     const r = registration(); const out = join(temp(), 'evidence'); const release = vi.fn();
     const seen: string[] = [];
     const report = await runRetrievalCampaign(r, dataset, { repo, out }, {
@@ -73,19 +85,22 @@ describe('registered BM25 treatment', () => {
         expect(env['ATOMA_TENANT_RUN']).toBe('1'); expect(env['ATOMA_SUBSCRIPTION_TIERS']).toBe('l1,l2,l3');
         expect(env['ATOMA_SKILL_LEARN']).toBe('0'); expect(env['ATOMA_EVENT_SKILLS']).toBe('0');
         const input = { dbPath: env['ATOMA_DB_PATH'], runId: env['ATOMA_RUN_ID'], workspacePath: env['ATOMA_BUILD_WORKSPACE'],
-          runsPath: env['ATOMA_RUNS_DIR'], skillsPath: env['ATOMA_SKILLS_DIR'], treatment: env['ATOMA_PROJECT_RETRIEVAL'] === '1' };
+          runsPath: env['ATOMA_RUNS_DIR'], skillsPath: env['ATOMA_SKILLS_DIR'], treatment: env['ATOMA_PROJECT_RETRIEVAL'] === '1', launch: env['ATOMA_PROJECT_RETRIEVAL_HAYSTACK'] ? JSON.parse(env['ATOMA_PROJECT_RETRIEVAL_HAYSTACK']) : null };
         const script = String.raw`
           import { readFileSync } from 'node:fs'; import assert from 'node:assert/strict';
-          import { openProjectRunRetrieval } from './src/projects/retrievalLaunch.ts';
+          import { openProjectRunRetrievalAuthority } from './src/projects/retrievalLaunch.ts';
+          import { openProjectRunHaystack } from './src/projects/retrievalHaystackLaunch.ts';
           import { resolveProjectRegistryOwner } from './src/projects/runAuthority.ts';
           import { createProjectRetrievalTool } from './src/tools/projectRetrieval.ts';
           const input = JSON.parse(readFileSync(0, 'utf8')); const owner = resolveProjectRegistryOwner(input);
           assert.equal(owner.kind, 'project');
           if (input.treatment) {
-            const tool = createProjectRetrievalTool(openProjectRunRetrieval(input), { signal: new AbortController().signal, deadlineAt: Date.now() + 10000 });
+            const prepared = openProjectRunHaystack(input, input.launch);
+            await prepared.prepare({ signal: new AbortController().signal, deadlineAt: Date.now() + 10000 });
+            const tool = createProjectRetrievalTool(prepared.binding, { signal: new AbortController().signal, deadlineAt: Date.now() + 10000 });
             const result = await tool.execute({ query: 'annual price' }); assert.equal(result.ok, true); assert.ok(result.passages.length > 0);
             process.stdout.write(JSON.stringify(result)); await tool.close();
-          } else { assert.throws(() => openProjectRunRetrieval(input)); process.stdout.write('null'); }
+          } else { assert.throws(() => openProjectRunRetrievalAuthority(input)); process.stdout.write('null'); }
         `;
         const response = JSON.parse(execFileSync(process.execPath, ['--import', 'tsx', '--input-type=module', '--eval', script], {
           cwd: repo, input: JSON.stringify(input), encoding: 'utf8', timeout: 10_000,
@@ -114,11 +129,11 @@ describe('registered BM25 treatment', () => {
       const after = new Database(join(attempt, 'end.db'), { readonly: true });
       expect(after.prepare('SELECT COUNT(*) AS n FROM atom_types').get()).toEqual({ n: 1 }); after.close();
       const preparation = JSON.parse(readFileSync(join(attempt, 'preparation.json'), 'utf8'));
-      expect(preparation.backend).toBe(entry.arm === 'atoma-bm25' ? 'sqlite-fts5' : null);
+      expect(preparation.backend).toBe(entry.arm === 'atoma-haystack' ? 'haystack' : null);
       expect(preparation.sourceBytes).toBeGreaterThan(0);
       const result = JSON.parse(readFileSync(join(attempt, 'result.json'), 'utf8'));
       const observations = retrievalObservations(join(out, result.tracePath), dataset, questionFor(dataset, 'northstar-01'));
-      expect(observations).toMatchObject(entry.arm === 'atoma-bm25' ?
+      expect(observations).toMatchObject(entry.arm === 'atoma-haystack' ?
         { calls: 1, failures: 0, invalidSourcePassages: 0, coveredFacts: 1, coverageDisposition: 'evidence-covered' } :
         { calls: 0, coverageDisposition: 'not-invoked' });
     }

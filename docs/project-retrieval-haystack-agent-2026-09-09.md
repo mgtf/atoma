@@ -2,6 +2,11 @@
 
 Date: 2026-09-09. Experimental development comparison; no rollout decision.
 
+**Subsequent simplification:** [Haystack is now the only product retrieval backend](project-retrieval-haystack-only-2026-09-09.md).
+Source preparation no longer builds FTS5, and normal retrieval-enabled
+coordinators require and forward explicit Haystack configuration. The pilot
+description below records the exact earlier implementation that was measured.
+
 ## Change
 
 A `haystack-development` campaign now compares ordinary Atoma (A), Atoma
