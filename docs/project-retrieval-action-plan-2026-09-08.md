@@ -3,7 +3,8 @@
 Date: 2026-09-08, progress updated 2026-09-09. Status: evaluation instruments,
 A/C characterization driver, archived development pilot, typed host boundary,
 deterministic document ingestion, SQLite FTS5 backend and opt-in project-run
-activation delivered. Paired treatment evaluation, operational rollout and
+activation delivered. The paired BM25 development pilot is archived and did
+not meet its benefit screen. Broader evaluation, operational rollout and
 retrieval-provider integrations remain pending.
 
 ## Implementation progress
@@ -29,8 +30,8 @@ completed on one source revision and UTC day. Frontier-direct passed both
 tasks; Atoma reached both registered deadlines, with correct pricing facts or
 maintenance behavior but incomplete source-supported delivery. This tiny
 sample identifies development failure cases, not a retrieval benefit. The
-[retrieval protocol](../benchmark/retrieval/PROTOCOL.md) still requires a new
-paired control when the search treatment exists.
+[new paired BM25 pilot](../benchmark/retrieval-bm25-pilot-2026-09-09/README.md)
+now supplies that same-revision control and records no full-task gain.
 
 Steps 4–5 now have a [reviewed host contract](project-retrieval-host-contract-2026-09-09.md)
 and an opt-in `startTask` library binding. `search_project_docs` is intercepted
@@ -52,7 +53,7 @@ current project/principal/run state, and a dedicated L1 canonical scope.
 `ATOMA_PROJECT_RETRIEVAL=1` on the coordinator host enables this path for new
 project runs. The compiled process smoke covers coordinator → child → L1 →
 FTS5, live revocation and the real isolated worker. The benchmark treatment is
-implemented; its live evaluation and operational lifecycle remain pending. This is not default activation or
+implemented and its development pilot is archived; operational lifecycle remains pending. This is not default activation or
 evidence of an A/B gain. The [downstream privacy audit](project-retrieval-privacy-audit-2026-09-09.md)
 reproduced a common-registry disclosure. [Project registry ownership](project-registry-ownership-2026-09-09.md)
 now contains those prompts, descriptions, names, tools and history. Registered
@@ -512,17 +513,17 @@ existence and an in-memory executor mock alone do not satisfy this step.
 
 ### Step 10 — run the registered BM25 comparison
 
-- [ ] Freeze the treatment revision, protocol, scorer and parameters. Perform
+- [x] Freeze the treatment revision, protocol, scorer and parameters. Perform
   the paired A/B comparison and registered frontier reference on that revision
   and day, following Step 3's isolation and ordering rules.
-- [ ] Measure retrieval coverage separately from answer and artifact quality.
+- [x] Measure retrieval coverage separately from answer and artifact quality.
   Classify misses as ingestion, scope, lexical mismatch, ranking, context
   truncation or failure to use retrieved evidence.
-- [ ] Publish all runs, including timeouts, tool errors, unavailable retrieval,
+- [x] Publish all runs, including timeouts, tool errors, unavailable retrieval,
   failed deliveries and negative results. Do not silently discard bad pairs.
-- [ ] Apply the pre-registered decision rule. If the interval is inconclusive,
+- [x] Apply the pre-registered decision rule. If the interval is inconclusive,
   report that result; additional runs require a separately registered extension.
-- [ ] Keep BM25 if it earns its registered benefit. If it does not, retain
+- [x] Keep BM25 if it earns its registered benefit. If it does not, retain
   agentic search as the default and diagnose the measured failure class before
   proposing another component. BM25's failure is not evidence that embeddings
   or Qdrant will succeed.
@@ -530,6 +531,15 @@ existence and an in-memory executor mock alone do not satisfy this step.
 **Deliverable:** a dated report, raw machine-readable results, exact configs,
 scorer outputs and replay instructions under the new benchmark directory.
 Historical benchmark files and claims remain unchanged.
+
+**Development pilot completed:** [six-attempt report and raw archives](../benchmark/retrieval-bm25-pilot-2026-09-09/README.md).
+A and B each passed 0/2 tasks; C passed 2/2. B returned valid source evidence
+for every required fact but failed final citations or task completion. The
+predeclared screen was not met, so agentic search stays the default. The
+harness's first failure and accounting are also archived, with a regression
+fix before the separately registered continuation. This closes the bounded
+development comparison, not project-family confirmation or production rollout;
+the correlated two-task sample has no population confidence interval.
 
 ### Step 11 — add operational lifecycle and observability
 

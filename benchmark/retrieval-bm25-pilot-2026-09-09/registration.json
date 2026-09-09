@@ -1,0 +1,116 @@
+{
+  "version": 1,
+  "registeredAt": "2026-09-09T00:15:17.369Z",
+  "spec": {
+    "version": 1,
+    "id": "bm25-development-pilot-2026-09-09",
+    "purpose": "Screen BM25 availability on the two prior development tasks with fresh paired controls; this small sample cannot establish production benefit.",
+    "kind": "bm25-development",
+    "treatment": {
+      "backend": "sqlite-fts5",
+      "index": {
+        "storageVersion": 1,
+        "extractionVersion": "utf8-files-v1",
+        "chunkerVersion": "markdown-lines-v1",
+        "chunks": {
+          "maxBytes": 1400,
+          "maxLines": 16
+        },
+        "contextVersion": "path-headings-source-v1",
+        "tokenizer": "unicode61 remove_diacritics 2",
+        "normalization": "original-bytes; no overlap",
+        "embedding": null,
+        "generatedContext": null
+      },
+      "queryLimits": {
+        "maxQueryBytes": 2048,
+        "maxResults": 5,
+        "maxCandidates": 50,
+        "maxExcerptBytes": 1600,
+        "maxResponseBytes": 12000,
+        "timeoutMs": 2000
+      },
+      "ranking": {
+        "version": "bm25-or-v1",
+        "contextWeight": 1,
+        "textWeight": 1
+      }
+    },
+    "decision": {
+      "objective": "paired-full-pass",
+      "minimumGain": 0.5,
+      "maxElapsedRatio": 1.25,
+      "maxPriceEquivalentRatio": 1.25
+    },
+    "questionIds": [
+      "northstar-01",
+      "northstar-13"
+    ],
+    "repetitions": 1,
+    "firstArm": "atoma",
+    "models": {
+      "l1": "sub:anthropic:haiku",
+      "l2": "sub:anthropic:sonnet",
+      "l3": "sub:anthropic:opus",
+      "frontier": "sub:anthropic:opus"
+    },
+    "workerImage": "sha256:498e9d07666bc19082ea5323d7be1d148f79552d471e492d598253ff3d57ba4a",
+    "timeoutMs": 180000,
+    "maxWallMs": 1200000,
+    "stopAfterConsecutiveInfrastructureFailures": 1,
+    "thresholds": {
+      "trust": 3,
+      "promote": 3,
+      "demote": 2
+    }
+  },
+  "source": {
+    "revision": "ddf7376b64e92fb34c8acadefc8ba68e9695eda6",
+    "sha256": "1a101a527850569541f1292fdacb6f9d4ed0a3fc0de4cc958442cd0cf60f41e0"
+  },
+  "instrumentsSha256": "0487c2320e74963f7535e1f05674e88e980617c2c1ef27971b4386460116499b",
+  "runtime": {
+    "node": "v24.20.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "policy": "project-container-no-egress; fresh-authority-and-registry-per-attempt; learning-promotion-direct-event-skills-off; prefilter-cache-off; provider-cache-uncontrolled; bm25-only-treatment",
+  "schedule": [
+    {
+      "ordinal": 1,
+      "questionId": "northstar-01",
+      "repetition": 1,
+      "arm": "atoma"
+    },
+    {
+      "ordinal": 2,
+      "questionId": "northstar-01",
+      "repetition": 1,
+      "arm": "atoma-bm25"
+    },
+    {
+      "ordinal": 3,
+      "questionId": "northstar-01",
+      "repetition": 1,
+      "arm": "frontier-direct"
+    },
+    {
+      "ordinal": 4,
+      "questionId": "northstar-13",
+      "repetition": 1,
+      "arm": "frontier-direct"
+    },
+    {
+      "ordinal": 5,
+      "questionId": "northstar-13",
+      "repetition": 1,
+      "arm": "atoma-bm25"
+    },
+    {
+      "ordinal": 6,
+      "questionId": "northstar-13",
+      "repetition": 1,
+      "arm": "atoma"
+    }
+  ]
+}

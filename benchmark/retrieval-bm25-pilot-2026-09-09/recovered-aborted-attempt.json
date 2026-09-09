@@ -1,0 +1,114 @@
+{
+  "note": "Recovered offline after campaign completion persistence failed. Original aborted.json incorrectly reports zero recorded attempts and spend; one attempt actually ran. Excluded from the later paired comparison, retained in total campaign consumption.",
+  "entry": {
+    "ordinal": 1,
+    "questionId": "northstar-01",
+    "repetition": 1,
+    "arm": "atoma"
+  },
+  "runId": "2831ded2-7069-4bde-8df3-f52ebb3885fd",
+  "traceStartedAt": "2026-09-09T00:15:19.737Z",
+  "traceEndedAt": "2026-09-09T00:18:21.527Z",
+  "traceTotals": {
+    "calls": 13,
+    "inputTokens": 7318,
+    "outputTokens": 5695,
+    "cacheReadInputTokens": 133543,
+    "cacheCreationInputTokens": 128300,
+    "costUsd": 0.2889652999999999,
+    "perModel": [
+      {
+        "model": "sub:anthropic:haiku",
+        "calls": 12,
+        "inputTokens": 7316,
+        "outputTokens": 4145,
+        "costUsd": 0.18966155
+      },
+      {
+        "model": "sub:anthropic:opus",
+        "calls": 1,
+        "inputTokens": 2,
+        "outputTokens": 1550,
+        "costUsd": 0.09930375
+      }
+    ]
+  },
+  "runner": {
+    "outcome": "failed",
+    "costUsd": 0.289,
+    "subscriptionCostUsd": 0.289,
+    "llmCalls": 13,
+    "opusCalls": 1,
+    "sonnetCalls": 0,
+    "haikuCalls": 12,
+    "otherCalls": 0,
+    "deterministicPhases": 0,
+    "escalations": 1,
+    "learnedSkills": 0,
+    "learnedEventSkills": 0,
+    "promotions": 0,
+    "refusals": 0,
+    "compileErrors": 0,
+    "demotions": 0,
+    "dispatchFallbacks": 0,
+    "uncoveredObligations": 0
+  },
+  "score": {
+    "questionId": "northstar-01",
+    "full": false,
+    "checks": [
+      {
+        "id": "question-binding",
+        "ok": true
+      },
+      {
+        "id": "snapshot-binding",
+        "ok": true
+      },
+      {
+        "id": "answerability",
+        "ok": true
+      },
+      {
+        "id": "fact-set",
+        "ok": true
+      },
+      {
+        "id": "value:annual-price-cents",
+        "ok": true
+      },
+      {
+        "id": "evidence:annual-price-cents",
+        "ok": false
+      },
+      {
+        "id": "preserved:README.md",
+        "ok": true
+      },
+      {
+        "id": "preserved:docs/billing.md",
+        "ok": true
+      },
+      {
+        "id": "preserved:docs/decisions.md",
+        "ok": true
+      },
+      {
+        "id": "preserved:docs/operations.txt",
+        "ok": true
+      },
+      {
+        "id": "preserved:pricing.json",
+        "ok": true
+      },
+      {
+        "id": "preserved:preview.mjs",
+        "ok": true
+      },
+      {
+        "id": "preserved:CORPUS.json",
+        "ok": true
+      }
+    ]
+  }
+}

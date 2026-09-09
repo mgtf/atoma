@@ -1,0 +1,12 @@
+{
+  "observedAt": "2026-09-09T00:21:35.091Z",
+  "versions": {
+    "workerImage": "sha256:3980d525c4d306f9e9eb26315b56bda550edef8bf91f39f867abe70100824cc1",
+    "claude": "2.1.123 (Claude Code)"
+  },
+  "runtime": {
+    "node": "v24.20.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "campaignId": "bm25-development-pilot-2026-09-09-r2",
+  "kind": "bm25-development",
+  "reason": "completed",
+  "planned": 6,
+  "attempted": 6,
+  "apiSpendUsd": 0,
+  "subscriptionPriceEquivalentUsd": 2.1567,
+  "arms": [
+    {
+      "arm": "atoma",
+      "planned": 2,
+      "attempted": 2,
+      "full": 0,
+      "infrastructureFailures": 0,
+      "elapsedMs": 367039,
+      "llmCalls": 42
+    },
+    {
+      "arm": "atoma-bm25",
+      "planned": 2,
+      "attempted": 2,
+      "full": 0,
+      "infrastructureFailures": 0,
+      "elapsedMs": 369045,
+      "llmCalls": 41
+    },
+    {
+      "arm": "frontier-direct",
+      "planned": 2,
+      "attempted": 2,
+      "full": 2,
+      "infrastructureFailures": 0,
+      "elapsedMs": 114673,
+      "llmCalls": 2
+    }
+  ],
+  "comparison": {
+    "pairs": [
+      {
+        "questionId": "northstar-01",
+        "repetition": 1,
+        "kind": "retrieval",
+        "complete": true,
+        "a": false,
+        "b": false,
+        "elapsedA": 183493,
+        "elapsedB": 183507,
+        "priceA": 0.2889,
+        "priceB": 0.3324
+      },
+      {
+        "questionId": "northstar-13",
+        "repetition": 1,
+        "kind": "maintenance",
+        "complete": true,
+        "a": false,
+        "b": false,
+        "elapsedA": 183546,
+        "elapsedB": 185538,
+        "priceA": 0.3131,
+        "priceB": 0.2955
+      }
+    ],
+    "plannedPairs": 2,
+    "completePairs": 2,
+    "aFull": 0,
+    "bFull": 0,
+    "wins": 0,
+    "losses": 0,
+    "pairedFullPassDifference": 0,
+    "elapsedRatio": 1.0054653592669989,
+    "priceEquivalentRatio": 1.0430232558139534,
+    "uncertainty": "No population confidence interval: questions and repetitions within the development project are correlated. A new project-family sample is required.",
+    "decision": "screen-not-met",
+    "rule": {
+      "objective": "paired-full-pass",
+      "minimumGain": 0.5,
+      "maxElapsedRatio": 1.25,
+      "maxPriceEquivalentRatio": 1.25
+    }
+  },
+  "claim": "development screening only; correlated synthetic tasks do not establish production benefit"
+}

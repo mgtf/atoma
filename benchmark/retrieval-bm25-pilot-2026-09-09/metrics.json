@@ -1,0 +1,1085 @@
+[
+  {
+    "entry": {
+      "ordinal": 1,
+      "questionId": "northstar-01",
+      "repetition": 1,
+      "arm": "atoma"
+    },
+    "runId": "71b70b46-350a-4e4c-9b40-174bb29c7ce9",
+    "recorded": true,
+    "full": false,
+    "elapsedMs": 183493,
+    "runner": {
+      "outcome": "failed",
+      "costUsd": 0.2889,
+      "subscriptionCostUsd": 0.2889,
+      "llmCalls": 22,
+      "opusCalls": 1,
+      "sonnetCalls": 1,
+      "haikuCalls": 20,
+      "otherCalls": 0,
+      "deterministicPhases": 0,
+      "escalations": 2,
+      "learnedSkills": 0,
+      "learnedEventSkills": 0,
+      "promotions": 0,
+      "refusals": 0,
+      "compileErrors": 0,
+      "demotions": 0,
+      "dispatchFallbacks": 0,
+      "uncoveredObligations": 0
+    },
+    "score": {
+      "questionId": "northstar-01",
+      "full": false,
+      "checks": [
+        {
+          "id": "answer-schema",
+          "ok": false
+        },
+        {
+          "id": "preserved:README.md",
+          "ok": true
+        },
+        {
+          "id": "preserved:docs/billing.md",
+          "ok": true
+        },
+        {
+          "id": "preserved:docs/decisions.md",
+          "ok": true
+        },
+        {
+          "id": "preserved:docs/operations.txt",
+          "ok": true
+        },
+        {
+          "id": "preserved:pricing.json",
+          "ok": true
+        },
+        {
+          "id": "preserved:preview.mjs",
+          "ok": true
+        },
+        {
+          "id": "preserved:CORPUS.json",
+          "ok": true
+        }
+      ]
+    },
+    "traceStartedAt": "2026-09-09T00:21:36.172Z",
+    "traceEndedAt": "2026-09-09T00:24:37.964Z",
+    "traceTotals": {
+      "calls": 22,
+      "inputTokens": 7140,
+      "outputTokens": 9256,
+      "cacheReadInputTokens": 270865,
+      "cacheCreationInputTokens": 142207,
+      "costUsd": 0.28892805,
+      "perModel": [
+        {
+          "model": "sub:anthropic:haiku",
+          "calls": 20,
+          "inputTokens": 7138,
+          "outputTokens": 7917,
+          "costUsd": 0.25059955
+        },
+        {
+          "model": "sub:anthropic:opus",
+          "calls": 1,
+          "inputTokens": 2,
+          "outputTokens": 1339,
+          "costUsd": 0.0383285
+        },
+        {
+          "model": "sub:anthropic:sonnet",
+          "calls": 1,
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "costUsd": 0
+        }
+      ]
+    },
+    "toolCalls": 28,
+    "observedServedModels": [
+      "haiku",
+      "opus",
+      null
+    ],
+    "retrieval": {
+      "calls": 0,
+      "failures": 0,
+      "emptyResults": 0,
+      "invalidSourcePassages": 0,
+      "returnedPassages": 0,
+      "durationMs": 0,
+      "facts": [
+        {
+          "key": "annual-price-cents",
+          "covered": false
+        }
+      ],
+      "expectedFacts": 1,
+      "coveredFacts": 0,
+      "coverageDisposition": "not-invoked"
+    },
+    "preparation": {
+      "backend": null,
+      "receipt": null,
+      "elapsedMs": 0.006290999999919222,
+      "cpuUserMicros": 16,
+      "cpuSystemMicros": 9,
+      "processRssBytes": 376897536,
+      "storeBytes": 315392,
+      "documents": 4,
+      "sourceBytes": 2171,
+      "passages": 0,
+      "payers": {
+        "l1": {
+          "selection": "sub:anthropic:haiku",
+          "provider": "claude-cli",
+          "payer": "host-subscription",
+          "source": "account"
+        },
+        "l2": {
+          "selection": "sub:anthropic:sonnet",
+          "provider": "claude-cli",
+          "payer": "host-subscription",
+          "source": "account"
+        },
+        "l3": {
+          "selection": "sub:anthropic:opus",
+          "provider": "claude-cli",
+          "payer": "host-subscription",
+          "source": "account"
+        }
+      }
+    }
+  },
+  {
+    "entry": {
+      "ordinal": 2,
+      "questionId": "northstar-01",
+      "repetition": 1,
+      "arm": "atoma-bm25"
+    },
+    "runId": "5ce48126-8b4b-4831-b484-ccbc2f344efa",
+    "recorded": true,
+    "full": false,
+    "elapsedMs": 183507,
+    "runner": {
+      "outcome": "failed",
+      "costUsd": 0.3324,
+      "subscriptionCostUsd": 0.3324,
+      "llmCalls": 21,
+      "opusCalls": 1,
+      "sonnetCalls": 0,
+      "haikuCalls": 20,
+      "otherCalls": 0,
+      "deterministicPhases": 0,
+      "escalations": 1,
+      "learnedSkills": 0,
+      "learnedEventSkills": 0,
+      "promotions": 0,
+      "refusals": 0,
+      "compileErrors": 0,
+      "demotions": 0,
+      "dispatchFallbacks": 0,
+      "uncoveredObligations": 0
+    },
+    "score": {
+      "questionId": "northstar-01",
+      "full": false,
+      "checks": [
+        {
+          "id": "question-binding",
+          "ok": true
+        },
+        {
+          "id": "snapshot-binding",
+          "ok": true
+        },
+        {
+          "id": "answerability",
+          "ok": true
+        },
+        {
+          "id": "fact-set",
+          "ok": true
+        },
+        {
+          "id": "value:annual-price-cents",
+          "ok": true
+        },
+        {
+          "id": "evidence:annual-price-cents",
+          "ok": false
+        },
+        {
+          "id": "preserved:README.md",
+          "ok": true
+        },
+        {
+          "id": "preserved:docs/billing.md",
+          "ok": true
+        },
+        {
+          "id": "preserved:docs/decisions.md",
+          "ok": true
+        },
+        {
+          "id": "preserved:docs/operations.txt",
+          "ok": true
+        },
+        {
+          "id": "preserved:pricing.json",
+          "ok": true
+        },
+        {
+          "id": "preserved:preview.mjs",
+          "ok": true
+        },
+        {
+          "id": "preserved:CORPUS.json",
+          "ok": true
+        }
+      ]
+    },
+    "traceStartedAt": "2026-09-09T00:24:40.365Z",
+    "traceEndedAt": "2026-09-09T00:27:42.158Z",
+    "traceTotals": {
+      "calls": 21,
+      "inputTokens": 13810,
+      "outputTokens": 10578,
+      "cacheReadInputTokens": 167165,
+      "cacheCreationInputTokens": 140883,
+      "costUsd": 0.33242325000000006,
+      "perModel": [
+        {
+          "model": "sub:anthropic:haiku",
+          "calls": 20,
+          "inputTokens": 13808,
+          "outputTokens": 9383,
+          "costUsd": 0.2412945
+        },
+        {
+          "model": "sub:anthropic:opus",
+          "calls": 1,
+          "inputTokens": 2,
+          "outputTokens": 1195,
+          "costUsd": 0.09112875
+        }
+      ]
+    },
+    "toolCalls": 12,
+    "observedServedModels": [
+      "haiku",
+      "opus",
+      null
+    ],
+    "retrieval": {
+      "calls": 1,
+      "failures": 0,
+      "emptyResults": 0,
+      "invalidSourcePassages": 0,
+      "returnedPassages": 5,
+      "durationMs": 8,
+      "facts": [
+        {
+          "key": "annual-price-cents",
+          "covered": true
+        }
+      ],
+      "expectedFacts": 1,
+      "coveredFacts": 1,
+      "coverageDisposition": "evidence-covered"
+    },
+    "preparation": {
+      "backend": "sqlite-fts5",
+      "receipt": {
+        "version": 1,
+        "scope": {
+          "kind": "tenant",
+          "runId": "5ce48126-8b4b-4831-b484-ccbc2f344efa",
+          "orgId": "2fb396a0-3b3c-4671-9f24-bd2b004d35f9",
+          "projectId": "41df6b1a-6a8b-4605-b92b-1fb61d2c4f09",
+          "principalId": "8d44fe2d-fede-432d-89f6-22e251dde409",
+          "corpusId": "project-docs",
+          "snapshotId": "5ce48126-8b4b-4831-b484-ccbc2f344efa",
+          "snapshotSha256": "1fd7ca09a96b5d9640905ec14d162759658a356da38540061fe35ec34adfb8ed",
+          "generation": "0850a0a8525138e02267b37f34b3332f31c1f4203757f7ae2f77c6e37bfba8ce"
+        },
+        "manifest": {
+          "version": 1,
+          "corpusId": "project-docs",
+          "snapshotId": "5ce48126-8b4b-4831-b484-ccbc2f344efa",
+          "snapshotSha256": "1fd7ca09a96b5d9640905ec14d162759658a356da38540061fe35ec34adfb8ed",
+          "documents": [
+            {
+              "path": "README.md",
+              "sha256": "ee0e218b9b5bdccf78675687d0caae18b8f92f3dc656bde84813645bc2b03c0e",
+              "bytes": 465
+            },
+            {
+              "path": "docs/billing.md",
+              "sha256": "98efd32bfe73a29b17086fc9be347ae3acfa5b5f061d1b17561295a85fe51e9b",
+              "bytes": 757
+            },
+            {
+              "path": "docs/decisions.md",
+              "sha256": "e843ca885f0c1f5363a5f9b20a5292a6a225a9ceccb4250bc97306a20b52c953",
+              "bytes": 668
+            },
+            {
+              "path": "docs/operations.txt",
+              "sha256": "5bb63ca0601025dd6cf45f2bbcc3f3bcda9839eba8cbf61e53f5501fc68435d6",
+              "bytes": 281
+            }
+          ]
+        },
+        "sourceRunId": "cfab9e1c-f4f9-454e-9c59-cd6d736f7487",
+        "sourceManifestHash": "8e2c5b562d469c7f3090b4b54eec30801a6a3e706889329da2dc088c262bb868",
+        "sourceRoot": "/private/tmp/atoma-bm25-evidence-20260909-r2/attempts/0002-atoma-bm25-northstar-01/orgs/2fb396a0-3b3c-4671-9f24-bd2b004d35f9/projects/41df6b1a-6a8b-4605-b92b-1fb61d2c4f09/runs/5ce48126-8b4b-4831-b484-ccbc2f344efa/retrieval-source"
+      },
+      "elapsedMs": 6.7997920000052545,
+      "cpuUserMicros": 5407,
+      "cpuSystemMicros": 2020,
+      "processRssBytes": 139165696,
+      "storeBytes": 385024,
+      "documents": 4,
+      "sourceBytes": 2171,
+      "passages": 11,
+      "payers": {
+        "l1": {
+          "selection": "sub:anthropic:haiku",
+          "provider": "claude-cli",
+          "payer": "host-subscription",
+          "source": "account"
+        },
+        "l2": {
+          "selection": "sub:anthropic:sonnet",
+          "provider": "claude-cli",
+          "payer": "host-subscription",
+          "source": "account"
+        },
+        "l3": {
+          "selection": "sub:anthropic:opus",
+          "provider": "claude-cli",
+          "payer": "host-subscription",
+          "source": "account"
+        }
+      }
+    }
+  },
+  {
+    "entry": {
+      "ordinal": 3,
+      "questionId": "northstar-01",
+      "repetition": 1,
+      "arm": "frontier-direct"
+    },
+    "runId": "0b2a811e-0355-433d-8e0f-2714e29b0aed",
+    "recorded": true,
+    "full": true,
+    "elapsedMs": 40701,
+    "runner": {
+      "outcome": "delivered",
+      "costUsd": 0.5142,
+      "subscriptionCostUsd": 0.5142,
+      "llmCalls": 1,
+      "opusCalls": 1,
+      "sonnetCalls": 0,
+      "haikuCalls": 0,
+      "otherCalls": 0,
+      "deterministicPhases": 0,
+      "escalations": 0,
+      "learnedSkills": 0,
+      "learnedEventSkills": 0,
+      "promotions": 0,
+      "refusals": 0,
+      "compileErrors": 0,
+      "demotions": 0,
+      "dispatchFallbacks": 0,
+      "uncoveredObligations": 0
+    },
+    "score": {
+      "questionId": "northstar-01",
+      "full": true,
+      "checks": [
+        {
+          "id": "question-binding",
+          "ok": true
+        },
+        {
+          "id": "snapshot-binding",
+          "ok": true
+        },
+        {
+          "id": "answerability",
+          "ok": true
+        },
+        {
+          "id": "fact-set",
+          "ok": true
+        },
+        {
+          "id": "value:annual-price-cents",
+          "ok": true
+        },
+        {
+          "id": "evidence:annual-price-cents",
+          "ok": true
+        },
+        {
+          "id": "preserved:README.md",
+          "ok": true
+        },
+        {
+          "id": "preserved:docs/billing.md",
+          "ok": true
+        },
+        {
+          "id": "preserved:docs/decisions.md",
+          "ok": true
+        },
+        {
+          "id": "preserved:docs/operations.txt",
+          "ok": true
+        },
+        {
+          "id": "preserved:pricing.json",
+          "ok": true
+        },
+        {
+          "id": "preserved:preview.mjs",
+          "ok": true
+        },
+        {
+          "id": "preserved:CORPUS.json",
+          "ok": true
+        }
+      ]
+    },
+    "traceStartedAt": "2026-09-09T00:27:44.455Z",
+    "traceEndedAt": "2026-09-09T00:28:22.487Z",
+    "traceTotals": {
+      "calls": 1,
+      "inputTokens": 14,
+      "outputTokens": 2518,
+      "cacheReadInputTokens": 162532,
+      "cacheCreationInputTokens": 59191,
+      "costUsd": 0.51422975,
+      "perModel": [
+        {
+          "model": "sub:anthropic:opus",
+          "calls": 1,
+          "inputTokens": 14,
+          "outputTokens": 2518,
+          "costUsd": 0.51422975
+        }
+      ]
+    },
+    "toolCalls": 11,
+    "observedServedModels": [
+      "opus"
+    ],
+    "retrieval": {
+      "calls": 0,
+      "failures": 0,
+      "emptyResults": 0,
+      "invalidSourcePassages": 0,
+      "returnedPassages": 0,
+      "durationMs": 0,
+      "facts": [
+        {
+          "key": "annual-price-cents",
+          "covered": false
+        }
+      ],
+      "expectedFacts": 1,
+      "coveredFacts": 0,
+      "coverageDisposition": "not-invoked"
+    },
+    "preparation": {
+      "backend": null,
+      "receipt": null,
+      "elapsedMs": 0.005375000007916242,
+      "cpuUserMicros": 9,
+      "cpuSystemMicros": 10,
+      "processRssBytes": 119652352,
+      "storeBytes": 315392,
+      "documents": 4,
+      "sourceBytes": 2171,
+      "passages": 0,
+      "payers": {
+        "l1": {
+          "selection": "sub:anthropic:haiku",
+          "provider": "claude-cli",
+          "payer": "host-subscription",
+          "source": "account"
+        },
+        "l2": {
+          "selection": "sub:anthropic:sonnet",
+          "provider": "claude-cli",
+          "payer": "host-subscription",
+          "source": "account"
+        },
+        "l3": {
+          "selection": "sub:anthropic:opus",
+          "provider": "claude-cli",
+          "payer": "host-subscription",
+          "source": "account"
+        }
+      }
+    }
+  },
+  {
+    "entry": {
+      "ordinal": 4,
+      "questionId": "northstar-13",
+      "repetition": 1,
+      "arm": "frontier-direct"
+    },
+    "runId": "cd284495-0033-4b90-9f76-c228ebfd4ffe",
+    "recorded": true,
+    "full": true,
+    "elapsedMs": 73972,
+    "runner": {
+      "outcome": "delivered",
+      "costUsd": 0.4126,
+      "subscriptionCostUsd": 0.4126,
+      "llmCalls": 1,
+      "opusCalls": 1,
+      "sonnetCalls": 0,
+      "haikuCalls": 0,
+      "otherCalls": 0,
+      "deterministicPhases": 0,
+      "escalations": 0,
+      "learnedSkills": 0,
+      "learnedEventSkills": 0,
+      "promotions": 0,
+      "refusals": 0,
+      "compileErrors": 0,
+      "demotions": 0,
+      "dispatchFallbacks": 0,
+      "uncoveredObligations": 0
+    },
+    "score": {
+      "questionId": "northstar-13",
+      "full": true,
+      "checks": [
+        {
+          "id": "question-binding",
+          "ok": true
+        },
+        {
+          "id": "snapshot-binding",
+          "ok": true
+        },
+        {
+          "id": "answerability",
+          "ok": true
+        },
+        {
+          "id": "fact-set",
+          "ok": true
+        },
+        {
+          "id": "value:annual-price-cents",
+          "ok": true
+        },
+        {
+          "id": "evidence:annual-price-cents",
+          "ok": true
+        },
+        {
+          "id": "value:monthly-price-cents",
+          "ok": true
+        },
+        {
+          "id": "evidence:monthly-price-cents",
+          "ok": true
+        },
+        {
+          "id": "value:refund-days",
+          "ok": true
+        },
+        {
+          "id": "evidence:refund-days",
+          "ok": true
+        },
+        {
+          "id": "preserved:README.md",
+          "ok": true
+        },
+        {
+          "id": "preserved:docs/billing.md",
+          "ok": true
+        },
+        {
+          "id": "preserved:docs/decisions.md",
+          "ok": true
+        },
+        {
+          "id": "preserved:docs/operations.txt",
+          "ok": true
+        },
+        {
+          "id": "preserved:preview.mjs",
+          "ok": true
+        },
+        {
+          "id": "preserved:CORPUS.json",
+          "ok": true
+        },
+        {
+          "id": "maintenance-behavior",
+          "ok": true
+        }
+      ]
+    },
+    "traceStartedAt": "2026-09-09T00:28:25.701Z",
+    "traceEndedAt": "2026-09-09T00:29:37.004Z",
+    "traceTotals": {
+      "calls": 1,
+      "inputTokens": 14,
+      "outputTokens": 5732,
+      "cacheReadInputTokens": 205129,
+      "cacheCreationInputTokens": 26664,
+      "costUsd": 0.4125845,
+      "perModel": [
+        {
+          "model": "sub:anthropic:opus",
+          "calls": 1,
+          "inputTokens": 14,
+          "outputTokens": 5732,
+          "costUsd": 0.4125845
+        }
+      ]
+    },
+    "toolCalls": 13,
+    "observedServedModels": [
+      "opus"
+    ],
+    "retrieval": {
+      "calls": 0,
+      "failures": 0,
+      "emptyResults": 0,
+      "invalidSourcePassages": 0,
+      "returnedPassages": 0,
+      "durationMs": 0,
+      "facts": [
+        {
+          "key": "annual-price-cents",
+          "covered": false
+        },
+        {
+          "key": "monthly-price-cents",
+          "covered": false
+        },
+        {
+          "key": "refund-days",
+          "covered": false
+        }
+      ],
+      "expectedFacts": 3,
+      "coveredFacts": 0,
+      "coverageDisposition": "not-invoked"
+    },
+    "preparation": {
+      "backend": null,
+      "receipt": null,
+      "elapsedMs": 0.0050829999963752925,
+      "cpuUserMicros": 9,
+      "cpuSystemMicros": 7,
+      "processRssBytes": 121864192,
+      "storeBytes": 315392,
+      "documents": 4,
+      "sourceBytes": 2171,
+      "passages": 0,
+      "payers": {
+        "l1": {
+          "selection": "sub:anthropic:haiku",
+          "provider": "claude-cli",
+          "payer": "host-subscription",
+          "source": "account"
+        },
+        "l2": {
+          "selection": "sub:anthropic:sonnet",
+          "provider": "claude-cli",
+          "payer": "host-subscription",
+          "source": "account"
+        },
+        "l3": {
+          "selection": "sub:anthropic:opus",
+          "provider": "claude-cli",
+          "payer": "host-subscription",
+          "source": "account"
+        }
+      }
+    }
+  },
+  {
+    "entry": {
+      "ordinal": 5,
+      "questionId": "northstar-13",
+      "repetition": 1,
+      "arm": "atoma-bm25"
+    },
+    "runId": "6004c2d7-3f63-450f-a78b-22bfe773ad80",
+    "recorded": true,
+    "full": false,
+    "elapsedMs": 185538,
+    "runner": {
+      "outcome": "failed",
+      "costUsd": 0.2955,
+      "subscriptionCostUsd": 0.2955,
+      "llmCalls": 20,
+      "opusCalls": 1,
+      "sonnetCalls": 0,
+      "haikuCalls": 19,
+      "otherCalls": 0,
+      "deterministicPhases": 0,
+      "escalations": 1,
+      "learnedSkills": 0,
+      "learnedEventSkills": 0,
+      "promotions": 0,
+      "refusals": 0,
+      "compileErrors": 0,
+      "demotions": 0,
+      "dispatchFallbacks": 0,
+      "uncoveredObligations": 0
+    },
+    "score": {
+      "questionId": "northstar-13",
+      "full": false,
+      "checks": [
+        {
+          "id": "answer-schema",
+          "ok": false
+        },
+        {
+          "id": "preserved:README.md",
+          "ok": true
+        },
+        {
+          "id": "preserved:docs/billing.md",
+          "ok": true
+        },
+        {
+          "id": "preserved:docs/decisions.md",
+          "ok": true
+        },
+        {
+          "id": "preserved:docs/operations.txt",
+          "ok": true
+        },
+        {
+          "id": "preserved:preview.mjs",
+          "ok": true
+        },
+        {
+          "id": "preserved:CORPUS.json",
+          "ok": true
+        },
+        {
+          "id": "maintenance-behavior",
+          "ok": false
+        }
+      ]
+    },
+    "traceStartedAt": "2026-09-09T00:29:40.272Z",
+    "traceEndedAt": "2026-09-09T00:32:42.065Z",
+    "traceTotals": {
+      "calls": 20,
+      "inputTokens": 16904,
+      "outputTokens": 11216,
+      "cacheReadInputTokens": 190938,
+      "cacheCreationInputTokens": 100235,
+      "costUsd": 0.2954545499999999,
+      "perModel": [
+        {
+          "model": "sub:anthropic:haiku",
+          "calls": 19,
+          "inputTokens": 16902,
+          "outputTokens": 9787,
+          "costUsd": 0.19785080000000005
+        },
+        {
+          "model": "sub:anthropic:opus",
+          "calls": 1,
+          "inputTokens": 2,
+          "outputTokens": 1429,
+          "costUsd": 0.09760375
+        }
+      ]
+    },
+    "toolCalls": 14,
+    "observedServedModels": [
+      "haiku",
+      "opus",
+      null
+    ],
+    "retrieval": {
+      "calls": 5,
+      "failures": 0,
+      "emptyResults": 0,
+      "invalidSourcePassages": 0,
+      "returnedPassages": 18,
+      "durationMs": 26,
+      "facts": [
+        {
+          "key": "annual-price-cents",
+          "covered": true
+        },
+        {
+          "key": "monthly-price-cents",
+          "covered": true
+        },
+        {
+          "key": "refund-days",
+          "covered": true
+        }
+      ],
+      "expectedFacts": 3,
+      "coveredFacts": 3,
+      "coverageDisposition": "evidence-covered"
+    },
+    "preparation": {
+      "backend": "sqlite-fts5",
+      "receipt": {
+        "version": 1,
+        "scope": {
+          "kind": "tenant",
+          "runId": "6004c2d7-3f63-450f-a78b-22bfe773ad80",
+          "orgId": "87faa47b-25e8-4d4f-88d1-3474c5f8189e",
+          "projectId": "7ba56c44-c65d-4934-b54f-30ea5749d2d9",
+          "principalId": "6abd2436-6a48-446e-a38c-97413d60114f",
+          "corpusId": "project-docs",
+          "snapshotId": "6004c2d7-3f63-450f-a78b-22bfe773ad80",
+          "snapshotSha256": "b17a4ce93a353ce9cc2cb2119c5a87ea01a6eb6ba85980574b9a7fb64f4ae976",
+          "generation": "71cc162d4972ad7efe7b1cbb8d5b87b7cea417b016c46bb7ea7ba4eaf9dc1b26"
+        },
+        "manifest": {
+          "version": 1,
+          "corpusId": "project-docs",
+          "snapshotId": "6004c2d7-3f63-450f-a78b-22bfe773ad80",
+          "snapshotSha256": "b17a4ce93a353ce9cc2cb2119c5a87ea01a6eb6ba85980574b9a7fb64f4ae976",
+          "documents": [
+            {
+              "path": "README.md",
+              "sha256": "ee0e218b9b5bdccf78675687d0caae18b8f92f3dc656bde84813645bc2b03c0e",
+              "bytes": 465
+            },
+            {
+              "path": "docs/billing.md",
+              "sha256": "98efd32bfe73a29b17086fc9be347ae3acfa5b5f061d1b17561295a85fe51e9b",
+              "bytes": 757
+            },
+            {
+              "path": "docs/decisions.md",
+              "sha256": "e843ca885f0c1f5363a5f9b20a5292a6a225a9ceccb4250bc97306a20b52c953",
+              "bytes": 668
+            },
+            {
+              "path": "docs/operations.txt",
+              "sha256": "5bb63ca0601025dd6cf45f2bbcc3f3bcda9839eba8cbf61e53f5501fc68435d6",
+              "bytes": 281
+            }
+          ]
+        },
+        "sourceRunId": "3cb90449-3be6-41c9-95cc-19b499e07c31",
+        "sourceManifestHash": "8e2c5b562d469c7f3090b4b54eec30801a6a3e706889329da2dc088c262bb868",
+        "sourceRoot": "/private/tmp/atoma-bm25-evidence-20260909-r2/attempts/0005-atoma-bm25-northstar-13/orgs/87faa47b-25e8-4d4f-88d1-3474c5f8189e/projects/7ba56c44-c65d-4934-b54f-30ea5749d2d9/runs/6004c2d7-3f63-450f-a78b-22bfe773ad80/retrieval-source"
+      },
+      "elapsedMs": 4.422207999974489,
+      "cpuUserMicros": 3445,
+      "cpuSystemMicros": 1567,
+      "processRssBytes": 135086080,
+      "storeBytes": 385024,
+      "documents": 4,
+      "sourceBytes": 2171,
+      "passages": 11,
+      "payers": {
+        "l1": {
+          "selection": "sub:anthropic:haiku",
+          "provider": "claude-cli",
+          "payer": "host-subscription",
+          "source": "account"
+        },
+        "l2": {
+          "selection": "sub:anthropic:sonnet",
+          "provider": "claude-cli",
+          "payer": "host-subscription",
+          "source": "account"
+        },
+        "l3": {
+          "selection": "sub:anthropic:opus",
+          "provider": "claude-cli",
+          "payer": "host-subscription",
+          "source": "account"
+        }
+      }
+    }
+  },
+  {
+    "entry": {
+      "ordinal": 6,
+      "questionId": "northstar-13",
+      "repetition": 1,
+      "arm": "atoma"
+    },
+    "runId": "ba0c5e91-3b6c-488f-90fb-7c061119a0bf",
+    "recorded": true,
+    "full": false,
+    "elapsedMs": 183546,
+    "runner": {
+      "outcome": "failed",
+      "costUsd": 0.3131,
+      "subscriptionCostUsd": 0.3131,
+      "llmCalls": 20,
+      "opusCalls": 1,
+      "sonnetCalls": 0,
+      "haikuCalls": 19,
+      "otherCalls": 0,
+      "deterministicPhases": 0,
+      "escalations": 1,
+      "learnedSkills": 0,
+      "learnedEventSkills": 0,
+      "promotions": 0,
+      "refusals": 0,
+      "compileErrors": 0,
+      "demotions": 0,
+      "dispatchFallbacks": 0,
+      "uncoveredObligations": 0
+    },
+    "score": {
+      "questionId": "northstar-13",
+      "full": false,
+      "checks": [
+        {
+          "id": "answer-schema",
+          "ok": false
+        },
+        {
+          "id": "preserved:README.md",
+          "ok": true
+        },
+        {
+          "id": "preserved:docs/billing.md",
+          "ok": true
+        },
+        {
+          "id": "preserved:docs/decisions.md",
+          "ok": true
+        },
+        {
+          "id": "preserved:docs/operations.txt",
+          "ok": true
+        },
+        {
+          "id": "preserved:preview.mjs",
+          "ok": true
+        },
+        {
+          "id": "preserved:CORPUS.json",
+          "ok": true
+        },
+        {
+          "id": "maintenance-behavior",
+          "ok": false
+        }
+      ]
+    },
+    "traceStartedAt": "2026-09-09T00:32:46.361Z",
+    "traceEndedAt": "2026-09-09T00:35:48.182Z",
+    "traceTotals": {
+      "calls": 20,
+      "inputTokens": 7280,
+      "outputTokens": 9993,
+      "cacheReadInputTokens": 203148,
+      "cacheCreationInputTokens": 126471,
+      "costUsd": 0.31311155000000007,
+      "perModel": [
+        {
+          "model": "sub:anthropic:haiku",
+          "calls": 19,
+          "inputTokens": 7278,
+          "outputTokens": 8567,
+          "costUsd": 0.2162828
+        },
+        {
+          "model": "sub:anthropic:opus",
+          "calls": 1,
+          "inputTokens": 2,
+          "outputTokens": 1426,
+          "costUsd": 0.09682875
+        }
+      ]
+    },
+    "toolCalls": 14,
+    "observedServedModels": [
+      "haiku",
+      "opus",
+      null
+    ],
+    "retrieval": {
+      "calls": 0,
+      "failures": 0,
+      "emptyResults": 0,
+      "invalidSourcePassages": 0,
+      "returnedPassages": 0,
+      "durationMs": 0,
+      "facts": [
+        {
+          "key": "annual-price-cents",
+          "covered": false
+        },
+        {
+          "key": "monthly-price-cents",
+          "covered": false
+        },
+        {
+          "key": "refund-days",
+          "covered": false
+        }
+      ],
+      "expectedFacts": 3,
+      "coveredFacts": 0,
+      "coverageDisposition": "not-invoked"
+    },
+    "preparation": {
+      "backend": null,
+      "receipt": null,
+      "elapsedMs": 0.004166000057011843,
+      "cpuUserMicros": 7,
+      "cpuSystemMicros": 3,
+      "processRssBytes": 122355712,
+      "storeBytes": 315392,
+      "documents": 4,
+      "sourceBytes": 2171,
+      "passages": 0,
+      "payers": {
+        "l1": {
+          "selection": "sub:anthropic:haiku",
+          "provider": "claude-cli",
+          "payer": "host-subscription",
+          "source": "account"
+        },
+        "l2": {
+          "selection": "sub:anthropic:sonnet",
+          "provider": "claude-cli",
+          "payer": "host-subscription",
+          "source": "account"
+        },
+        "l3": {
+          "selection": "sub:anthropic:opus",
+          "provider": "claude-cli",
+          "payer": "host-subscription",
+          "source": "account"
+        }
+      }
+    }
+  }
+]

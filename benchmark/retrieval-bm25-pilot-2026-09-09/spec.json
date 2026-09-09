@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "id": "bm25-development-pilot-2026-09-09",
+  "purpose": "Screen BM25 availability on the two prior development tasks with fresh paired controls; this small sample cannot establish production benefit.",
+  "kind": "bm25-development",
+  "questionIds": [
+    "northstar-01",
+    "northstar-13"
+  ],
+  "repetitions": 1,
+  "firstArm": "atoma",
+  "models": {
+    "l1": "sub:anthropic:haiku",
+    "l2": "sub:anthropic:sonnet",
+    "l3": "sub:anthropic:opus",
+    "frontier": "sub:anthropic:opus"
+  },
+  "workerImage": "sha256:498e9d07666bc19082ea5323d7be1d148f79552d471e492d598253ff3d57ba4a",
+  "timeoutMs": 180000,
+  "maxWallMs": 1200000,
+  "stopAfterConsecutiveInfrastructureFailures": 1,
+  "thresholds": {
+    "trust": 3,
+    "promote": 3,
+    "demote": 2
+  },
+  "treatment": {
+    "backend": "sqlite-fts5",
+    "index": {
+      "storageVersion": 1,
+      "extractionVersion": "utf8-files-v1",
+      "chunkerVersion": "markdown-lines-v1",
+      "chunks": {
+        "maxBytes": 1400,
+        "maxLines": 16
+      },
+      "contextVersion": "path-headings-source-v1",
+      "tokenizer": "unicode61 remove_diacritics 2",
+      "normalization": "original-bytes; no overlap",
+      "embedding": null,
+      "generatedContext": null
+    },
+    "queryLimits": {
+      "maxQueryBytes": 2048,
+      "maxResults": 5,
+      "maxCandidates": 50,
+      "maxExcerptBytes": 1600,
+      "maxResponseBytes": 12000,
+      "timeoutMs": 2000
+    },
+    "ranking": {
+      "version": "bm25-or-v1",
+      "contextWeight": 1,
+      "textWeight": 1
+    }
+  },
+  "decision": {
+    "objective": "paired-full-pass",
+    "minimumGain": 0.5,
+    "maxElapsedRatio": 1.25,
+    "maxPriceEquivalentRatio": 1.25
+  }
+}
