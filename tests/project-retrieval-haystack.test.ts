@@ -94,6 +94,12 @@ describe('experimental Haystack host boundary', () => {
     input.authority.scope = { ...input.authority.scope, generation: 'f'.repeat(64) };
     await expect(createHaystackRetrievalBinding({ ...input, python: executable() })).rejects.toThrow('mismatch');
   });
+  it('requires a literal true admission before sending documents to Python', async () => {
+    const input = await fixture();
+    input.authority.service.authorize.mockResolvedValue('yes' as never);
+    await expect(createHaystackRetrievalBinding({ ...input, python: executable() })).rejects.toThrow('denied');
+    expect(() => readFileSync(join(root, 'pid'))).toThrow();
+  });
   it('does not inherit host secrets or enable model downloads', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'synthetic-key'); vi.stubEnv('PYTHONPATH', root);
     try { const { tool } = await bind('env'); expect(await tool.execute({ query: 'price' })).toMatchObject({ ok: true }); }

@@ -110,7 +110,7 @@ export async function createHaystackRetrievalBinding(input: {
   if (passages.size !== input.corpus.passages.length) throw new Error('Haystack duplicate passage');
   let child: HaystackProcess | undefined;
   try {
-    if (!await binding.service.authorize(scope, input.context)) throw new Error('Haystack source denied');
+    if (await binding.service.authorize(scope, input.context) !== true) throw new Error('Haystack source denied');
     if (settings.mode === 'hybrid-rerank' && (
       await haystackModelRevision(settings.embeddingPath, input.context) !== settings.embeddingRevision ||
       await haystackModelRevision(settings.rerankerPath, input.context) !== settings.rerankerRevision)) {
@@ -121,14 +121,15 @@ export async function createHaystackRetrievalBinding(input: {
     const ready = await child.send({ op: 'init', settings, documents: [...passages].map(([id, p]) => ({
       id, content: retrievalPassageContext(manifest, p) + '\n' + p.excerpt,
     })) }, input.context, true);
-    if (ready.kind !== 'ready' || ready.documents !== passages.size || !await binding.service.authorize(scope, input.context)) {
+    if (ready.kind !== 'ready' || ready.documents !== passages.size || await binding.service.authorize(scope, input.context) !== true) {
       throw new Error('Haystack initialization refused');
     }
+    assertRetrievalTime(input.context);
     const process = child;
     let closed = false;
     return { scope, limits: binding.limits, service: {
       authorize: async (candidate, context) => !closed && JSON.stringify(candidate) === JSON.stringify(scope) &&
-        await binding.service.authorize(candidate, context),
+        await binding.service.authorize(candidate, context) === true,
       search: async (candidate, query, context) => {
         if (closed || JSON.stringify(candidate) !== JSON.stringify(scope)) return { ok: false, status: 'denied' };
         const result = await process.send({ op: 'search', query: query.terms.join(' '), limit: query.maxCandidates }, context);
@@ -144,6 +145,7 @@ export async function createHaystackRetrievalBinding(input: {
           }), truncated: result.hits.length >= query.maxCandidates };
       },
       dispose: async () => {
+        if (closed) return;
         closed = true;
         try { await process.close(); } finally { passages.clear(); await binding.service.dispose(); }
       },
