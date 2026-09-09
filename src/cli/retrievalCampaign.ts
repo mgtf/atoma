@@ -112,6 +112,8 @@ function traceMatches(path: string, runId: string): boolean {
 export function summarizeRetrievalCampaign(
   registration: RetrievalRegistration, rows: readonly RetrievalCampaignResult[], reason: string
 ) {
+  const comparison = pairedRetrievalDecision(registration, rows);
+  if (comparison && reason !== 'completed') comparison.decision = 'inconclusive';
   return {
     campaignId: registration.spec.id, kind: registration.spec.kind, reason,
     planned: registration.schedule.length, attempted: rows.length,
@@ -130,7 +132,7 @@ export function summarizeRetrievalCampaign(
           ? selected.reduce((sum, r) => sum + r.runner!.llmCalls!, 0) : null,
       };
     }),
-    comparison: pairedRetrievalDecision(registration, rows),
+    comparison,
     claim: registration.spec.kind === 'agentic-characterization' ? 'characterization only; no retrieval treatment or improvement claim' :
       'development screening only; correlated synthetic tasks do not establish production benefit',
   };
@@ -231,11 +233,12 @@ export async function runRetrievalCampaign(
           full: runner?.outcome === 'delivered' && !infrastructureFailure && score.full,
           tracePath: traceValid ? relative(out, tracePath) : null,
         });
-        await project?.finish(runner);
         writeJson(join(attempt, 'retrieval-observations.json'), retrievalObservations(tracePath, frozen, questionFor(frozen, entry.questionId)));
         writeJson(join(attempt, 'result.json'), row);
         appendFileSync(rowsPath, JSON.stringify(row) + '\n');
         rows.push(row);
+        // Completion persistence must never erase a stopped attempt or its spend.
+        await project?.finish(runner);
         deps.verify(registration, options.repo);
         if (!isDeepStrictEqual(deps.preflight(registration), versions)) throw new Error('worker or CLI version changed during campaign');
         process.stderr.write(`retrieval ${entry.ordinal}/${registration.schedule.length} ${entry.arm} ${entry.questionId}: ${row.full ? 'pass' : 'fail'}\n`);

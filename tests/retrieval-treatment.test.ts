@@ -15,12 +15,13 @@ import { parseRunLog } from '../src/cli/burnin.js';
 import { openDb } from '../src/registry/db.js';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { resolveProjectRegistryOwner } from '../src/projects/runAuthority.js';
+import { ProjectStore } from '../src/projects/store.js';
 
 const repo = resolve(import.meta.dirname, '..');
 const dataset = loadRetrievalDataset(join(repo, 'benchmark/retrieval'));
 const roots: string[] = [];
 function temp() { const root = mkdtempSync(join(tmpdir(), 'atoma-bm25-test-')); roots.push(root); return root; }
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function registration() {
   const spec = retrievalCampaignSpecSchema.parse({ version: 1, id: 'bm25-test', purpose: 'Compare the paired development treatment with fixed scoring.',
     kind: 'bm25-development', questionIds: ['northstar-11', 'northstar-12'], repetitions: 1, firstArm: 'atoma',
@@ -147,5 +148,47 @@ describe('registered BM25 treatment', () => {
     const forged = passage(evidence.startByte, evidence.endByte); forged.excerpt = forged.excerpt.replace('19000', '99000');
     expect(observe([response([forged])])).toMatchObject({ invalidSourcePassages: 1, coveredFacts: 0, coverageDisposition: 'invalid-source' });
     expect(retrievalObservations(join(root, 'missing.json'), dataset, question)).toBeNull();
+  });
+
+  it.each(['failed', 'cancelled', 'error', 'missing'] as const)('persists %s outcomes through the real project completion path', async outcome => {
+    const r = registration(); const out = join(temp(), 'evidence'); const release = vi.fn();
+    const report = await runRetrievalCampaign(r, dataset, { repo, out }, {
+      acquire: () => ({ path: join(out, 'test-lease'), release, attachChild: () => {} }),
+      verify: () => {}, archiveSource: () => {}, preflight: () => ({}),
+      spawn: async opts => {
+        const env = opts.env!;
+        writeFileSync(join(env['ATOMA_RUNS_DIR']!, `${env['ATOMA_RUN_ID']}.json`), JSON.stringify({
+          id: env['ATOMA_RUN_ID'], endedAt: new Date().toISOString(), events: [],
+        }));
+        return outcome === 'missing' ? 'crashed before epilogue' : formatRunStatsEpilogue({ ...delivered, outcome });
+      },
+    });
+    const infra = outcome === 'error' || outcome === 'missing';
+    expect(report).toMatchObject({ attempted: infra ? 1 : 6, reason: infra ? 'infrastructure-stop' : 'completed' });
+    expect(report.arms.every(arm => arm.full === 0)).toBe(true);
+    const first = join(out, 'attempts/0001-atoma-northstar-11');
+    const start = JSON.parse(readFileSync(join(first, 'start.json'), 'utf8'));
+    const db = new Database(join(first, 'end.db'), { readonly: true });
+    expect(db.prepare('SELECT status FROM project_runs WHERE project_run_id = ?').get(start.runId)).toEqual({ status: outcome === 'cancelled' ? 'cancelled' : 'failed' });
+    db.close(); expect(release).toHaveBeenCalledOnce();
+  });
+
+  it('preserves the stopped attempt and accounting even if host completion persistence fails', async () => {
+    const r = registration(); const out = join(temp(), 'evidence'); const release = vi.fn();
+    const original = ProjectStore.prototype.transitionProjectRun;
+    vi.spyOn(ProjectStore.prototype, 'transitionProjectRun').mockImplementation(function(this: ProjectStore, input) {
+      if (input.to === 'failed') throw new Error('completion persistence fault');
+      return original.call(this, input);
+    });
+    await expect(runRetrievalCampaign(r, dataset, { repo, out }, {
+      acquire: () => ({ path: join(out, 'test-lease'), release, attachChild: () => {} }),
+      verify: () => {}, archiveSource: () => {}, preflight: () => ({}),
+      spawn: async () => formatRunStatsEpilogue({ ...delivered, outcome: 'failed' }),
+    })).rejects.toThrow('completion persistence fault');
+    expect(JSON.parse(readFileSync(join(out, 'aborted.json'), 'utf8'))).toMatchObject({
+      reason: 'aborted', attempted: 1, subscriptionPriceEquivalentUsd: 0.1, comparison: { decision: 'inconclusive' },
+    });
+    expect(readFileSync(join(out, 'results.jsonl'), 'utf8').trim().split('\n')).toHaveLength(1);
+    expect(release).toHaveBeenCalledOnce();
   });
 });

@@ -75,8 +75,9 @@ export async function prepareRetrievalProjectAttempt(input: {
     handedOff = true;
     return { env, preparation, close: () => { if (db.open) db.close(); }, finish: async (runner: RunStats | null) => {
       try {
+        const status = runner?.outcome === 'delivered' ? 'delivered' : runner?.outcome === 'cancelled' ? 'cancelled' : 'failed';
         projects.transitionProjectRun({ orgId: viewer.orgId, projectRunId: runId, from: 'running',
-          to: runner?.outcome === 'delivered' ? 'delivered' : runner?.outcome === 'cancelled' ? 'cancelled' : 'failed',
+          to: status, ...(status === 'failed' ? { error: 'Benchmark runner did not deliver; see archived run log.' } : {}),
           ...(runner ? { stats: runner } : {}), ...(runner?.outcome === 'delivered' ? { traceId: runId } : {}) });
         await db.backup(join(attempt, 'end.db'));
       } finally { db.close(); }
