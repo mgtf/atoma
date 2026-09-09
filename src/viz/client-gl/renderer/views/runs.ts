@@ -83,7 +83,6 @@ const EVENT_ACTOR_MIN_WIDTH = 64;
 /** Mean advance of 11px bold in the UI face; only bounds the truncation. */
 const EVENT_TITLE_CHAR_PX = 6.4;
 /** Characters the card's second line can show at 9px across the pane. */
-const EVENT_DETAIL_CHARS = 160;
 
 /**
  * Roughly two lines of the 13px summary title at the right pane's width.
@@ -867,14 +866,23 @@ export function drawRuns(
     // the body is prose that survives truncation gracefully. Truncating the
     // pair as one string dropped the numbers first whenever an event had
     // reasoning attached, which is exactly when they were worth reading.
-    const bodyBudget = Math.max(24, EVENT_DETAIL_CHARS - copy.footer.length - 3);
-    const detail = [truncate(copy.body, bodyBudget), copy.footer]
+    // Trace bodies can contain whole scripts. Flatten only their preview;
+    // explicit newlines survive Pixi's wordWrap=false and would spill over
+    // the next fixed-height card. Reserve measured space for the footer.
+    const footer = copy.footer.replace(/\s+/g, ' ').trim();
+    const body = copy.body.replace(/\s+/g, ' ').trim();
+    const detailWidth = Math.max(0, cardWidth - 22);
+    const bodyBudget = Math.max(0, detailWidth - ctx.measureText(
+      footer ? ` · ${footer}` : '', { size: 9 }
+    ));
+    const detail = [ctx.fitText(body, bodyBudget, { size: 9 }), footer]
       .filter(Boolean)
       .join(' · ');
     ctx.text(cardContent, detail, 11, 25, {
       size: 9,
       color: event.error ? GPU_COLORS.error : GPU_COLORS.muted,
-      width: cardWidth - 22,
+      width: detailWidth,
+      singleLine: true,
     });
     if (item.branchStart && branch) {
       ctx.text(

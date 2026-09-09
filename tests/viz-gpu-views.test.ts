@@ -4873,6 +4873,26 @@ describe('drawRuns behavior', () => {
     expect(detail!.value).toContain('⇢ haiku');
   });
 
+  it('keeps multiline tool previews within one card line without changing the trace', () => {
+    const command = "console.log('Match');\n\r\n".repeat(30);
+    const event: VizEvent = {
+      id: 'multiline-probe', kind: 'tool', ts: Date.now(),
+      name: 'record_probe', actor: { tier: 1, name: 'Ammonia' },
+      args: { command }, result: { exitCode: 0 }, durationMs: 43,
+    };
+    for (const width of [720, WIDTH]) {
+      const ctx = createRecordingCtx();
+      drawRuns(ctx, makeSnapshot({}, { run: makeRun([event]) }), width, HEIGHT);
+      const detail = ctx.texts.find((text) =>
+        ctx.eventCards.some((card) => card.content === text.parent) && text.y === 25);
+      expect(detail).toBeDefined();
+      expect(detail!.value).not.toMatch(/[\r\n]/);
+      expect(detail!.value).toContain('43ms');
+      expect(detail!.options).toMatchObject({ singleLine: true });
+      expect(event.args).toEqual({ command });
+    }
+  });
+
   it('does not reserve room for scene tuning inside the Runs detail column', () => {
     const events: VizEvent[] = [makeLlmEvent('a', { role: 'plan' })];
     const ctx = createRecordingCtx();
