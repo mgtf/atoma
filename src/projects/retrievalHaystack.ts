@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { once } from 'node:events';
 import { HAYSTACK_FRAME_BYTES, HAYSTACK_REPLY_BYTES, haystackReplySchema, haystackSettingsSchema,
   type HaystackReply, type HaystackSettings } from '../contracts/retrievalHaystack.js';
-import { projectRetrievalPassageSchema } from '../contracts/projectRetrieval.js';
+import { matchesProjectRetrievalFilters, projectRetrievalPassageSchema } from '../contracts/projectRetrieval.js';
 import { PROJECT_RETRIEVAL_CORPUS_LIMITS } from '../contracts/projectRetrievalCorpus.js';
 import { haystackModelRevision } from './retrievalModelFiles.js';
 import { validateProjectRetrievalBinding, type ProjectRetrievalBinding,
@@ -120,6 +120,8 @@ export async function createHaystackRetrievalBinding(input: {
     child = new HaystackProcess(input.python);
     const ready = await child.send({ op: 'init', settings, documents: [...passages].map(([id, p]) => ({
       id, content: retrievalPassageContext(manifest, p) + '\n' + p.excerpt,
+      meta: { path: p.path, format: p.path.endsWith('.md') ? 'md' : 'txt',
+        snapshotId: manifest.snapshotId, snapshotSha256: manifest.snapshotSha256 },
     })) }, input.context, true);
     if (ready.kind !== 'ready' || (input.runtimeSha256 !== undefined && ready.runtimeSha256 !== input.runtimeSha256) ||
         ready.documents !== passages.size || await binding.service.authorize(scope, input.context) !== true) {
@@ -133,7 +135,10 @@ export async function createHaystackRetrievalBinding(input: {
         await binding.service.authorize(candidate, context) === true,
       search: async (candidate, query, context) => {
         if (closed || JSON.stringify(candidate) !== JSON.stringify(scope)) return { ok: false, status: 'denied' };
-        const result = await process.send({ op: 'search', query: query.text, lexicalQuery: query.terms.join(' '), limit: query.maxCandidates }, context);
+        const filters = query.filters ? { field: 'meta.path', operator: 'in',
+          value: manifest.documents.filter(d => matchesProjectRetrievalFilters(d.path, query.filters)).map(d => d.path) } : undefined;
+        const result = await process.send({ op: 'search', query: query.text, lexicalQuery: query.terms.join(' '),
+          limit: query.maxCandidates, ...(filters ? { filters } : {}) }, context);
         if (result.kind !== 'result' || result.hits.length > query.maxCandidates || new Set(result.hits.map(h => h.id)).size !== result.hits.length) {
           throw new Error('Haystack invalid result');
         }
@@ -141,7 +146,9 @@ export async function createHaystackRetrievalBinding(input: {
           snapshotSha256: scope.snapshotSha256, generation: scope.generation,
           passages: result.hits.map(hit => {
             const passage = passages.get(hit.id);
-            if (!passage) throw new Error('Haystack unknown passage');
+            if (!passage || !matchesProjectRetrievalFilters(passage.path, query.filters)) {
+              throw new Error('Haystack unknown or excluded passage');
+            }
             return { ...passage, score: hit.score };
           }), truncated: result.hits.length >= query.maxCandidates };
       },

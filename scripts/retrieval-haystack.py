@@ -54,7 +54,7 @@ def main():
                 if request["op"] == "init" and pipeline is None:
                     settings = request["settings"]
                     mode = settings["mode"]
-                    documents = [Document(id=d["id"], content=d["content"]) for d in request["documents"]]
+                    documents = [Document(id=d["id"], content=d["content"], meta=d.get("meta", {})) for d in request["documents"]]
                     store = InMemoryDocumentStore(shared=False, bm25_algorithm="BM25Okapi", embedding_similarity_function="cosine")
                     pipeline = Pipeline()
                     pipeline.add_component("bm25", InMemoryBM25Retriever(store))
@@ -95,10 +95,10 @@ def main():
                     response = {"kind": "ready", "id": request_id, "version": __version__, "documents": len(documents), "runtimeSha256": runtime_identity()["sha256"]}
                 elif request["op"] == "search" and pipeline is not None:
                     query, limit = request["query"], request["limit"]
-                    inputs = {"bm25": {"query": request["lexicalQuery"], "top_k": limit}}
+                    inputs = {"bm25": {"query": request["lexicalQuery"], "top_k": limit, "filters": request.get("filters")}}
                     target = "bm25"
                     if mode == "hybrid-rerank":
-                        inputs.update({"embed": {"text": query}, "dense": {"top_k": limit},
+                        inputs.update({"embed": {"text": query}, "dense": {"top_k": limit, "filters": request.get("filters")},
                                        "fusion": {"top_k": limit}, "ranker": {"query": query, "top_k": limit}})
                         target = "ranker"
                     documents = pipeline.run(inputs)[target]["documents"]

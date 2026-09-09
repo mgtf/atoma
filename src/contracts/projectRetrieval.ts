@@ -20,8 +20,28 @@ export const projectRetrievalScopeSchema = z.discriminatedUnion('kind', [
 ]).readonly();
 export type ProjectRetrievalScope = z.infer<typeof projectRetrievalScopeSchema>;
 
+export const projectDocumentPathSchema = z.string().min(1).max(512).refine(path =>
+  !/[\\:]/.test(path) &&
+  !Array.from(path).some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127) &&
+  path.split('/').every(part => part !== '' && part !== '.' && part !== '..'),
+'expected a normalized relative document path');
+/** Optional narrowing only; authority and snapshot are always host-owned. */
+export const projectRetrievalFiltersSchema = z.object({
+  paths: z.array(projectDocumentPathSchema).min(1).max(20).optional(),
+  directories: z.array(projectDocumentPathSchema).min(1).max(20).optional(),
+  formats: z.array(z.enum(['md', 'txt'])).min(1).max(2).optional(),
+}).strict();
+export type ProjectRetrievalFilters = z.infer<typeof projectRetrievalFiltersSchema>;
+
+export function matchesProjectRetrievalFilters(path: string, filters?: ProjectRetrievalFilters): boolean {
+  return !filters || ((!filters.paths || filters.paths.includes(path)) &&
+    (!filters.directories || filters.directories.some(directory => path.startsWith(directory + '/'))) &&
+    (!filters.formats || filters.formats.some(format => path.endsWith('.' + format))));
+}
+
 export const projectRetrievalRequestSchema = z.object({
   query: z.string().min(1).max(1000),
+  filters: projectRetrievalFiltersSchema.optional(),
   limit: z.number().int().min(1).max(10).optional(),
   maxExcerptBytes: z.number().int().min(128).max(4096).optional(),
 }).strict();
@@ -45,6 +65,7 @@ export const DEFAULT_PROJECT_RETRIEVAL_LIMITS = projectRetrievalLimitsSchema.par
 /** Materialized backend query; terms are data, never a raw FTS expression. */
 export const projectRetrievalQuerySchema = z.object({
   text: projectRetrievalRequestSchema.shape.query,
+  filters: projectRetrievalFiltersSchema.optional(),
   terms: z.array(z.string().min(1).max(128)).min(1).max(32).readonly(),
   limit: z.number().int().min(1).max(10),
   maxExcerptBytes: z.number().int().min(128).max(4096),
@@ -60,6 +81,7 @@ export function parseProjectRetrievalQuery(
   const terms = [...new Set(parsed.data.query.normalize('NFC').toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) ?? [])];
   const query = projectRetrievalQuerySchema.safeParse({
     text: parsed.data.query.normalize('NFC'),
+    ...(parsed.data.filters ? { filters: parsed.data.filters } : {}),
     terms, limit: Math.min(parsed.data.limit ?? limits.maxResults, limits.maxResults),
     maxExcerptBytes: Math.min(parsed.data.maxExcerptBytes ?? limits.maxExcerptBytes, limits.maxExcerptBytes),
     maxCandidates: limits.maxCandidates,
@@ -67,11 +89,6 @@ export function parseProjectRetrievalQuery(
   return query.success ? query.data : null;
 }
 
-export const projectDocumentPathSchema = z.string().min(1).max(512).refine(path =>
-  !/[\\:]/.test(path) &&
-  !Array.from(path).some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127) &&
-  path.split('/').every(part => part !== '' && part !== '.' && part !== '..'),
-'expected a normalized relative document path');
 const offset = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const line = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 

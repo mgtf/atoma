@@ -214,3 +214,34 @@ source, tests and authored documentation. The runner also refuses a recorded
 receipt without engine configuration and a revoked receipt with or without
 configuration. Synthetic benchmark controls remain identifiable by their
 absence of a receipt; they cannot inherit the host engine configuration.
+
+## Document metadata and narrowing filters
+
+`search_project_docs` accepts optional `filters`:
+
+```json
+{"query":"refund policy","filters":{"directories":["docs"],"formats":["md"]}}
+```
+
+`paths` selects exact normalized relative file paths; `directories` selects
+recursive descendants, without a trailing slash; `formats` accepts `md` and
+`txt`. Each path/directory list accepts 1–20 entries. Values within a field
+are alternatives; fields combine with AND. Omitted or empty filter objects
+retain the full admitted snapshot; empty lists are invalid. A valid filter
+matching no documents returns a successful empty result.
+
+The host derives Haystack document metadata (`path`, `format`, `snapshotId`,
+`snapshotSha256`) from the admitted manifest. It resolves the bounded selectors
+to admitted paths and passes a native `meta.path in [...]` filter to BOTH BM25
+and dense retrieval before fusion and reranking. Returned IDs are checked
+against the same selection on the host; a backend violation is unavailable,
+not a silently truncated result. Citations still come from original bytes.
+
+Filters cannot select another organisation, project, corpus or snapshot.
+Admission and live authority checks remain mandatory and separate from ranking.
+No new store, model call, dependency or operator configuration is introduced.
+The run-owned in-memory index is rebuilt at initialization, including metadata;
+there is no persistent Haystack index to migrate. Existing model/runtime pins
+remain valid. Restart the development host to load the changed source; packaged
+hosts require a new build. No new live agent benchmark accompanies this change;
+retrieval-quality and run-cost improvements remain unmeasured.

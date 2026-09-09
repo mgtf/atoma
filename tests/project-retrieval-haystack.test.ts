@@ -9,6 +9,7 @@ import { createHaystackRetrievalBinding } from '../src/projects/retrievalHaystac
 import { haystackModelRevision } from '../src/projects/retrievalModelFiles.js';
 import { createProjectRetrievalTool, type ProjectRetrievalBinding } from '../src/tools/projectRetrieval.js';
 import { corpusScope, prepareTestCorpus, retrievalContext } from './helpers/projectRetrievalCorpus.js';
+import { matchesProjectRetrievalFilters } from '../src/contracts/projectRetrieval.js';
 import type { HaystackSettings } from '../src/contracts/retrievalHaystack.js';
 
 let root: string;
@@ -56,6 +57,25 @@ async function bind(behavior = 'valid') {
 }
 
 describe('experimental Haystack host boundary', () => {
+  it('combines filter fields and respects directory boundaries', () => {
+    const filters = { directories: ['docs'], paths: ['docs/nested/a.md', 'docs/a.txt'] };
+    expect(matchesProjectRetrievalFilters('docs/nested/a.md', filters)).toBe(true);
+    expect(matchesProjectRetrievalFilters('docs-other/a.md', filters)).toBe(false);
+    expect(matchesProjectRetrievalFilters('docs/b.md', filters)).toBe(false);
+    expect(matchesProjectRetrievalFilters('docs/a.txt', { ...filters, formats: ['md'] })).toBe(false);
+  });
+  it('forwards bounded filters and refuses an excluded backend hit', async () => {
+    const { tool } = await bind();
+    expect(await tool.execute({ query: 'price', filters: { paths: ['price.md'] } }))
+      .toEqual({ ok: false, status: 'unavailable' });
+    expect(JSON.parse(readFileSync(join(root, 'query.json'), 'utf8'))).toMatchObject({
+      filters: { field: 'meta.path', operator: 'in', value: ['price.md'] },
+    });
+    for (const filters of [{ orgId: 'other' }, { snapshotId: 'other' }, { paths: ['../secret.md'] },
+      { directories: ['docs/'] }, { formats: ['pdf'] }, { paths: [] }]) {
+      expect(await tool.execute({ query: 'price', filters })).toEqual({ ok: false, status: 'invalid_request' });
+    }
+  });
   it('preserves NFC text for semantic search across the child boundary', async () => {
     const { tool } = await bind();
     expect(await tool.execute({ query: 'Cafe\u0301 : pourquoi NON, non ?' })).toMatchObject({ ok: true });
@@ -153,6 +173,11 @@ describe.skipIf(!python)('real optional Haystack runtime', () => {
     owned.push(binding);
     const tool = createProjectRetrievalTool(binding, retrievalContext());
     expect(await tool.execute({ query: 'annual price', limit: 1 })).toMatchObject({ ok: true, passages: [{ path: 'price.md', excerpt: input.corpus.passages[0]!.excerpt }] });
+    const filtered = await tool.execute({ query: 'annual price', filters: { paths: ['support.md'] } });
+    expect(filtered).toMatchObject({ ok: true });
+    if (filtered.ok) expect(filtered.passages.every(p => p.path === 'support.md')).toBe(true);
+    expect(await tool.execute({ query: 'price', filters: { formats: ['txt'] } }))
+      .toMatchObject({ ok: true, passages: [] });
     await tool.close();
   }, 65_000);
   it.skipIf(!process.env['ATOMA_HAYSTACK_TEST_MODELS'])('runs local embeddings, fusion and cross-encoder reranking', async () => {
@@ -168,6 +193,11 @@ describe.skipIf(!python)('real optional Haystack runtime', () => {
     owned.push(binding);
     const tool = createProjectRetrievalTool(binding, retrievalContext());
     expect(await tool.execute({ query: 'annual price', limit: 1 })).toMatchObject({ ok: true, passages: [{ path: 'price.md' }] });
+    const filtered = await tool.execute({ query: 'annual price', filters: { paths: ['support.md'] } });
+    expect(filtered).toMatchObject({ ok: true });
+    if (filtered.ok) expect(filtered.passages.every(p => p.path === 'support.md')).toBe(true);
+    expect(await tool.execute({ query: 'price', filters: { formats: ['txt'] } }))
+      .toMatchObject({ ok: true, passages: [] });
     await tool.close();
   }, 125_000);
 });
