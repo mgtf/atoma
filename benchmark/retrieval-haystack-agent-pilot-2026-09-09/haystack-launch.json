@@ -1,0 +1,12 @@
+{
+  "python": "/private/tmp/atoma-haystack-eval-venv/bin/python",
+  "runtimeSha256": "bfe8a7bcd1a571038f1d1aa65cd30c9b4d968a7c8c4c2c75e757f1a21ff987ca",
+  "settings": {
+    "mode": "hybrid-rerank",
+    "embeddingPath": "/private/tmp/atoma-haystack-models/embedding",
+    "rerankerPath": "/private/tmp/atoma-haystack-models/reranker",
+    "queryPrefix": "Represent this sentence for searching relevant passages: ",
+    "embeddingRevision": "73f92974f1658714c46293725648a914cf2f4a68360374600b8e23f695968e96",
+    "rerankerRevision": "626066419752140b03cbdce61a92f31405be0ff8c2592261cf7fbbab2697fe44"
+  }
+}

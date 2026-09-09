@@ -6,7 +6,8 @@ deterministic document ingestion, SQLite FTS5 backend and opt-in project-run
 activation delivered. The paired BM25 development pilot is archived and did
 not meet its benefit screen. Broader evaluation, operational rollout and
 production retrieval-provider integrations remain pending. An experimental
-Haystack host library binding is now available for component evaluation.
+Haystack backend is now available for component and shared-runner evaluation.
+Its six-attempt agent pilot is archived and did not meet its benefit screen.
 
 ## Implementation progress
 
@@ -62,8 +63,14 @@ treatment evaluation and operational lifecycle remain before rollout.
 
 A [Haystack framework experiment](project-retrieval-haystack-2026-09-09.md) now
 adds native BM25 and local embeddings/fusion/reranking behind the same L1
-element. Its component screen is separate from the agent campaign and cannot
-promote the backend by itself. Production activation remains conditional.
+element. The [shared-runner integration](project-retrieval-haystack-agent-2026-09-09.md)
+now measures timed initialization, source admission and the complete agent
+treatment. Its [six-attempt pilot](../benchmark/retrieval-haystack-agent-pilot-2026-09-09/README.md)
+records 0/2 full tasks for A and B, versus 1/2 for the frontier reference.
+Haystack returned the needed evidence on its one search; a wrong final
+citation and missing answer files still prevented completion. The second
+treatment task did not invoke retrieval. The component screen and this agent
+campaign are separate evidence; neither authorizes production activation.
 
 ## Objective and implementation order
 

@@ -1,0 +1,90 @@
+retrieval 1/6 atoma northstar-05: fail
+retrieval 2/6 atoma-haystack northstar-05: fail
+retrieval 3/6 frontier-direct northstar-05: pass
+retrieval 4/6 frontier-direct northstar-13: fail
+retrieval 5/6 atoma-haystack northstar-13: fail
+retrieval 6/6 atoma northstar-13: fail
+{
+  "campaignId": "haystack-agent-development-20260909",
+  "kind": "haystack-development",
+  "reason": "completed",
+  "planned": 6,
+  "attempted": 6,
+  "apiSpendUsd": 0,
+  "subscriptionPriceEquivalentUsd": 2.0709999999999997,
+  "arms": [
+    {
+      "arm": "atoma",
+      "planned": 2,
+      "attempted": 2,
+      "full": 0,
+      "infrastructureFailures": 0,
+      "elapsedMs": 367224,
+      "llmCalls": 38
+    },
+    {
+      "arm": "atoma-haystack",
+      "planned": 2,
+      "attempted": 2,
+      "full": 0,
+      "infrastructureFailures": 0,
+      "elapsedMs": 366737,
+      "llmCalls": 38
+    },
+    {
+      "arm": "frontier-direct",
+      "planned": 2,
+      "attempted": 2,
+      "full": 1,
+      "infrastructureFailures": 0,
+      "elapsedMs": 98302,
+      "llmCalls": 2
+    }
+  ],
+  "comparison": {
+    "pairs": [
+      {
+        "questionId": "northstar-05",
+        "repetition": 1,
+        "kind": "retrieval",
+        "complete": true,
+        "a": false,
+        "b": false,
+        "elapsedA": 183386,
+        "elapsedB": 183095,
+        "priceA": 0.3591,
+        "priceB": 0.3133
+      },
+      {
+        "questionId": "northstar-13",
+        "repetition": 1,
+        "kind": "maintenance",
+        "complete": true,
+        "a": false,
+        "b": false,
+        "elapsedA": 183838,
+        "elapsedB": 183642,
+        "priceA": 0.3032,
+        "priceB": 0.283
+      }
+    ],
+    "plannedPairs": 2,
+    "completePairs": 2,
+    "aFull": 0,
+    "bFull": 0,
+    "wins": 0,
+    "losses": 0,
+    "pairedFullPassDifference": 0,
+    "elapsedRatio": 0.9986738339542078,
+    "priceEquivalentRatio": 0.9003472746489507,
+    "uncertainty": "No population confidence interval: questions and repetitions within the development project are correlated. A new project-family sample is required.",
+    "decision": "screen-not-met",
+    "rule": {
+      "objective": "paired-full-pass",
+      "minimumGain": 0.5,
+      "maxElapsedRatio": 1.25,
+      "maxPriceEquivalentRatio": 1.25
+    }
+  },
+  "claim": "development screening only; correlated synthetic tasks do not establish production benefit"
+}

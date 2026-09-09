@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "id": "haystack-agent-development-20260909",
+  "purpose": "Compare ordinary Atoma with local Haystack hybrid retrieval on a development French refund question and the pricing maintenance task; preserve exact source citations and all stopped attempts.",
+  "kind": "haystack-development",
+  "treatment": {
+    "backend": "haystack",
+    "index": {
+      "storageVersion": 1,
+      "extractionVersion": "utf8-files-v1",
+      "chunkerVersion": "markdown-lines-v1",
+      "chunks": {
+        "maxBytes": 1400,
+        "maxLines": 16
+      },
+      "contextVersion": "path-headings-source-v1",
+      "tokenizer": "unicode61 remove_diacritics 2",
+      "normalization": "original-bytes; no overlap",
+      "embedding": null,
+      "generatedContext": null
+    },
+    "queryLimits": {
+      "maxQueryBytes": 2048,
+      "maxResults": 5,
+      "maxCandidates": 50,
+      "maxExcerptBytes": 1600,
+      "maxResponseBytes": 12000,
+      "timeoutMs": 2000
+    },
+    "launch": {
+      "python": "/private/tmp/atoma-haystack-eval-venv/bin/python",
+      "settings": {
+        "mode": "hybrid-rerank",
+        "embeddingPath": "/private/tmp/atoma-haystack-models/embedding",
+        "rerankerPath": "/private/tmp/atoma-haystack-models/reranker",
+        "queryPrefix": "Represent this sentence for searching relevant passages: ",
+        "embeddingRevision": "73f92974f1658714c46293725648a914cf2f4a68360374600b8e23f695968e96",
+        "rerankerRevision": "626066419752140b03cbdce61a92f31405be0ff8c2592261cf7fbbab2697fe44"
+      },
+      "runtimeSha256": "bfe8a7bcd1a571038f1d1aa65cd30c9b4d968a7c8c4c2c75e757f1a21ff987ca"
+    }
+  },
+  "decision": {
+    "objective": "paired-full-pass",
+    "minimumGain": 0.5,
+    "maxElapsedRatio": 1.25,
+    "maxPriceEquivalentRatio": 1.25
+  },
+  "questionIds": [
+    "northstar-05",
+    "northstar-13"
+  ],
+  "repetitions": 1,
+  "firstArm": "atoma",
+  "models": {
+    "l1": "sub:anthropic:haiku",
+    "l2": "sub:anthropic:sonnet",
+    "l3": "sub:anthropic:opus",
+    "frontier": "sub:anthropic:opus"
+  },
+  "workerImage": "sha256:0314184f0c5b5f058b4fac4044d083cc53dae607f8fd856ca87222081cda82f8",
+  "timeoutMs": 180000,
+  "maxWallMs": 1200000,
+  "stopAfterConsecutiveInfrastructureFailures": 1,
+  "thresholds": {
+    "trust": 3,
+    "promote": 3,
+    "demote": 2
+  }
+}

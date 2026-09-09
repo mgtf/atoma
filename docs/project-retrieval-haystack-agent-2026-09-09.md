@@ -96,3 +96,15 @@ npm run benchmark -- retrieval run --registration /absolute/new-registration.jso
 
 Only `run` consumes model quota. Save every attempt, stopped trace, initial and
 final store, executable score and accounting before interpreting the screen.
+
+## Completed development pilot
+
+The [six-attempt report and replayable archive](../benchmark/retrieval-haystack-agent-pilot-2026-09-09/README.md)
+record A 0/2, B 0/2 and C 1/2 full tasks, with no infrastructure failure.
+The pre-registered benefit screen was not met. Haystack's one search returned
+the required evidence, but its final citation used the wrong line number.
+The maintenance treatment did not invoke retrieval; all three maintenance
+attempts made the correct change without delivering the required cited answer.
+The framework remains experimental pending downstream completion work and
+new evidence. All scores and the paired decision reproduced offline from a
+fresh extraction; no additional model calls or scorer changes were needed.
