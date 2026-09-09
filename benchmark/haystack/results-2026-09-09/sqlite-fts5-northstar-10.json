@@ -1,0 +1,25 @@
+{
+  "questionId": "northstar-10",
+  "startedAt": "2026-09-09T07:56:42.479Z",
+  "events": [
+    {
+      "kind": "tool",
+      "name": "search_project_docs",
+      "args": {
+        "query": "Une annulation coupe-t-elle immédiatement l’accès, et quelle file traite les escalades de facturation ?",
+        "limit": 5
+      },
+      "result": {
+        "ok": true,
+        "status": "ok",
+        "corpusId": "development-docs",
+        "snapshotId": "northstar-v1",
+        "snapshotSha256": "31d63c88fa2aac63a8220091713f04c30b50a29a40019b4839b21e72d289654c",
+        "generation": "27622bb3b7b6b2043dfa8f0f30b209469b801f473e3c8ebfe90169ddeffc6ac3",
+        "passages": [],
+        "truncated": false
+      },
+      "durationMs": 0.24587499999995543
+    }
+  ]
+}

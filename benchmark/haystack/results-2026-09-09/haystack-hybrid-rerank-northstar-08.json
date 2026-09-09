@@ -1,0 +1,98 @@
+{
+  "questionId": "northstar-08",
+  "startedAt": "2026-09-09T07:56:42.479Z",
+  "events": [
+    {
+      "kind": "tool",
+      "name": "search_project_docs",
+      "args": {
+        "query": "According to the accepted replacement of D-001, after which failed retry is the customer emailed?",
+        "limit": 5
+      },
+      "result": {
+        "ok": true,
+        "status": "ok",
+        "corpusId": "development-docs",
+        "snapshotId": "northstar-v1",
+        "snapshotSha256": "31d63c88fa2aac63a8220091713f04c30b50a29a40019b4839b21e72d289654c",
+        "generation": "27622bb3b7b6b2043dfa8f0f30b209469b801f473e3c8ebfe90169ddeffc6ac3",
+        "passages": [
+          {
+            "documentId": "400bdbd48746d4dd802c4bbc89a400f48c8ca27e29da574f15d605f5b19dfa40",
+            "path": "docs/decisions.md",
+            "sha256": "e843ca885f0c1f5363a5f9b20a5292a6a225a9ceccb4250bc97306a20b52c953",
+            "startByte": 209,
+            "endByte": 529,
+            "startLine": 9,
+            "endLine": 15,
+            "headingContext": [
+              "Billing decisions",
+              "D-002 — accepted"
+            ],
+            "excerpt": "## D-002 — accepted\n\nThe accepted annual price is 19000 euro cents per seat, replacing D-001.\nNotify by email only after the third failed retry; intermediate retries are silent.\nSwitching from monthly to annual takes effect at the next renewal date.\nThere is no immediate prorated charge when requesting that switch.\n\n",
+            "score": 0.9969233870506287
+          },
+          {
+            "documentId": "400bdbd48746d4dd802c4bbc89a400f48c8ca27e29da574f15d605f5b19dfa40",
+            "path": "docs/decisions.md",
+            "sha256": "e843ca885f0c1f5363a5f9b20a5292a6a225a9ceccb4250bc97306a20b52c953",
+            "startByte": 21,
+            "endByte": 209,
+            "startLine": 3,
+            "endLine": 8,
+            "headingContext": [
+              "Billing decisions",
+              "D-001 — archived"
+            ],
+            "excerpt": "## D-001 — archived\n\nStatus: superseded by D-002.\nThe early proposal priced the annual subscription at 22800 euro cents per seat.\nThe proposal sent an email after every failed payment.\n\n",
+            "score": 0.4758923053741455
+          },
+          {
+            "documentId": "9c05d0a2e3c79c3550669dfacc10551c098fbcb81ba5a8862ed529225acce207",
+            "path": "docs/billing.md",
+            "sha256": "98efd32bfe73a29b17086fc9be347ae3acfa5b5f061d1b17561295a85fe51e9b",
+            "startByte": 523,
+            "endByte": 670,
+            "startLine": 16,
+            "endLine": 20,
+            "headingContext": [
+              "Billing policy",
+              "Payment failures"
+            ],
+            "excerpt": "## Payment failures\n\nA failed payment receives three retries, spaced 48 hours apart.\nThe customer receives an email after the third failed retry.\n\n",
+            "score": 0.4065079689025879
+          },
+          {
+            "documentId": "400bdbd48746d4dd802c4bbc89a400f48c8ca27e29da574f15d605f5b19dfa40",
+            "path": "docs/decisions.md",
+            "sha256": "e843ca885f0c1f5363a5f9b20a5292a6a225a9ceccb4250bc97306a20b52c953",
+            "startByte": 529,
+            "endByte": 668,
+            "startLine": 16,
+            "endLine": 19,
+            "headingContext": [
+              "Billing decisions",
+              "D-003 — draft"
+            ],
+            "excerpt": "## D-003 — draft\n\nStatus: draft; not approved for implementation.\nThe draft proposes cryptocurrency payments and a 30-day refund window.\n",
+            "score": 0.000030608411179855466
+          },
+          {
+            "documentId": "18979a0919beb366d434065bdbfb4926d4894603f6f0a2110a94ed44555f14c4",
+            "path": "docs/operations.txt",
+            "sha256": "5bb63ca0601025dd6cf45f2bbcc3f3bcda9839eba8cbf61e53f5501fc68435d6",
+            "startByte": 0,
+            "endByte": 281,
+            "startLine": 1,
+            "endLine": 6,
+            "headingContext": [],
+            "excerpt": "Northstar operations\n\nPayment webhook event IDs are retained for 45 days to reject duplicate delivery.\nAn export link expires 72 hours after creation.\nCustomer-visible invoice labels are available in English and French.\nThe support escalation queue is named studio-billing-review.\n",
+            "score": 0.000022619937226409093
+          }
+        ],
+        "truncated": true
+      },
+      "durationMs": 128.9132499999996
+    }
+  ]
+}

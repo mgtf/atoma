@@ -1,0 +1,101 @@
+{
+  "questionId": "northstar-03",
+  "startedAt": "2026-09-09T07:56:42.479Z",
+  "events": [
+    {
+      "kind": "tool",
+      "name": "search_project_docs",
+      "args": {
+        "query": "When does a customer moving from monthly payments to a twelve-month term start paying on the new schedule?",
+        "limit": 5
+      },
+      "result": {
+        "ok": true,
+        "status": "ok",
+        "corpusId": "development-docs",
+        "snapshotId": "northstar-v1",
+        "snapshotSha256": "31d63c88fa2aac63a8220091713f04c30b50a29a40019b4839b21e72d289654c",
+        "generation": "27622bb3b7b6b2043dfa8f0f30b209469b801f473e3c8ebfe90169ddeffc6ac3",
+        "passages": [
+          {
+            "documentId": "400bdbd48746d4dd802c4bbc89a400f48c8ca27e29da574f15d605f5b19dfa40",
+            "path": "docs/decisions.md",
+            "sha256": "e843ca885f0c1f5363a5f9b20a5292a6a225a9ceccb4250bc97306a20b52c953",
+            "startByte": 209,
+            "endByte": 529,
+            "startLine": 9,
+            "endLine": 15,
+            "headingContext": [
+              "Billing decisions",
+              "D-002 — accepted"
+            ],
+            "excerpt": "## D-002 — accepted\n\nThe accepted annual price is 19000 euro cents per seat, replacing D-001.\nNotify by email only after the third failed retry; intermediate retries are silent.\nSwitching from monthly to annual takes effect at the next renewal date.\nThere is no immediate prorated charge when requesting that switch.\n\n",
+            "score": 5.1115137695653114
+          },
+          {
+            "documentId": "9c05d0a2e3c79c3550669dfacc10551c098fbcb81ba5a8862ed529225acce207",
+            "path": "docs/billing.md",
+            "sha256": "98efd32bfe73a29b17086fc9be347ae3acfa5b5f061d1b17561295a85fe51e9b",
+            "startByte": 18,
+            "endByte": 278,
+            "startLine": 3,
+            "endLine": 9,
+            "headingContext": [
+              "Billing policy",
+              "Accepted offers"
+            ],
+            "excerpt": "## Accepted offers\n\nThe monthly subscription costs 1900 euro cents per seat.\nThe annual subscription costs 19000 euro cents per seat for twelve months.\nThe annual offer uses the configuration key stripe_price_annual_studio.\nAll offers are denominated in EUR.\n\n",
+            "score": 3.650118894516604
+          },
+          {
+            "documentId": "400bdbd48746d4dd802c4bbc89a400f48c8ca27e29da574f15d605f5b19dfa40",
+            "path": "docs/decisions.md",
+            "sha256": "e843ca885f0c1f5363a5f9b20a5292a6a225a9ceccb4250bc97306a20b52c953",
+            "startByte": 529,
+            "endByte": 668,
+            "startLine": 16,
+            "endLine": 19,
+            "headingContext": [
+              "Billing decisions",
+              "D-003 — draft"
+            ],
+            "excerpt": "## D-003 — draft\n\nStatus: draft; not approved for implementation.\nThe draft proposes cryptocurrency payments and a 30-day refund window.\n",
+            "score": 3.076996543097065
+          },
+          {
+            "documentId": "9c05d0a2e3c79c3550669dfacc10551c098fbcb81ba5a8862ed529225acce207",
+            "path": "docs/billing.md",
+            "sha256": "98efd32bfe73a29b17086fc9be347ae3acfa5b5f061d1b17561295a85fe51e9b",
+            "startByte": 523,
+            "endByte": 670,
+            "startLine": 16,
+            "endLine": 20,
+            "headingContext": [
+              "Billing policy",
+              "Payment failures"
+            ],
+            "excerpt": "## Payment failures\n\nA failed payment receives three retries, spaced 48 hours apart.\nThe customer receives an email after the third failed retry.\n\n",
+            "score": 2.5432241118285868
+          },
+          {
+            "documentId": "9c05d0a2e3c79c3550669dfacc10551c098fbcb81ba5a8862ed529225acce207",
+            "path": "docs/billing.md",
+            "sha256": "98efd32bfe73a29b17086fc9be347ae3acfa5b5f061d1b17561295a85fe51e9b",
+            "startByte": 278,
+            "endByte": 523,
+            "startLine": 10,
+            "endLine": 15,
+            "headingContext": [
+              "Billing policy",
+              "Cancellation and refunds"
+            ],
+            "excerpt": "## Cancellation and refunds\n\nCancellation stops the next renewal; access continues until the paid term ends.\nThe refund request window is 14 calendar days after the initial payment.\nChanging the billing period must preserve that refund window.\n\n",
+            "score": 2.4701036984125797
+          }
+        ],
+        "truncated": true
+      },
+      "durationMs": 0.7263330000000678
+    }
+  ]
+}

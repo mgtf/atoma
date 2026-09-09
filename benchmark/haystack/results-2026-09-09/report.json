@@ -1,0 +1,804 @@
+{
+  "startedAt": "2026-09-09T07:56:42.479Z",
+  "finishedAt": "2026-09-09T07:56:47.678Z",
+  "measurement": "direct-retrieval-development-only",
+  "rows": [
+    {
+      "arm": "sqlite-fts5",
+      "questions": 13,
+      "answerable": 11,
+      "fullyCovered": 8,
+      "coveredFacts": 11,
+      "expectedFacts": 16,
+      "failures": 0,
+      "invalidSourcePassages": 0,
+      "unanswerableWithHits": 2,
+      "medianQueryMs": 0.4534590000000094,
+      "preparation": {
+        "ok": true,
+        "elapsedMs": 1.536875000000009,
+        "documents": 4,
+        "passages": 11,
+        "generation": "27622bb3b7b6b2043dfa8f0f30b209469b801f473e3c8ebfe90169ddeffc6ac3"
+      },
+      "observations": [
+        {
+          "questionId": "northstar-01",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 1.6913749999999936,
+          "facts": [
+            {
+              "key": "annual-price-cents",
+              "covered": true
+            }
+          ],
+          "expectedFacts": 1,
+          "coveredFacts": 1,
+          "coverageDisposition": "evidence-covered"
+        },
+        {
+          "questionId": "northstar-02",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 0.4534590000000094,
+          "facts": [
+            {
+              "key": "provider-key",
+              "covered": true
+            }
+          ],
+          "expectedFacts": 1,
+          "coveredFacts": 1,
+          "coverageDisposition": "evidence-covered"
+        },
+        {
+          "questionId": "northstar-03",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 0.49370900000002393,
+          "facts": [
+            {
+              "key": "switch-at-next-renewal",
+              "covered": true
+            }
+          ],
+          "expectedFacts": 1,
+          "coveredFacts": 1,
+          "coverageDisposition": "evidence-covered"
+        },
+        {
+          "questionId": "northstar-04",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 0.3474160000000097,
+          "facts": [
+            {
+              "key": "export-link-hours",
+              "covered": true
+            }
+          ],
+          "expectedFacts": 1,
+          "coveredFacts": 1,
+          "coverageDisposition": "evidence-covered"
+        },
+        {
+          "questionId": "northstar-05",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 4,
+          "durationMs": 0.5352080000000115,
+          "facts": [
+            {
+              "key": "refund-days",
+              "covered": false
+            }
+          ],
+          "expectedFacts": 1,
+          "coveredFacts": 0,
+          "coverageDisposition": "evidence-not-covered"
+        },
+        {
+          "questionId": "northstar-06",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 3,
+          "durationMs": 0.6804169999999772,
+          "facts": [
+            {
+              "key": "retry-count",
+              "covered": false
+            },
+            {
+              "key": "retry-hours",
+              "covered": false
+            }
+          ],
+          "expectedFacts": 2,
+          "coveredFacts": 0,
+          "coverageDisposition": "evidence-not-covered"
+        },
+        {
+          "questionId": "northstar-07",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 0.4157079999999951,
+          "facts": [
+            {
+              "key": "annual-price-cents",
+              "covered": true
+            }
+          ],
+          "expectedFacts": 1,
+          "coveredFacts": 1,
+          "coverageDisposition": "evidence-covered"
+        },
+        {
+          "questionId": "northstar-08",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 0.7633329999999887,
+          "facts": [
+            {
+              "key": "email-after-retry",
+              "covered": true
+            }
+          ],
+          "expectedFacts": 1,
+          "coveredFacts": 1,
+          "coverageDisposition": "evidence-covered"
+        },
+        {
+          "questionId": "northstar-09",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 0.502584000000013,
+          "facts": [
+            {
+              "key": "annual-price-cents",
+              "covered": true
+            },
+            {
+              "key": "event-retention-days",
+              "covered": true
+            }
+          ],
+          "expectedFacts": 2,
+          "coveredFacts": 2,
+          "coverageDisposition": "evidence-covered"
+        },
+        {
+          "questionId": "northstar-10",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 1,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 0,
+          "durationMs": 0.24587499999995543,
+          "facts": [
+            {
+              "key": "access-until-paid-term-end",
+              "covered": false
+            },
+            {
+              "key": "support-queue",
+              "covered": false
+            }
+          ],
+          "expectedFacts": 2,
+          "coveredFacts": 0,
+          "coverageDisposition": "evidence-not-covered"
+        },
+        {
+          "questionId": "northstar-11",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 0.33783299999998917,
+          "facts": [],
+          "expectedFacts": 0,
+          "coveredFacts": 0,
+          "coverageDisposition": "abstention-task"
+        },
+        {
+          "questionId": "northstar-12",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 0.31358299999999417,
+          "facts": [],
+          "expectedFacts": 0,
+          "coveredFacts": 0,
+          "coverageDisposition": "abstention-task"
+        },
+        {
+          "questionId": "northstar-13",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 0.3558750000000259,
+          "facts": [
+            {
+              "key": "annual-price-cents",
+              "covered": true
+            },
+            {
+              "key": "monthly-price-cents",
+              "covered": true
+            },
+            {
+              "key": "refund-days",
+              "covered": true
+            }
+          ],
+          "expectedFacts": 3,
+          "coveredFacts": 3,
+          "coverageDisposition": "evidence-covered"
+        }
+      ]
+    },
+    {
+      "arm": "haystack-bm25",
+      "questions": 13,
+      "answerable": 11,
+      "fullyCovered": 8,
+      "coveredFacts": 12,
+      "expectedFacts": 16,
+      "failures": 0,
+      "invalidSourcePassages": 0,
+      "unanswerableWithHits": 2,
+      "medianQueryMs": 0.57912500000009,
+      "preparation": {
+        "ok": true,
+        "elapsedMs": 667.347583,
+        "documents": 4,
+        "passages": 11,
+        "generation": "27622bb3b7b6b2043dfa8f0f30b209469b801f473e3c8ebfe90169ddeffc6ac3"
+      },
+      "observations": [
+        {
+          "questionId": "northstar-01",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 68.15045899999996,
+          "facts": [
+            {
+              "key": "annual-price-cents",
+              "covered": true
+            }
+          ],
+          "expectedFacts": 1,
+          "coveredFacts": 1,
+          "coverageDisposition": "evidence-covered"
+        },
+        {
+          "questionId": "northstar-02",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 0.8395410000000538,
+          "facts": [
+            {
+              "key": "provider-key",
+              "covered": true
+            }
+          ],
+          "expectedFacts": 1,
+          "coveredFacts": 1,
+          "coverageDisposition": "evidence-covered"
+        },
+        {
+          "questionId": "northstar-03",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 0.7263330000000678,
+          "facts": [
+            {
+              "key": "switch-at-next-renewal",
+              "covered": true
+            }
+          ],
+          "expectedFacts": 1,
+          "coveredFacts": 1,
+          "coverageDisposition": "evidence-covered"
+        },
+        {
+          "questionId": "northstar-04",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 0.5493339999999307,
+          "facts": [
+            {
+              "key": "export-link-hours",
+              "covered": true
+            }
+          ],
+          "expectedFacts": 1,
+          "coveredFacts": 1,
+          "coverageDisposition": "evidence-covered"
+        },
+        {
+          "questionId": "northstar-05",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 0.5156660000000102,
+          "facts": [
+            {
+              "key": "refund-days",
+              "covered": false
+            }
+          ],
+          "expectedFacts": 1,
+          "coveredFacts": 0,
+          "coverageDisposition": "evidence-not-covered"
+        },
+        {
+          "questionId": "northstar-06",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 0.5900840000000471,
+          "facts": [
+            {
+              "key": "retry-count",
+              "covered": false
+            },
+            {
+              "key": "retry-hours",
+              "covered": false
+            }
+          ],
+          "expectedFacts": 2,
+          "coveredFacts": 0,
+          "coverageDisposition": "evidence-not-covered"
+        },
+        {
+          "questionId": "northstar-07",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 0.6075829999999769,
+          "facts": [
+            {
+              "key": "annual-price-cents",
+              "covered": true
+            }
+          ],
+          "expectedFacts": 1,
+          "coveredFacts": 1,
+          "coverageDisposition": "evidence-covered"
+        },
+        {
+          "questionId": "northstar-08",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 0.5607919999999922,
+          "facts": [
+            {
+              "key": "email-after-retry",
+              "covered": true
+            }
+          ],
+          "expectedFacts": 1,
+          "coveredFacts": 1,
+          "coverageDisposition": "evidence-covered"
+        },
+        {
+          "questionId": "northstar-09",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 0.5674579999999878,
+          "facts": [
+            {
+              "key": "annual-price-cents",
+              "covered": true
+            },
+            {
+              "key": "event-retention-days",
+              "covered": true
+            }
+          ],
+          "expectedFacts": 2,
+          "coveredFacts": 2,
+          "coverageDisposition": "evidence-covered"
+        },
+        {
+          "questionId": "northstar-10",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 0.5500419999999622,
+          "facts": [
+            {
+              "key": "access-until-paid-term-end",
+              "covered": true
+            },
+            {
+              "key": "support-queue",
+              "covered": false
+            }
+          ],
+          "expectedFacts": 2,
+          "coveredFacts": 1,
+          "coverageDisposition": "evidence-not-covered"
+        },
+        {
+          "questionId": "northstar-11",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 0.48433399999998983,
+          "facts": [],
+          "expectedFacts": 0,
+          "coveredFacts": 0,
+          "coverageDisposition": "abstention-task"
+        },
+        {
+          "questionId": "northstar-12",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 0.57912500000009,
+          "facts": [],
+          "expectedFacts": 0,
+          "coveredFacts": 0,
+          "coverageDisposition": "abstention-task"
+        },
+        {
+          "questionId": "northstar-13",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 0.6666660000000775,
+          "facts": [
+            {
+              "key": "annual-price-cents",
+              "covered": true
+            },
+            {
+              "key": "monthly-price-cents",
+              "covered": true
+            },
+            {
+              "key": "refund-days",
+              "covered": true
+            }
+          ],
+          "expectedFacts": 3,
+          "coveredFacts": 3,
+          "coverageDisposition": "evidence-covered"
+        }
+      ]
+    },
+    {
+      "arm": "haystack-hybrid-rerank",
+      "questions": 13,
+      "answerable": 11,
+      "fullyCovered": 9,
+      "coveredFacts": 13,
+      "expectedFacts": 16,
+      "failures": 0,
+      "invalidSourcePassages": 0,
+      "unanswerableWithHits": 2,
+      "medianQueryMs": 130.87645900000007,
+      "preparation": {
+        "ok": true,
+        "elapsedMs": 2673.861166,
+        "documents": 4,
+        "passages": 11,
+        "generation": "27622bb3b7b6b2043dfa8f0f30b209469b801f473e3c8ebfe90169ddeffc6ac3"
+      },
+      "observations": [
+        {
+          "questionId": "northstar-01",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 178.28437499999973,
+          "facts": [
+            {
+              "key": "annual-price-cents",
+              "covered": true
+            }
+          ],
+          "expectedFacts": 1,
+          "coveredFacts": 1,
+          "coverageDisposition": "evidence-covered"
+        },
+        {
+          "questionId": "northstar-02",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 122.06083399999989,
+          "facts": [
+            {
+              "key": "provider-key",
+              "covered": true
+            }
+          ],
+          "expectedFacts": 1,
+          "coveredFacts": 1,
+          "coverageDisposition": "evidence-covered"
+        },
+        {
+          "questionId": "northstar-03",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 127.51741700000002,
+          "facts": [
+            {
+              "key": "switch-at-next-renewal",
+              "covered": true
+            }
+          ],
+          "expectedFacts": 1,
+          "coveredFacts": 1,
+          "coverageDisposition": "evidence-covered"
+        },
+        {
+          "questionId": "northstar-04",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 121.52183400000013,
+          "facts": [
+            {
+              "key": "export-link-hours",
+              "covered": true
+            }
+          ],
+          "expectedFacts": 1,
+          "coveredFacts": 1,
+          "coverageDisposition": "evidence-covered"
+        },
+        {
+          "questionId": "northstar-05",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 133.19654199999968,
+          "facts": [
+            {
+              "key": "refund-days",
+              "covered": true
+            }
+          ],
+          "expectedFacts": 1,
+          "coveredFacts": 1,
+          "coverageDisposition": "evidence-covered"
+        },
+        {
+          "questionId": "northstar-06",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 137.9833749999998,
+          "facts": [
+            {
+              "key": "retry-count",
+              "covered": false
+            },
+            {
+              "key": "retry-hours",
+              "covered": false
+            }
+          ],
+          "expectedFacts": 2,
+          "coveredFacts": 0,
+          "coverageDisposition": "evidence-not-covered"
+        },
+        {
+          "questionId": "northstar-07",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 129.817583,
+          "facts": [
+            {
+              "key": "annual-price-cents",
+              "covered": true
+            }
+          ],
+          "expectedFacts": 1,
+          "coveredFacts": 1,
+          "coverageDisposition": "evidence-covered"
+        },
+        {
+          "questionId": "northstar-08",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 128.9132499999996,
+          "facts": [
+            {
+              "key": "email-after-retry",
+              "covered": true
+            }
+          ],
+          "expectedFacts": 1,
+          "coveredFacts": 1,
+          "coverageDisposition": "evidence-covered"
+        },
+        {
+          "questionId": "northstar-09",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 131.85325000000012,
+          "facts": [
+            {
+              "key": "annual-price-cents",
+              "covered": true
+            },
+            {
+              "key": "event-retention-days",
+              "covered": true
+            }
+          ],
+          "expectedFacts": 2,
+          "coveredFacts": 2,
+          "coverageDisposition": "evidence-covered"
+        },
+        {
+          "questionId": "northstar-10",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 134.63066700000036,
+          "facts": [
+            {
+              "key": "access-until-paid-term-end",
+              "covered": false
+            },
+            {
+              "key": "support-queue",
+              "covered": true
+            }
+          ],
+          "expectedFacts": 2,
+          "coveredFacts": 1,
+          "coverageDisposition": "evidence-not-covered"
+        },
+        {
+          "questionId": "northstar-11",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 126.28299999999945,
+          "facts": [],
+          "expectedFacts": 0,
+          "coveredFacts": 0,
+          "coverageDisposition": "abstention-task"
+        },
+        {
+          "questionId": "northstar-12",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 130.87645900000007,
+          "facts": [],
+          "expectedFacts": 0,
+          "coveredFacts": 0,
+          "coverageDisposition": "abstention-task"
+        },
+        {
+          "questionId": "northstar-13",
+          "calls": 1,
+          "failures": 0,
+          "emptyResults": 0,
+          "invalidSourcePassages": 0,
+          "returnedPassages": 5,
+          "durationMs": 143.40749999999935,
+          "facts": [
+            {
+              "key": "annual-price-cents",
+              "covered": true
+            },
+            {
+              "key": "monthly-price-cents",
+              "covered": true
+            },
+            {
+              "key": "refund-days",
+              "covered": true
+            }
+          ],
+          "expectedFacts": 3,
+          "coveredFacts": 3,
+          "coverageDisposition": "evidence-covered"
+        }
+      ]
+    }
+  ],
+  "decision": "candidate-for-agent-evaluation",
+  "caveat": "No answer generation or task-success measurement. One pass on 13 development questions; no held-out evaluation."
+}

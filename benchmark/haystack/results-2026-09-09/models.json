@@ -1,0 +1,12 @@
+[
+  {
+    "model": "BAAI/bge-small-en-v1.5",
+    "upstreamRevision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a",
+    "contentSha256": "73f92974f1658714c46293725648a914cf2f4a68360374600b8e23f695968e96"
+  },
+  {
+    "model": "cross-encoder/ms-marco-MiniLM-L6-v2",
+    "upstreamRevision": "233902d25c440f23af6f7d6e94d2946bac0bee0a",
+    "contentSha256": "626066419752140b03cbdce61a92f31405be0ff8c2592261cf7fbbab2697fe44"
+  }
+]

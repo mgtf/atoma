@@ -1,0 +1,99 @@
+{
+  "questionId": "northstar-10",
+  "startedAt": "2026-09-09T07:56:42.479Z",
+  "events": [
+    {
+      "kind": "tool",
+      "name": "search_project_docs",
+      "args": {
+        "query": "Une annulation coupe-t-elle immédiatement l’accès, et quelle file traite les escalades de facturation ?",
+        "limit": 5
+      },
+      "result": {
+        "ok": true,
+        "status": "ok",
+        "corpusId": "development-docs",
+        "snapshotId": "northstar-v1",
+        "snapshotSha256": "31d63c88fa2aac63a8220091713f04c30b50a29a40019b4839b21e72d289654c",
+        "generation": "27622bb3b7b6b2043dfa8f0f30b209469b801f473e3c8ebfe90169ddeffc6ac3",
+        "passages": [
+          {
+            "documentId": "507f2270991897106976ef4a65cc0ad169c4dce0aefcc97d0a7b99076a76308c",
+            "path": "README.md",
+            "sha256": "ee0e218b9b5bdccf78675687d0caae18b8f92f3dc656bde84813645bc2b03c0e",
+            "startByte": 0,
+            "endByte": 465,
+            "startLine": 1,
+            "endLine": 10,
+            "headingContext": [
+              "Northstar subscriptions"
+            ],
+            "excerpt": "# Northstar subscriptions\n\nThis synthetic project manages subscriptions for a design studio.\nThe current billing policy is in docs/billing.md.\nAccepted decisions supersede drafts and archived decisions.\nAmounts are integer euro cents. Provider identifiers are configuration keys.\n\nTo preview the configured offers, run `node preview.mjs`.\nThe preview reads pricing.json; only that configuration needs changing to\nenable an offer whose terms are already documented.\n",
+            "score": 0
+          },
+          {
+            "documentId": "9c05d0a2e3c79c3550669dfacc10551c098fbcb81ba5a8862ed529225acce207",
+            "path": "docs/billing.md",
+            "sha256": "98efd32bfe73a29b17086fc9be347ae3acfa5b5f061d1b17561295a85fe51e9b",
+            "startByte": 0,
+            "endByte": 18,
+            "startLine": 1,
+            "endLine": 2,
+            "headingContext": [
+              "Billing policy"
+            ],
+            "excerpt": "# Billing policy\n\n",
+            "score": 0
+          },
+          {
+            "documentId": "9c05d0a2e3c79c3550669dfacc10551c098fbcb81ba5a8862ed529225acce207",
+            "path": "docs/billing.md",
+            "sha256": "98efd32bfe73a29b17086fc9be347ae3acfa5b5f061d1b17561295a85fe51e9b",
+            "startByte": 18,
+            "endByte": 278,
+            "startLine": 3,
+            "endLine": 9,
+            "headingContext": [
+              "Billing policy",
+              "Accepted offers"
+            ],
+            "excerpt": "## Accepted offers\n\nThe monthly subscription costs 1900 euro cents per seat.\nThe annual subscription costs 19000 euro cents per seat for twelve months.\nThe annual offer uses the configuration key stripe_price_annual_studio.\nAll offers are denominated in EUR.\n\n",
+            "score": 0
+          },
+          {
+            "documentId": "9c05d0a2e3c79c3550669dfacc10551c098fbcb81ba5a8862ed529225acce207",
+            "path": "docs/billing.md",
+            "sha256": "98efd32bfe73a29b17086fc9be347ae3acfa5b5f061d1b17561295a85fe51e9b",
+            "startByte": 278,
+            "endByte": 523,
+            "startLine": 10,
+            "endLine": 15,
+            "headingContext": [
+              "Billing policy",
+              "Cancellation and refunds"
+            ],
+            "excerpt": "## Cancellation and refunds\n\nCancellation stops the next renewal; access continues until the paid term ends.\nThe refund request window is 14 calendar days after the initial payment.\nChanging the billing period must preserve that refund window.\n\n",
+            "score": 0
+          },
+          {
+            "documentId": "9c05d0a2e3c79c3550669dfacc10551c098fbcb81ba5a8862ed529225acce207",
+            "path": "docs/billing.md",
+            "sha256": "98efd32bfe73a29b17086fc9be347ae3acfa5b5f061d1b17561295a85fe51e9b",
+            "startByte": 523,
+            "endByte": 670,
+            "startLine": 16,
+            "endLine": 20,
+            "headingContext": [
+              "Billing policy",
+              "Payment failures"
+            ],
+            "excerpt": "## Payment failures\n\nA failed payment receives three retries, spaced 48 hours apart.\nThe customer receives an email after the third failed retry.\n\n",
+            "score": 0
+          }
+        ],
+        "truncated": true
+      },
+      "durationMs": 0.5500419999999622
+    }
+  ]
+}

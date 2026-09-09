@@ -83,6 +83,11 @@ context. There is no persistent vector index: a new binding rebuilds embeddings
 and checks its model digests. A later persistent cache must include model,
 chunker, context and embedding settings in its own generation identity.
 
+The [first archived component screen](../benchmark/haystack/results-2026-09-09/README.md)
+measured complete evidence for 9/11 answerable questions with the hybrid
+pipeline, versus 8/11 with FTS5. It meets the screen for a later agent
+experiment; it does not establish task success or authorize rollout.
+
 ## Installation and verification
 
 Use a dedicated Python environment (Python 3.10.16 was tested):

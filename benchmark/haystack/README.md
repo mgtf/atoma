@@ -1,5 +1,9 @@
 # Haystack component evaluation
 
+[First archived result](results-2026-09-09/README.md): hybrid retrieval covered
+9/11 answerable development questions completely, compared with 8/11 for
+FTS5. This meets the component screen for a later agent experiment.
+
 Development retrieval experiment, separate from the shared-runner A/B/C agent
 campaign. No answer model, subscription transport, API key or product store.
 All three backends receive the same prepared passages and the original query
