@@ -35,6 +35,7 @@ Neighbours:
   results are observed before model-facing truncation. A finite tool budget
   permits one finalization, which cannot execute tools. Abort and partial
   usage propagate across the complete loop. No Codex-native tools are enabled.
+  Acceptance evidence: [codex-all-tiers-2026-09-08](../../docs/incidents/codex-all-tiers-2026-09-08.md).
 - Effort settings belong on strategy calls only. Validators and prefilters are
   deterministic and cheap.
 - A transport cannot outlive its deadline. Keep both per-call abort and outer

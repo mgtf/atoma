@@ -25,7 +25,7 @@ node --import tsx benchmark/haystack/evaluate.mjs replay /absolute/path/to/outpu
 
 The output directory must be new. `models/embedding` and `models/reranker`
 must contain the local reference weights documented in the
-[implementation record](../../docs/project-retrieval-haystack-2026-09-09.md).
+[implementation record](../../docs/incidents/project-retrieval-record-2026-09-09.md#haystack-retrieval-experiment).
 Run from a committed source tree; registration pins source and compiled
 hashes, Python packages, model content, instrument lock and query limits.
 `run` refuses identity changes and existing result files. Preserve any failed

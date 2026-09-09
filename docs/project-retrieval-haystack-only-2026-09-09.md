@@ -75,7 +75,7 @@ These are host settings for the compiled projects CLI or viz coordinator;
 restart a long-running coordinator after changing them. The Python path is
 a placeholder for the operator's provisioned environment. Hybrid settings
 still require the local models and content pins described in the
-[Haystack implementation](project-retrieval-haystack-2026-09-09.md). Startup
+[Haystack implementation](incidents/project-retrieval-record-2026-09-09.md#haystack-retrieval-experiment). Startup
 validates runtime identity and consumes the run budget before any model
 completion. Failure or cancellation closes Python and preserves accounting.
 

@@ -1,7 +1,7 @@
 # Project registry ownership
 
 Date: 2026-09-09. Corrective increment for the
-[downstream retrieval audit](project-retrieval-privacy-audit-2026-09-09.md).
+[downstream retrieval audit](incidents/project-retrieval-record-2026-09-09.md#project-retrieval-downstream-privacy-audit).
 Retrieval remains opt-in. No provider, embedding or reranker call is added.
 
 ## Storage and authority
