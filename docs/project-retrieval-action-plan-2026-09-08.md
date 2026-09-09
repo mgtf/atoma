@@ -5,7 +5,8 @@ A/C characterization driver, archived development pilot, typed host boundary,
 deterministic document ingestion, SQLite FTS5 backend and opt-in project-run
 activation delivered. The paired BM25 development pilot is archived and did
 not meet its benefit screen. Broader evaluation, operational rollout and
-retrieval-provider integrations remain pending.
+production retrieval-provider integrations remain pending. An experimental
+Haystack host library binding is now available for component evaluation.
 
 ## Implementation progress
 
@@ -58,6 +59,11 @@ evidence of an A/B gain. The [downstream privacy audit](project-retrieval-privac
 reproduced a common-registry disclosure. [Project registry ownership](project-registry-ownership-2026-09-09.md)
 now contains those prompts, descriptions, names, tools and history. Registered
 treatment evaluation and operational lifecycle remain before rollout.
+
+A [Haystack framework experiment](project-retrieval-haystack-2026-09-09.md) now
+adds native BM25 and local embeddings/fusion/reranking behind the same L1
+element. Its component screen is separate from the agent campaign and cannot
+promote the backend by itself. Production activation remains conditional.
 
 ## Objective and implementation order
 

@@ -1,0 +1,5 @@
+-r requirements-haystack.txt
+sentence-transformers-haystack==0.1.1
+sentence-transformers==6.0.1
+transformers==5.16.1
+torch==2.14.0

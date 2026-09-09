@@ -1,0 +1,2 @@
+# Optional host runtime; never installed in Atoma's worker.
+haystack-ai==3.1.1
