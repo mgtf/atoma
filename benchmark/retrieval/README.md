@@ -136,8 +136,8 @@ sources, maintenance probes and reference fixes. It does not register a live
 campaign, pin evaluator source code or report any model results. There is no
 automatic lock repair: a changed corpus or score rule needs review and a new
 registration before measurement. See [the protocol](PROTOCOL.md) for that next
-step. The characterization driver below performs that registration and runs
-the existing agentic paths; it does not add a search backend.
+step. The driver below registers either the original A/C characterization or
+the paired BM25 development treatment.
 
 ## Registered characterization campaigns
 
@@ -203,3 +203,45 @@ Reports distinguish planned and attempted runs, failed scores, infrastructure
 failures and subscription price equivalents. They make no retrieval gain
 claim. Aborts preserve an `aborted.json` report and all preceding evidence;
 there is no overwrite or resume mode.
+
+## Registered BM25 development comparison
+
+[bm25.example.json](bm25.example.json) uses `kind: bm25-development` with three
+arms: A (`atoma`), B (`atoma-bm25`) and C (`frontier-direct`). Use the same
+register/inspect/run commands above. Both development tasks from the earlier
+pilot are repeated on the new source revision; historical A/C results are not
+the control. The first two task orders are A/B/C and C/B/A. Over six task
+groups the schedule cycles through all six permutations; two groups do not
+balance every position. Held-out questions remain refused.
+
+All three arms use synthetic project authorities in an independent SQLite
+store and the normal tenant `startTask` path. Only B receives a production
+retrieval launch receipt, prepared from the selected snapshot's admitted
+documents. Index construction is inside B's end-to-end attempt budget; the
+remaining budget is passed to the shared runner. The same goal and source
+bytes reach every arm. Production receipt IDs identify the project source
+run; answer IDs are the fixture identities explicitly required by the goal.
+Neither the gold answers nor another project's documents enter the workspace.
+
+Registration also freezes the production index version, splitter/context
+settings, BM25 weights and query limits. Unsupported settings are refused,
+never recorded while silently executing defaults. No embeddings, reranking,
+external retrieval API, query cache or LLM-generated context is used.
+
+The example's predeclared screen asks for a paired full-pass gain of at least
+0.5, with total B/A elapsed time and subscription price equivalent each at
+most 1.25. Missing attempts/accounting or any infrastructure failure make the
+screen inconclusive. Otherwise it returns `screen-not-met` or
+`advance-to-new-confirmation`. This is a development screen, not statistical
+confirmation: correlated questions from one project cannot supply a population
+confidence interval. A favorable screen never enables retrieval by default.
+
+Each attempt additionally archives `start.db`, `end.db`, `preparation.json`
+and `retrieval-observations.json`. Preparation records index-only elapsed/CPU,
+process RSS at completion (not peak memory), complete store size (not marginal
+index size), document/passage counts and payer attribution. There is one fresh
+index per B attempt, with no amortization or rebuild claim. Observations read
+host tool traces, verify returned source bytes and measure golden evidence
+coverage separately from the full-task scorer. Absent evidence alone cannot
+distinguish lexical mismatch from ranking or truncation. Missing telemetry is
+`null`, never zero. The raw archive is required for diagnosis.

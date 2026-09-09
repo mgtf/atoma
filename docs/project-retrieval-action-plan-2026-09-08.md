@@ -21,7 +21,9 @@ in Step 3. Registration pins source/instruments/models/image and alternates
 Atoma/frontier-direct attempts. Execution uses `spawnRun`, the shared runner,
 the global lease, mandatory containers and independent fresh state. Its first
 supported mode is development characterization through host subscriptions.
-The CLI does not yet activate the project search element.
+The BM25 development mode now activates the project search element only for
+treatment B; all A/B/C arms use the same synthetic project runner path. It
+freezes retrieval settings and a screening rule before model execution.
 The [four-attempt development pilot](../benchmark/retrieval-pilot-2026-09-09/README.md)
 completed on one source revision and UTC day. Frontier-direct passed both
 tasks; Atoma reached both registered deadlines, with correct pricing facts or
@@ -49,8 +51,8 @@ an immutable source archive and receipt, a read-only child resolver against
 current project/principal/run state, and a dedicated L1 canonical scope.
 `ATOMA_PROJECT_RETRIEVAL=1` on the coordinator host enables this path for new
 project runs. The compiled process smoke covers coordinator → child → L1 →
-FTS5, live revocation and the real isolated worker. The benchmark treatment and
-operational lifecycle are still pending; this is not default activation or
+FTS5, live revocation and the real isolated worker. The benchmark treatment is
+implemented; its live evaluation and operational lifecycle remain pending. This is not default activation or
 evidence of an A/B gain. The [downstream privacy audit](project-retrieval-privacy-audit-2026-09-09.md)
 reproduced a common-registry disclosure. [Project registry ownership](project-registry-ownership-2026-09-09.md)
 now contains those prompts, descriptions, names, tools and history. Registered

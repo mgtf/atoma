@@ -18,8 +18,8 @@ selector, sandbox and tool capabilities, deadlines, budgets, stopping rules,
 threshold environment values, and provider accounting configuration. Record
 the starting stores, skill/trust state, learning policy and cache treatment.
 The instrument lock is insufficient for a live comparison on its own.
-`retrieval register` now freezes these inputs for an A/C development
-characterization, and `inspect` prints it offline. See the
+`retrieval register` freezes these inputs for A/C development characterization
+or the A/B/C BM25 development screen, and `inspect` prints it offline. See the
 [operator commands and exact supported policies](README.md#registered-characterization-campaigns).
 
 Use three arms:
@@ -82,12 +82,11 @@ This small corpus cannot justify a vector service or a scale threshold.
 The initial A/C pilot identified citation and task-completion failures under
 the registered deadlines; it does not establish a retrieval benefit. Preserve
 those cases when evaluating the next increment. The driver uses host
-subscriptions, empty starting state and development questions; treatment B,
-paid API campaigns and the
-confirmatory statistical report remain later increments.
-The [scoped host execution contract](../../docs/project-retrieval-host-contract-2026-09-09.md)
-and optional library executor are now implemented with injected services.
-Next implement source ingestion, the current-access store resolver and SQLite
-FTS5 before activating a retrieval treatment and the paired A/B/C comparison.
+subscriptions, empty starting registry state and development questions. The
+BM25 mode now uses production project admission, source ingestion, scoped
+FTS5 and the current-access resolver for B. All three arms take the same
+tenant runner path. See the [registered settings, screen and evidence limits](README.md#registered-bm25-development-comparison).
+Paid API campaigns and confirmatory project-family sampling remain later
+increments; a development screen is not a production adoption decision.
 Keep production tenant authorization, worker protocol isolation, indexing and
 operational lifecycle tests separate from the fixture scorer's guarantees.

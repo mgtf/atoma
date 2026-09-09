@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, relative } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { parseModelSelector } from '../contracts/modelSelector.js';
@@ -13,9 +13,12 @@ import {
 import { acquireRunLeaseWithoutRecovery, type RunLease } from '../mcp/runLock.js';
 import { spawnRun, withUnkillableBackstop, DEFAULT_HARD_KILL_MARGIN_MS, UNKILLABLE_BACKSTOP_EXTRA_MS } from './burnin.js';
 import {
-  loadRetrievalDataset, prepareRetrievalWorkspace, readRetrievalFile,
+  loadRetrievalDataset, prepareRetrievalWorkspace, readRetrievalFile, questionFor,
   type RetrievalDataset,
 } from './retrievalDataset.js';
+import { prepareRetrievalProjectAttempt } from './retrievalProjectAttempt.js';
+import { retrievalObservations } from './retrievalObservations.js';
+import { pairedRetrievalDecision } from './retrievalComparison.js';
 import { scoreRetrievalWorkspace } from './retrievalScorer.js';
 import {
   archiveRetrievalSource, assertRetrievalExecutionIdentity, validateRetrievalRegistration,
@@ -116,7 +119,7 @@ export function summarizeRetrievalCampaign(
     apiSpendUsd: 0,
     subscriptionPriceEquivalentUsd: rows.every(r => r.runner?.costUsd !== null && r.runner?.costUsd !== undefined)
       ? rows.reduce((sum, r) => sum + r.runner!.costUsd!, 0) : null,
-    arms: (['atoma', 'frontier-direct'] as const).map(arm => {
+    arms: [...new Set(registration.schedule.map(entry => entry.arm))].map(arm => {
       const selected = rows.filter(r => r.entry.arm === arm);
       return {
         arm, planned: registration.schedule.filter(e => e.arm === arm).length,
@@ -127,7 +130,9 @@ export function summarizeRetrievalCampaign(
           ? selected.reduce((sum, r) => sum + r.runner!.llmCalls!, 0) : null,
       };
     }),
-    claim: 'characterization only; no retrieval treatment or improvement claim',
+    comparison: pairedRetrievalDecision(registration, rows),
+    claim: registration.spec.kind === 'agentic-characterization' ? 'characterization only; no retrieval treatment or improvement claim' :
+      'development screening only; correlated synthetic tasks do not establish production benefit',
   };
 }
 
@@ -182,50 +187,63 @@ export async function runRetrievalCampaign(
       mkdirSync(attempt);
       for (const dir of ['state/skills', 'traces']) mkdirSync(join(attempt, dir), { recursive: true });
       const prepared = prepareRetrievalWorkspace(frozen, entry.questionId, join(attempt, 'seed'));
-      const runId = `retrieval-${randomUUID()}`;
-      const env = retrievalChildEnvironment(registration, entry, attempt, runId, host);
-      writeJson(join(attempt, 'start.json'), {
-        entry, runId, goal: prepared.goal, initialState: 'empty store before runner bootstrap; empty skills',
-        executionEnv: Object.fromEntries(Object.entries(env).filter(([key]) => key.startsWith('ATOMA_'))),
-      });
+      const runId = registration.spec.kind === 'bm25-development' ? randomUUID() : `retrieval-${randomUUID()}`;
+      let env = retrievalChildEnvironment(registration, entry, attempt, runId, host);
       const start = Date.now();
-      childSettled = false;
-      const pending = Promise.resolve().then(() => deps.spawn({
-        cwd: options.repo, npmScript: 'run:build:dev', goal: prepared.goal,
-        timeoutMs: registration.spec.timeoutMs, logPath: join(attempt, 'run.log'),
-        env, signal, onSpawn: pid => lease.attachChild(pid),
-        extraArgs: [
-          entry.arm === 'frontier-direct' ? '--baseline' : '--no-baseline',
-          '--container', '--no-egress', '--worker-image', registration.spec.workerImage,
-          '--no-learn-skills', '--no-promote-skills', '--no-direct-skills', '--seed', prepared.workspace,
-        ],
-      }));
-      const log = await withUnkillableBackstop(pending.finally(() => { childSettled = true; }),
-        registration.spec.timeoutMs + DEFAULT_HARD_KILL_MARGIN_MS + UNKILLABLE_BACKSTOP_EXTRA_MS, id);
-      // Keep the archive write mandatory even though spawnRun's best-effort log
-      // write cannot reject a run that already completed.
-      writeFileSync(join(attempt, 'run.log'), log, { mode: 0o600 });
-      const runner = parseRunStatsEpilogue(log);
-      const tracePath = join(attempt, 'traces', `${runId}.json`);
-      const traceValid = traceMatches(tracePath, runId);
-      const score = scoreRetrievalWorkspace(frozen, entry.questionId, join(attempt, 'workspace'));
-      const infrastructureFailure = runner === null || runner.outcome === 'error' || !traceValid;
-      const row = retrievalCampaignResultSchema.parse({
-        entry, runId, startedAt: new Date(start).toISOString(), elapsedMs: Date.now() - start,
-        runner, infrastructureFailure, score,
-        full: runner?.outcome === 'delivered' && !infrastructureFailure && score.full,
-        tracePath: traceValid ? `attempts/${id}/traces/${runId}.json` : null,
-      });
-      writeJson(join(attempt, 'result.json'), row);
-      appendFileSync(rowsPath, JSON.stringify(row) + '\n');
-      rows.push(row);
-      deps.verify(registration, options.repo);
-      if (!isDeepStrictEqual(deps.preflight(registration), versions)) throw new Error('worker or CLI version changed during campaign');
-      process.stderr.write(`retrieval ${entry.ordinal}/${registration.schedule.length} ${entry.arm} ${entry.questionId}: ${row.full ? 'pass' : 'fail'}\n`);
-      consecutiveInfrastructureFailures = infrastructureFailure ? consecutiveInfrastructureFailures + 1 : 0;
-      if (consecutiveInfrastructureFailures >= registration.spec.stopAfterConsecutiveInfrastructureFailures) {
-        reason = 'infrastructure-stop'; break;
-      }
+      const project = registration.spec.kind === 'bm25-development' ? await prepareRetrievalProjectAttempt({
+        registration, entry, dataset: frozen, attempt, seed: prepared.workspace, runId, env, signal,
+        deadlineAt: Math.min(start + registration.spec.timeoutMs, started + registration.spec.maxWallMs),
+      }) : null;
+      if (project) env = project.env;
+      const remainingMs = Math.max(1, registration.spec.timeoutMs - (Date.now() - start));
+      env['ATOMA_BUILD_TIMEOUT_MS'] = String(remainingMs);
+      try {
+        writeJson(join(attempt, 'start.json'), {
+          entry, runId, goal: prepared.goal, initialState: project ?
+            'synthetic project authorities; empty registry before bootstrap; empty skills; see start.db' :
+            'empty store before runner bootstrap; empty skills',
+          executionEnv: Object.fromEntries(Object.entries(env).filter(([key]) => key.startsWith('ATOMA_'))),
+        });
+        childSettled = false;
+        const pending = Promise.resolve().then(() => deps.spawn({
+          cwd: options.repo, npmScript: 'run:build:dev', goal: prepared.goal,
+          timeoutMs: remainingMs, logPath: join(attempt, 'run.log'),
+          env, signal, onSpawn: pid => lease.attachChild(pid),
+          extraArgs: [
+            entry.arm === 'frontier-direct' ? '--baseline' : '--no-baseline',
+            '--container', '--no-egress', '--worker-image', registration.spec.workerImage,
+            '--no-learn-skills', '--no-promote-skills', '--no-direct-skills', '--seed', prepared.workspace,
+          ],
+        }));
+        const log = await withUnkillableBackstop(pending.finally(() => { childSettled = true; }),
+          registration.spec.timeoutMs + DEFAULT_HARD_KILL_MARGIN_MS + UNKILLABLE_BACKSTOP_EXTRA_MS, id);
+        // Keep the archive write mandatory even though spawnRun's best-effort log
+        // write cannot reject a run that already completed.
+        writeFileSync(join(attempt, 'run.log'), log, { mode: 0o600 });
+        const runner = parseRunStatsEpilogue(log);
+        const tracePath = join(env['ATOMA_RUNS_DIR']!, `${runId}.json`);
+        const traceValid = traceMatches(tracePath, runId);
+        const score = scoreRetrievalWorkspace(frozen, entry.questionId, env['ATOMA_BUILD_WORKSPACE']!);
+        const infrastructureFailure = runner === null || runner.outcome === 'error' || !traceValid;
+        const row = retrievalCampaignResultSchema.parse({
+          entry, runId, startedAt: new Date(start).toISOString(), elapsedMs: Date.now() - start,
+          runner, infrastructureFailure, score,
+          full: runner?.outcome === 'delivered' && !infrastructureFailure && score.full,
+          tracePath: traceValid ? relative(out, tracePath) : null,
+        });
+        await project?.finish(runner);
+        writeJson(join(attempt, 'retrieval-observations.json'), retrievalObservations(tracePath, frozen, questionFor(frozen, entry.questionId)));
+        writeJson(join(attempt, 'result.json'), row);
+        appendFileSync(rowsPath, JSON.stringify(row) + '\n');
+        rows.push(row);
+        deps.verify(registration, options.repo);
+        if (!isDeepStrictEqual(deps.preflight(registration), versions)) throw new Error('worker or CLI version changed during campaign');
+        process.stderr.write(`retrieval ${entry.ordinal}/${registration.schedule.length} ${entry.arm} ${entry.questionId}: ${row.full ? 'pass' : 'fail'}\n`);
+        consecutiveInfrastructureFailures = infrastructureFailure ? consecutiveInfrastructureFailures + 1 : 0;
+        if (consecutiveInfrastructureFailures >= registration.spec.stopAfterConsecutiveInfrastructureFailures) {
+          reason = 'infrastructure-stop'; break;
+        }
+      } finally { project?.close(); }
     }
     if (reason === 'completed' && options.signal?.aborted) reason = 'cancelled';
     else if (reason === 'completed' && budgetSignal.aborted) reason = 'wall-budget';

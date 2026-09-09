@@ -1,3 +1,7 @@
+import { isDeepStrictEqual } from 'node:util';
+import { DEFAULT_PROJECT_RETRIEVAL_LIMITS } from '../contracts/projectRetrieval.js';
+import { PROJECT_RETRIEVAL_BM25 } from '../contracts/projectRetrievalCorpus.js';
+import { retrievalIndexConfig } from '../projects/retrievalCorpus.js';
 import { execFileSync } from 'node:child_process';
 import { dirname, basename, join, resolve } from 'node:path';
 import { writeFileSync } from 'node:fs';
@@ -10,6 +14,15 @@ import { runHostSupported, unsupportedRunHostMessage } from '../run/platform.js'
 
 export const RETRIEVAL_CAMPAIGN_POLICY =
   'container-no-egress; fresh-prebootstrap-state; learning-promotion-direct-event-skills-off; prefilter-cache-off; provider-cache-uncontrolled' as const;
+
+export function retrievalCampaignPolicy(spec: RetrievalCampaignSpec): RetrievalRegistration['policy'] {
+  return spec.kind === 'agentic-characterization' ? RETRIEVAL_CAMPAIGN_POLICY :
+    'project-container-no-egress; fresh-authority-and-registry-per-attempt; learning-promotion-direct-event-skills-off; prefilter-cache-off; provider-cache-uncontrolled; bm25-only-treatment';
+}
+
+export function retrievalTreatmentSettings(): NonNullable<RetrievalCampaignSpec['treatment']> {
+  return { backend: 'sqlite-fts5', index: retrievalIndexConfig(), queryLimits: DEFAULT_PROJECT_RETRIEVAL_LIMITS, ranking: PROJECT_RETRIEVAL_BM25 };
+}
 
 /** Inputs executed by the source runner, its scorer, build and image recipe. */
 export const RETRIEVAL_SOURCE_PATHS = [
@@ -45,6 +58,15 @@ export function retrievalSchedule(spec: RetrievalCampaignSpec): RetrievalSchedul
   let pair = 0;
   for (let repetition = 1; repetition <= spec.repetitions; repetition++) {
     for (const questionId of spec.questionIds) {
+      if (spec.kind === 'bm25-development') {
+        // Six permutations balance every position and both A/B orders over six tasks.
+        const cycles = [['atoma', 'atoma-bm25', 'frontier-direct'], ['frontier-direct', 'atoma-bm25', 'atoma'],
+          ['atoma-bm25', 'frontier-direct', 'atoma'], ['atoma', 'frontier-direct', 'atoma-bm25'],
+          ['frontier-direct', 'atoma', 'atoma-bm25'], ['atoma-bm25', 'atoma', 'frontier-direct']] as const;
+        const offset = spec.firstArm === 'atoma' ? 0 : spec.firstArm === 'frontier-direct' ? 1 : 2;
+        for (const arm of cycles[(pair++ + offset) % cycles.length]!) entries.push({ ordinal: entries.length + 1, questionId, repetition, arm });
+        continue;
+      }
       const other = spec.firstArm === 'atoma' ? 'frontier-direct' : 'atoma';
       const arms = pair++ % 2 === 0 ? [spec.firstArm, other] as const : [other, spec.firstArm] as const;
       for (const arm of arms) entries.push({ ordinal: entries.length + 1, questionId, repetition, arm });
@@ -57,14 +79,18 @@ export function validateRetrievalRegistration(
   input: unknown, dataset: RetrievalDataset
 ): RetrievalRegistration {
   const registration = retrievalRegistrationSchema.parse(input);
-  if (registration.policy !== RETRIEVAL_CAMPAIGN_POLICY ||
+  if (registration.policy !== retrievalCampaignPolicy(registration.spec) ||
       JSON.stringify(registration.schedule) !== JSON.stringify(retrievalSchedule(registration.spec))) {
     throw new Error('registered arm schedule or execution policy is inconsistent');
+  }
+  if (registration.spec.kind === 'bm25-development' &&
+      !isDeepStrictEqual(registration.spec.treatment, retrievalTreatmentSettings())) {
+    throw new Error('registered retrieval backend settings differ from the production defaults');
   }
   for (const id of registration.spec.questionIds) {
     const q = questionFor(dataset, id);
     if (snapshotFor(dataset, q.snapshotId).split !== 'development') {
-      throw new Error('characterization uses development questions only; reserve held-out projects for confirmation');
+      throw new Error('retrieval campaigns use development questions only; reserve held-out projects for confirmation');
     }
   }
   if (retrievalSha256(readRetrievalFile(dataset.root, 'instruments.lock.json')) !== registration.instrumentsSha256) {
@@ -85,7 +111,7 @@ export function createRetrievalRegistration(
     version: 1, registeredAt: new Date().toISOString(), spec,
     source: retrievalSourceIdentity(repo), runtime,
     instrumentsSha256: retrievalSha256(readRetrievalFile(dataset.root, 'instruments.lock.json')),
-    policy: RETRIEVAL_CAMPAIGN_POLICY, schedule: retrievalSchedule(spec),
+    policy: retrievalCampaignPolicy(spec), schedule: retrievalSchedule(spec),
   }, dataset);
 }
 
