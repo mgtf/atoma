@@ -18,6 +18,7 @@ import {
 } from './retrievalDataset.js';
 import { prepareRetrievalProjectAttempt } from './retrievalProjectAttempt.js';
 import { retrievalObservations } from './retrievalObservations.js';
+import { inspectHaystackRuntime } from '../projects/retrievalHaystackRuntime.js';
 import { pairedRetrievalDecision } from './retrievalComparison.js';
 import { scoreRetrievalWorkspace } from './retrievalScorer.js';
 import {
@@ -77,6 +78,11 @@ export function inspectRetrievalHost(registration: RetrievalRegistration): Recor
     versions[binary] = execFileSync(binary, ['--version'], {
       encoding: 'utf8', timeout: 10_000, maxBuffer: 16_000,
     }).trim();
+  }
+  if (registration.spec.treatment?.backend === 'haystack') {
+    const runtime = inspectHaystackRuntime(registration.spec.treatment.launch.python);
+    if (runtime.sha256 !== registration.spec.treatment.launch.runtimeSha256) throw new Error('registered Haystack runtime changed');
+    versions['haystackRuntimeSha256'] = runtime.sha256;
   }
   return versions;
 }
@@ -189,10 +195,10 @@ export async function runRetrievalCampaign(
       mkdirSync(attempt);
       for (const dir of ['state/skills', 'traces']) mkdirSync(join(attempt, dir), { recursive: true });
       const prepared = prepareRetrievalWorkspace(frozen, entry.questionId, join(attempt, 'seed'));
-      const runId = registration.spec.kind === 'bm25-development' ? randomUUID() : `retrieval-${randomUUID()}`;
+      const runId = registration.spec.kind !== 'agentic-characterization' ? randomUUID() : `retrieval-${randomUUID()}`;
       let env = retrievalChildEnvironment(registration, entry, attempt, runId, host);
       const start = Date.now();
-      const project = registration.spec.kind === 'bm25-development' ? await prepareRetrievalProjectAttempt({
+      const project = registration.spec.kind !== 'agentic-characterization' ? await prepareRetrievalProjectAttempt({
         registration, entry, dataset: frozen, attempt, seed: prepared.workspace, runId, env, signal,
         deadlineAt: Math.min(start + registration.spec.timeoutMs, started + registration.spec.maxWallMs),
       }) : null;

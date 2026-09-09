@@ -3,6 +3,11 @@ import contextlib
 import json
 import os
 import sys
+import hashlib
+import platform
+import queue
+import threading
+from importlib.metadata import distributions
 
 os.environ["HAYSTACK_TELEMETRY_ENABLED"] = "False"
 os.environ["HF_HUB_OFFLINE"] = "1"
@@ -10,7 +15,27 @@ os.environ["TRANSFORMERS_OFFLINE"] = "1"
 os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 
 
+def runtime_identity():
+    identity = {"python": platform.python_version(), "packages": sorted(
+        (d.metadata["Name"], d.version) for d in distributions())}
+    encoded = json.dumps(identity, separators=(",", ":"), ensure_ascii=True)
+    return {"identity": identity, "sha256": hashlib.sha256(encoded.encode()).hexdigest()}
+
+
+def input_lines():
+    # Observe EOF even while native model work is busy: a killed host cannot orphan us.
+    requests = queue.Queue(maxsize=9)
+    def read():
+        for line in sys.stdin.buffer:
+            requests.put(line)
+        os._exit(0)
+    threading.Thread(target=read, daemon=True).start()
+    while True:
+        yield requests.get()
+
+
 def main():
+    lines = input_lines()
     from haystack import Document, Pipeline, __version__
     from haystack.components.retrievers.in_memory import InMemoryBM25Retriever, InMemoryEmbeddingRetriever
     from haystack.components.joiners import DocumentJoiner
@@ -22,7 +47,7 @@ def main():
     mode = None
     # Redirect all dependency chatter; the protocol channel has one writer.
     with contextlib.redirect_stdout(sys.stderr):
-        for line in sys.stdin.buffer:
+        for line in lines:
             request = json.loads(line)
             request_id = request["id"]
             try:
@@ -67,7 +92,7 @@ def main():
                     elif mode != "bm25":
                         raise ValueError("unsupported mode")
                     store.write_documents(documents)
-                    response = {"kind": "ready", "id": request_id, "version": __version__, "documents": len(documents)}
+                    response = {"kind": "ready", "id": request_id, "version": __version__, "documents": len(documents), "runtimeSha256": runtime_identity()["sha256"]}
                 elif request["op"] == "search" and pipeline is not None:
                     query, limit = request["query"], request["limit"]
                     inputs = {"bm25": {"query": query, "top_k": limit}}
@@ -92,4 +117,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:] == ["--identity"]:
+        print(json.dumps(runtime_identity()))
+    else:
+        main()

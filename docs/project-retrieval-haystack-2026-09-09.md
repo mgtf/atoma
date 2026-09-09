@@ -88,6 +88,10 @@ measured complete evidence for 9/11 answerable questions with the hybrid
 pipeline, versus 8/11 with FTS5. It meets the screen for a later agent
 experiment; it does not establish task success or authorize rollout.
 
+The [shared-runner development integration](project-retrieval-haystack-agent-2026-09-09.md)
+now supports a registered Haystack treatment with timed initialization and
+unchanged agent/scoring paths. Ordinary coordinator activation remains FTS5.
+
 ## Installation and verification
 
 Use a dedicated Python environment (Python 3.10.16 was tested):

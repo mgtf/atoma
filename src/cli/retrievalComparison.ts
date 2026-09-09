@@ -3,11 +3,11 @@ import type { RetrievalCampaignResult, RetrievalRegistration } from '../contract
 /** Descriptive paired screening. Synthetic questions within one project are correlated. */
 export function pairedRetrievalDecision(registration: RetrievalRegistration, rows: readonly RetrievalCampaignResult[]) {
   const spec = registration.spec;
-  if (spec.kind !== 'bm25-development') return null;
+  if (spec.kind === 'agentic-characterization') return null;
   const pairs = registration.schedule.filter(e => e.arm === 'atoma').map(entry => {
     const matching = rows.filter(r => r.entry.questionId === entry.questionId && r.entry.repetition === entry.repetition);
     const a = matching.find(r => r.entry.arm === 'atoma');
-    const b = matching.find(r => r.entry.arm === 'atoma-bm25');
+    const b = matching.find(r => r.entry.arm === (spec.kind === 'haystack-development' ? 'atoma-haystack' : 'atoma-bm25'));
     return { questionId: entry.questionId, repetition: entry.repetition,
       kind: matching.some(r => r.score.checks.some(c => c.id.startsWith('maintenance-'))) ? 'maintenance' : 'retrieval',
       complete: !!a && !!b, a: a?.full ?? false, b: b?.full ?? false,

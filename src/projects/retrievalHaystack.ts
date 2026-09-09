@@ -88,7 +88,7 @@ class HaystackProcess {
 /** Experimental library binding. Atoma retains admission, scope, citations and L1 execution. */
 export async function createHaystackRetrievalBinding(input: {
   authority: ProjectRetrievalBinding; corpus: PreparedProjectRetrievalCorpus;
-  python: string; settings: HaystackSettings; context: ProjectRetrievalCallContext;
+  python: string; settings: HaystackSettings; runtimeSha256?: string; context: ProjectRetrievalCallContext;
 }): Promise<ProjectRetrievalBinding> {
   const binding = validateProjectRetrievalBinding(input.authority);
   const { scope } = binding;
@@ -121,7 +121,8 @@ export async function createHaystackRetrievalBinding(input: {
     const ready = await child.send({ op: 'init', settings, documents: [...passages].map(([id, p]) => ({
       id, content: retrievalPassageContext(manifest, p) + '\n' + p.excerpt,
     })) }, input.context, true);
-    if (ready.kind !== 'ready' || ready.documents !== passages.size || await binding.service.authorize(scope, input.context) !== true) {
+    if (ready.kind !== 'ready' || (input.runtimeSha256 !== undefined && ready.runtimeSha256 !== input.runtimeSha256) ||
+        ready.documents !== passages.size || await binding.service.authorize(scope, input.context) !== true) {
       throw new Error('Haystack initialization refused');
     }
     assertRetrievalTime(input.context);

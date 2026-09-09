@@ -33,6 +33,8 @@ import { containerToolBackend, localToolBackend, withProjectRetrievalBackend } f
 import { validateProjectRetrievalBinding, type ProjectRetrievalBinding } from '../tools/projectRetrieval.js';
 import { projectRetrievalEnabled } from '../contracts/projectRetrievalLaunch.js';
 import { openProjectRunRetrieval } from '../projects/retrievalLaunch.js';
+import { HAYSTACK_LAUNCH_ENV, haystackLaunchSchema } from '../contracts/retrievalHaystack.js';
+import { openProjectRunHaystack } from '../projects/retrievalHaystackLaunch.js';
 import { baselineModel, runFrontierBaseline } from './baseline.js';
 import {
   assertIsolationBoundary,
@@ -493,9 +495,19 @@ export async function startTask(
     );
   }
   let retrievalBinding: ProjectRetrievalBinding | undefined;
+  let prepareRetrieval: ReturnType<typeof openProjectRunHaystack>['prepare'] | undefined;
+  let haystackLaunch;
+  const haystackRaw = process.env[HAYSTACK_LAUNCH_ENV];
+  if (haystackRaw !== undefined) {
+    try {
+      if (Buffer.byteLength(haystackRaw) > 8192) throw new Error('oversized config');
+      haystackLaunch = haystackLaunchSchema.parse(JSON.parse(haystackRaw));
+    } catch { throw new RunnerConfigError('invalid experimental Haystack configuration'); }
+  }
   let retrievalFromReceipt = false;
   try { retrievalFromReceipt = projectRetrievalEnabled(process.env); }
   catch { throw new RunnerConfigError('invalid project retrieval activation'); }
+  if (haystackLaunch && !retrievalFromReceipt) throw new RunnerConfigError('Haystack requires a project retrieval receipt');
   if (retrievalFromReceipt && (opts?.projectRetrieval || process.env['ATOMA_TENANT_RUN'] !== '1' || !requestedRunId)) {
     throw new RunnerConfigError('project retrieval activation requires an exclusive tenant run receipt');
   }
@@ -632,8 +644,11 @@ export async function startTask(
       throw new RunnerConfigError('project retrieval requires container isolation and tenant lifecycle settings');
     }
     try {
-      retrievalBinding = openProjectRunRetrieval({ dbPath, runId: requestedRunId!, workspacePath: workspaceRoot,
-        skillsPath: skillsDirPath(), runsPath: runsDir });
+      const paths = { dbPath, runId: requestedRunId!, workspacePath: workspaceRoot, skillsPath: skillsDirPath(), runsPath: runsDir };
+      if (haystackLaunch) {
+        const prepared = openProjectRunHaystack(paths, haystackLaunch);
+        retrievalBinding = prepared.binding; prepareRetrieval = prepared.prepare;
+      } else retrievalBinding = openProjectRunRetrieval(paths);
     } catch { throw new RunnerConfigError('project retrieval launch is unavailable or denied'); }
   }
   const tenantRun = process.env['ATOMA_TENANT_RUN'] === '1';
@@ -892,8 +907,11 @@ export async function startTask(
     onWedged();
   }, timeoutMs + WATCHDOG_GRACE_MS);
 
+  let retrievalPrepared = !prepareRetrieval;
   const settled = (async (): Promise<RunOutcome> => {
     try {
+      if (prepareRetrieval) await prepareRetrieval({ signal, deadlineAt });
+      retrievalPrepared = true;
       const result = await handle(task, ctx);
       clearTimeout(watchdog);
       const persistedRun = recorder.endRun({
@@ -986,7 +1004,7 @@ export async function startTask(
       console.error('');
       console.error(`LLM usage at abort:`);
       console.error(metrics.formatSummary());
-      console.error(formatRunStatsEpilogue(machineRunStats('failed', metrics, runSignals)));
+      console.error(formatRunStatsEpilogue(machineRunStats(retrievalPrepared ? 'failed' : 'error', metrics, runSignals)));
       console.error(
         `\nrun recorded in ${recorder.runsDir} — open the visualizer for details: npm run viz`
       );

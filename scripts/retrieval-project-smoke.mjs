@@ -16,6 +16,8 @@ import { ProjectRunCoordinator, projectRunHostLayout } from '../dist/projects/co
 import { buildArtifactManifest } from '../dist/projects/artifacts.js';
 import { closeStoreHandles } from '../dist/core/stores.js';
 import { ProjectRetrievalLaunchStore, openProjectRunRetrieval } from '../dist/projects/retrievalLaunch.js';
+import { openProjectRunHaystack } from '../dist/projects/retrievalHaystackLaunch.js';
+import { HAYSTACK_LAUNCH_ENV, haystackLaunchSchema } from '../dist/contracts/retrievalHaystack.js';
 import { parseRunLog, spawnRun } from '../dist/cli/burnin.js';
 import { L1Atom } from '../dist/atoms/L1Atom.js';
 import { AnthropicLlmClient } from '../dist/core/llm.js';
@@ -37,8 +39,10 @@ if (process.argv.includes('--child')) {
   env.ATOMA_BUILD_WORKSPACE = workspace + '-wrong';
   await assert.rejects(startTask(buildProfile, ['--container', '--no-promote-skills', '--no-direct-skills', 'Read docs.']), /unavailable or denied/);
   env.ATOMA_BUILD_WORKSPACE = workspace;
-  const binding = openProjectRunRetrieval({ dbPath: env.ATOMA_DB_PATH, runId: env.ATOMA_RUN_ID,
-    workspacePath: workspace, skillsPath: env.ATOMA_SKILLS_DIR, runsPath: env.ATOMA_RUNS_DIR });
+  const paths = { dbPath: env.ATOMA_DB_PATH, runId: env.ATOMA_RUN_ID, workspacePath: workspace,
+    skillsPath: env.ATOMA_SKILLS_DIR, runsPath: env.ATOMA_RUNS_DIR };
+  const prepared = env[HAYSTACK_LAUNCH_ENV] ? openProjectRunHaystack(paths, haystackLaunchSchema.parse(JSON.parse(env[HAYSTACK_LAUNCH_ENV]))) : null;
+  const binding = prepared?.binding ?? openProjectRunRetrieval(paths);
   const owner = resolveProjectRegistryOwner({ dbPath: env.ATOMA_DB_PATH, runId: env.ATOMA_RUN_ID,
     workspacePath: workspace, skillsPath: env.ATOMA_SKILLS_DIR, runsPath: env.ATOMA_RUNS_DIR });
   const registryDb = openDb(env.ATOMA_DB_PATH);
@@ -59,7 +63,7 @@ if (process.argv.includes('--child')) {
   mkdirSync(workspace, { recursive: true });
   writeFileSync(join(workspace, 'probe.txt'), 'workspace fixture');
   const realContainer = env.ATOMA_RETRIEVAL_SMOKE_CONTAINER === '1';
-  const base = realContainer ? await containerToolBackend({ workspaceRoot: workspace, egress: false }) : localToolBackend({ workspaceRoot: workspace, logger });
+  const base = realContainer ? await containerToolBackend({ workspaceRoot: workspace, egress: false, ...(env.ATOMA_RETRIEVAL_SMOKE_IMAGE ? { image: env.ATOMA_RETRIEVAL_SMOKE_IMAGE } : {}) }) : localToolBackend({ workspaceRoot: workspace, logger });
   assert.equal(base.executor.has(SEARCH), false);
   const backend = await withProjectRetrievalBackend(base, binding, run);
   const received = [];
@@ -73,7 +77,7 @@ if (process.argv.includes('--child')) {
       content: [
         { type: 'tool_use', id: 'search', name: SEARCH, input: { query: 'annual price' } },
         realContainer ? { type: 'tool_use', id: 'worker', name: 'run_shell', input: { command: 'node', args: ['-e',
-          'console.log(JSON.stringify({source:require("node:fs").existsSync(process.argv[1]),db:process.env.ATOMA_DB_PATH??null,retrieval:process.env.ATOMA_PROJECT_RETRIEVAL??null}))',
+          'console.log(JSON.stringify({source:require("node:fs").existsSync(process.argv[1]),db:process.env.ATOMA_DB_PATH??null,retrieval:process.env.ATOMA_PROJECT_RETRIEVAL??null,haystack:process.env.ATOMA_PROJECT_RETRIEVAL_HAYSTACK??null}))',
           join(dirname(workspace), 'retrieval-source/docs.md')] } } :
           { type: 'tool_use', id: 'worker', name: 'read_file', input: { path: 'probe.txt' } },
       ], stop_reason: 'tool_use', usage: { input_tokens: 1, output_tokens: 1 },
@@ -84,6 +88,7 @@ if (process.argv.includes('--child')) {
   const llm = new AnthropicLlmClient(sdk);
   const atom = new L1Atom({ name: 'Ammonia', ordinal: 3, model: 'test', systemPrompt: 'Consult source data.', tools: backend.toolDecls, params: {} });
   try {
+    await prepared?.prepare(run);
     const result = await atom.execute({ description: 'Find the annual price.' },
       { reasoning: 'Read original evidence', subtasks: [], aggregation: { mode: 'concat' }, expectedOutput: 'Cited price' },
       { ...run, limits: DEFAULT_LIMITS, logger, llm, tools: backend.executor });
@@ -91,7 +96,7 @@ if (process.argv.includes('--child')) {
     assert.deepEqual(result.toolCallResults, [{ name: SEARCH, ok: true }, { name: realContainer ? 'run_shell' : 'read_file', ok: true }]);
     if (realContainer) {
       assert.ok(received[1], JSON.stringify({ result, received }));
-      assert.deepEqual(JSON.parse(received[1].stdout), { source: false, db: null, retrieval: null });
+      assert.deepEqual(JSON.parse(received[1].stdout), { source: false, db: null, retrieval: null, haystack: null });
     }
     console.log('ATOMA_RETRIEVAL_SMOKE_READY');
     const tool = createProjectRetrievalTool(binding, run);
@@ -136,7 +141,9 @@ if (process.argv.includes('--child')) {
         ATOMA_PROJECT_RETRIEVAL: '1', ATOMA_MODEL_L1: 'api:ollama:test', ATOMA_MODEL_L2: 'api:ollama:test', ATOMA_MODEL_L3: 'api:ollama:test', OLLAMA_BASE_URL: 'http://127.0.0.1:1' },
       driver: async options => {
         const launches = ProjectRetrievalLaunchStore.open(dbPath);
-        childLog = await spawnRun({ ...options, env: { ...options.env, ATOMA_RETRIEVAL_SMOKE_CONTAINER: realContainer ? '1' : '0' },
+        childLog = await spawnRun({ ...options, env: { ...options.env, ATOMA_RETRIEVAL_SMOKE_CONTAINER: realContainer ? '1' : '0',
+          ATOMA_RETRIEVAL_SMOKE_IMAGE: process.env.ATOMA_RETRIEVAL_SMOKE_IMAGE,
+          ...(process.argv.includes('--haystack') ? { [HAYSTACK_LAUNCH_ENV]: JSON.stringify(haystackLaunchSchema.parse(JSON.parse(process.env[HAYSTACK_LAUNCH_ENV]))) } : {}) },
           hardKillMarginMs: 0, onChunk: chunk => {
             if (chunk.includes('ATOMA_RETRIEVAL_SMOKE_READY')) launches.revoke(options.env.ATOMA_RUN_ID);
           } });

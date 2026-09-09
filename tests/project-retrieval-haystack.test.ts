@@ -1,3 +1,6 @@
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { fileURLToPath } from 'node:url';
 import { mkdtempSync, writeFileSync, rmSync, readFileSync, mkdirSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -123,6 +126,19 @@ describe('experimental Haystack host boundary', () => {
 
 const python = process.env['ATOMA_HAYSTACK_TEST_PYTHON'];
 describe.skipIf(!python)('real optional Haystack runtime', () => {
+  it('exits when its host input pipe disappears', async () => {
+    const child = spawn(python!, ['-I', '-u', fileURLToPath(new URL('../scripts/retrieval-haystack.py', import.meta.url))],
+      { stdio: ['pipe', 'pipe', 'pipe'], env: { HAYSTACK_TELEMETRY_ENABLED: 'False', HF_HUB_OFFLINE: '1' } });
+    child.stderr.resume();
+    const closed = once(child, 'close');
+    try {
+      child.stdin.write(JSON.stringify({ id: 0, op: 'init', settings: { mode: 'bm25' }, documents: [] }) + '\n');
+      await once(child.stdout, 'data');
+      child.stdin.destroy();
+      expect((await closed)[0]).toBe(0);
+    } finally { child.kill('SIGKILL'); }
+  }, 15_000);
+
   it('loads the pinned framework and retrieves source bytes across the Python boundary', async () => {
     const input = await fixture();
     const binding = await createHaystackRetrievalBinding({ ...input, python: python!, context: retrievalContext(60_000) });

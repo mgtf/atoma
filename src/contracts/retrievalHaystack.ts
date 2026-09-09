@@ -13,10 +13,14 @@ export const haystackSettingsSchema = z.discriminatedUnion('mode', [
     queryPrefix: z.string().max(1000),
     embeddingRevision: projectDocumentDigestSchema, rerankerRevision: projectDocumentDigestSchema }).strict(),
 ]);
+export const HAYSTACK_LAUNCH_ENV = 'ATOMA_PROJECT_RETRIEVAL_HAYSTACK';
+export const haystackLaunchSchema = z.object({ python: localPath, settings: haystackSettingsSchema,
+  runtimeSha256: projectDocumentDigestSchema }).strict();
+export type HaystackLaunch = z.infer<typeof haystackLaunchSchema>;
 export type HaystackSettings = z.infer<typeof haystackSettingsSchema>;
 export const haystackReplySchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('ready'), id: z.literal(0), version: z.literal(HAYSTACK_VERSION),
-    documents: z.number().int().nonnegative() }).strict(),
+    documents: z.number().int().nonnegative(), runtimeSha256: projectDocumentDigestSchema.optional() }).strict(),
   z.object({ kind: z.literal('result'), id: z.number().int().positive(),
     hits: z.array(z.object({ id: projectDocumentDigestSchema, score: z.number().finite() }).strict()).max(100) }).strict(),
   z.object({ kind: z.literal('error'), id: z.number().int().nonnegative() }).strict(),

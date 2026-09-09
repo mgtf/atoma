@@ -10,6 +10,7 @@ import { openDb } from '../registry/db.js';
 import type { RetrievalRegistration, RetrievalScheduleEntry } from '../contracts/retrievalCampaign.js';
 import type { RunStats } from '../contracts/runStats.js';
 import { questionFor, snapshotFor, type RetrievalDataset } from './retrievalDataset.js';
+import { HAYSTACK_LAUNCH_ENV } from '../contracts/retrievalHaystack.js';
 import { parseRunLog } from './burnin.js';
 
 /** Synthetic host-owned project authorities; all three arms take the same tenant runner path. */
@@ -54,20 +55,26 @@ export async function prepareRetrievalProjectAttempt(input: {
       dbPath, runId, orgId: viewer.orgId, tierModels: { l1: s.models.l1, l2: s.models.l2, l3: s.models.l3 },
       subscriptionTransport: { principalId: viewer.principalId }, workspacePath: layout.workspacePath,
       runsPath: layout.runsPath, skillsPath: layout.skillsPath, artifactManifestPath: layout.artifactManifestPath });
-    const env = { ...input.env, ...built.environment, ATOMA_SKILL_LEARN: '0', ATOMA_EVENT_SKILLS: '0',
-      ATOMA_PROJECT_RETRIEVAL: entry.arm === 'atoma-bm25' ? '1' : '0' };
+    const treatment = entry.arm === 'atoma-bm25' || entry.arm === 'atoma-haystack';
+    const env: NodeJS.ProcessEnv = { ...input.env, ...built.environment, ATOMA_SKILL_LEARN: '0', ATOMA_EVENT_SKILLS: '0',
+      ATOMA_PROJECT_RETRIEVAL: treatment ? '1' : '0' };
+    if (entry.arm === 'atoma-haystack') {
+      if (s.treatment?.backend !== 'haystack') throw new Error('missing Haystack treatment');
+      env[HAYSTACK_LAUNCH_ENV] = JSON.stringify(s.treatment.launch);
+    }
     const before = process.cpuUsage(); const started = performance.now();
     let receipt: unknown = null;
-    if (entry.arm === 'atoma-bm25') {
+    if (treatment) {
       receipt = await new ProjectRetrievalLaunchStore(db).prepare(runId, sourceId, { signal, deadlineAt });
     }
     const cpu = process.cpuUsage(before);
-    const preparation = { backend: entry.arm === 'atoma-bm25' ? 'sqlite-fts5' : null, receipt,
+    const preparation = { backend: treatment ? s.treatment!.backend : null, receipt,
+      phase: 'source-receipt-and-fts-cache; Haystack warmup occurs inside the timed child run',
       elapsedMs: performance.now() - started, cpuUserMicros: cpu.user, cpuSystemMicros: cpu.system,
       processRssBytes: process.memoryUsage().rss,
       storeBytes: (db.pragma('page_count', { simple: true }) as number) * (db.pragma('page_size', { simple: true }) as number),
       documents: snapshot.documents.length, sourceBytes: snapshot.documents.reduce((n, d) => n + d.bytes, 0),
-      passages: entry.arm === 'atoma-bm25' ?
+      passages: treatment ?
         (db.prepare("SELECT SUM(passage_count) AS n FROM project_retrieval_generations_v1 WHERE status = 'ready'").get() as { n: number }).n : 0,
       payers: built.payers };
     writeFileSync(join(attempt, 'preparation.json'), JSON.stringify(preparation, null, 2) + '\n', { flag: 'wx', mode: 0o600 });

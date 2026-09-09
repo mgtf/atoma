@@ -16,11 +16,12 @@ export const RETRIEVAL_CAMPAIGN_POLICY =
   'container-no-egress; fresh-prebootstrap-state; learning-promotion-direct-event-skills-off; prefilter-cache-off; provider-cache-uncontrolled' as const;
 
 export function retrievalCampaignPolicy(spec: RetrievalCampaignSpec): RetrievalRegistration['policy'] {
-  return spec.kind === 'agentic-characterization' ? RETRIEVAL_CAMPAIGN_POLICY :
+  return spec.kind === 'agentic-characterization' ? RETRIEVAL_CAMPAIGN_POLICY : spec.kind === 'haystack-development' ?
+    'project-container-no-egress; fresh-authority-and-registry-per-attempt; learning-promotion-direct-event-skills-off; prefilter-cache-off; provider-cache-uncontrolled; local-haystack-treatment' :
     'project-container-no-egress; fresh-authority-and-registry-per-attempt; learning-promotion-direct-event-skills-off; prefilter-cache-off; provider-cache-uncontrolled; bm25-only-treatment';
 }
 
-export function retrievalTreatmentSettings(): NonNullable<RetrievalCampaignSpec['treatment']> {
+export function retrievalTreatmentSettings(): Extract<NonNullable<RetrievalCampaignSpec['treatment']>, { backend: 'sqlite-fts5' }> {
   return { backend: 'sqlite-fts5', index: retrievalIndexConfig(), queryLimits: DEFAULT_PROJECT_RETRIEVAL_LIMITS, ranking: PROJECT_RETRIEVAL_BM25 };
 }
 
@@ -58,13 +59,14 @@ export function retrievalSchedule(spec: RetrievalCampaignSpec): RetrievalSchedul
   let pair = 0;
   for (let repetition = 1; repetition <= spec.repetitions; repetition++) {
     for (const questionId of spec.questionIds) {
-      if (spec.kind === 'bm25-development') {
+      if (spec.kind !== 'agentic-characterization') {
+        const treatmentArm = spec.kind === 'haystack-development' ? 'atoma-haystack' : 'atoma-bm25';
         // Six permutations balance every position and both A/B orders over six tasks.
         const cycles = [['atoma', 'atoma-bm25', 'frontier-direct'], ['frontier-direct', 'atoma-bm25', 'atoma'],
           ['atoma-bm25', 'frontier-direct', 'atoma'], ['atoma', 'frontier-direct', 'atoma-bm25'],
           ['frontier-direct', 'atoma', 'atoma-bm25'], ['atoma-bm25', 'atoma', 'frontier-direct']] as const;
         const offset = spec.firstArm === 'atoma' ? 0 : spec.firstArm === 'frontier-direct' ? 1 : 2;
-        for (const arm of cycles[(pair++ + offset) % cycles.length]!) entries.push({ ordinal: entries.length + 1, questionId, repetition, arm });
+        for (const arm of cycles[(pair++ + offset) % cycles.length]!) entries.push({ ordinal: entries.length + 1, questionId, repetition, arm: arm === 'atoma-bm25' ? treatmentArm : arm });
         continue;
       }
       const other = spec.firstArm === 'atoma' ? 'frontier-direct' : 'atoma';
@@ -86,6 +88,11 @@ export function validateRetrievalRegistration(
   if (registration.spec.kind === 'bm25-development' &&
       !isDeepStrictEqual(registration.spec.treatment, retrievalTreatmentSettings())) {
     throw new Error('registered retrieval backend settings differ from the production defaults');
+  }
+  const treatment = registration.spec.treatment;
+  if (treatment?.backend === 'haystack' && (!isDeepStrictEqual(treatment.index, retrievalIndexConfig()) ||
+      !isDeepStrictEqual(treatment.queryLimits, DEFAULT_PROJECT_RETRIEVAL_LIMITS))) {
+    throw new Error('registered Haystack settings differ from the shared corpus/query defaults');
   }
   for (const id of registration.spec.questionIds) {
     const q = questionFor(dataset, id);

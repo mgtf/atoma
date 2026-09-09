@@ -3,6 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { L3Atom } from '../src/atoms/L3Atom.js';
+import { haystackTestRuntime } from './helpers/haystack.js';
+import { HAYSTACK_LAUNCH_ENV } from '../src/contracts/retrievalHaystack.js';
+import { parseRunStatsEpilogue } from '../src/contracts/runStats.js';
 import { MockLlmClient } from '../src/core/llm.js';
 import { resetHostLifecycleSnapshotForTests, startTask } from '../src/run/runner.js';
 import { buildProfile } from '../src/run/profiles/build.js';
@@ -41,14 +44,15 @@ function environment() {
     ATOMA_BASELINE_MODEL: 'api:ollama:test', ATOMA_BUILD_WORKSPACE: join(root, 'workspace'),
     ATOMA_DB_PATH: join(root, 'store.db'), ATOMA_LEDGER_DB: join(root, 'store.db'),
     ATOMA_SKILLS_DIR: join(root, 'skills'), ATOMA_RUNS_DIR: join(root, 'traces'),
-    ATOMA_BUILD_TIMEOUT_MS: '10000', ATOMA_EGRESS: '0', ATOMA_TENANT_RUN: '', ATOMA_RUN_ID: 'test-run',
+    [HAYSTACK_LAUNCH_ENV]: '', ATOMA_BUILD_TIMEOUT_MS: '10000', ATOMA_EGRESS: '0', ATOMA_TENANT_RUN: '', ATOMA_RUN_ID: 'test-run',
   })) vi.stubEnv(key, value);
+  vi.stubEnv(HAYSTACK_LAUNCH_ENV, undefined);
   resetHostLifecycleSnapshotForTests();
   return root;
 }
 
 describe('trusted retrieval injection through startTask', () => {
-  it('resolves the coordinator receipt through the real startTask path without a library injection', async () => {
+  it.each(['fts5', 'haystack', 'broken-haystack'])('resolves the coordinator receipt through startTask with %s', async mode => {
     const root = environment();
     const f = projectRetrievalFixture(root);
     const source = f.makeRun({ 'docs.md': 'Private price is 190 euros.\n' });
@@ -57,7 +61,13 @@ describe('trusted retrieval injection through startTask', () => {
     for (const [key, value] of Object.entries({ ATOMA_PROJECT_RETRIEVAL: '1', ATOMA_TENANT_RUN: '1', ATOMA_RUN_ID: current.run.projectRunId,
       ATOMA_DB_PATH: f.dbPath, ATOMA_BUILD_WORKSPACE: current.layout.workspacePath, ATOMA_RUNS_DIR: current.layout.runsPath,
       ATOMA_SKILLS_DIR: current.layout.skillsPath, ATOMA_SKILL_PROMOTE: '0', ATOMA_SKILL_DIRECT: '0', ATOMA_PREFILTER_CACHE: '0' })) vi.stubEnv(key, value);
+    if (mode !== 'fts5') {
+      const config = haystackTestRuntime(root);
+      if (mode === 'broken-haystack') config.runtimeSha256 = 'e'.repeat(64);
+      vi.stubEnv(HAYSTACK_LAUNCH_ENV, JSON.stringify(config));
+    }
     resetHostLifecycleSnapshotForTests();
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     const llm = new MockLlmClient();
     let observed: unknown;
     llm.enqueue(async req => {
@@ -68,9 +78,13 @@ describe('trusted retrieval injection through startTask', () => {
     vi.mocked(containerToolBackend).mockImplementation(async opts => localToolBackend({ workspaceRoot: opts.workspaceRoot, logger: silentLogger() }));
     const handle = await startTask(buildProfile, ['--container', '--baseline', '--no-learn-skills', '--no-promote-skills', '--no-direct-skills', 'Consult the source.']);
     try {
-      expect((await handle.settled).outcome).toBe('delivered');
-      expect(observed).toMatchObject({ ok: true, passages: [expect.objectContaining({ excerpt: 'Private price is 190 euros.\n' })] });
+      expect((await handle.settled).outcome).toBe(mode === 'broken-haystack' ? 'failed' : 'delivered');
+      if (mode === 'broken-haystack') {
+        expect(observed).toBeUndefined();
+        expect(parseRunStatsEpilogue(errors.mock.calls.map(c => c.join(' ')).join('\n'))).toMatchObject({ outcome: 'error', llmCalls: 0 });
+      } else expect(observed).toMatchObject({ ok: true, passages: [expect.objectContaining({ excerpt: 'Private price is 190 euros.\n' })] });
     } finally { await handle.shutdown(); }
+    if (mode !== 'fts5') expect(() => process.kill(Number(readFileSync(join(root, 'haystack.pid'), 'utf8')), 0)).toThrow();
   });
 
   it('constructs a private registry through startTask even with retrieval disabled', async () => {
