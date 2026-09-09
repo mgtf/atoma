@@ -5413,6 +5413,34 @@ describe('render groups — per-frame animation stays off the root batch', () =>
     }
   });
 
+  it('shows pending frontier usage, partial totals, then the final receipt', () => {
+    const start: VizEvent = {
+      id: 'start', kind: 'llm-start', ts: Date.now(), llmEventId: 'receipt',
+      actor: { tier: 3, name: 'BaselineFrontierDirect' },
+    };
+    const render = (run: VizRun) => {
+      const ctx = createRecordingCtx();
+      drawRuns(ctx, makeSnapshot({}, { run }), 1280, 800);
+      return ctx.statCards.map(({ value }) => value);
+    };
+    const run = makeRun([start], {
+      startedAt: new Date().toISOString(), endedAt: undefined, durationMs: undefined,
+      totals: { calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 },
+    });
+    expect(render(run).filter((value) => value === 'Awaiting usage')).toHaveLength(2);
+    expect(render({ ...run, endedAt: new Date().toISOString() }))
+      .toContain('Usage unavailable');
+    const totals = { calls: 1, inputTokens: 26, outputTokens: 7360, costUsd: 0.55138 };
+    expect(render({ ...run, totals })).toContain('$0.5514 (partial)');
+    const final = render({
+      ...run, totals, endedAt: new Date().toISOString(),
+      events: [start, makeLlmEvent('receipt')],
+    });
+    expect(final).toContain('26/7360');
+    expect(final).toContain('$0.5514');
+    expect(final).not.toContain('Awaiting usage');
+  });
+
   it('groups the runs view chips, agent lanes and stat tiles by band', () => {
     const ctx = createRecordingCtx();
     const events: VizEvent[] = [

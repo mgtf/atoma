@@ -1051,14 +1051,23 @@ function drawRunStatGrid(
 ): number {
   const inFlight = inFlightLlmEvents(run);
   const completedCalls = run.totals?.calls ?? 0;
+  // Usage arrives with the completed provider call, including a whole frontier
+  // tool loop. Keep known totals, but never present them as complete while
+  // another call has no usage receipt (even after an interrupted run).
+  const usageValue = (value: string): string =>
+    inFlight.length
+      ? completedCalls > 0
+        ? snapshot.t('summary.usagePartial', { value })
+        : snapshot.t(run.endedAt ? 'summary.usageUnavailable' : 'summary.usagePending')
+      : value;
   const stats: [string, string][] = [
     [snapshot.t('summary.duration'), fmtMs(runElapsedMs(run))],
     [
       snapshot.t('summary.llmCalls'),
       inFlight.length ? `${completedCalls} (+${inFlight.length})` : scalar(run.totals?.calls, '0'),
     ],
-    [snapshot.t('summary.tokens'), `${run.totals?.inputTokens ?? 0}/${run.totals?.outputTokens ?? 0}`],
-    [snapshot.t('summary.cost'), fmtCost(run.totals?.costUsd)],
+    [snapshot.t('summary.tokens'), usageValue(`${run.totals?.inputTokens ?? 0}/${run.totals?.outputTokens ?? 0}`)],
+    [snapshot.t('summary.cost'), usageValue(fmtCost(run.totals?.costUsd))],
   ];
   const accents = [GPU_COLORS.cyan, GPU_COLORS.tiers[3], GPU_COLORS.primary, GPU_COLORS.success];
   const statWidth = (width - RUN_STAT_GAP) / 2;
