@@ -1109,5 +1109,8 @@
   "settings.mcpHelpHint": "Reconnecte-toi depuis ton agent si l’accès ne fonctionne plus. Vérifie que l’adresse se termine par /mcp et que tu as approuvé la bonne organisation. Pour vérifier la connexion, demande à ton agent de lister tes projets Atoma.",
   "skillReason.successNotFollowed": "Succès non crédité — le validateur a constaté que le run n’a pas suivi la recette",
   "skillReason.failureNotFollowed": "Échec non attribué — le validateur a constaté que le run n’a pas suivi la recette",
-  "sentinel.rule.trajectory-drift": "Une exécution de Molécule clôturée dont la séquence ordonnée d’éléments s’écarte fortement de toutes les exécutions créditées de la même Molécule et du même skill dans les runs terminés, dès que trois sont connues. Non calibré : une ligne à lire, jamais un jugement."
+  "sentinel.rule.trajectory-drift": "Une exécution de Molécule clôturée dont la séquence ordonnée d’éléments s’écarte fortement de toutes les exécutions créditées de la même Molécule et du même skill dans les runs terminés, dès que trois sont connues. Non calibré : une ligne à lire, jamais un jugement.",
+  "summary.usagePending": "En attente de l’usage",
+  "summary.usageUnavailable": "Usage indisponible",
+  "summary.usagePartial": "{{value}} (partiel)"
 }

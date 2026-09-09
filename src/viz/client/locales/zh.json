@@ -1109,5 +1109,8 @@
   "settings.mcpHelpHint": "如果访问失效，请从智能体重新连接。检查地址是否以 /mcp 结尾，并确认你批准了正确的组织。要验证连接，请让智能体列出你的 Atoma 项目。",
   "skillReason.successNotFollowed": "成功未计入——验证器发现该 run 未遵循操作流程",
   "skillReason.failureNotFollowed": "失败未归因——验证器发现该 run 未遵循操作流程",
-  "sentinel.rule.trajectory-drift": "当已知的已计入执行达到三次后，某次已结束的 Molecule 执行，其有序元素序列与已完成 run 中同一 Molecule 和 skill 的每次已计入执行都相差甚远。未校准：只是供查看的一行信息，绝非判断。"
+  "sentinel.rule.trajectory-drift": "当已知的已计入执行达到三次后，某次已结束的 Molecule 执行，其有序元素序列与已完成 run 中同一 Molecule 和 skill 的每次已计入执行都相差甚远。未校准：只是供查看的一行信息，绝非判断。",
+  "summary.usagePending": "正在等待用量数据",
+  "summary.usageUnavailable": "用量数据不可用",
+  "summary.usagePartial": "{{value}}（部分）"
 }
