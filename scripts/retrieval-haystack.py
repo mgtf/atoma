@@ -95,7 +95,7 @@ def main():
                     response = {"kind": "ready", "id": request_id, "version": __version__, "documents": len(documents), "runtimeSha256": runtime_identity()["sha256"]}
                 elif request["op"] == "search" and pipeline is not None:
                     query, limit = request["query"], request["limit"]
-                    inputs = {"bm25": {"query": query, "top_k": limit}}
+                    inputs = {"bm25": {"query": request["lexicalQuery"], "top_k": limit}}
                     target = "bm25"
                     if mode == "hybrid-rerank":
                         inputs.update({"embed": {"text": query}, "dense": {"top_k": limit},
@@ -117,7 +117,18 @@ def main():
 
 
 if __name__ == "__main__":
-    if sys.argv[1:] == ["--identity"]:
+    if sys.argv[1:] in (["--check"], ["--check-hybrid"]):
+        with contextlib.redirect_stdout(sys.stderr):
+            from haystack import __version__
+            if __version__ != "3.1.1":
+                raise ValueError("unsupported Haystack version")
+            from haystack.components.retrievers.in_memory import InMemoryBM25Retriever
+            if sys.argv[1:] == ["--check-hybrid"]:
+                from haystack_integrations.components.embedders.sentence_transformers import SentenceTransformersDocumentEmbedder, SentenceTransformersTextEmbedder
+                from haystack_integrations.components.rankers.sentence_transformers import SentenceTransformersSimilarityRanker
+                import torch
+        print(json.dumps(runtime_identity()))
+    elif sys.argv[1:] == ["--identity"]:
         print(json.dumps(runtime_identity()))
     else:
         main()

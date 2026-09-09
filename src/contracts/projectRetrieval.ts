@@ -44,6 +44,7 @@ export const DEFAULT_PROJECT_RETRIEVAL_LIMITS = projectRetrievalLimitsSchema.par
 
 /** Materialized backend query; terms are data, never a raw FTS expression. */
 export const projectRetrievalQuerySchema = z.object({
+  text: projectRetrievalRequestSchema.shape.query,
   terms: z.array(z.string().min(1).max(128)).min(1).max(32).readonly(),
   limit: z.number().int().min(1).max(10),
   maxExcerptBytes: z.number().int().min(128).max(4096),
@@ -58,6 +59,7 @@ export function parseProjectRetrievalQuery(
   if (!parsed.success || Buffer.byteLength(parsed.data.query, 'utf8') > limits.maxQueryBytes) return null;
   const terms = [...new Set(parsed.data.query.normalize('NFC').toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) ?? [])];
   const query = projectRetrievalQuerySchema.safeParse({
+    text: parsed.data.query.normalize('NFC'),
     terms, limit: Math.min(parsed.data.limit ?? limits.maxResults, limits.maxResults),
     maxExcerptBytes: Math.min(parsed.data.maxExcerptBytes ?? limits.maxExcerptBytes, limits.maxExcerptBytes),
     maxCandidates: limits.maxCandidates,
@@ -73,6 +75,12 @@ export const projectDocumentPathSchema = z.string().min(1).max(512).refine(path 
 const offset = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const line = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 
+/** Copyable source reference; the quote retains original line endings. */
+export const projectRetrievalCitationSchema = z.object({
+  path: projectDocumentPathSchema, sha256: projectDocumentDigestSchema,
+  startLine: line, endLine: line, quote: z.string().min(1).max(4096),
+}).strict();
+
 export const projectRetrievalPassageSchema = z.object({
   documentId: projectDocumentDigestSchema,
   path: projectDocumentPathSchema,
@@ -82,6 +90,7 @@ export const projectRetrievalPassageSchema = z.object({
   headingContext: z.array(z.string().max(256)).max(6),
   excerpt: z.string().min(1).max(4096),
   score: z.number().finite().optional(),
+  citation: projectRetrievalCitationSchema.optional(),
 }).strict().superRefine((p, ctx) => {
   const bytes = Buffer.byteLength(p.excerpt, 'utf8');
   const lines = p.excerpt.split('\n').length - (p.excerpt.endsWith('\n') ? 1 : 0);
@@ -90,8 +99,17 @@ export const projectRetrievalPassageSchema = z.object({
       Buffer.from(p.excerpt, 'utf8').toString('utf8') !== p.excerpt) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'inconsistent original-source span' });
   }
+  if (p.citation && (p.citation.path !== p.path || p.citation.sha256 !== p.sha256 ||
+      p.citation.startLine !== p.startLine || p.citation.endLine !== p.endLine || p.citation.quote !== p.excerpt)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'citation differs from original-source span' });
+  }
 });
 export type ProjectRetrievalPassage = z.infer<typeof projectRetrievalPassageSchema>;
+
+export function projectRetrievalCitation(passage: ProjectRetrievalPassage): z.infer<typeof projectRetrievalCitationSchema> {
+  return { path: passage.path, sha256: passage.sha256, startLine: passage.startLine,
+    endLine: passage.endLine, quote: passage.excerpt };
+}
 
 export const projectRetrievalResponseSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true), status: z.literal('ok'), ...sourceBinding,

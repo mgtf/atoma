@@ -19,6 +19,15 @@ describe('L1Atom', () => {
     params: { temperature: 0 },
   };
 
+  it('exposes the effective remaining tool budget to execution without raising it', async () => {
+    const ctx = { ...makeCtx(), deadlineAt: Date.now() + 80_000 };
+    ctx.llm.enqueueText(jsonText({ output: 'ok', summary: 's' }));
+    await new L1Atom(base).execute({ description: 'Finish the configuration and its answer file' }, makePlan(), ctx);
+    const call = ctx.llm.calls[0]!;
+    expect(call.maxToolIterations).toBeLessThan(24);
+    expect(call.userContent).toContain(`at most ${call.maxToolIterations} tool iterations`);
+  });
+
   it('produces a Plan from a JSON response', async () => {
     const ctx = makeCtx();
     ctx.llm.enqueueText(

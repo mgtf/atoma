@@ -23,6 +23,8 @@
     "test:watch": "vitest",
     "doctor": "node dist/cli/doctor.js",
     "doctor:dev": "tsx src/cli/doctor.ts",
+    "haystack:config": "node dist/cli/haystackConfig.js",
+    "haystack:config:dev": "tsx src/cli/haystackConfig.ts",
     "deploy:preflight": "node dist/cli/deploy-preflight.js",
     "auth": "node dist/cli/auth.js",
     "auth:dev": "tsx src/cli/auth.ts",

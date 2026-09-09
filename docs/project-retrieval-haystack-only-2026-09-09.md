@@ -71,6 +71,18 @@ PY
 )"
 ```
 
+To store the generated value in a checkout `.env`, print the literal line:
+
+```bash
+printf "ATOMA_HAYSTACK_CONFIG='%s'\n" "$ATOMA_HAYSTACK_CONFIG"
+```
+
+Copy that output into `.env`, replacing any existing entry for this key.
+Do not put the command substitution itself into `.env`: dotenv does not
+execute shell commands. `.env.example` includes the corresponding template.
+Compiled services read the process environment, so their service environment
+must receive the same value; placing it in `.env` alone does not configure them.
+
 These are host settings for the compiled projects CLI or viz coordinator;
 restart a long-running coordinator after changing them. The Python path is
 a placeholder for the operator's provisioned environment. Hybrid settings
@@ -80,6 +92,68 @@ validates runtime identity and consumes the run budget before any model
 completion. Failure or cancellation closes Python and preserves accounting.
 
 ## Benchmarks and verification
+
+### Host configuration and diagnostics
+
+After provisioning the Python environment and model directories, generate
+configuration with the supported CLI (from the repository root):
+
+```bash
+npm run --silent haystack:config:dev -- \
+  --python /absolute/venv/bin/python \
+  --embedding /absolute/models/embedding \
+  --reranker /absolute/models/reranker \
+  --query-prefix 'Represent this sentence for searching relevant passages: '
+```
+
+The prefix above belongs to the tested BGE English model; supply the prefix
+required by your chosen model, including an explicit empty string when needed.
+Omit all three model options for BM25. The command prints JSON only, computes
+content pins with the production reader, and checks runtime imports offline.
+It never downloads models or rewrites `.env`. Paste its JSON into the quoted
+`ATOMA_HAYSTACK_CONFIG` entry in `.env` for development. For production, use
+`npm run --silent haystack:config -- ...` from the built release on the target
+host and put the entry in `/home/atoma/config/atoma.env` for the supplied systemd
+service. Restart the coordinator while idle after changing configuration.
+
+`npm run doctor:dev` loads the checkout environment; `npm run doctor` checks
+the process environment of a compiled deployment. Configured search is checked
+for importability, runtime identity and model content pins without inference,
+downloads or provider calls. Missing configuration fails a gated project host
+and warns an ungated operator host. A passing check does not prove model weights
+can load or answer correctly; use the real runtime smoke for that proof.
+
+Package installation still uses `scripts/requirements-haystack-hybrid.txt`.
+This pins direct dependencies, not a complete platform-specific dependency
+lock or an immutable runtime image. Those packaging steps remain outstanding.
+
+Semantic retrieval and reranking receive the original NFC query; only BM25
+receives the normalized lexical terms. Historical benchmark results predate
+this correction and must not be attributed to the new query path.
+
+### Citation assembly and incomplete delivery
+
+Every returned passage now includes a `citation` object with `path`, `sha256`,
+`startLine`, `endLine` and `quote`. The host derives it from the admitted passage,
+preserving blank lines, CRLF and the final newline. Copy it as a whole reference;
+it does not claim which individual line proves a fact. Narrower citations need
+an explicit source read and exact-line verification. Backend-supplied citations
+that disagree with the passage are refused. Citation bytes count toward the
+existing response cap, so fewer passages may fit; no response budget is raised.
+
+The [archived pilot](../benchmark/retrieval-haystack-agent-pilot-2026-09-09/README.md)
+shows two different failure paths. On question 05 the source was retrieved but
+its lines were misquoted. On question 13 the frontier explicitly reported tool
+budget exhaustion after its configuration edit; Atoma's later answer-writing
+phase was never reached before the deadline, while retries repeated discovery.
+There is no evidence that a missing-file gate alone would complete either run.
+
+L1 execution now sees the same effective tool-iteration limit sent to its
+transport, with guidance to reserve capacity for all deliverables and resume
+from current state. This does not increase budgets or preserve provider sessions
+between retries. No new validation gate, automatic search injection or line
+reranking is introduced. These changes require a fresh registered pilot to
+establish any task-success benefit; the historical scorer remains unchanged.
 
 The former SQLite implementation lives only in
 `benchmark/haystack/sqliteBaseline.ts`, for the component comparator. Its native

@@ -33,6 +33,7 @@ const reply = value => process.stdout.write(JSON.stringify(value) + '\\n');
 let documents;
 require('node:readline').createInterface({input:process.stdin}).on('line', line => {
  const request = JSON.parse(line);
+ if(request.op === 'search') fs.writeFileSync(${JSON.stringify(join(root, 'query.json'))}, JSON.stringify(request));
  if(request.op === 'init') {
    documents = request.documents;
    if(mode === 'env' && (process.env.OPENAI_API_KEY || process.env.HOME || process.env.PYTHONPATH || process.env.HF_HUB_OFFLINE !== '1')) process.exit(2);
@@ -55,6 +56,13 @@ async function bind(behavior = 'valid') {
 }
 
 describe('experimental Haystack host boundary', () => {
+  it('preserves NFC text for semantic search across the child boundary', async () => {
+    const { tool } = await bind();
+    expect(await tool.execute({ query: 'Cafe\u0301 : pourquoi NON, non ?' })).toMatchObject({ ok: true });
+    expect(JSON.parse(readFileSync(join(root, 'query.json'), 'utf8'))).toMatchObject({
+      query: 'Café : pourquoi NON, non ?', lexicalQuery: 'café pourquoi non',
+    });
+  });
   it('returns exact admitted passages through the existing L1 element and honors live revocation', async () => {
     const { tool, binding, authority, corpus } = await bind();
     const result = await tool.execute({ query: 'price', limit: 1 });

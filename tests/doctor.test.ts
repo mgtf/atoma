@@ -54,6 +54,18 @@ function dependencies(
 }
 
 describe('atoma doctor', () => {
+  it('checks configured Haystack pins and reports verification failures without a model call', async () => {
+    const config = { python: '/host/python', runtimeSha256: 'a'.repeat(64), settings: { mode: 'bm25' } };
+    const env = { ...ANTHROPIC_PINS, ATOMA_HAYSTACK_CONFIG: JSON.stringify(config) };
+    const mode = { container: false, egress: false };
+    let received: unknown;
+    const pass = await diagnoseDoctor({ mode, env, dependencies: dependencies({ verifyHaystack: async launch => { received = launch; } }) });
+    expect(received).toEqual(config);
+    expect(pass.checks.find(c => c.id === 'haystack')?.status).toBe('pass');
+    const fail = await diagnoseDoctor({ mode, env, dependencies: dependencies({ verifyHaystack: async () => { throw new Error('changed model'); } }) });
+    expect(fail.checks.find(c => c.id === 'haystack')).toMatchObject({ status: 'fail', detail: 'changed model' });
+    expect(fail.ready).toBe(false);
+  });
   it.each([
     ['v20.18.9', false],
     ['v20.19.0', false],

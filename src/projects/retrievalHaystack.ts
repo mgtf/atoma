@@ -133,7 +133,7 @@ export async function createHaystackRetrievalBinding(input: {
         await binding.service.authorize(candidate, context) === true,
       search: async (candidate, query, context) => {
         if (closed || JSON.stringify(candidate) !== JSON.stringify(scope)) return { ok: false, status: 'denied' };
-        const result = await process.send({ op: 'search', query: query.terms.join(' '), limit: query.maxCandidates }, context);
+        const result = await process.send({ op: 'search', query: query.text, lexicalQuery: query.terms.join(' '), limit: query.maxCandidates }, context);
         if (result.kind !== 'result' || result.hits.length > query.maxCandidates || new Set(result.hits.map(h => h.id)).size !== result.hits.length) {
           throw new Error('Haystack invalid result');
         }

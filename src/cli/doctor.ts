@@ -12,6 +12,8 @@
  */
 import { execFile } from 'node:child_process';
 import { diagnosePreview } from './doctorPreview.js';
+import { readHaystackLaunch, HAYSTACK_LAUNCH_ENV } from '../contracts/retrievalHaystack.js';
+import { verifyHaystackLaunch } from '../projects/retrievalRuntime.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -77,6 +79,7 @@ export interface DoctorDependencies {
   ): Promise<{ stdout: string; stderr: string }>;
   fetchStatus(url: string, timeoutMs: number): Promise<{ ok: boolean; status: number }>;
   probeWorker(image: string): Promise<{ toolCount: number }>;
+  verifyHaystack: typeof verifyHaystackLaunch;
 }
 
 export interface ParsedDoctorOptions {
@@ -307,6 +310,7 @@ function defaultDependencies(): DoctorDependencies {
     runCommand: defaultRunCommand,
     fetchStatus: defaultFetchStatus,
     probeWorker: defaultProbeWorker,
+    verifyHaystack: verifyHaystackLaunch,
   };
 }
 
@@ -664,6 +668,23 @@ export async function diagnoseDoctor(args: {
 
   checks.push(checkVisualizerAuth(env));
   checks.push(checkGitHubApp(env));
+  let projectHost = false;
+  try { projectHost = vizAuthEnabled(env); } catch { /* Auth check already reports invalid configuration. */ }
+  if (env[HAYSTACK_LAUNCH_ENV] || projectHost) {
+    try {
+      const launch = readHaystackLaunch(env);
+      await deps.verifyHaystack(launch);
+      checks.push({ id: 'haystack', label: 'Project search', status: 'pass',
+        detail: `${launch.settings.mode}: runtime imports and content pins verified; inference not probed` });
+    } catch (error) {
+      checks.push({ id: 'haystack', label: 'Project search', status: 'fail',
+        detail: failureDetail(error), remedy: 'Provision the host runtime/models, then generate ATOMA_HAYSTACK_CONFIG with npm run haystack:config.' });
+    }
+  } else {
+    checks.push({ id: 'haystack', label: 'Project search', status: 'warn',
+      detail: 'ATOMA_HAYSTACK_CONFIG is unset; project runs cannot start',
+      remedy: 'Generate the host configuration with npm run haystack:config.' });
+  }
 
   const anthropicKeyIgnored =
     nonEmpty(env['ANTHROPIC_API_KEY']) &&

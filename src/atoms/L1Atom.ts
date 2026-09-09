@@ -289,6 +289,7 @@ export class L1Atom extends Atom {
 
   async execute(task: Task, plan: Plan, ctx: RunContext): Promise<Result> {
     const hasValidator = this.tools.some((t) => t.name === 'validate_html');
+    const maxToolIterations = capToolIterations(hasValidator ? 40 : 24, ctx.deadlineAt);
     const userContent = [
       `You are molecule "${this.name}" (tier 1). Your plan has been APPROVED. Execute it now.`,
       ``,
@@ -304,6 +305,9 @@ export class L1Atom extends Atom {
       `  Do not just describe what you would do — call the tools.`,
       `- Use RELATIVE paths for file tools (e.g. "index.html", not "/abs/index.html").`,
       `- After every tool call, read the result before deciding the next step.`,
+      `- This execution has at most ${maxToolIterations} tool iterations. Reserve capacity for every requested file and its verification.`,
+      `- On a retry, inspect the current state and complete the remaining work; do not repeat completed discovery or rewrite already-correct files.`,
+      `- A requested answer/report file is a deliverable too: writing the main artifact does not replace writing that file.`,
       hasValidator
         ? `- For ANY web artifact you produce, call validate_html on the server URL.`
         : null,
@@ -439,7 +443,7 @@ export class L1Atom extends Atom {
       // no-validator path; when we've wired a validator into the tool set,
       // give the loop enough room to actually converge before falling back
       // to the tools-disabled finalization round-trip.
-        maxToolIterations: capToolIterations(hasValidator ? 40 : 24, ctx.deadlineAt),
+        maxToolIterations,
       })
     );
 
