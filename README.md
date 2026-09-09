@@ -194,6 +194,12 @@ manifest is published into one idempotent GitHub repository. Gated `/api/runs`
 lists that organisation's project traces from
 `orgs/<orgId>/projects/<projectId>/runs/<runId>/`.
 
+Project runs always initialize document search through Haystack. Provision the
+host Python runtime and set `ATOMA_PROJECT_RETRIEVAL_HAYSTACK` before launching
+one; [the search setup](docs/project-retrieval-haystack-only-2026-09-09.md#activation)
+describes lexical and local hybrid configurations. Missing configuration
+refuses a new project run before reservation. No paid retrieval API is required.
+
 A first login without an invitation creates a personal organisation and makes
 that principal its owner. Joining an existing organisation requires an explicit
 one-use invitation. In a source checkout, mint an invitation

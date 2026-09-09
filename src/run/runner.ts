@@ -31,7 +31,7 @@ import { RecordingLlmClient } from '../viz/recordingLlm.js';
 import { RecordingRegistry } from '../viz/recordingRegistry.js';
 import { containerToolBackend, localToolBackend, withProjectRetrievalBackend } from './toolBackend.js';
 import { validateProjectRetrievalBinding, type ProjectRetrievalBinding } from '../tools/projectRetrieval.js';
-import { projectRetrievalEnabled } from '../contracts/projectRetrievalLaunch.js';
+import { hasProjectRetrievalReceipt } from '../contracts/projectRetrievalLaunch.js';
 import { HAYSTACK_LAUNCH_ENV, readHaystackLaunch } from '../contracts/retrievalHaystack.js';
 import { openProjectRunHaystack } from '../projects/retrievalHaystackLaunch.js';
 import { baselineModel, runFrontierBaseline } from './baseline.js';
@@ -496,14 +496,14 @@ export async function startTask(
   let retrievalBinding: ProjectRetrievalBinding | undefined;
   let prepareRetrieval: ReturnType<typeof openProjectRunHaystack>['prepare'] | undefined;
   let retrievalFromReceipt = false;
-  try { retrievalFromReceipt = projectRetrievalEnabled(process.env); }
-  catch { throw new RunnerConfigError('invalid project retrieval activation'); }
+  try { retrievalFromReceipt = hasProjectRetrievalReceipt(process.env); }
+  catch { throw new RunnerConfigError('invalid project retrieval receipt marker'); }
   let haystackLaunch: ReturnType<typeof readHaystackLaunch> | undefined;
   try { if (retrievalFromReceipt || process.env[HAYSTACK_LAUNCH_ENV] !== undefined) haystackLaunch = readHaystackLaunch(process.env); }
   catch { throw new RunnerConfigError('project retrieval requires a valid ATOMA_PROJECT_RETRIEVAL_HAYSTACK configuration'); }
   if (haystackLaunch && !retrievalFromReceipt) throw new RunnerConfigError('Haystack requires a project retrieval receipt');
   if (retrievalFromReceipt && (opts?.projectRetrieval || process.env['ATOMA_TENANT_RUN'] !== '1' || !requestedRunId)) {
-    throw new RunnerConfigError('project retrieval activation requires an exclusive tenant run receipt');
+    throw new RunnerConfigError('project retrieval requires an exclusive tenant run receipt');
   }
   if (opts?.projectRetrieval) {
     try { retrievalBinding = validateProjectRetrievalBinding(opts.projectRetrieval); }

@@ -107,7 +107,7 @@ async function fixture() {
   for (const [key, value] of Object.entries(environment)) if (key.startsWith('ATOMA_')) vi.stubEnv(key, value);
   const context = retrievalContext();
   await ProjectRetrievalLaunchStore.open(f.dbPath).prepare(run.run.projectRunId, source.run.projectRunId, context);
-  vi.stubEnv('ATOMA_PROJECT_RETRIEVAL', '1');
+  vi.stubEnv('ATOMA_PROJECT_RETRIEVAL_RECEIPT', '1');
   const prepared = openProjectRunHaystack({ dbPath: f.dbPath, runId: run.run.projectRunId,
     workspacePath: run.layout.workspacePath, skillsPath: run.layout.skillsPath, runsPath: run.layout.runsPath }, haystackTestRuntime(root));
   await prepared.prepare(context);

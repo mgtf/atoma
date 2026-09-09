@@ -58,7 +58,7 @@ describe('trusted retrieval injection through startTask', () => {
     const source = f.makeRun({ 'docs.md': 'Private price is 190 euros.\n' });
     const current = f.makeRun();
     await ProjectRetrievalLaunchStore.open(f.dbPath).prepare(current.run.projectRunId, source.run.projectRunId, retrievalContext());
-    for (const [key, value] of Object.entries({ ATOMA_PROJECT_RETRIEVAL: '1', ATOMA_TENANT_RUN: '1', ATOMA_RUN_ID: current.run.projectRunId,
+    for (const [key, value] of Object.entries({ ATOMA_PROJECT_RETRIEVAL_RECEIPT: '1', ATOMA_TENANT_RUN: '1', ATOMA_RUN_ID: current.run.projectRunId,
       ATOMA_DB_PATH: f.dbPath, ATOMA_BUILD_WORKSPACE: current.layout.workspacePath, ATOMA_RUNS_DIR: current.layout.runsPath,
       ATOMA_SKILLS_DIR: current.layout.skillsPath, ATOMA_SKILL_PROMOTE: '0', ATOMA_SKILL_DIRECT: '0', ATOMA_PREFILTER_CACHE: '0' })) vi.stubEnv(key, value);
     {
@@ -98,7 +98,7 @@ describe('trusted retrieval injection through startTask', () => {
 
   it('constructs a private registry through startTask even with retrieval disabled', async () => {
     const root = environment(); const f = projectRetrievalFixture(root); const current = f.makeRun();
-    for (const [key, value] of Object.entries({ ATOMA_PROJECT_RETRIEVAL: '0', ATOMA_TENANT_RUN: '1', ATOMA_RUN_ID: current.run.projectRunId,
+    for (const [key, value] of Object.entries({ ATOMA_PROJECT_RETRIEVAL_RECEIPT: undefined, ATOMA_TENANT_RUN: '1', ATOMA_RUN_ID: current.run.projectRunId,
       ATOMA_DB_PATH: f.dbPath, ATOMA_BUILD_WORKSPACE: current.layout.workspacePath, ATOMA_RUNS_DIR: current.layout.runsPath,
       ATOMA_SKILLS_DIR: current.layout.skillsPath, ATOMA_SKILL_PROMOTE: '0', ATOMA_SKILL_DIRECT: '0', ATOMA_PREFILTER_CACHE: '0' })) vi.stubEnv(key, value);
     resetHostLifecycleSnapshotForTests();
@@ -128,7 +128,7 @@ describe('trusted retrieval injection through startTask', () => {
 
   it.each(['missing', 'foreign-path'])('refuses %s project authority without retrieval before any setup', async variant => {
     const root = environment(); const f = projectRetrievalFixture(root); const current = f.makeRun();
-    for (const [key, value] of Object.entries({ ATOMA_PROJECT_RETRIEVAL: '0', ATOMA_TENANT_RUN: '1',
+    for (const [key, value] of Object.entries({ ATOMA_PROJECT_RETRIEVAL_RECEIPT: undefined, ATOMA_TENANT_RUN: '1',
       ATOMA_RUN_ID: variant === 'missing' ? 'missing-run' : current.run.projectRunId,
       ATOMA_DB_PATH: f.dbPath, ATOMA_BUILD_WORKSPACE: join(root, 'wrong-workspace'),
       ATOMA_RUNS_DIR: current.layout.runsPath, ATOMA_SKILLS_DIR: current.layout.skillsPath,
@@ -141,7 +141,7 @@ describe('trusted retrieval injection through startTask', () => {
 
   it.each(['missing-config', 'missing-receipt'])('refuses %s before workspace or provider construction', async missing => {
     const root = environment();
-    vi.stubEnv('ATOMA_PROJECT_RETRIEVAL', '1'); vi.stubEnv('ATOMA_TENANT_RUN', '1');
+    vi.stubEnv('ATOMA_PROJECT_RETRIEVAL_RECEIPT', '1'); vi.stubEnv('ATOMA_TENANT_RUN', '1');
     vi.stubEnv(HAYSTACK_LAUNCH_ENV, missing === 'missing-config' ? undefined : JSON.stringify(haystackTestRuntime(root)));
     vi.stubEnv('ATOMA_SKILL_PROMOTE', '0'); vi.stubEnv('ATOMA_SKILL_DIRECT', '0');
     vi.stubEnv('ATOMA_PREFILTER_CACHE', '0'); resetHostLifecycleSnapshotForTests();

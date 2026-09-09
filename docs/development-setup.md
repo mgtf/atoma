@@ -50,10 +50,18 @@ npm run doctor:dev                # quota-free preflight, no build required
 platform is unusable by another — never share one directory between a Windows
 checkout and a WSL2 clone, or between host and container.
 
+Organisation-scoped project runs (browser, MCP or `projects run`) additionally
+require Docker and a provisioned host Haystack runtime. Follow the
+[search setup](project-retrieval-haystack-only-2026-09-09.md#activation) and set
+`ATOMA_PROJECT_RETRIEVAL_HAYSTACK` in the coordinator environment. Search is
+mandatory for these runs, including an empty first corpus. The ordinary test
+suite uses a ranking process fixture and needs no Haystack installation;
+standalone operator runs have no tenant project corpus.
+
 ## macOS
 
-Nothing beyond the block above is required for development, verification and
-runs. Two optional pieces:
+Nothing beyond the common block is required for development, verification
+and standalone operator runs. Two additional pieces:
 
 - **Docker Desktop**, only for the container-isolation commands.
 - **python3**, for the `start_static_server` element at run time, and

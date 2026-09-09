@@ -85,7 +85,7 @@ describe('registered Haystack treatment', () => {
         expect(env['ATOMA_TENANT_RUN']).toBe('1'); expect(env['ATOMA_SUBSCRIPTION_TIERS']).toBe('l1,l2,l3');
         expect(env['ATOMA_SKILL_LEARN']).toBe('0'); expect(env['ATOMA_EVENT_SKILLS']).toBe('0');
         const input = { dbPath: env['ATOMA_DB_PATH'], runId: env['ATOMA_RUN_ID'], workspacePath: env['ATOMA_BUILD_WORKSPACE'],
-          runsPath: env['ATOMA_RUNS_DIR'], skillsPath: env['ATOMA_SKILLS_DIR'], treatment: env['ATOMA_PROJECT_RETRIEVAL'] === '1', launch: env['ATOMA_PROJECT_RETRIEVAL_HAYSTACK'] ? JSON.parse(env['ATOMA_PROJECT_RETRIEVAL_HAYSTACK']) : null };
+          runsPath: env['ATOMA_RUNS_DIR'], skillsPath: env['ATOMA_SKILLS_DIR'], treatment: env['ATOMA_PROJECT_RETRIEVAL_RECEIPT'] === '1', launch: env['ATOMA_PROJECT_RETRIEVAL_HAYSTACK'] ? JSON.parse(env['ATOMA_PROJECT_RETRIEVAL_HAYSTACK']) : null };
         const script = String.raw`
           import { readFileSync } from 'node:fs'; import assert from 'node:assert/strict';
           import { openProjectRunRetrievalAuthority } from './src/projects/retrievalLaunch.ts';

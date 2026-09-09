@@ -1,3 +1,4 @@
+import { haystackTestEnvironment } from './helpers/haystack.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import {
@@ -676,7 +677,7 @@ describe('ProjectRunCoordinator', () => {
       store: f.store,
       dbPath: f.dbPath,
       projectsRoot: f.root,
-      hostEnv: { PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
+      hostEnv: { ...haystackTestEnvironment(f.root), PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
       driver,
       acquireLease: async () => runLease,
       publisher,
@@ -732,7 +733,7 @@ describe('ProjectRunCoordinator', () => {
       store: f.store,
       dbPath: f.dbPath,
       projectsRoot: f.root,
-      hostEnv: { PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
+      hostEnv: { ...haystackTestEnvironment(f.root), PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
       driver,
       acquireLease: async () => lease(),
     });
@@ -744,6 +745,7 @@ describe('ProjectRunCoordinator', () => {
     });
     expect(coordinator.hasActiveRunForPrincipal(f.viewer.principalId)).toBe(true);
     expect(coordinator.hasActiveRunForPrincipal(randomUUID())).toBe(false);
+    await vi.waitFor(() => expect(driver).toHaveBeenCalledOnce());
     settle?.(
       `${formatRunStatsEpilogue({ ...DELIVERED_STATS, outcome: 'failed' })}\n✖ stopped\n`
     );
@@ -780,7 +782,7 @@ describe('ProjectRunCoordinator', () => {
       store: f.store,
       dbPath: f.dbPath,
       projectsRoot: f.root,
-      hostEnv: { PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
+      hostEnv: { ...haystackTestEnvironment(f.root), PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
       driver,
       acquireLease: async () => lease(),
       onRunFinished: finished,
@@ -812,7 +814,7 @@ describe('ProjectRunCoordinator', () => {
       store: f.store,
       dbPath: f.dbPath,
       projectsRoot: f.root,
-      hostEnv: { PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
+      hostEnv: { ...haystackTestEnvironment(f.root), PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
       driver: vi.fn(async () => {
         throw new Error('driver died');
       }),
@@ -845,7 +847,7 @@ describe('ProjectRunCoordinator', () => {
       store: f.store,
       dbPath: f.dbPath,
       projectsRoot: f.root,
-      hostEnv: { PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
+      hostEnv: { ...haystackTestEnvironment(f.root), PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
       // A run that spends, reports its spend, and produces no artifact.
       driver: vi.fn(async () => `${formatRunStatsEpilogue(failedStats)}\n✖ build failed\n`),
       acquireLease: async () => lease(),
@@ -895,7 +897,7 @@ describe('ProjectRunCoordinator', () => {
       store: f.store,
       dbPath: f.dbPath,
       projectsRoot: f.root,
-      hostEnv: { PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
+      hostEnv: { ...haystackTestEnvironment(f.root), PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
       driver,
       acquireLease: async () => lease(),
     });
@@ -915,6 +917,7 @@ describe('ProjectRunCoordinator', () => {
       projectId: f.project.projectId,
       request: { idempotencyKey: 'run-2', goal: 'Add a timezone selector to the clock.' },
     });
+    await coordinator.waitForIdle();
     expect(second.goal).toBe('Add a timezone selector to the clock.');
     const extraArgs = driver.mock.calls[1]?.[0].extraArgs ?? [];
     const seedAt = extraArgs.indexOf('--seed');
@@ -951,7 +954,7 @@ describe('ProjectRunCoordinator', () => {
       store: f.store,
       dbPath: f.dbPath,
       projectsRoot: f.root,
-      hostEnv: { PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
+      hostEnv: { ...haystackTestEnvironment(f.root), PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
       driver,
       acquireLease: async () => lease(),
     });
@@ -987,7 +990,7 @@ describe('ProjectRunCoordinator', () => {
       store: f.store,
       dbPath: f.dbPath,
       projectsRoot: f.root,
-      hostEnv: { PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
+      hostEnv: { ...haystackTestEnvironment(f.root), PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
       driver,
       acquireLease: async () => lease(),
     });
@@ -1007,8 +1010,8 @@ describe('ProjectRunCoordinator', () => {
       started.projectRunId,
       'traces'
     );
-    expect(driver.mock.calls[0]?.[0].env?.['ATOMA_RUNS_DIR']).toBe(tracesDir);
     await coordinator.waitForIdle();
+    expect(driver.mock.calls[0]?.[0].env?.['ATOMA_RUNS_DIR']).toBe(tracesDir);
     const failed = f.store.getProjectRun(f.viewer.orgId, started.projectRunId)!;
     expect(failed.status).toBe('failed');
     expect(failed.error).toMatch(/API key is invalid/);
@@ -1022,7 +1025,7 @@ describe('ProjectRunCoordinator', () => {
       store: f.store,
       dbPath: f.dbPath,
       projectsRoot: f.root,
-      hostEnv: { PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
+      hostEnv: { ...haystackTestEnvironment(f.root), PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
       driver: vi.fn(),
       acquireLease: async () => {
         throw new RunLockBusyError('another run is in progress');
@@ -1134,7 +1137,7 @@ describe('a launch refused before the spawn, through the coordinator', () => {
       store: f.store,
       dbPath: f.dbPath,
       projectsRoot: f.root,
-      hostEnv: { PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
+      hostEnv: { ...haystackTestEnvironment(f.root), PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
       driver,
       acquireLease: async () => lease(),
     });
@@ -1202,7 +1205,7 @@ describe('the subscription-transport door, at the coordinator', () => {
       store: f.store,
       dbPath: f.dbPath,
       projectsRoot: f.root,
-      hostEnv: subscriptionHost(),
+      hostEnv: { ...subscriptionHost(), ...haystackTestEnvironment(f.root) },
       driver: driver as unknown as ProjectRunDriver,
       acquireLease: async () => lease(),
     });
@@ -1216,7 +1219,7 @@ describe('the subscription-transport door, at the coordinator', () => {
       store: f.store,
       dbPath: f.dbPath,
       projectsRoot: f.root,
-      hostEnv: subscriptionHost(),
+      hostEnv: { ...subscriptionHost(), ...haystackTestEnvironment(f.root) },
       driver: driver as unknown as ProjectRunDriver,
       acquireLease: async () => lease(),
       platformAdmins: () => false,
@@ -1235,7 +1238,7 @@ describe('the subscription-transport door, at the coordinator', () => {
       store: f.store,
       dbPath: f.dbPath,
       projectsRoot: f.root,
-      hostEnv: subscriptionHost(),
+      hostEnv: { ...subscriptionHost(), ...haystackTestEnvironment(f.root) },
       driver: driver as unknown as ProjectRunDriver,
       acquireLease: async () => lease(),
       platformAdmins: () => {
@@ -1255,7 +1258,7 @@ describe('the subscription-transport door, at the coordinator', () => {
       projectsRoot: f.root,
       // A host with NO credential and no pins of its own: only the admin's
       // account pins, re-authorised per run, can make this run startable.
-      hostEnv: { PATH: process.env['PATH'], ATOMA_HOST_SUBSCRIPTION_ORG: f.viewer.orgId },
+      hostEnv: { ...haystackTestEnvironment(f.root), PATH: process.env['PATH'], ATOMA_HOST_SUBSCRIPTION_ORG: f.viewer.orgId },
       driver: driver as unknown as ProjectRunDriver,
       acquireLease: async () => lease(),
       platformAdmins: (principalId) => principalId === f.viewer.principalId,
@@ -1294,7 +1297,7 @@ describe('the subscription-transport door, at the coordinator', () => {
       store: f.store,
       dbPath: f.dbPath,
       projectsRoot: f.root,
-      hostEnv: { PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
+      hostEnv: { ...haystackTestEnvironment(f.root), PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
       driver: driver as unknown as ProjectRunDriver,
       acquireLease: async () => lease(),
       platformAdmins: () => true,
@@ -1322,7 +1325,7 @@ describe('the subscription-transport door, at the coordinator', () => {
       store: f.store,
       dbPath: f.dbPath,
       projectsRoot: f.root,
-      hostEnv: { PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
+      hostEnv: { ...haystackTestEnvironment(f.root), PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
       driver: driver as unknown as ProjectRunDriver,
       acquireLease: async () => lease(),
       tierModelsFor: () => ({
@@ -1348,6 +1351,7 @@ describe('the subscription-transport door, at the coordinator', () => {
       projectId: f.project.projectId,
       request: { idempotencyKey: 'personal-codex', goal: 'Build a clock.' },
     });
+    await coordinator.waitForIdle();
     expect(lookedUp).toEqual([f.viewer.principalId]);
     expect(seen).toEqual([
       { principalId: f.viewer.principalId, payer: 'principal-subscription' },
@@ -1482,7 +1486,7 @@ describe('ProjectRunCoordinator — a large trace is evidence, not a refusal', (
       store: f.store,
       dbPath: f.dbPath,
       projectsRoot: f.root,
-      hostEnv: { PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
+      hostEnv: { ...haystackTestEnvironment(f.root), PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
       driver: driver as unknown as ProjectRunDriver,
       acquireLease: async () => lease(),
       ...(publisher ? { publisher } : {}),
@@ -1712,6 +1716,7 @@ describe('a project run has a budget an operator can set', () => {
     { configured: undefined, expected: 1_800_000 },
     { configured: '2400000', expected: 2_400_000 },
   ])('carries the resolved $expected ms budget to the driver, and ATOMA_BUILD_TIMEOUT_MS stays inert', async ({ configured, expected }) => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now());
     const f = fixture();
     const driver = vi.fn(
       async (_spawn: SpawnRunOptions) =>
@@ -1722,6 +1727,7 @@ describe('a project run has a budget an operator can set', () => {
       dbPath: f.dbPath,
       projectsRoot: f.root,
       hostEnv: {
+        ...haystackTestEnvironment(f.root),
         PATH: process.env['PATH'],
         ...ANTHROPIC_PINS,
         ANTHROPIC_API_KEY: 'model-key',
@@ -1753,7 +1759,7 @@ describe('a project run has a budget an operator can set', () => {
           store: f.store,
           dbPath: f.dbPath,
           projectsRoot: f.root,
-          hostEnv: { PATH: process.env['PATH'], [PROJECT_RUN_TIMEOUT_ENV]: 'later' },
+          hostEnv: { ...haystackTestEnvironment(f.root), PATH: process.env['PATH'], [PROJECT_RUN_TIMEOUT_ENV]: 'later' },
           driver: vi.fn(async (_spawn: SpawnRunOptions) => ''),
           acquireLease: async () => lease(),
         })

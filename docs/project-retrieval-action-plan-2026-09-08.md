@@ -13,7 +13,10 @@ Its six-attempt agent pilot is archived and did not meet its benefit screen.
 with BM25 and hybrid pipeline modes. SQLite FTS5 remains only in the development
 component comparator. Source preparation no longer builds its unused cache.
 The earlier steps below record implementation history; retrieval activation
-now requires explicit Haystack host configuration and remains opt-in.
+now requires explicit Haystack host configuration for every new project run.
+Search is mandatory by owner decision; the old activation switch has been
+removed. Read the current backend decision above for the supported launch
+contract. The earlier opt-in steps and negative measurements remain history.
 
 ## Implementation progress
 

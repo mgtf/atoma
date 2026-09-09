@@ -1,10 +1,11 @@
+import { haystackTestEnvironment } from './helpers/haystack.js';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthStore, sha256Hex, type Viewer } from '../src/auth/store.js';
 import { closeStoreHandles } from '../src/core/stores.js';
 import { SkillRegistry } from '../src/skills/registry.js';
@@ -118,13 +119,14 @@ it('reuses a project run across MCP sessions while its real lease is held', asyn
   });
   let launches = 0;
   let finish: (output: string) => void = () => undefined;
+  const driven = new Promise<string>((resolve) => { finish = resolve; });
   const coordinator = new ProjectRunCoordinator({
     store, dbPath, projectsRoot: root,
-    hostEnv: { PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'test-key' },
+    hostEnv: { ...haystackTestEnvironment(root), PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'test-key' },
     acquireLease: (id) => acquireRunLease(id, join(root, 'lease.db')),
     driver: () => {
       launches++;
-      return new Promise<string>((resolve) => { finish = resolve; });
+      return driven;
     },
   });
   const service = new ProjectService({ store, coordinator, github: null });
@@ -145,7 +147,7 @@ it('reuses a project run across MCP sessions while its real lease is held', asyn
     const retry = await start(second);
     expect(retry.task.status).toBe('working');
     expect(retry.task.statusMessage).toBe(original.task.statusMessage);
-    expect(launches).toBe(1);
+    await vi.waitFor(() => expect(launches).toBe(1));
     expect(store.listProjectRuns(login.viewer.orgId, project.projectId)).toHaveLength(1);
 
     const conflict = await start(second, 'Different goal.');

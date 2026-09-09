@@ -76,9 +76,10 @@ describe('registered Haystack agent treatment', () => {
       const runId = randomUUID();
       const env = retrievalChildEnvironment(registration, entry, attempt, runId, { [HAYSTACK_LAUNCH_ENV]: 'ambient forbidden' });
       expect(env[HAYSTACK_LAUNCH_ENV]).toBeUndefined();
-      const project = await prepareRetrievalProjectAttempt({ registration, entry, dataset, attempt, seed: prepared.workspace, runId, env, ...retrievalContext() });
+      const project = await prepareRetrievalProjectAttempt({ registration, entry, dataset, attempt, seed: prepared.workspace, runId, env: { ...env, [HAYSTACK_LAUNCH_ENV]: 'must not leak into controls' }, ...retrievalContext() });
       try {
-        expect(project.env['ATOMA_PROJECT_RETRIEVAL']).toBe(entry.arm === 'atoma-haystack' ? '1' : '0');
+        expect(project.env['ATOMA_PROJECT_RETRIEVAL_RECEIPT']).toBe(entry.arm === 'atoma-haystack' ? '1' : undefined);
+        if (entry.arm !== 'atoma-haystack') expect(project.env[HAYSTACK_LAUNCH_ENV]).toBeUndefined();
         if (entry.arm === 'atoma-haystack') {
           expect(JSON.parse(project.env[HAYSTACK_LAUNCH_ENV]!)).toEqual(launch);
           const bound = openProjectRunHaystack({ dbPath: project.env['ATOMA_DB_PATH']!, runId,

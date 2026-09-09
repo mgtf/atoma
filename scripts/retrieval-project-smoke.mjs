@@ -78,7 +78,7 @@ if (process.argv.includes('--child')) {
       content: [
         { type: 'tool_use', id: 'search', name: SEARCH, input: { query: 'annual price' } },
         realContainer ? { type: 'tool_use', id: 'worker', name: 'run_shell', input: { command: 'node', args: ['-e',
-          'console.log(JSON.stringify({source:require("node:fs").existsSync(process.argv[1]),db:process.env.ATOMA_DB_PATH??null,retrieval:process.env.ATOMA_PROJECT_RETRIEVAL??null,haystack:process.env.ATOMA_PROJECT_RETRIEVAL_HAYSTACK??null}))',
+          'console.log(JSON.stringify({source:require("node:fs").existsSync(process.argv[1]),db:process.env.ATOMA_DB_PATH??null,retrieval:process.env.ATOMA_PROJECT_RETRIEVAL_RECEIPT??null,haystack:process.env.ATOMA_PROJECT_RETRIEVAL_HAYSTACK??null}))',
           join(dirname(workspace), 'retrieval-source/docs.md')] } } :
           { type: 'tool_use', id: 'worker', name: 'read_file', input: { path: 'probe.txt' } },
       ], stop_reason: 'tool_use', usage: { input_tokens: 1, output_tokens: 1 },
@@ -140,7 +140,7 @@ if (process.argv.includes('--child')) {
     const haystack = process.argv.includes('--haystack') ? haystackLaunchSchema.parse(JSON.parse(process.env[HAYSTACK_LAUNCH_ENV])) : haystackTestRuntime(root);
     const coordinator = new ProjectRunCoordinator({ store: projects, dbPath, projectsRoot: root, cwd: root, timeoutMs: 60_000,
       hostEnv: { PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR,
-        ATOMA_PROJECT_RETRIEVAL: '1', [HAYSTACK_LAUNCH_ENV]: JSON.stringify(haystack), ATOMA_MODEL_L1: 'api:ollama:test', ATOMA_MODEL_L2: 'api:ollama:test', ATOMA_MODEL_L3: 'api:ollama:test', OLLAMA_BASE_URL: 'http://127.0.0.1:1' },
+        [HAYSTACK_LAUNCH_ENV]: JSON.stringify(haystack), ATOMA_MODEL_L1: 'api:ollama:test', ATOMA_MODEL_L2: 'api:ollama:test', ATOMA_MODEL_L3: 'api:ollama:test', OLLAMA_BASE_URL: 'http://127.0.0.1:1' },
       driver: async options => {
         const launches = ProjectRetrievalLaunchStore.open(dbPath);
         childLog = await spawnRun({ ...options, env: { ...options.env, ATOMA_RETRIEVAL_SMOKE_CONTAINER: realContainer ? '1' : '0',

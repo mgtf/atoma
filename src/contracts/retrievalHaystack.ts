@@ -27,7 +27,7 @@ export const haystackReplySchema = z.discriminatedUnion('kind', [
 ]);
 export type HaystackReply = z.infer<typeof haystackReplySchema>;
 
-/** A retrieval-enabled host must supply one explicit, pinned local runtime. */
+/** Every project-run host must supply one explicit, pinned local runtime. */
 export function readHaystackLaunch(env: NodeJS.ProcessEnv): HaystackLaunch {
   try {
     const raw = env[HAYSTACK_LAUNCH_ENV];
