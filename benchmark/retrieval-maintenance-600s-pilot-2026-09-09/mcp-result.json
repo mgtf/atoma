@@ -1,0 +1,85 @@
+{
+  "_meta": {
+    "io.modelcontextprotocol/related-task": {
+      "taskId": "e8e98de3dd3c4756c6c1b9f4b07c0b74"
+    }
+  },
+  "content": [
+    {
+      "type": "text",
+      "text": "{\n  \"campaignId\": \"haystack-mcp-maintenance-600s-20260909\",\n  \"kind\": \"haystack-development\",\n  \"reason\": \"completed\",\n  \"planned\": 3,\n  \"attempted\": 3,\n  \"apiSpendUsd\": 0,\n  \"subscriptionPriceEquivalentUsd\": 1.0232999999999999,\n  \"arms\": [\n    {\n      \"arm\": \"frontier-direct\",\n      \"planned\": 1,\n      \"attempted\": 1,\n      \"full\": 1,\n      \"infrastructureFailures\": 0,\n      \"elapsedMs\": 94722,\n      \"llmCalls\": 1\n    },\n    {\n      \"arm\": \"atoma-haystack\",\n      \"planned\": 1,\n      \"attempted\": 1,\n      \"full\": 1,\n      \"infrastructureFailures\": 0,\n      \"elapsedMs\": 223079,\n      \"llmCalls\": 22\n    },\n    {\n      \"arm\": \"atoma\",\n      \"planned\": 1,\n      \"attempted\": 1,\n      \"full\": 1,\n      \"infrastructureFailures\": 0,\n      \"elapsedMs\": 152503,\n      \"llmCalls\": 14\n    }\n  ],\n  \"comparison\": {\n    \"pairs\": [\n      {\n        \"questionId\": \"northstar-13\",\n        \"repetition\": 1,\n        \"kind\": \"maintenance\",\n        \"complete\": true,\n        \"a\": true,\n        \"b\": true,\n        \"elapsedA\": 152503,\n        \"elapsedB\": 223079,\n        \"priceA\": 0.2146,\n        \"priceB\": 0.2851\n      }\n    ],\n    \"plannedPairs\": 1,\n    \"completePairs\": 1,\n    \"aFull\": 1,\n    \"bFull\": 1,\n    \"wins\": 0,\n    \"losses\": 0,\n    \"pairedFullPassDifference\": 0,\n    \"elapsedRatio\": 1.4627843386687476,\n    \"priceEquivalentRatio\": 1.3285181733457596,\n    \"uncertainty\": \"No population confidence interval: questions and repetitions within the development project are correlated. A new project-family sample is required.\",\n    \"decision\": \"screen-not-met\",\n    \"rule\": {\n      \"objective\": \"paired-full-pass\",\n      \"minimumGain\": 0.5,\n      \"maxElapsedRatio\": 1.25,\n      \"maxPriceEquivalentRatio\": 1.25\n    }\n  },\n  \"claim\": \"development screening only; correlated synthetic tasks do not establish production benefit\"\n}"
+    }
+  ],
+  "structuredContent": {
+    "campaignId": "haystack-mcp-maintenance-600s-20260909",
+    "kind": "haystack-development",
+    "reason": "completed",
+    "planned": 3,
+    "attempted": 3,
+    "apiSpendUsd": 0,
+    "subscriptionPriceEquivalentUsd": 1.0232999999999999,
+    "arms": [
+      {
+        "arm": "frontier-direct",
+        "planned": 1,
+        "attempted": 1,
+        "full": 1,
+        "infrastructureFailures": 0,
+        "elapsedMs": 94722,
+        "llmCalls": 1
+      },
+      {
+        "arm": "atoma-haystack",
+        "planned": 1,
+        "attempted": 1,
+        "full": 1,
+        "infrastructureFailures": 0,
+        "elapsedMs": 223079,
+        "llmCalls": 22
+      },
+      {
+        "arm": "atoma",
+        "planned": 1,
+        "attempted": 1,
+        "full": 1,
+        "infrastructureFailures": 0,
+        "elapsedMs": 152503,
+        "llmCalls": 14
+      }
+    ],
+    "comparison": {
+      "pairs": [
+        {
+          "questionId": "northstar-13",
+          "repetition": 1,
+          "kind": "maintenance",
+          "complete": true,
+          "a": true,
+          "b": true,
+          "elapsedA": 152503,
+          "elapsedB": 223079,
+          "priceA": 0.2146,
+          "priceB": 0.2851
+        }
+      ],
+      "plannedPairs": 1,
+      "completePairs": 1,
+      "aFull": 1,
+      "bFull": 1,
+      "wins": 0,
+      "losses": 0,
+      "pairedFullPassDifference": 0,
+      "elapsedRatio": 1.4627843386687476,
+      "priceEquivalentRatio": 1.3285181733457596,
+      "uncertainty": "No population confidence interval: questions and repetitions within the development project are correlated. A new project-family sample is required.",
+      "decision": "screen-not-met",
+      "rule": {
+        "objective": "paired-full-pass",
+        "minimumGain": 0.5,
+        "maxElapsedRatio": 1.25,
+        "maxPriceEquivalentRatio": 1.25
+      }
+    },
+    "claim": "development screening only; correlated synthetic tasks do not establish production benefit"
+  }
+}

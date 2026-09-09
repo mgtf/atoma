@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "id": "haystack-mcp-maintenance-600s-20260909",
+  "purpose": "Repeat the development maintenance question with a 600-second equal budget after the earlier missing answer and citation failures. Keep scorers, prompts, models and retrieval fixed. Check final frontier usage receipts alongside the MCP-visible runs. One question is diagnostic only; Orchard remains held out.",
+  "kind": "haystack-development",
+  "treatment": {
+    "backend": "haystack",
+    "index": {
+      "storageVersion": 1,
+      "extractionVersion": "utf8-files-v1",
+      "chunkerVersion": "markdown-lines-v1",
+      "chunks": {
+        "maxBytes": 1400,
+        "maxLines": 16
+      },
+      "contextVersion": "path-headings-source-v1",
+      "tokenizer": "unicode61 remove_diacritics 2",
+      "normalization": "original-bytes; no overlap",
+      "embedding": null,
+      "generatedContext": null
+    },
+    "queryLimits": {
+      "maxQueryBytes": 2048,
+      "maxResults": 5,
+      "maxCandidates": 50,
+      "maxExcerptBytes": 1600,
+      "maxResponseBytes": 12000,
+      "timeoutMs": 2000
+    },
+    "launch": {
+      "python": "/Users/mgtf/.atoma/haystack/venv/bin/python",
+      "settings": {
+        "mode": "hybrid-rerank",
+        "embeddingPath": "/Users/mgtf/.atoma/haystack/embedding",
+        "rerankerPath": "/Users/mgtf/.atoma/haystack/reranker",
+        "queryPrefix": "Represent this sentence for searching relevant passages: ",
+        "embeddingRevision": "73f92974f1658714c46293725648a914cf2f4a68360374600b8e23f695968e96",
+        "rerankerRevision": "626066419752140b03cbdce61a92f31405be0ff8c2592261cf7fbbab2697fe44"
+      },
+      "runtimeSha256": "097b6a29a27e5a820dbfce925e010f2c484693d07fb963f425c8366ea4214d89"
+    }
+  },
+  "decision": {
+    "objective": "paired-full-pass",
+    "minimumGain": 0.5,
+    "maxElapsedRatio": 1.25,
+    "maxPriceEquivalentRatio": 1.25
+  },
+  "questionIds": [
+    "northstar-13"
+  ],
+  "repetitions": 1,
+  "firstArm": "frontier-direct",
+  "models": {
+    "l1": "sub:anthropic:haiku",
+    "l2": "sub:anthropic:sonnet",
+    "l3": "sub:anthropic:opus",
+    "frontier": "sub:anthropic:opus"
+  },
+  "workerImage": "sha256:3e045211ebfd1a18ff96a74d7defc3a732bbe06802c2e9dba7efa3f629a7793e",
+  "timeoutMs": 600000,
+  "maxWallMs": 1800000,
+  "stopAfterConsecutiveInfrastructureFailures": 1,
+  "thresholds": {
+    "trust": 3,
+    "promote": 3,
+    "demote": 2
+  }
+}
