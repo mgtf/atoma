@@ -1108,5 +1108,6 @@
   "settings.mcpHelpTitle": "接続ヘルプ",
   "settings.mcpHelpHint": "アクセスできなくなった場合は、エージェントから再接続してください。アドレスが/mcpで終わっていることと、正しい組織を承認したことを確認してください。接続を確認するには、エージェントにAtomaプロジェクトの一覧を表示するよう依頼してください。",
   "skillReason.successNotFollowed": "成功として計上されません—検証により、runがレシピに従っていないことが確認されました",
-  "skillReason.failureNotFollowed": "失敗として扱われません—検証により、runがレシピに従っていないことが確認されました"
+  "skillReason.failureNotFollowed": "失敗として扱われません—検証により、runがレシピに従っていないことが確認されました",
+  "sentinel.rule.trajectory-drift": "同じMoleculeおよびskillについて既知の実行が3件に達した時点で、完了したrun内で実績として認められたすべての実行から、順序付き要素シーケンスが大きく乖離している、終了済みのMolecule実行1件。未較正：確認用の行であり、決して判定ではありません。"
 }

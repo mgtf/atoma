@@ -1108,5 +1108,6 @@
   "settings.mcpHelpTitle": "Ajuda com a ligação",
   "settings.mcpHelpHint": "Volte a ligar a partir do seu agente se o acesso deixar de funcionar. Verifique se o endereço termina em /mcp e se aprovou a organização correta. Para verificar a ligação, peça ao agente para listar os seus projetos Atoma.",
   "skillReason.successNotFollowed": "Sucesso não contabilizado — o validador observou que o run não seguiu a receita",
-  "skillReason.failureNotFollowed": "Falha não atribuída — o validador observou que o run não seguiu a receita"
+  "skillReason.failureNotFollowed": "Falha não atribuída — o validador observou que o run não seguiu a receita",
+  "sentinel.rule.trajectory-drift": "Uma execução fechada de uma Molécula cuja sequência ordenada de elementos está muito distante de todas as execuções creditadas da mesma Molécula e skill em runs concluídos, assim que forem conhecidas três. Sem calibração: uma linha para ler, nunca um julgamento."
 }
