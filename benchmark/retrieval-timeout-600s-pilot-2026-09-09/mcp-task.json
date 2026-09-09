@@ -1,0 +1,11 @@
+{
+  "task": {
+    "taskId": "7beb4ebc83104c2969c66fa85ac1856a",
+    "status": "working",
+    "ttl": 2400000,
+    "createdAt": "2026-09-09T13:02:17.332Z",
+    "lastUpdatedAt": "2026-09-09T13:02:17.332Z",
+    "pollInterval": 2000,
+    "statusMessage": "campaign haystack-mcp-timeout-600s-20260909 validating"
+  }
+}

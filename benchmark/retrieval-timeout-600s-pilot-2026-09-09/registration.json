@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "registeredAt": "2026-09-09T13:01:36.374Z",
+  "spec": {
+    "version": 1,
+    "id": "haystack-mcp-timeout-600s-20260909",
+    "purpose": "Diagnose the 180-second deadline censoring observed on northstar-05 using a 600-second per-attempt limit on unchanged runtime, instruments, models and worker digest. Run agentic Atoma, Haystack Atoma and the real frontier reference with the same increased budget. This is one development question, not a population benefit claim or a correction to previously observed citation errors. Orchard remains held out.",
+    "kind": "haystack-development",
+    "treatment": {
+      "backend": "haystack",
+      "index": {
+        "storageVersion": 1,
+        "extractionVersion": "utf8-files-v1",
+        "chunkerVersion": "markdown-lines-v1",
+        "chunks": {
+          "maxBytes": 1400,
+          "maxLines": 16
+        },
+        "contextVersion": "path-headings-source-v1",
+        "tokenizer": "unicode61 remove_diacritics 2",
+        "normalization": "original-bytes; no overlap",
+        "embedding": null,
+        "generatedContext": null
+      },
+      "queryLimits": {
+        "maxQueryBytes": 2048,
+        "maxResults": 5,
+        "maxCandidates": 50,
+        "maxExcerptBytes": 1600,
+        "maxResponseBytes": 12000,
+        "timeoutMs": 2000
+      },
+      "launch": {
+        "python": "/Users/mgtf/.atoma/haystack/venv/bin/python",
+        "settings": {
+          "mode": "hybrid-rerank",
+          "embeddingPath": "/Users/mgtf/.atoma/haystack/embedding",
+          "rerankerPath": "/Users/mgtf/.atoma/haystack/reranker",
+          "queryPrefix": "Represent this sentence for searching relevant passages: ",
+          "embeddingRevision": "73f92974f1658714c46293725648a914cf2f4a68360374600b8e23f695968e96",
+          "rerankerRevision": "626066419752140b03cbdce61a92f31405be0ff8c2592261cf7fbbab2697fe44"
+        },
+        "runtimeSha256": "097b6a29a27e5a820dbfce925e010f2c484693d07fb963f425c8366ea4214d89"
+      }
+    },
+    "decision": {
+      "objective": "paired-full-pass",
+      "minimumGain": 0.5,
+      "maxElapsedRatio": 1.25,
+      "maxPriceEquivalentRatio": 1.25
+    },
+    "questionIds": [
+      "northstar-05"
+    ],
+    "repetitions": 1,
+    "firstArm": "atoma",
+    "models": {
+      "l1": "sub:anthropic:haiku",
+      "l2": "sub:anthropic:sonnet",
+      "l3": "sub:anthropic:opus",
+      "frontier": "sub:anthropic:opus"
+    },
+    "workerImage": "sha256:3e045211ebfd1a18ff96a74d7defc3a732bbe06802c2e9dba7efa3f629a7793e",
+    "timeoutMs": 600000,
+    "maxWallMs": 1800000,
+    "stopAfterConsecutiveInfrastructureFailures": 1,
+    "thresholds": {
+      "trust": 3,
+      "promote": 3,
+      "demote": 2
+    }
+  },
+  "source": {
+    "revision": "7b86255ea105b9debb959acc0fafeb5e7917f113",
+    "sha256": "1284af0af7ffa6f71fff48ea2362562a804c63d38ef24d40bedc3bf3fdf75075"
+  },
+  "instrumentsSha256": "0487c2320e74963f7535e1f05674e88e980617c2c1ef27971b4386460116499b",
+  "runtime": {
+    "node": "v24.20.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "policy": "project-container-no-egress; fresh-authority-and-registry-per-attempt; learning-promotion-direct-event-skills-off; prefilter-cache-off; provider-cache-uncontrolled; local-haystack-treatment",
+  "schedule": [
+    {
+      "ordinal": 1,
+      "questionId": "northstar-05",
+      "repetition": 1,
+      "arm": "atoma"
+    },
+    {
+      "ordinal": 2,
+      "questionId": "northstar-05",
+      "repetition": 1,
+      "arm": "atoma-haystack"
+    },
+    {
+      "ordinal": 3,
+      "questionId": "northstar-05",
+      "repetition": 1,
+      "arm": "frontier-direct"
+    }
+  ]
+}
