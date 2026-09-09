@@ -1004,7 +1004,8 @@ export async function startTask(
       console.error('');
       console.error(`LLM usage at abort:`);
       console.error(metrics.formatSummary());
-      console.error(formatRunStatsEpilogue(machineRunStats(retrievalPrepared ? 'failed' : 'error', metrics, runSignals)));
+      // A shutdown may finish while warmup rejects; retain its cancellation disposition.
+      console.error(formatRunStatsEpilogue(machineRunStats(torn ? 'cancelled' : retrievalPrepared ? 'failed' : 'error', metrics, runSignals)));
       console.error(
         `\nrun recorded in ${recorder.runsDir} — open the visualizer for details: npm run viz`
       );
