@@ -157,3 +157,9 @@ can only report that it cannot be.
 - `ATOMA_SENTINEL_COST_ALERT_USD` is the default for `--cost-alert`, read
   through the one helper both hosts share. The flag wins, and a threshold is
   recorded with any result it influenced.
+- `--trajectory-min-score <0..1|off>` is the floor of the `trajectory-drift`
+  rule, defaulting to `ATOMA_SENTINEL_TRAJECTORY_MIN_SCORE` and then to the
+  contract's provisional `TRAJECTORY_DRIFT_DEFAULT_MIN_SCORE`, through the one
+  helper both hosts share. Armed by default because the rule exists to collect
+  calibration rows; `off` disarms it. `--once` prints, per corpus, how many
+  finished runs and credited trajectories the reference held.

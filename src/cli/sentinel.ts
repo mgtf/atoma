@@ -29,7 +29,12 @@ import { storeDbPath } from '../core/stores.js';
 import { mcpRunLockPath } from '../mcp/runLock.js';
 import { hasProjectTables, ProjectStore } from '../projects/store.js';
 import { claimSentinelWatch, type SentinelWatchLease } from '../sentinel/lease.js';
-import { sentinelCostAlertFromEnv, sleepInhibitorHint } from '../sentinel/resident.js';
+import {
+  parseTrajectoryMinScore,
+  sentinelCostAlertFromEnv,
+  sentinelTrajectoryMinScoreFromEnv,
+  sleepInhibitorHint,
+} from '../sentinel/resident.js';
 import {
   runSentinelLoop,
   SentinelWatch,
@@ -40,6 +45,11 @@ import {
   projectRunSource,
   type SentinelRunSource,
 } from '../sentinel/sources.js';
+import {
+  operatorTrajectoryReferenceSource,
+  projectTrajectoryReferenceSource,
+  type TrajectoryReferenceSource,
+} from '../sentinel/reference.js';
 import { sentinelRuleIds } from '../sentinel/rules.js';
 import { parseCliArgs } from './args.js';
 import { applyCheckoutDotenvForSourceEntry } from './loadDotenv.js';
@@ -47,7 +57,8 @@ import { applyCheckoutDotenvForSourceEntry } from './loadDotenv.js';
 const USAGE = `atoma sentinel — mechanical live watch over runs in flight
 
 usage:
-  npm run sentinel [-- --once] [--interval <ms>] [--cost-alert <usd>] [--db path]
+  npm run sentinel [-- --once] [--interval <ms>] [--cost-alert <usd>]
+                   [--trajectory-min-score <0..1|off>] [--db path]
 
 what it does:
   Watches BOTH run corpora — operator runs under runs/, and project runs the
@@ -72,6 +83,13 @@ flags:
   --interval <ms>        poll interval (default ${SENTINEL_DEFAULT_INTERVAL_MS})
   --cost-alert <usd>     raise run.anomaly past this cumulative spend
                          (default: ATOMA_SENTINEL_COST_ALERT_USD)
+  --trajectory-min-score <0..1|off>
+                         raise run.anomaly when a closed Molecule execution's
+                         element sequence scores below this similarity against
+                         credited executions of the same Molecule and skill in
+                         finished runs of the same corpus (default:
+                         ATOMA_SENTINEL_TRAJECTORY_MIN_SCORE, else 0.5;
+                         uncalibrated — a row to read, not a judgment)
   --runs <dir>           operator runs directory (default ATOMA_RUNS_DIR or ./runs)
   --operator-only        do not watch project runs even if this store has them
   --db <path>            product store holding the journal and the projects
@@ -93,7 +111,7 @@ async function main(): Promise<void> {
   applyCheckoutDotenvForSourceEntry();
   const args = parseCliArgs(process.argv, {
     booleanFlags: ['help', 'once', 'operator-only'],
-    valueFlags: ['interval', 'cost-alert', 'runs', 'db'],
+    valueFlags: ['interval', 'cost-alert', 'trajectory-min-score', 'runs', 'db'],
     undeclared: 'discard',
   });
   if (args.flags['help'] === 'true') {
@@ -112,6 +130,17 @@ async function main(): Promise<void> {
   // both hosts share so the two cannot disagree about what arms the rule.
   const costAlertUsd =
     positiveNumber(args.flags['cost-alert'], '--cost-alert') ?? sentinelCostAlertFromEnv();
+  const trajectoryFlag = args.flags['trajectory-min-score'];
+  let trajectoryMinScore: number | null;
+  if (trajectoryFlag === undefined) {
+    trajectoryMinScore = sentinelTrajectoryMinScoreFromEnv();
+  } else {
+    const parsed = parseTrajectoryMinScore(trajectoryFlag);
+    if (parsed === undefined) {
+      fail(`invalid --trajectory-min-score="${trajectoryFlag}" (a number in (0, 1], or off)`);
+    }
+    trajectoryMinScore = parsed;
+  }
   const runsDir = args.flags['runs'];
 
   const journal = PlatformEventLog.open(dbPath);
@@ -121,18 +150,22 @@ async function main(): Promise<void> {
   // and not one customer run. The tenant source is added only when this store
   // already HOLDS project tables: `ProjectStore.open` applies its DDL, and a
   // watcher must not bring a tenant control plane into being by looking at it.
-  const sources: SentinelRunSource[] = [
-    operatorRunSource({
-      runsDir:
-        typeof runsDir === 'string' && runsDir.length > 0
-          ? runsDir
-          : (process.env['ATOMA_RUNS_DIR'] ?? './runs'),
-    }),
+  const operatorRunsDir =
+    typeof runsDir === 'string' && runsDir.length > 0
+      ? runsDir
+      : (process.env['ATOMA_RUNS_DIR'] ?? './runs');
+  const sources: SentinelRunSource[] = [operatorRunSource({ runsDir: operatorRunsDir })];
+  // The trajectory rule scores a live execution against FINISHED runs of the
+  // SAME corpus, so every corpus watched gets its own reference beside it.
+  const references: TrajectoryReferenceSource[] = [
+    operatorTrajectoryReferenceSource({ runsDir: operatorRunsDir }),
   ];
   let projectsLine = 'off (--operator-only)';
   if (args.flags['operator-only'] !== 'true') {
     if (hasProjectTables(dbPath)) {
-      sources.push(projectRunSource({ reader: ProjectStore.open(dbPath) }));
+      const store = ProjectStore.open(dbPath);
+      sources.push(projectRunSource({ reader: store }));
+      references.push(projectTrajectoryReferenceSource({ reader: store }));
       projectsLine = 'on (project_runs where status = running)';
     } else {
       projectsLine = 'off (no project control plane in this store)';
@@ -143,6 +176,8 @@ async function main(): Promise<void> {
     journal,
     sources,
     costAlertUsd,
+    trajectoryMinScore,
+    trajectoryReferences: references,
     leasePath: mcpRunLockPath(),
     source: 'cli',
     logger: (line) => process.stdout.write(`[sentinel] ${line}\n`),
@@ -152,7 +187,8 @@ async function main(): Promise<void> {
     `atoma sentinel — ${sentinelRuleIds().length} rules, zero tokens, flagging only\n` +
       `  store    ${dbPath}\n` +
       `  projects ${projectsLine}\n` +
-      `  cost     ${costAlertUsd === null ? 'threshold disarmed (--cost-alert to arm)' : `alert past ${costAlertUsd} USD`}\n`
+      `  cost     ${costAlertUsd === null ? 'threshold disarmed (--cost-alert to arm)' : `alert past ${costAlertUsd} USD`}\n` +
+      `  drift    ${trajectoryMinScore === null ? 'trajectory rule disarmed (--trajectory-min-score to arm)' : `trajectory-drift below similarity ${trajectoryMinScore} (uncalibrated)`}\n`
   );
 
   if (args.flags['once'] === 'true') {
@@ -170,6 +206,15 @@ async function main(): Promise<void> {
     );
     for (const skip of report.skipped) {
       process.stdout.write(`  skipped ${skip.runId ?? '(source)'}: ${skip.reason}\n`);
+    }
+    for (const reference of report.references ?? []) {
+      process.stdout.write(
+        reference.failed !== null
+          ? `  reference ${reference.corpus}: failed — ${reference.failed}\n`
+          : `  reference ${reference.corpus}: ${reference.runs} finished run(s), ` +
+              `${reference.signatures} credited trajectorie(s)` +
+              `${reference.unreadable > 0 ? `, ${reference.unreadable} unreadable` : ''}\n`
+      );
     }
     return;
   }

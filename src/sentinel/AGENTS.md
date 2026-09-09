@@ -44,6 +44,21 @@ Neighbours:
   Severity and push audience are forced by the exhaustive maps in
   [`src/contracts/platformEvents.ts`](../contracts/platformEvents.ts) and
   [`src/viz/push/routes.ts`](../viz/push/routes.ts).
+- `trajectory-drift` is the one rule with an input beyond the run's own
+  window: a TRAJECTORY REFERENCE — the credited, closed executions of FINISHED
+  runs of the same corpus — built by `reference.ts` and handed in through
+  `SentinelEnv`, so the rule itself still reads no file. It scores each CLOSED
+  Molecule execution (the `llm` event with its `llmEventId` is the proof; a
+  prefix scored against whole paths is the false alarm it must not raise on a
+  run in flight) against the executions of the same Molecule and skill, needs
+  `TRAJECTORY_MIN_SAMPLES` before speaking, emits once per execution, and
+  carries element NAMES only — never arguments or results. Its floor
+  (`ATOMA_SENTINEL_TRAJECTORY_MIN_SCORE`, `--trajectory-min-score`, default
+  `TRAJECTORY_DRIFT_DEFAULT_MIN_SCORE`) is UNCALIBRATED and armed by default
+  so the journal collects what calibration needs; `off` disarms it. The
+  derivation and score live in `src/contracts/trajectory.ts` because the
+  analyst's digest reads them too. Design, pilot and the two stages this row
+  gates: [trajectory predictability, 2026-09-09](../../docs/trajectory-predictability-design-2026-09-09.md).
 
 ## The watch and the loop
 
@@ -119,6 +134,17 @@ Neighbours:
   is the transport's exception, `result.ok === false` is the element's own
   verdict — and the second is where atoma's tools report almost everything.
   Measured on the cold `web-counter` trace: 1 against 4.
+- The trajectory reference is loaded ONCE per tick, per corpus, before any
+  run is screened: operator runs from `runs/index.json` entries with an
+  `endedAt`, project runs from `listFinishedRunTraces` (`ended_at` is the
+  fact). Bounded to `TRAJECTORY_REFERENCE_MAX_RUNS` newest runs, cached per
+  trace on size and mtime so a steady tick costs one `stat` per run and no
+  parse, fail-soft on a trace it cannot read (counted in the tick's
+  `references`, never dropped silently), and contained: a source that throws
+  leaves its corpus unscored that tick and says so. The two corpora never mix
+  in a reference either — but a project reference spans every organisation,
+  because how a skill executes is knowledge, and knowledge is the commons;
+  the finding still carries its org as attribution and nothing more.
 
 ## Untrusted content
 
@@ -157,3 +183,10 @@ Neighbours:
   whether it has it at all is still an open decision in the design document.
   Until that is settled the table cannot express it, and no row here is
   cancel-eligible.
+- The trajectory rule keys on the SKILL a Molecule was injected with, and on
+  the Molecule alone when none was (`keyedBy: 'atom'`, noisier and labelled
+  so). It deliberately does NOT compare an execution with the skill's declared
+  recipe — the design's within-run `k = 0` — because that needs the recipe's
+  tool set and is Stage B's decision. Nor does the reference exclude credited
+  runs the analyst later graded otherwise: Stage A accepts that poisoning and
+  is descriptive only, which is one more reason this row carries no power.

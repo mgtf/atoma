@@ -344,3 +344,119 @@ describe('the project corpus', () => {
     ]);
   });
 });
+
+describe('the trajectory reference', () => {
+  const ACTOR = { name: 'Methane', tier: 1 };
+  const RECIPE = ['write_file', 'write_file', 'start_node_server', 'fetch_url', 'fetch_url', 'fetch_url', 'read_file'];
+  const DRIFTED = [
+    ...Array<string>(4).fill('write_file'),
+    'start_node_server',
+    ...Array<string>(12).fill('fetch_url'),
+    'read_file',
+    'read_file',
+  ];
+
+  /** One execution of one Molecule under one skill, closed, and credited when `credited`. */
+  function trace(id: string, tools: readonly string[], credited: boolean, endedAt?: string) {
+    let ts = NOW - 50_000;
+    const executionId = `${id}-exec`;
+    return {
+      id,
+      label: 'a run',
+      startedAt: new Date(NOW - 60_000).toISOString(),
+      ...(endedAt ? { endedAt } : {}),
+      events: [
+        { id: `${id}-inject`, ts: (ts += 1), kind: 'skill', op: 'inject', l1Name: 'Methane', l1AtomId: 'a', skillId: 'node-api', actor: { name: 'Tracheid', tier: 2 } },
+        ...tools.map((name, index) => ({
+          id: `${id}-tool-${index}`,
+          ts: (ts += 1),
+          kind: 'tool',
+          llmEventId: executionId,
+          name,
+          args: { url: 'http://localhost:1/' },
+          durationMs: 10,
+          actor: ACTOR,
+        })),
+        {
+          id: executionId,
+          ts: (ts += 1),
+          kind: 'llm',
+          role: 'execute',
+          model: 'm',
+          actor: ACTOR,
+          systemPrompt: '',
+          userContent: '',
+          response: '',
+          stopReason: 'end_turn',
+          durationMs: 10,
+          usage: { inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+          costUsd: 0.01,
+        },
+        ...(credited
+          ? [{ id: `${id}-success`, ts: (ts += 1), kind: 'skill', op: 'success', l1Name: 'Methane', l1AtomId: 'a', skillId: 'node-api', actor: { name: 'Tracheid', tier: 2 } }]
+          : []),
+      ],
+    };
+  }
+  const ENDED = new Date(NOW - 20_000).toISOString();
+  const finishedEntry = (id: string) => ({ ...liveEntry(id), inFlight: false, endedAt: ENDED });
+  const corpus = () =>
+    runsFixture([liveEntry('live'), finishedEntry('f1'), finishedEntry('f2'), finishedEntry('f3')], {
+      live: trace('live', DRIFTED, false),
+      f1: trace('f1', RECIPE, true, ENDED),
+      f2: trace('f2', RECIPE, true, ENDED),
+      f3: trace('f3', RECIPE, true, ENDED),
+    });
+  const driftRows = (report: { emitted: { ruleId: string }[] }) =>
+    report.emitted.filter((finding) => finding.ruleId === 'trajectory-drift');
+
+  it('scores a live operator run against the finished runs beside it, reports what it used, and says it once', () => {
+    const journal = fakeJournal();
+    const dir = corpus();
+    const watch = () => new SentinelWatch({ journal, runsDir: dir, now: () => NOW, trajectoryMinScore: 0.5 });
+    const report = watch().tick();
+    expect(report.references).toEqual([{ corpus: 'operator', runs: 3, signatures: 3, unreadable: 0, failed: null }]);
+    expect(report.runs.map((run) => run.runId)).toEqual(['live']);
+    expect(driftRows(report)).toHaveLength(1);
+    const row = journal.appended.find((event) => event.detail?.['dedupeKey'] === 'trajectory-drift:live-exec')!;
+    expect(row.kind).toBe('run.anomaly');
+    expect(row.actorType).toBe('system');
+    expect(row.detail?.['corpus']).toBe('operator');
+    expect(row.detail?.['observed']).toBe('write_file×4 › start_node_server › fetch_url×12 › read_file×2');
+    expect(row.detail?.['sampleSize']).toBe(3);
+    // A restarted watcher reads the journal and repeats nothing.
+    expect(driftRows(watch().tick())).toEqual([]);
+  });
+
+  it('loads no reference and scores nothing while the floor is disarmed', () => {
+    const journal = fakeJournal();
+    const report = new SentinelWatch({ journal, runsDir: corpus(), now: () => NOW }).tick();
+    expect(report.references).toBeUndefined();
+    expect(driftRows(report)).toEqual([]);
+  });
+
+  it('reports a reference source that throws, and keeps screening the run', () => {
+    const journal = fakeJournal();
+    const report = new SentinelWatch({
+      journal,
+      runsDir: corpus(),
+      now: () => NOW,
+      trajectoryMinScore: 0.5,
+      trajectoryReferences: [
+        {
+          corpus: 'operator',
+          load() {
+            throw new Error('store locked');
+          },
+        },
+      ],
+    }).tick();
+    expect(report.references).toEqual([
+      { corpus: 'operator', runs: 0, signatures: 0, unreadable: 0, failed: 'Error: store locked' },
+    ]);
+    expect(report.runs.map((run) => run.runId)).toEqual(['live']);
+    expect(driftRows(report)).toEqual([]);
+    // The window-only rules still ran over the same run.
+    expect(report.emitted.length).toBeGreaterThan(0);
+  });
+});

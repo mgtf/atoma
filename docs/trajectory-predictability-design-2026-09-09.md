@@ -336,3 +336,34 @@ wasted calls in the skills lifecycle.
 - [sentinel blind spot, 2026-08-23](incidents/sentinel-blind-spot-2026-08-23.md)
 - [supervisor-held proof attestation (A1), 2026-08-22](supervisor-attestation-a1-review-2026-08-22.md)
 - [engineering record, 2026-08-14](incidents/engineering-record-2026-08-14.md#considered-and-rejected-do-not-re-propose-naively)
+
+## 13. Implementation note, 2026-09-09
+
+Stage A landed the same day, at the owner's explicit request after the
+COOLING-OFF concern was raised and reaffirmed. What landed, and where it
+departs from the body above:
+
+- The signature, key and score schemas AND the pure derivation live together
+  in `src/contracts/trajectory.ts`, not in `src/sentinel`: the analyst's
+  digest reads the same quantity and the two subsystems may not import each
+  other. `src/sentinel/reference.ts` is the one impure step, reading finished
+  traces per corpus, bounded and cached.
+- The rule is `trajectory-drift` in `src/sentinel/rules.ts`, journal-only,
+  scoring only CLOSED executions (the `llm` event that carries the execution's
+  id is the proof), once per execution, element names only.
+- The analyst does not read the journal today, so section 5.3's "one question
+  about the run's `trajectory-drift` rows" became a mechanical `trajectories`
+  block in the digest plus one clause in the `execution` stage of the prompt
+  (`ANALYST_PROMPT_VERSION` bumped). Same quantity, read from the trace.
+- Open question 1 took the default: keyed on the injected skill, on the
+  Molecule alone otherwise, labelled `keyedBy`. Question 2: the sentinel
+  computes and journals; the analyst sees the quantity in its digest. Question
+  3: every credited run enters the reference, poisoning accepted for a
+  descriptive stage. Question 4 was not run; the corpus is still ten traces.
+- The floor is armed by default at `TRAJECTORY_DRIFT_DEFAULT_MIN_SCORE` (0.5)
+  and is stated everywhere as uncalibrated. On the fixture cut from five real
+  traces (`tests/fixtures/sentinel-trajectory-traces.json`) the three readings
+  of section 4 order mechanically: a clean repeat scores above 0.8, the 10:47
+  first phase between 0.6 and 0.75, the pomodoro streak below 0.5 — and no key
+  in those five runs reaches three skill-keyed samples, so the rule would have
+  been silent on them. That is the calibration gap Stage A exists to close.

@@ -148,10 +148,16 @@ import {
   type SentinelDiscovery,
   type SentinelRunSource,
 } from '../sentinel/sources.js';
+import {
+  operatorTrajectoryReferenceSource,
+  projectTrajectoryReferenceSource,
+  type TrajectoryReferenceSource,
+} from '../sentinel/reference.js';
 import { SentinelWatch, SENTINEL_DEFAULT_INTERVAL_MS } from '../sentinel/watch.js';
 import {
   sentinelCostAlertFromEnv,
   sentinelIntervalFromEnv,
+  sentinelTrajectoryMinScoreFromEnv,
   startResidentSentinel,
   sleepInhibitorHint,
   unarmedSentinelHealth,
@@ -1061,6 +1067,19 @@ function sentinelSources(): SentinelRunSource[] {
   ];
 }
 
+/**
+ * One trajectory reference per corpus watched, because a live execution is
+ * scored against FINISHED runs of its own corpus and the two never mix.
+ */
+function sentinelReferences(): TrajectoryReferenceSource[] {
+  return [
+    operatorTrajectoryReferenceSource({ runsDir: RUNS_DIR }),
+    ...(PROJECTS_RUNTIME
+      ? [projectTrajectoryReferenceSource({ reader: PROJECTS_RUNTIME.store })]
+      : []),
+  ];
+}
+
 const SENTINEL_BOOTED_AT = new Date().toISOString();
 
 const SENTINEL: ResidentSentinel | null = (() => {
@@ -1072,6 +1091,8 @@ const SENTINEL: ResidentSentinel | null = (() => {
       journal: EVENTS,
       sources: sentinelSources(),
       costAlertUsd: cli.costAlertUsd ?? sentinelCostAlertFromEnv(),
+      trajectoryMinScore: sentinelTrajectoryMinScoreFromEnv(),
+      trajectoryReferences: sentinelReferences(),
       leasePath: mcpRunLockPath(),
       source: 'viz-server',
       logger: (line) => console.error(`[sentinel] ${line}`),

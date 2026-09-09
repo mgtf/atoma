@@ -127,3 +127,28 @@ Neighbours:
   writer must state what it built on rather than omitting it.
 - `commitShaSchema` is the ONE definition of a 40-hex commit sha, imported by
   both the receipt and the row. It was written twice.
+
+## Trajectory signatures
+
+- `src/contracts/trajectory.ts` owns the signature, key and score shapes AND
+  the pure derivation over trace events, for the reason `traceFields.ts` lives
+  here: two subsystems read it — the sentinel's rule table and the analyst's
+  digest — and neither may import the other. It reads runtime-stamped
+  identities only (element names, actor names, skill ids, event and branch
+  ids) and never `args`, `result` or prose; its event type is structural so
+  every `VizEvent` satisfies it without a `src/viz` import.
+- ONE EXECUTION IS ONE `llmEventId`. It is CLOSED by the `llm` event carrying
+  that id, which `RecordingLlmClient` records only when the call returns, so
+  array order is causal and a signature without it is a prefix. It is CREDITED
+  by the next `skill.success` (naming its skill, when it had one) or `trust`
+  RESULT for its Molecule in an agreeing lane, before that Molecule's next
+  execution — so a remediation retry leaves its first attempt uncredited.
+  Lanes NEST (measured 2026-09-09 on the real traces): the Cell injects,
+  credits and trusts in its OWN lane and the Molecule executes in a child lane
+  the Cell opens, so an event agrees with an execution when their lanes are
+  equal or one is an ancestor of the other, and a lane-less event agrees with
+  any lane. One credit credits the latest attempt in a lane and closes the
+  older ones there, so the trust-RESULT-beside-skill-success pair cannot credit
+  a retry's failed first attempt; siblings in other lanes keep waiting.
+- A reference holds completed AND credited signatures only, newest
+  `TRAJECTORY_REFERENCE_MAX_PER_KEY` per key. Assemble it oldest-first.

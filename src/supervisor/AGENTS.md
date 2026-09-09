@@ -111,6 +111,12 @@ Neighbours:
   atoma MCP surface. The same verdict schema derives Codex's nullable optionals.
 - A run with no `endedAt` is refused, never analysed: the digest of a live
   trace is a partial view and the session would spend beside the run.
+- The digest carries a mechanical `trajectories` block — one row per Molecule
+  execution: ordered element names collapsed, the skill it was handed, whether
+  the run credited it — derived by `src/contracts/trajectory.ts`, the same
+  quantity the sentinel's `trajectory-drift` row scores. The prompt names it
+  as evidence for an `observation` or a `mechanism_candidate` and forbids
+  designing a threshold from it; the analyst reads the digest, not the journal.
 - New verdicts require an evidence-cited review of planning, delegation,
   execution, validation, recovery and learning, including delivered runs.
   Each stage reports reviewed, insufficient evidence (also budget-limited

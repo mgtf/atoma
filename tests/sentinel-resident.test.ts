@@ -9,6 +9,7 @@ import {
   SENTINEL_FAILURE_LIMIT,
   sentinelCostAlertFromEnv,
   sentinelIntervalFromEnv,
+  sentinelTrajectoryMinScoreFromEnv,
   sleepInhibitorHint,
   startResidentSentinel,
   vizSentinelEnabled,
@@ -238,6 +239,17 @@ describe('the environment surface', () => {
     expect(sentinelIntervalFromEnv({ ATOMA_VIZ_SENTINEL_INTERVAL_MS: '5000' })).toBe(5000);
     // Under a second is not an interval, it is a busy loop on the HTTP thread.
     expect(sentinelIntervalFromEnv({ ATOMA_VIZ_SENTINEL_INTERVAL_MS: '10' })).toBeNull();
+  });
+
+  it('reads the trajectory floor through one helper: armed by default, off on request, default on nonsense', () => {
+    expect(sentinelTrajectoryMinScoreFromEnv({})).toBe(0.5);
+    expect(sentinelTrajectoryMinScoreFromEnv({ ATOMA_SENTINEL_TRAJECTORY_MIN_SCORE: '0.35' })).toBe(0.35);
+    expect(sentinelTrajectoryMinScoreFromEnv({ ATOMA_SENTINEL_TRAJECTORY_MIN_SCORE: 'off' })).toBeNull();
+    expect(sentinelTrajectoryMinScoreFromEnv({ ATOMA_SENTINEL_TRAJECTORY_MIN_SCORE: '0' })).toBeNull();
+    // Unlike the cost threshold, nonsense must not silently DISARM the one rule
+    // that is on by default: the default floor stands and only `off` disarms.
+    expect(sentinelTrajectoryMinScoreFromEnv({ ATOMA_SENTINEL_TRAJECTORY_MIN_SCORE: 'lots' })).toBe(0.5);
+    expect(sentinelTrajectoryMinScoreFromEnv({ ATOMA_SENTINEL_TRAJECTORY_MIN_SCORE: '1.5' })).toBe(0.5);
   });
 
   /**

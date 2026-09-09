@@ -1,5 +1,13 @@
 import { createHash } from 'node:crypto';
 import type { VizEvent, VizToolEvent } from '../viz/trace.js';
+import {
+  collapseTrajectory,
+  deriveTrajectorySignatures,
+  referenceSamples,
+  scoreTrajectory,
+  TRAJECTORY_MIN_SAMPLES,
+  type TrajectoryReference,
+} from '../contracts/trajectory.js';
 
 /**
  * THE SENTINEL RULE TABLE.
@@ -55,6 +63,18 @@ export interface SentinelEnv {
    * An operator threshold, NOT a budget — nothing refuses to spend past it.
    */
   readonly costAlertUsd: number | null;
+  /**
+   * Credited trajectories of FINISHED runs of this run's corpus, or null when
+   * none could be loaded. The one input a rule takes beyond the window, and it
+   * arrives here so the rule itself never reads a file (`reference.ts` does).
+   */
+  readonly trajectoryReference?: TrajectoryReference | null;
+  /**
+   * Similarity below which a closed execution is journaled as drift, or null
+   * to disarm the rule. UNCALIBRATED (`TRAJECTORY_DRIFT_DEFAULT_MIN_SCORE`):
+   * a floor to collect rows under, not a judgment.
+   */
+  readonly trajectoryMinScore?: number | null;
 }
 
 interface SentinelRule {
@@ -247,6 +267,54 @@ const RULES: readonly SentinelRule[] = [
             dedupeKey: `slow-tool-outlier:${call.id}`,
           });
         }
+      }
+      return out;
+    },
+  },
+  {
+    id: 'trajectory-drift',
+    kind: 'run.anomaly',
+    check: (env) => {
+      // Stage A of docs/trajectory-predictability-design-2026-09-09.md: the
+      // ordered element names one Molecule execution emitted, scored against
+      // the credited executions of the same Molecule and skill in FINISHED
+      // runs of this corpus. It observes and journals; it decides nothing.
+      const reference = env.trajectoryReference ?? null;
+      const minScore = env.trajectoryMinScore ?? null;
+      if (reference === null || minScore === null) return [];
+      const out: SentinelFinding[] = [];
+      for (const signature of deriveTrajectorySignatures(env.runId, env.events)) {
+        // A prefix scored against whole paths is the false alarm this rule
+        // must not raise on a run in flight: only a closed execution is scored.
+        if (!signature.completed) continue;
+        const samples = referenceSamples(reference, signature.key);
+        if (samples.length < TRAJECTORY_MIN_SAMPLES) continue;
+        const score = scoreTrajectory(signature.tools, samples.map((sample) => sample.tools));
+        if (score.score >= minScore) continue;
+        const subject = signature.key.skillId === null ? 'its own' : `the ${signature.key.skillId}`;
+        out.push({
+          ruleId: 'trajectory-drift',
+          kind: 'run.anomaly',
+          summary: `${signature.key.l1Name} strayed from ${subject} trajectory: ${score.observedLen} calls against a median of ${score.predictedLen}, similarity ${score.score.toFixed(2)} over ${score.sampleSize} credited runs`,
+          detail: {
+            l1Name: signature.key.l1Name,
+            skillId: signature.key.skillId,
+            keyedBy: signature.key.keyedBy,
+            executionId: signature.executionId,
+            score: Number(score.score.toFixed(4)),
+            minScore,
+            observedLen: score.observedLen,
+            predictedLen: score.predictedLen,
+            nearestLen: score.nearestLen,
+            lengthRatio: Number(score.lengthRatio.toFixed(2)),
+            sampleSize: score.sampleSize,
+            // Element NAMES the runtime stamped, collapsed and bounded. Never
+            // arguments, never results: those are model-authored or ingested.
+            observed: collapseTrajectory(signature.tools),
+          },
+          // Once per execution: the path is closed, so the finding is final.
+          dedupeKey: `trajectory-drift:${signature.executionId}`,
+        });
       }
       return out;
     },

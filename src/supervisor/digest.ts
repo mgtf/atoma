@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { VerdictRunStatus } from '../contracts/supervisorVerdict.js';
 import type { VizEvent, VizRun } from '../viz/trace.js';
+import { collapseTrajectory, deriveTrajectorySignatures } from '../contracts/trajectory.js';
 
 /**
  * THE MECHANICAL PRE-DIGEST the analyst reads before the trace.
@@ -105,6 +106,25 @@ export interface RunDigest {
   readonly kindCounts: Record<string, number>;
   readonly errorEvents: { i: number; kind: string; error: string }[];
   readonly expensiveCalls: Record<string, unknown>[];
+  /**
+   * One row per Molecule execution: the ordered element names it emitted,
+   * collapsed, with the skill it was handed and whether the run credited it.
+   * Mechanical, from `src/contracts/trajectory.ts`; the prompt names it as
+   * evidence for an observation or a mechanism candidate, never as a
+   * threshold to design from.
+   */
+  readonly trajectories: {
+    i: number;
+    executionId: string;
+    actor: string;
+    tier: number | null;
+    skillId: string | null;
+    keyedBy: 'skill' | 'atom';
+    completed: boolean;
+    credited: boolean;
+    calls: number;
+    sequence: string;
+  }[];
 }
 
 export function digestRun(run: VizRun): { digest: RunDigest; lines: string[] } {
@@ -135,6 +155,22 @@ export function digestRun(run: VizRun): { digest: RunDigest; lines: string[] } {
     lines.push(JSON.stringify(digestEvent(event, index)));
   });
   costed.sort((a, b) => b.costUsd - a.costUsd);
+  const trajectories: RunDigest['trajectories'] = deriveTrajectorySignatures(run.id, events).map(
+    (signature) => ({
+      // The closing `llm` event's index, so an evidence ref lands on the line
+      // that proves the execution ended; the first tool's index while open.
+      i: signature.completedIndex ?? signature.firstIndex,
+      executionId: signature.executionId,
+      actor: signature.key.l1Name,
+      tier: signature.tier,
+      skillId: signature.key.skillId,
+      keyedBy: signature.key.keyedBy,
+      completed: signature.completed,
+      credited: signature.credited,
+      calls: signature.tools.length,
+      sequence: collapseTrajectory(signature.tools),
+    })
+  );
   const digest: RunDigest = {
     id: run.id,
     label: run.label,
@@ -152,6 +188,7 @@ export function digestRun(run: VizRun): { digest: RunDigest; lines: string[] } {
     kindCounts,
     errorEvents,
     expensiveCalls: costed.slice(0, 8),
+    trajectories,
   };
   return { digest, lines };
 }

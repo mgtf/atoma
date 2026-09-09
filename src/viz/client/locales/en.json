@@ -568,6 +568,7 @@
   "sentinel.rule.recurring-tool-error": "One element failing repeatedly with the same error. Read in two places: the transport exception and the element’s own ok:false.",
   "sentinel.rule.slow-tool-outlier": "One call far slower than the median for that same element name, with at least three samples.",
   "sentinel.rule.injection-signature": "An injection signature in an element RESULT — where untrusted content enters. A screen that says where to look, never an authorization boundary.",
+  "sentinel.rule.trajectory-drift": "One closed Molecule execution whose ordered element sequence sits far from every credited execution of the same Molecule and skill in finished runs, once three are known. Uncalibrated: a row to read, never a judgment.",
   "registry.detailPrompt": "System prompt",
   "registry.detailInstruction": "User instruction",
   "registry.detailInstructionHint": "Composed per call from the task, the plan and any injected skills — so it belongs to a run, not to the agent type. Open an LLM event in Runs to read the one that was actually sent.",

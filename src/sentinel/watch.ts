@@ -3,11 +3,14 @@ import type { VizEvent, VizRun } from '../viz/trace.js';
 import { peekRunLease } from '../mcp/runLock.js';
 import { eventLabel, type PlatformEventInput } from '../contracts/platformEvents.js';
 import { runSentinelRules, type SentinelFinding, type SentinelKind } from './rules.js';
+import type { TrajectoryReference } from '../contracts/trajectory.js';
+import { operatorTrajectoryReferenceSource, type TrajectoryReferenceSource } from './reference.js';
 import {
   MAX_TRACE_BYTES,
   operatorRunSource,
   readBoundedJson,
   type SentinelLiveRun,
+  type SentinelRunCorpus,
   type SentinelRunSource,
   type SentinelSkip,
 } from './sources.js';
@@ -79,6 +82,20 @@ export interface SentinelWatchOptions {
   readonly now?: () => number;
   /** USD alert threshold, or null to disable that rule. Not a budget. */
   readonly costAlertUsd?: number | null;
+  /**
+   * Similarity floor for `trajectory-drift`, or null to disarm it. Defaults to
+   * DISARMED here, so a bare watch in a test screens the window-only rules;
+   * both hosts pass the environment's value through one helper
+   * (`sentinelTrajectoryMinScoreFromEnv`), which arms it by default.
+   */
+  readonly trajectoryMinScore?: number | null;
+  /**
+   * Where the credited trajectories of finished runs come from, one per
+   * corpus. Omitted with the default operator source, it is that corpus's own
+   * `runs/`; omitted beside explicit `sources`, it is nothing, because this
+   * class cannot know which directories or stores those sources read.
+   */
+  readonly trajectoryReferences?: readonly TrajectoryReferenceSource[];
   readonly leasePath?: string;
   /**
    * Which host is watching. It rides every row as `detail.watch` so a finding
@@ -91,11 +108,22 @@ export interface SentinelWatchOptions {
   readonly logger?: (line: string) => void;
 }
 
+export interface SentinelReferenceReport {
+  readonly corpus: SentinelRunCorpus;
+  readonly runs: number;
+  readonly signatures: number;
+  readonly unreadable: number;
+  /** The source threw; the rule was silent for this corpus this tick. */
+  readonly failed: string | null;
+}
+
 export interface SentinelTickReport {
   readonly runs: SentinelLiveRun[];
   readonly emitted: SentinelFinding[];
   /** Candidates seen but skipped, with why — never silently ignored. */
   readonly skipped: SentinelSkip[];
+  /** Present when the trajectory rule is armed: what each corpus was scored against. */
+  readonly references?: SentinelReferenceReport[];
 }
 
 export class SentinelWatch {
@@ -103,17 +131,20 @@ export class SentinelWatch {
   private readonly sources: readonly SentinelRunSource[];
   private readonly now: () => number;
   private readonly costAlertUsd: number | null;
+  private readonly trajectoryMinScore: number | null;
+  private readonly trajectoryReferences: readonly TrajectoryReferenceSource[];
   private readonly leasePath: string | undefined;
   private readonly source: SentinelWatchSource;
   private readonly logger: (line: string) => void;
 
   constructor(options: SentinelWatchOptions) {
     this.journal = options.journal;
-    this.sources = options.sources ?? [
-      operatorRunSource({
-        runsDir: resolve(options.runsDir ?? process.env['ATOMA_RUNS_DIR'] ?? './runs'),
-      }),
-    ];
+    const runsDir = resolve(options.runsDir ?? process.env['ATOMA_RUNS_DIR'] ?? './runs');
+    this.sources = options.sources ?? [operatorRunSource({ runsDir })];
+    this.trajectoryMinScore = options.trajectoryMinScore ?? null;
+    this.trajectoryReferences =
+      options.trajectoryReferences ??
+      (options.sources ? [] : [operatorTrajectoryReferenceSource({ runsDir })]);
     this.now = options.now ?? (() => Date.now());
     this.costAlertUsd = options.costAlertUsd ?? null;
     if (options.leasePath !== undefined) this.leasePath = options.leasePath;
@@ -173,6 +204,37 @@ export class SentinelWatch {
       lease = null;
     }
 
+    // The trajectory reference, once per tick and per corpus, before any run
+    // is screened. Contained like every other read in this pass: a source that
+    // throws leaves its corpus unscored this tick and says so in the report.
+    let references: Map<SentinelRunCorpus, TrajectoryReference> | null = null;
+    const referenceReports: SentinelReferenceReport[] = [];
+    if (this.trajectoryMinScore !== null) {
+      references = new Map();
+      for (const source of this.trajectoryReferences) {
+        try {
+          const load = source.load();
+          references.set(source.corpus, load.reference);
+          referenceReports.push({
+            corpus: source.corpus,
+            runs: load.reference.runs,
+            signatures: load.reference.signatures,
+            unreadable: load.unreadable,
+            failed: null,
+          });
+        } catch (error) {
+          referenceReports.push({
+            corpus: source.corpus,
+            runs: 0,
+            signatures: 0,
+            unreadable: 0,
+            failed: String(error),
+          });
+          this.logger(`trajectory reference for ${source.corpus} runs failed: ${String(error)}`);
+        }
+      }
+    }
+
     for (const source of this.sources) {
       let discovered;
       try {
@@ -187,16 +249,17 @@ export class SentinelWatch {
       skipped.push(...discovered.skipped);
       for (const candidate of discovered.runs) {
         runs.push(candidate);
-        this.screen(candidate, lease, emitted, skipped);
+        this.screen(candidate, lease, references?.get(candidate.corpus) ?? null, emitted, skipped);
       }
     }
-    return { runs, emitted, skipped };
+    return { runs, emitted, skipped, ...(references ? { references: referenceReports } : {}) };
   }
 
   /** One live run: read, apply the table, journal what has not been said. */
   private screen(
     candidate: SentinelLiveRun,
     lease: ReturnType<typeof peekRunLease>,
+    reference: TrajectoryReference | null,
     emitted: SentinelFinding[],
     skipped: SentinelSkip[]
   ): void {
@@ -212,7 +275,13 @@ export class SentinelWatch {
       return;
     }
     const findings = runSentinelRules(
-      { runId: candidate.runId, events, costAlertUsd: this.costAlertUsd },
+      {
+        runId: candidate.runId,
+        events,
+        costAlertUsd: this.costAlertUsd,
+        trajectoryReference: reference,
+        trajectoryMinScore: this.trajectoryMinScore,
+      },
       (ruleId, error) => this.logger(`rule ${ruleId} threw: ${String(error)}`)
     );
     for (const finding of findings) {

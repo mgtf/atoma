@@ -1,4 +1,5 @@
 import { eventLabel } from '../contracts/platformEvents.js';
+import { TRAJECTORY_DRIFT_DEFAULT_MIN_SCORE } from '../contracts/trajectory.js';
 import {
   claimSentinelWatch,
   type SentinelWatchIncumbent,
@@ -268,6 +269,7 @@ export function unarmedSentinelHealth(
 export const VIZ_SENTINEL_ENV = 'ATOMA_VIZ_SENTINEL';
 export const SENTINEL_INTERVAL_ENV = 'ATOMA_VIZ_SENTINEL_INTERVAL_MS';
 export const SENTINEL_COST_ALERT_ENV = 'ATOMA_SENTINEL_COST_ALERT_USD';
+export const SENTINEL_TRAJECTORY_MIN_SCORE_ENV = 'ATOMA_SENTINEL_TRAJECTORY_MIN_SCORE';
 
 /**
  * THE HOST'S OWN WAY to hold a machine awake beside a long run, for the two
@@ -323,6 +325,34 @@ export function sentinelCostAlertFromEnv(
   if (raw === undefined || raw.trim() === '') return null;
   const value = Number(raw);
   return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/**
+ * ONE reader for the trajectory floor, shared by both hosts. Unlike the cost
+ * threshold this rule is ARMED by default — Stage A of the trajectory design
+ * exists to collect the rows that calibration needs — so nonsense falls back
+ * to the default rather than to silence, and only an explicit `off` (or `0`)
+ * disarms it.
+ */
+export function sentinelTrajectoryMinScoreFromEnv(
+  env: NodeJS.ProcessEnv = process.env
+): number | null {
+  const raw = env[SENTINEL_TRAJECTORY_MIN_SCORE_ENV];
+  if (raw === undefined || raw.trim() === '') return TRAJECTORY_DRIFT_DEFAULT_MIN_SCORE;
+  // `null` is a VALUE here (disarmed), so no `??`: only an unparsable string falls back.
+  const parsed = parseTrajectoryMinScore(raw);
+  return parsed === undefined ? TRAJECTORY_DRIFT_DEFAULT_MIN_SCORE : parsed;
+}
+
+/**
+ * `off`, `0`, `false` or `none` → null (disarmed); a number in (0, 1] → that
+ * floor; anything else → undefined, so each caller chooses its own fallback.
+ */
+export function parseTrajectoryMinScore(raw: string): number | null | undefined {
+  const value = raw.trim().toLowerCase();
+  if (value === 'off' || value === '0' || value === 'false' || value === 'none') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 && parsed <= 1 ? parsed : undefined;
 }
 
 /** Interval override, for tests and for an operator who wants a slower watch. */

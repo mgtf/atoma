@@ -140,6 +140,28 @@ describe('digestRun', () => {
     expect(runStatusOf({ endedAt: 'x' })).toBe('delivered');
     expect(runStatusOf({})).toBe('unknown');
   });
+
+  it('carries one mechanical trajectory row per Molecule execution, with its skill and its credit', () => {
+    const trace = finishedTrace();
+    const molecule = { name: 'Methane', tier: 1 };
+    const cell = { name: 'Tracheid', tier: 2 };
+    trace['events'] = [
+      { id: 'i1', ts: 1, kind: 'skill', op: 'inject', l1Name: 'Methane', l1AtomId: 'a', skillId: 'node-api', actor: cell },
+      { id: 't1', ts: 2, kind: 'tool', llmEventId: 'x1', name: 'write_file', args: { file: 'server.js' }, result: { ok: true }, durationMs: 4, actor: molecule },
+      { id: 't2', ts: 3, kind: 'tool', llmEventId: 'x1', name: 'write_file', args: {}, durationMs: 4, actor: molecule },
+      { id: 't3', ts: 4, kind: 'tool', llmEventId: 'x1', name: 'start_node_server', args: {}, durationMs: 4, actor: molecule },
+      { id: 'x1', ts: 5, kind: 'llm', role: 'execute', model: 'claude-sonnet-5', costUsd: 0.05, durationMs: 900, actor: molecule, response: 'done' },
+      { id: 's1', ts: 6, kind: 'skill', op: 'success', l1Name: 'Methane', l1AtomId: 'a', skillId: 'node-api', actor: cell },
+      { id: 't4', ts: 7, kind: 'tool', llmEventId: 'x2', name: 'read_file', args: {}, durationMs: 4, actor: molecule },
+    ];
+    const { digest } = digestRun(trace as never);
+    expect(digest.trajectories).toEqual([
+      { i: 4, executionId: 'x1', actor: 'Methane', tier: 1, skillId: 'node-api', keyedBy: 'skill', completed: true, credited: true, calls: 3, sequence: 'write_file×2 › start_node_server' },
+      { i: 6, executionId: 'x2', actor: 'Methane', tier: 1, skillId: null, keyedBy: 'atom', completed: false, credited: false, calls: 1, sequence: 'read_file' },
+    ]);
+    // Element names only: nothing the model passed as an argument reaches the block.
+    expect(JSON.stringify(digest.trajectories)).not.toContain('server.js');
+  });
 });
 
 describe('analyseRun', () => {

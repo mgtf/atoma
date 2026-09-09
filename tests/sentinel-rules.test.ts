@@ -9,6 +9,7 @@ import {
   type SentinelEnv,
 } from '../src/sentinel/rules.js';
 import { platformEventKindSchema, severityForKind } from '../src/contracts/platformEvents.js';
+import { buildTrajectoryReference, TRAJECTORY_MIN_SAMPLES } from '../src/contracts/trajectory.js';
 import type { VizEvent } from '../src/viz/trace.js';
 
 /**
@@ -68,12 +69,13 @@ describe('the rule table itself', () => {
     expect(severityForKind('run.anomaly')).toBe('warning');
   });
 
-  it('contains the five families the design named, and no inline extras', () => {
+  it('contains the five families the design named plus the trajectory row, and no inline extras', () => {
     expect(sentinelRuleIds()).toEqual([
       'cost-alert',
       'identical-tool-streak',
       'recurring-tool-error',
       'slow-tool-outlier',
+      'trajectory-drift',
       'injection-signature',
     ]);
   });
@@ -309,6 +311,127 @@ describe('injection-signature', () => {
     );
     expect(findings).toHaveLength(2);
     expect(new Set(findings.map((f) => f.dedupeKey)).size).toBe(2);
+  });
+});
+
+describe('trajectory-drift', () => {
+  const ACTOR = { name: 'Methane', tier: 1 as const };
+  const SUPERVISOR = { name: 'Tracheid', tier: 2 as const };
+  const RECIPE = ['write_file', 'write_file', 'start_node_server', 'fetch_url', 'fetch_url', 'fetch_url', 'read_file'];
+  const DRIFTED = [
+    ...Array<string>(4).fill('write_file'),
+    'start_node_server',
+    ...Array<string>(12).fill('fetch_url'),
+    'read_file',
+    'read_file',
+  ];
+
+  /** One run: an optional inject, one execution, its closing llm event, and how it was credited. */
+  function run(
+    runId: string,
+    tools: readonly string[],
+    opts: { skill?: string | null; credit?: 'skill' | 'trust' | 'none'; close?: boolean } = {}
+  ): VizEvent[] {
+    const skill = opts.skill === undefined ? 'node-api' : opts.skill;
+    const executionId = `${runId}-exec`;
+    const events: VizEvent[] = [];
+    if (skill !== null) {
+      events.push({ id: `${runId}-inject`, ts: 1, kind: 'skill', op: 'inject', l1Name: ACTOR.name, l1AtomId: 'a', skillId: skill, actor: SUPERVISOR });
+    }
+    for (const name of tools) events.push(toolEvent({ name, llmEventId: executionId, actor: ACTOR }));
+    if (opts.close !== false) {
+      events.push({
+        id: executionId,
+        ts: 2,
+        kind: 'llm',
+        role: 'execute',
+        model: 'm',
+        actor: ACTOR,
+        systemPrompt: '',
+        userContent: '',
+        response: '',
+        stopReason: 'end_turn',
+        durationMs: 1,
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+        costUsd: 0,
+      });
+    }
+    const credit = opts.credit ?? 'skill';
+    if (credit === 'trust') {
+      events.push({ id: `${runId}-trust`, ts: 3, kind: 'trust', actor: SUPERVISOR, child: ACTOR, subject: 'RESULT', successes: 1, failures: 0, reasoning: '' });
+    } else if (credit === 'skill') {
+      events.push({ id: `${runId}-success`, ts: 3, kind: 'skill', op: 'success', l1Name: ACTOR.name, l1AtomId: 'a', skillId: skill ?? 'node-api', actor: SUPERVISOR });
+    }
+    return events;
+  }
+
+  const reference = (count: number, opts: { skill?: string | null; credit?: 'skill' | 'trust' } = {}) =>
+    buildTrajectoryReference(
+      Array.from({ length: count }, (_unused, index) => ({ runId: `ref-${index}`, events: run(`ref-${index}`, RECIPE, opts) }))
+    );
+  const drift = (live: VizEvent[], over: Partial<SentinelEnv> = {}) =>
+    runSentinelRules({
+      runId: 'live',
+      events: live,
+      costAlertUsd: null,
+      trajectoryReference: reference(3),
+      trajectoryMinScore: 0.5,
+      ...over,
+    }).filter((finding) => finding.ruleId === 'trajectory-drift');
+
+  it('is silent without a reference, and silent when the floor is disarmed', () => {
+    const live = run('live', DRIFTED, { credit: 'none' });
+    expect(drift(live, { trajectoryReference: null })).toEqual([]);
+    expect(drift(live, { trajectoryMinScore: null })).toEqual([]);
+    expect(runSentinelRules(env(live)).filter((f) => f.ruleId === 'trajectory-drift')).toEqual([]);
+  });
+
+  it(`needs ${TRAJECTORY_MIN_SAMPLES} credited samples for the key before it speaks`, () => {
+    const live = run('live', DRIFTED, { credit: 'none' });
+    expect(drift(live, { trajectoryReference: reference(TRAJECTORY_MIN_SAMPLES - 1) })).toEqual([]);
+    expect(drift(live, { trajectoryReference: reference(TRAJECTORY_MIN_SAMPLES) })).toHaveLength(1);
+  });
+
+  it('journals a closed execution far from every credited path, once, with element names only', () => {
+    const findings = drift(run('live', DRIFTED, { credit: 'none' }));
+    expect(findings).toHaveLength(1);
+    const finding = findings[0]!;
+    expect(finding.kind).toBe('run.anomaly');
+    expect(finding.summary).toContain('Methane strayed from the node-api trajectory');
+    expect(finding.dedupeKey).toBe('trajectory-drift:live-exec');
+    expect(finding.detail).toMatchObject({
+      l1Name: 'Methane',
+      skillId: 'node-api',
+      keyedBy: 'skill',
+      executionId: 'live-exec',
+      observedLen: 19,
+      predictedLen: 7,
+      nearestLen: 7,
+      sampleSize: 3,
+      minScore: 0.5,
+      observed: 'write_file×4 › start_node_server › fetch_url×12 › read_file×2',
+    });
+    expect(finding.detail['score']).toBeLessThan(0.5);
+    // Names the runtime stamped, and nothing a model or a fetched page wrote.
+    expect(Object.keys(finding.detail)).not.toContain('args');
+    expect(Object.keys(finding.detail)).not.toContain('result');
+  });
+
+  it('does not score an execution its llm event has not closed yet', () => {
+    expect(drift(run('live', DRIFTED, { credit: 'none', close: false }))).toEqual([]);
+  });
+
+  it('stays silent on a path it has seen', () => {
+    expect(drift(run('live', RECIPE, { credit: 'none' }))).toEqual([]);
+  });
+
+  it('keys on the Molecule alone when no skill drove the execution, and says so', () => {
+    const findings = drift(run('live', DRIFTED, { skill: null, credit: 'none' }), {
+      trajectoryReference: reference(3, { skill: null, credit: 'trust' }),
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.summary).toContain('Methane strayed from its own trajectory');
+    expect(findings[0]!.detail).toMatchObject({ skillId: null, keyedBy: 'atom' });
   });
 });
 
