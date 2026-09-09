@@ -1,0 +1,13 @@
+{
+  "observedAt": "2026-09-09T14:02:50.134Z",
+  "versions": {
+    "workerImage": "sha256:81632bc7a3b74509e911c9169bbb0a104867acd30ecc6db74bcaa526a8d28ea8",
+    "claude": "2.1.123 (Claude Code)",
+    "haystackRuntimeSha256": "097b6a29a27e5a820dbfce925e010f2c484693d07fb963f425c8366ea4214d89"
+  },
+  "runtime": {
+    "node": "v24.20.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  }
+}

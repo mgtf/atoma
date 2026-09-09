@@ -1,0 +1,76 @@
+{
+  "campaignId": "haystack-mcp-policy-available-20260909",
+  "kind": "haystack-development",
+  "reason": "aborted",
+  "planned": 3,
+  "attempted": 2,
+  "apiSpendUsd": 0,
+  "subscriptionPriceEquivalentUsd": 0.8687,
+  "arms": [
+    {
+      "arm": "atoma",
+      "planned": 1,
+      "attempted": 1,
+      "full": 1,
+      "infrastructureFailures": 0,
+      "elapsedMs": 225409,
+      "subscriptionPriceEquivalentUsd": 0.421,
+      "llmCalls": 20
+    },
+    {
+      "arm": "atoma-haystack",
+      "planned": 1,
+      "attempted": 1,
+      "full": 1,
+      "infrastructureFailures": 0,
+      "elapsedMs": 284641,
+      "subscriptionPriceEquivalentUsd": 0.4477,
+      "llmCalls": 22
+    },
+    {
+      "arm": "frontier-direct",
+      "planned": 1,
+      "attempted": 0,
+      "full": 0,
+      "infrastructureFailures": 0,
+      "elapsedMs": 0,
+      "subscriptionPriceEquivalentUsd": 0,
+      "llmCalls": 0
+    }
+  ],
+  "comparison": {
+    "pairs": [
+      {
+        "questionId": "northstar-13",
+        "repetition": 1,
+        "kind": "maintenance",
+        "complete": true,
+        "a": true,
+        "b": true,
+        "elapsedA": 225409,
+        "elapsedB": 284641,
+        "priceA": 0.421,
+        "priceB": 0.4477
+      }
+    ],
+    "plannedPairs": 1,
+    "completePairs": 1,
+    "aFull": 1,
+    "bFull": 1,
+    "wins": 0,
+    "losses": 0,
+    "pairedFullPassDifference": 0,
+    "elapsedRatio": 1.2627756655679232,
+    "priceEquivalentRatio": 1.0634204275534442,
+    "uncertainty": "No population confidence interval: questions and repetitions within the development project are correlated. A new project-family sample is required.",
+    "decision": "inconclusive",
+    "rule": {
+      "objective": "paired-full-pass",
+      "minimumGain": 0.5,
+      "maxElapsedRatio": 1.25,
+      "maxPriceEquivalentRatio": 1.25
+    }
+  },
+  "claim": "development screening only; correlated synthetic tasks do not establish production benefit",
+  "error": "commit runtime/scorer source before registering or executing a retrieval campaign"
+}

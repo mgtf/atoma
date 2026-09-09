@@ -1,0 +1,88 @@
+{
+  "_meta": {
+    "io.modelcontextprotocol/related-task": {
+      "taskId": "b122a4ba5af2599f011ed0d4a309087a"
+    }
+  },
+  "content": [
+    {
+      "type": "text",
+      "text": "{\n  \"campaignId\": \"haystack-mcp-policy-available-isolated-20260909\",\n  \"kind\": \"haystack-development\",\n  \"reason\": \"completed\",\n  \"planned\": 3,\n  \"attempted\": 3,\n  \"apiSpendUsd\": 0,\n  \"subscriptionPriceEquivalentUsd\": 1.3946,\n  \"arms\": [\n    {\n      \"arm\": \"atoma\",\n      \"planned\": 1,\n      \"attempted\": 1,\n      \"full\": 0,\n      \"infrastructureFailures\": 0,\n      \"elapsedMs\": 453693,\n      \"subscriptionPriceEquivalentUsd\": 0.347,\n      \"llmCalls\": 16\n    },\n    {\n      \"arm\": \"atoma-haystack\",\n      \"planned\": 1,\n      \"attempted\": 1,\n      \"full\": 1,\n      \"infrastructureFailures\": 0,\n      \"elapsedMs\": 438798,\n      \"subscriptionPriceEquivalentUsd\": 0.2956,\n      \"llmCalls\": 14\n    },\n    {\n      \"arm\": \"frontier-direct\",\n      \"planned\": 1,\n      \"attempted\": 1,\n      \"full\": 1,\n      \"infrastructureFailures\": 0,\n      \"elapsedMs\": 129796,\n      \"subscriptionPriceEquivalentUsd\": 0.752,\n      \"llmCalls\": 1\n    }\n  ],\n  \"comparison\": {\n    \"pairs\": [\n      {\n        \"questionId\": \"northstar-13\",\n        \"repetition\": 1,\n        \"kind\": \"maintenance\",\n        \"complete\": true,\n        \"a\": false,\n        \"b\": true,\n        \"elapsedA\": 453693,\n        \"elapsedB\": 438798,\n        \"priceA\": 0.347,\n        \"priceB\": 0.2956\n      }\n    ],\n    \"plannedPairs\": 1,\n    \"completePairs\": 1,\n    \"aFull\": 0,\n    \"bFull\": 1,\n    \"wins\": 1,\n    \"losses\": 0,\n    \"pairedFullPassDifference\": 1,\n    \"elapsedRatio\": 0.9671694295481746,\n    \"priceEquivalentRatio\": 0.8518731988472622,\n    \"uncertainty\": \"No population confidence interval: questions and repetitions within the development project are correlated. A new project-family sample is required.\",\n    \"decision\": \"advance-to-new-confirmation\",\n    \"rule\": {\n      \"objective\": \"paired-full-pass\",\n      \"minimumGain\": 0.5,\n      \"maxElapsedRatio\": 1.25,\n      \"maxPriceEquivalentRatio\": 1.25\n    }\n  },\n  \"claim\": \"development screening only; correlated synthetic tasks do not establish production benefit\"\n}"
+    }
+  ],
+  "structuredContent": {
+    "campaignId": "haystack-mcp-policy-available-isolated-20260909",
+    "kind": "haystack-development",
+    "reason": "completed",
+    "planned": 3,
+    "attempted": 3,
+    "apiSpendUsd": 0,
+    "subscriptionPriceEquivalentUsd": 1.3946,
+    "arms": [
+      {
+        "arm": "atoma",
+        "planned": 1,
+        "attempted": 1,
+        "full": 0,
+        "infrastructureFailures": 0,
+        "elapsedMs": 453693,
+        "subscriptionPriceEquivalentUsd": 0.347,
+        "llmCalls": 16
+      },
+      {
+        "arm": "atoma-haystack",
+        "planned": 1,
+        "attempted": 1,
+        "full": 1,
+        "infrastructureFailures": 0,
+        "elapsedMs": 438798,
+        "subscriptionPriceEquivalentUsd": 0.2956,
+        "llmCalls": 14
+      },
+      {
+        "arm": "frontier-direct",
+        "planned": 1,
+        "attempted": 1,
+        "full": 1,
+        "infrastructureFailures": 0,
+        "elapsedMs": 129796,
+        "subscriptionPriceEquivalentUsd": 0.752,
+        "llmCalls": 1
+      }
+    ],
+    "comparison": {
+      "pairs": [
+        {
+          "questionId": "northstar-13",
+          "repetition": 1,
+          "kind": "maintenance",
+          "complete": true,
+          "a": false,
+          "b": true,
+          "elapsedA": 453693,
+          "elapsedB": 438798,
+          "priceA": 0.347,
+          "priceB": 0.2956
+        }
+      ],
+      "plannedPairs": 1,
+      "completePairs": 1,
+      "aFull": 0,
+      "bFull": 1,
+      "wins": 1,
+      "losses": 0,
+      "pairedFullPassDifference": 1,
+      "elapsedRatio": 0.9671694295481746,
+      "priceEquivalentRatio": 0.8518731988472622,
+      "uncertainty": "No population confidence interval: questions and repetitions within the development project are correlated. A new project-family sample is required.",
+      "decision": "advance-to-new-confirmation",
+      "rule": {
+        "objective": "paired-full-pass",
+        "minimumGain": 0.5,
+        "maxElapsedRatio": 1.25,
+        "maxPriceEquivalentRatio": 1.25
+      }
+    },
+    "claim": "development screening only; correlated synthetic tasks do not establish production benefit"
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "id": "haystack-mcp-policy-available-isolated-20260909",
+  "purpose": "Paired same-day development invocation-policy diagnostic on northstar-13: compare available vs search-first instruction campaigns, with fresh Atoma and frontier controls in each. Measure correctness, elapsed time, subscription equivalent and actual search invocation/order from host traces. Instructions do not guarantee invocation. No production benefit claim; Orchard remains held out.",
+  "kind": "haystack-development",
+  "treatment": {
+    "backend": "haystack",
+    "index": {
+      "storageVersion": 1,
+      "extractionVersion": "utf8-files-v1",
+      "chunkerVersion": "markdown-lines-v1",
+      "chunks": {
+        "maxBytes": 1400,
+        "maxLines": 16
+      },
+      "contextVersion": "path-headings-source-v1",
+      "tokenizer": "unicode61 remove_diacritics 2",
+      "normalization": "original-bytes; no overlap",
+      "embedding": null,
+      "generatedContext": null
+    },
+    "queryLimits": {
+      "maxQueryBytes": 2048,
+      "maxResults": 5,
+      "maxCandidates": 50,
+      "maxExcerptBytes": 1600,
+      "maxResponseBytes": 12000,
+      "timeoutMs": 2000
+    },
+    "launch": {
+      "python": "/Users/mgtf/.atoma/haystack/venv/bin/python",
+      "settings": {
+        "mode": "hybrid-rerank",
+        "embeddingPath": "/Users/mgtf/.atoma/haystack/embedding",
+        "rerankerPath": "/Users/mgtf/.atoma/haystack/reranker",
+        "queryPrefix": "Represent this sentence for searching relevant passages: ",
+        "embeddingRevision": "73f92974f1658714c46293725648a914cf2f4a68360374600b8e23f695968e96",
+        "rerankerRevision": "626066419752140b03cbdce61a92f31405be0ff8c2592261cf7fbbab2697fe44"
+      },
+      "runtimeSha256": "097b6a29a27e5a820dbfce925e010f2c484693d07fb963f425c8366ea4214d89"
+    }
+  },
+  "decision": {
+    "objective": "paired-full-pass",
+    "minimumGain": 0.5,
+    "maxElapsedRatio": 1.25,
+    "maxPriceEquivalentRatio": 1.25
+  },
+  "questionIds": [
+    "northstar-13"
+  ],
+  "repetitions": 1,
+  "firstArm": "atoma",
+  "models": {
+    "l1": "sub:anthropic:haiku",
+    "l2": "sub:anthropic:sonnet",
+    "l3": "sub:anthropic:opus",
+    "frontier": "sub:anthropic:opus"
+  },
+  "workerImage": "sha256:81632bc7a3b74509e911c9169bbb0a104867acd30ecc6db74bcaa526a8d28ea8",
+  "timeoutMs": 600000,
+  "maxWallMs": 1800000,
+  "stopAfterConsecutiveInfrastructureFailures": 1,
+  "thresholds": {
+    "trust": 3,
+    "promote": 3,
+    "demote": 2
+  },
+  "haystackInvocation": "available"
+}

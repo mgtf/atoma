@@ -1,0 +1,105 @@
+{
+  "version": 1,
+  "registeredAt": "2026-09-09T13:44:27.162Z",
+  "spec": {
+    "version": 1,
+    "id": "haystack-mcp-policy-available-20260909",
+    "purpose": "Paired same-day development invocation-policy diagnostic on northstar-13: compare available vs search-first instruction campaigns, with fresh Atoma and frontier controls in each. Measure correctness, elapsed time, subscription equivalent and actual search invocation/order from host traces. Instructions do not guarantee invocation. No production benefit claim; Orchard remains held out.",
+    "kind": "haystack-development",
+    "treatment": {
+      "backend": "haystack",
+      "index": {
+        "storageVersion": 1,
+        "extractionVersion": "utf8-files-v1",
+        "chunkerVersion": "markdown-lines-v1",
+        "chunks": {
+          "maxBytes": 1400,
+          "maxLines": 16
+        },
+        "contextVersion": "path-headings-source-v1",
+        "tokenizer": "unicode61 remove_diacritics 2",
+        "normalization": "original-bytes; no overlap",
+        "embedding": null,
+        "generatedContext": null
+      },
+      "queryLimits": {
+        "maxQueryBytes": 2048,
+        "maxResults": 5,
+        "maxCandidates": 50,
+        "maxExcerptBytes": 1600,
+        "maxResponseBytes": 12000,
+        "timeoutMs": 2000
+      },
+      "launch": {
+        "python": "/Users/mgtf/.atoma/haystack/venv/bin/python",
+        "settings": {
+          "mode": "hybrid-rerank",
+          "embeddingPath": "/Users/mgtf/.atoma/haystack/embedding",
+          "rerankerPath": "/Users/mgtf/.atoma/haystack/reranker",
+          "queryPrefix": "Represent this sentence for searching relevant passages: ",
+          "embeddingRevision": "73f92974f1658714c46293725648a914cf2f4a68360374600b8e23f695968e96",
+          "rerankerRevision": "626066419752140b03cbdce61a92f31405be0ff8c2592261cf7fbbab2697fe44"
+        },
+        "runtimeSha256": "097b6a29a27e5a820dbfce925e010f2c484693d07fb963f425c8366ea4214d89"
+      }
+    },
+    "haystackInvocation": "available",
+    "decision": {
+      "objective": "paired-full-pass",
+      "minimumGain": 0.5,
+      "maxElapsedRatio": 1.25,
+      "maxPriceEquivalentRatio": 1.25
+    },
+    "questionIds": [
+      "northstar-13"
+    ],
+    "repetitions": 1,
+    "firstArm": "atoma",
+    "models": {
+      "l1": "sub:anthropic:haiku",
+      "l2": "sub:anthropic:sonnet",
+      "l3": "sub:anthropic:opus",
+      "frontier": "sub:anthropic:opus"
+    },
+    "workerImage": "sha256:81632bc7a3b74509e911c9169bbb0a104867acd30ecc6db74bcaa526a8d28ea8",
+    "timeoutMs": 600000,
+    "maxWallMs": 1800000,
+    "stopAfterConsecutiveInfrastructureFailures": 1,
+    "thresholds": {
+      "trust": 3,
+      "promote": 3,
+      "demote": 2
+    }
+  },
+  "source": {
+    "revision": "8ec0d4efe430d83c95701550b9cb0ec2dcca1257",
+    "sha256": "a8593dd647c0081e603fa6fee8017f8b5b38be8b948f83d0d3ab53f905368d2f"
+  },
+  "instrumentsSha256": "0487c2320e74963f7535e1f05674e88e980617c2c1ef27971b4386460116499b",
+  "runtime": {
+    "node": "v24.20.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "policy": "project-container-no-egress; fresh-authority-and-registry-per-attempt; learning-promotion-direct-event-skills-off; prefilter-cache-off; provider-cache-uncontrolled; local-haystack-treatment",
+  "schedule": [
+    {
+      "ordinal": 1,
+      "questionId": "northstar-13",
+      "repetition": 1,
+      "arm": "atoma"
+    },
+    {
+      "ordinal": 2,
+      "questionId": "northstar-13",
+      "repetition": 1,
+      "arm": "atoma-haystack"
+    },
+    {
+      "ordinal": 3,
+      "questionId": "northstar-13",
+      "repetition": 1,
+      "arm": "frontier-direct"
+    }
+  ]
+}

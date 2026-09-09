@@ -1,0 +1,75 @@
+{
+  "campaignId": "haystack-mcp-policy-search-first-isolated-20260909",
+  "kind": "haystack-development",
+  "reason": "completed",
+  "planned": 3,
+  "attempted": 3,
+  "apiSpendUsd": 0,
+  "subscriptionPriceEquivalentUsd": 1.1042999999999998,
+  "arms": [
+    {
+      "arm": "frontier-direct",
+      "planned": 1,
+      "attempted": 1,
+      "full": 1,
+      "infrastructureFailures": 0,
+      "elapsedMs": 128717,
+      "subscriptionPriceEquivalentUsd": 0.4463,
+      "llmCalls": 1
+    },
+    {
+      "arm": "atoma-haystack",
+      "planned": 1,
+      "attempted": 1,
+      "full": 1,
+      "infrastructureFailures": 0,
+      "elapsedMs": 303300,
+      "subscriptionPriceEquivalentUsd": 0.3666,
+      "llmCalls": 22
+    },
+    {
+      "arm": "atoma",
+      "planned": 1,
+      "attempted": 1,
+      "full": 1,
+      "infrastructureFailures": 0,
+      "elapsedMs": 207903,
+      "subscriptionPriceEquivalentUsd": 0.2914,
+      "llmCalls": 14
+    }
+  ],
+  "comparison": {
+    "pairs": [
+      {
+        "questionId": "northstar-13",
+        "repetition": 1,
+        "kind": "maintenance",
+        "complete": true,
+        "a": true,
+        "b": true,
+        "elapsedA": 207903,
+        "elapsedB": 303300,
+        "priceA": 0.2914,
+        "priceB": 0.3666
+      }
+    ],
+    "plannedPairs": 1,
+    "completePairs": 1,
+    "aFull": 1,
+    "bFull": 1,
+    "wins": 0,
+    "losses": 0,
+    "pairedFullPassDifference": 0,
+    "elapsedRatio": 1.458853407598736,
+    "priceEquivalentRatio": 1.2580645161290323,
+    "uncertainty": "No population confidence interval: questions and repetitions within the development project are correlated. A new project-family sample is required.",
+    "decision": "screen-not-met",
+    "rule": {
+      "objective": "paired-full-pass",
+      "minimumGain": 0.5,
+      "maxElapsedRatio": 1.25,
+      "maxPriceEquivalentRatio": 1.25
+    }
+  },
+  "claim": "development screening only; correlated synthetic tasks do not establish production benefit"
+}

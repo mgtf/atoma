@@ -1,0 +1,11 @@
+{
+  "task": {
+    "taskId": "b122a4ba5af2599f011ed0d4a309087a",
+    "status": "working",
+    "ttl": 2400000,
+    "createdAt": "2026-09-09T14:02:49.461Z",
+    "lastUpdatedAt": "2026-09-09T14:02:49.461Z",
+    "pollInterval": 2000,
+    "statusMessage": "campaign haystack-mcp-policy-available-isolated-20260909 validating"
+  }
+}
