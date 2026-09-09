@@ -383,10 +383,8 @@ describe('runner stdout contract — burn-in parses this', () => {
     expect(src).not.toMatch(/enregistr|visualiseur|d\u00e9marre/);
   });
 
-  it('emits the machine stats epilogue on delivered and failed paths', () => {
-    expect(src.match(/formatRunStatsEpilogue\(machineRunStats\('delivered'/g)).toHaveLength(1);
-    expect(src.match(/formatRunStatsEpilogue\(machineRunStats\('failed'/g)).toHaveLength(2);
-  });
+  // Epilogues are exercised through startTask in project-retrieval-runner.test.ts,
+  // including delivered, failed-model and infrastructure-preparation outcomes.
 
   it('exposes runTask taking a profile plus argv', () => {
     expect(typeof runTask).toBe('function');

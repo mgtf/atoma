@@ -52,7 +52,7 @@ function environment() {
 }
 
 describe('trusted retrieval injection through startTask', () => {
-  it.each(['fts5', 'haystack', 'broken-haystack'])('resolves the coordinator receipt through startTask with %s', async mode => {
+  it.each(['fts5', 'haystack', 'broken-haystack', 'failed-model'])('resolves the coordinator receipt through startTask with %s', async mode => {
     const root = environment();
     const f = projectRetrievalFixture(root);
     const source = f.makeRun({ 'docs.md': 'Private price is 190 euros.\n' });
@@ -68,9 +68,11 @@ describe('trusted retrieval injection through startTask', () => {
     }
     resetHostLifecycleSnapshotForTests();
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const logs = vi.spyOn(console, 'log').mockImplementation(() => {});
     const llm = new MockLlmClient();
     let observed: unknown;
     llm.enqueue(async req => {
+      if (mode === 'failed-model') throw new Error('Synthetic model failure');
       observed = await req.executor!.execute(SEARCH, { query: 'price' });
       return { text: 'Source consulted.', stopReason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 } };
     });
@@ -78,11 +80,14 @@ describe('trusted retrieval injection through startTask', () => {
     vi.mocked(containerToolBackend).mockImplementation(async opts => localToolBackend({ workspaceRoot: opts.workspaceRoot, logger: silentLogger() }));
     const handle = await startTask(buildProfile, ['--container', '--baseline', '--no-learn-skills', '--no-promote-skills', '--no-direct-skills', 'Consult the source.']);
     try {
-      expect((await handle.settled).outcome).toBe(mode === 'broken-haystack' ? 'failed' : 'delivered');
+      expect((await handle.settled).outcome).toBe(['broken-haystack', 'failed-model'].includes(mode) ? 'failed' : 'delivered');
+      const epilogue = parseRunStatsEpilogue([...logs.mock.calls, ...errors.mock.calls].map(c => c.join(' ')).join('\n'));
+      expect(epilogue?.outcome).toBe(mode === 'broken-haystack' ? 'error' : mode === 'failed-model' ? 'failed' : 'delivered');
       if (mode === 'broken-haystack') {
         expect(observed).toBeUndefined();
         expect(parseRunStatsEpilogue(errors.mock.calls.map(c => c.join(' ')).join('\n'))).toMatchObject({ outcome: 'error', llmCalls: 0 });
-      } else expect(observed).toMatchObject({ ok: true, passages: [expect.objectContaining({ excerpt: 'Private price is 190 euros.\n' })] });
+      } else if (mode === 'failed-model') expect(observed).toBeUndefined();
+      else expect(observed).toMatchObject({ ok: true, passages: [expect.objectContaining({ excerpt: 'Private price is 190 euros.\n' })] });
     } finally { await handle.shutdown(); }
     if (mode !== 'fts5') expect(() => process.kill(Number(readFileSync(join(root, 'haystack.pid'), 'utf8')), 0)).toThrow();
   });
