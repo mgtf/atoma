@@ -89,7 +89,7 @@ The public composition model is **Element → Molecule → Cell → Tissue**.
 - Numeric tiers 1/2/3 remain stable in storage, traces, env vars, and class
   names. Implementation names such as `AtomRegistry`, `Tool`, and
   `atom_types` remain stable too.
-- The 37 `atoma_*` MCP tools are host control/read APIs, not L1 elements; a
+- The 38 `atoma_*` MCP tools are host control/read APIs, not L1 elements; a
   caller sees the subset its tier admits (viewer, member, admin, platform).
 - Public taxonomy aliases coexist with legacy exports for compatibility.
 

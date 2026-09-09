@@ -114,6 +114,10 @@ const mcpSmoke = async (base) => {
   }
   const startTool = tools.find((tool) => tool.name === 'atoma_operator_run_start');
   if (startTool?.execution?.taskSupport !== 'optional') throw new Error('atoma_operator_run_start is not a task tool');
+  const benchmarkTool = tools.find((tool) => tool.name === 'atoma_benchmark_start');
+  if (benchmarkTool?.execution?.taskSupport !== 'optional') throw new Error('atoma_benchmark_start is not a task tool');
+  const invalidBenchmark = await call('tools/call', { name: 'atoma_benchmark_start', arguments: { registration: {} } });
+  if (!invalidBenchmark.isError) throw new Error('benchmark accepted an unregistered protocol');
   for (const tenantOnly of ['atoma_projects_list', 'atoma_run_start', 'atoma_org_members', 'atoma_journal_tail', 'atoma_notifications', 'atoma_run_preview']) {
     if (names.includes(tenantOnly)) throw new Error(`ungated MCP must not expose ${tenantOnly}`);
   }

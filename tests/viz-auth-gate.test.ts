@@ -1,3 +1,4 @@
+import { seedBenchmark } from './helpers/retrievalBenchmark.js';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
@@ -724,6 +725,7 @@ describe('viz auth gate (process level)', () => {
 
   it('reserves operator surfaces and the admin control plane to a CLI-granted platform admin', async () => {
     const instance = tempInstance();
+    const benchmark = seedBenchmark(join(instance.runsDir, 'benchmarks'));
     const provider = await startFakeProvider({ port: await freePort(), subject: 202 });
     const port = await freePort();
     const base = `http://127.0.0.1:${port}`;
@@ -740,6 +742,8 @@ describe('viz auth gate (process level)', () => {
     // Before the grant: an ordinary org owner is NOT the platform operator.
     const whoamiBefore = await fetch(`${base}/auth/whoami`, { headers: cookie });
     expect(await whoamiBefore.json()).toMatchObject({ authenticated: true, platformAdmin: false });
+    expect(await (await fetch(`${base}/api/runs`, { headers: cookie })).json()).toEqual([]);
+    expect((await fetch(`${base}/api/runs/${benchmark.start.runId}`, { headers: cookie })).status).toBe(404);
     for (const path of ['/api/registries', '/api/skills', '/api/burnin', '/api/admin/organisations']) {
       const refused = await fetch(`${base}${path}`, { headers: cookie });
       expect(refused.status).toBe(403);
@@ -774,6 +778,8 @@ describe('viz auth gate (process level)', () => {
     // The flag rides the very next request: no re-login, no session refresh.
     const whoamiAfter = await fetch(`${base}/auth/whoami`, { headers: cookie });
     expect(await whoamiAfter.json()).toMatchObject({ authenticated: true, platformAdmin: true });
+    expect(await (await fetch(`${base}/api/runs`, { headers: cookie })).json()).toMatchObject([{ id: benchmark.start.runId }]);
+    expect(await (await fetch(`${base}/api/runs/${benchmark.start.runId}`, { headers: cookie })).json()).toEqual(benchmark.trace);
     expect((await fetch(`${base}/api/registries`, { headers: cookie })).status).toBe(200);
 
     const organisations = await fetch(`${base}/api/admin/organisations`, { headers: cookie });

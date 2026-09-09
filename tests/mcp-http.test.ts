@@ -22,6 +22,8 @@ import { ProjectRunCoordinator } from '../src/projects/coordinator.js';
 import { ProjectService } from '../src/projects/service.js';
 import { acquireRunLease } from '../src/mcp/runLock.js';
 import { ANTHROPIC_PINS } from './tier-pins.js';
+import { benchmarkRegistration } from './helpers/retrievalBenchmark.js';
+import { summarizeRetrievalCampaign } from '../src/cli/retrievalCampaign.js';
 
 /**
  * ONE MCP FOR EVERYONE, OVER HTTP. What these hold, through the real SDK
@@ -177,7 +179,7 @@ describe('the catalogue by tier', () => {
     expect(asAdmin).toEqual([...asMember, 'atoma_org_members', 'atoma_org_models']);
     // The tray needs the host's notification builder; this host has none, so
     // the platform ladder is the whole table minus that one row.
-    expect(asPlatform).toEqual(MCP_TOOL_NAMES.filter((name) => name !== 'atoma_notifications'));
+    expect(asPlatform).toEqual(MCP_TOOL_NAMES.filter((name) => !['atoma_notifications', 'atoma_benchmark_start'].includes(name)));
     const withTray = names({ kind: 'principal', viewer: viewer('org:viewer'), tokenId: 't' }, { ...TENANT_HOST, notifications: () => ({ notifications: [], nextBefore: null }) });
     expect(withTray).toContain('atoma_notifications');
     expect(callerTier({ kind: 'operator' })).toBe('platform');
@@ -701,4 +703,44 @@ describe('runs as tasks, and the run log', () => {
     expect(messages).toHaveLength(3);
     await client.close();
   });
+});
+
+
+it('exposes registered benchmarks only to platform callers and drives cancellation through MCP tasks', async () => {
+  const registration = benchmarkRegistration();
+  let aborted = false;
+  let finish: (() => void) | undefined;
+  const deps: McpToolDeps = { ...TENANT_HOST, benchmarkStart: async (input, signal, progress) => {
+    expect(input).toEqual(registration);
+    progress('attempt 1: frontier-direct');
+    await new Promise<void>(resolve => {
+      finish = resolve;
+      signal.addEventListener('abort', () => { aborted = true; resolve(); }, { once: true });
+    });
+    return summarizeRetrievalCampaign(input, [], signal.aborted ? 'cancelled' : 'completed');
+  } };
+  const { url } = await listen(req => ({ kind: 'principal', tokenId: 't',
+    viewer: viewer('org:owner', req.headers.authorization === 'Bearer platform'),
+  }), deps);
+  const member = await connect(url, 'member');
+  const platform = await connect(url, 'platform');
+  try {
+    expect(await toolNames(member)).not.toContain('atoma_benchmark_start');
+    expect((await member.callTool({ name: 'atoma_benchmark_start', arguments: { registration } })).isError).toBe(true);
+    expect(await toolNames(platform)).toContain('atoma_benchmark_start');
+    const start = () => platform.request({ method: 'tools/call', params: {
+      name: 'atoma_benchmark_start', arguments: { registration },
+    } }, CreateTaskResultSchema, { task: { ttl: 60_000 } });
+    const first = await start();
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    expect((await platform.experimental.tasks.getTask(first.task.taskId)).statusMessage).toContain('frontier-direct');
+    finish!();
+    const result = await platform.experimental.tasks.getTaskResult(first.task.taskId, CallToolResultSchema);
+    expect(result.structuredContent).toMatchObject({ campaignId: registration.spec.id, reason: 'completed' });
+    finish = undefined;
+    const second = await start();
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    await platform.experimental.tasks.cancelTask(second.task.taskId);
+    await vi.waitFor(() => expect(aborted).toBe(true));
+  } finally { finish?.(); await member.close(); await platform.close(); }
 });

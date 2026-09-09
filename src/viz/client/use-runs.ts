@@ -29,7 +29,7 @@ export function useRunsIndex(active: boolean) {
           const topChanged = next[0]?.id !== current[0]?.id;
           const countChanged = next.length !== current.length;
           const anyLive = next.some((entry) => isIndexEntryLive(entry));
-          return topChanged || countChanged || anyLive ? next : current;
+          return topChanged || countChanged || anyLive || current.some((entry) => isIndexEntryLive(entry)) ? next : current;
         });
       }).catch(setError);
     }, 2000);

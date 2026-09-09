@@ -157,13 +157,14 @@ describe('viz run index is bounded', () => {
  * decision rather than a quiet loss of a column.
  */
 describe('the row reads a stated set of trace members', () => {
-  it('names exactly the nine it builds from', () => {
+  it('names the header and events it builds from', () => {
     expect([...TRACE_HEADER_KEYS].sort()).toEqual([
       'cancelled',
       'degraded',
       'durationMs',
       'endedAt',
       'error',
+      'events',
       'id',
       'label',
       'startedAt',

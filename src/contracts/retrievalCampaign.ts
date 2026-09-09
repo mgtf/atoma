@@ -89,6 +89,15 @@ export const retrievalRegistrationSchema = z.object({
   schedule: z.array(retrievalScheduleEntrySchema).min(2).max(200),
 }).strict();
 
+/** Host-written attempt receipt, also used to locate live benchmark traces. */
+export const retrievalAttemptStartSchema = z.object({
+  entry: retrievalScheduleEntrySchema,
+  runId: z.string().regex(/^[A-Za-z0-9-]+$/),
+  goal: z.string(),
+  initialState: z.string(),
+  executionEnv: z.record(z.string(), z.string()),
+}).strict();
+
 export const retrievalCampaignResultSchema = z.object({
   entry: retrievalScheduleEntrySchema,
   runId: z.string(),

@@ -3,6 +3,8 @@ import type { CreateTaskOptions, TaskRequestHandlerExtra, TaskStore, ToolTaskHan
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult, Request, RequestId, Result, Task } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
+import { retrievalRegistrationSchema } from '../contracts/retrievalCampaign.js';
+import type { RetrievalCampaignStart } from '../cli/retrievalCampaignHost.js';
 import { ProjectHttpError } from '../projects/service.js';
 import type { Viewer } from '../auth/store.js';
 import {
@@ -153,6 +155,33 @@ export interface RunTaskHost {
   readonly follow: (runId: string) => void;
   /** Registered cleanups run when the session's server closes. */
   readonly cleanups: (() => void)[];
+}
+
+export const BENCHMARK_RUN_INPUT = { registration: retrievalRegistrationSchema };
+
+/** Registered campaigns use the same task/cancellation protocol as runs. */
+export function benchmarkRunTaskHandler(host: RunTaskHost, start: RetrievalCampaignStart): ToolTaskHandler<typeof BENCHMARK_RUN_INPUT> {
+  return handlerWith<typeof BENCHMARK_RUN_INPUT>(async (args, extra) => {
+    const task = await extra.taskStore.createTask({
+      ttl: args.registration.spec.maxWallMs + TASK_RESULT_GRACE_MS, pollInterval: TASK_POLL_INTERVAL_MS,
+    });
+    const abort = new AbortController();
+    host.store.onCancel(task.taskId, () => abort.abort());
+    await extra.taskStore.updateTaskStatus(task.taskId, 'working', `campaign ${args.registration.spec.id} validating`);
+    // A disconnected session stops observing; it does not cancel the campaign.
+    let observing = true;
+    host.cleanups.push(() => { observing = false; });
+    const progress = (message: string) => {
+      if (observing) quietly(() => extra.taskStore.updateTaskStatus(task.taskId, 'working', message));
+    };
+    void Promise.resolve().then(() => start(args.registration, abort.signal, progress)).then(
+      report => { if (observing) quietly(() => extra.taskStore.storeTaskResult(task.taskId,
+        report.reason === 'completed' ? 'completed' : 'failed', jsonResult(report))); },
+      error => { if (observing) quietly(() => extra.taskStore.storeTaskResult(task.taskId, 'failed',
+        errorResult(`campaign refused or aborted: ${String(error).slice(0, 1000)}`))); }
+    );
+    return { task: await extra.taskStore.getTask(task.taskId) };
+  });
 }
 
 /* -------------------------------------------------------------- operator */

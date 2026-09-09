@@ -97,6 +97,14 @@ Neighbours:
 
 ## Runs are tasks (`tasks.ts`)
 
+- `atoma_benchmark_start` is a platform-only task over the existing retrieval
+  campaign CLI. It accepts a full immutable registration, never caller-chosen
+  dataset/output paths. The host fixes the dataset and archive root; source,
+  instruments, worker and global lease checks remain the CLI's. Cancellation
+  reaches the same campaign signal. Attempts are visible in the current viz
+  without creating product project rows. Operator guide:
+  [benchmark MCP integration](../../docs/benchmark-mcp-viz-2026-09-09.md).
+
 - BOTH START TOOLS ARE MCP TASKS (spec 2025-11-25, SDK experimental
   `registerToolTask`): `atoma_run_start` (member) and
   `atoma_operator_run_start` (platform) answer a task-augmented call with a

@@ -174,15 +174,20 @@ function harness(spawn: typeof spawnRun = async opts => candidate(opts)) {
 
 describe('retrieval campaign execution through the shared launcher seam', () => {
   it('isolates every attempt, scores stopped workspaces, archives failures and preserves the global lease', async () => {
+    const onAttempt = vi.fn();
+    const onChild = vi.fn();
     const h = harness(async opts => {
       expect(existsSync(opts.env!['ATOMA_DB_PATH']!)).toBe(false);
       expect(readdirSync(opts.env!['ATOMA_SKILLS_DIR']!)).toEqual([]);
       expect(peekRunLock(h.lock)?.runId).toBe('retrieval:test-campaign');
+      expect(onAttempt).toHaveBeenCalled();
       const log = candidate(opts);
       writeFileSync(opts.env!['ATOMA_DB_PATH']!, 'this attempt state');
       return log;
     });
-    const report = await runRetrievalCampaign(registration(), dataset, { repo, out: h.out }, h.deps);
+    const report = await runRetrievalCampaign(registration(), dataset, { repo, out: h.out, onAttempt, onChild }, h.deps);
+    expect(onAttempt).toHaveBeenCalledTimes(4);
+    expect(onChild.mock.calls).toEqual([[null], [null], [null], [null]]);
     expect(report).toMatchObject({ reason: 'completed', planned: 4, attempted: 4, apiSpendUsd: 0 });
     expect(report.arms.map(a => a.full)).toEqual([2, 2]);
     const calls = h.run.mock.calls.map(([o]) => o);

@@ -2,6 +2,7 @@ import { updateOrgModels } from '../auth/orgModels.js';
 import type { PlatformEventSink } from '../contracts/platformEvents.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import type { RetrievalCampaignStart } from '../cli/retrievalCampaignHost.js';
 import type { AuthStore, Viewer } from '../auth/store.js';
 import { platformEventKindSchema, PLATFORM_EVENT_FAMILIES } from '../contracts/platformEvents.js';
 import { SUPPORTED_LOCALES } from '../contracts/locales.js';
@@ -40,6 +41,8 @@ import {
 import { registerResources } from './resources.js';
 import {
   OPERATOR_RUN_INPUT,
+  BENCHMARK_RUN_INPUT,
+  benchmarkRunTaskHandler,
   PROJECT_RUN_INPUT,
   SessionTaskStore,
   TASKS_CAPABILITY,
@@ -94,6 +97,7 @@ export interface McpToolDeps {
   readonly emit?: PlatformEventSink;
   /** Whether this host may spawn operator-corpus runs (the machine's own runner). */
   readonly operatorRuns: boolean;
+  readonly benchmarkStart?: RetrievalCampaignStart;
   /**
    * `run.ts`'s injectable driver and lease, reached through the deps so a
    * wire test can start an operator run without spawning the runner. Absent
@@ -119,7 +123,7 @@ export interface McpToolDeps {
   }) => TrayPage;
 }
 
-export type McpToolNeed = 'projects' | 'auth' | 'journal' | 'operator-runs' | 'notifications';
+export type McpToolNeed = 'projects' | 'auth' | 'journal' | 'operator-runs' | 'notifications' | 'benchmarks';
 
 export interface McpToolSpec {
   readonly name: string;
@@ -494,6 +498,18 @@ export const MCP_TOOLS: readonly McpToolSpec[] = [
   },
 
   /* -------------------------------------------------------------- platform */
+  {
+    name: 'atoma_benchmark_start',
+    tier: 'platform',
+    needs: ['benchmarks'],
+    register: (server, ctx) => server.experimental.tasks.registerToolTask('atoma_benchmark_start', {
+      title: 'Start a registered retrieval benchmark',
+      description: 'Execute an immutable CLI retrieval registration with isolated per-attempt stores and the real frontier reference agent. Uses host subscriptions and the global run lease. Requires committed matching source and an installed pinned worker. Visible in Runs to platform admins. Follow as an MCP task; tasks/cancel stops the campaign. No arbitrary dataset or output paths. Results are development evidence, not a production benefit claim.',
+      inputSchema: BENCHMARK_RUN_INPUT,
+      annotations: MUTATING,
+      execution: { taskSupport: 'optional' },
+    }, benchmarkRunTaskHandler(ctx.tasks, ctx.deps.benchmarkStart!)),
+  },
   {
     name: 'atoma_operator_run_start',
     tier: 'platform',
@@ -958,6 +974,7 @@ function hostHonours(spec: McpToolSpec, deps: McpToolDeps): boolean {
     if (need === 'auth') return deps.auth !== null;
     if (need === 'journal') return deps.journal !== null;
     if (need === 'notifications') return typeof deps.notifications === 'function';
+    if (need === 'benchmarks') return typeof deps.benchmarkStart === 'function';
     return deps.operatorRuns;
   });
 }

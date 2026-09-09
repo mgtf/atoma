@@ -7,7 +7,7 @@ import { parseModelSelector } from '../contracts/modelSelector.js';
 import { parseRunStatsEpilogue } from '../contracts/runStats.js';
 import { readTraceTopLevelFields } from '../contracts/traceFields.js';
 import {
-  retrievalCampaignResultSchema, type RetrievalCampaignResult,
+  retrievalAttemptStartSchema, retrievalCampaignResultSchema, type RetrievalCampaignResult,
   type RetrievalRegistration, type RetrievalScheduleEntry,
 } from '../contracts/retrievalCampaign.js';
 import { acquireRunLeaseWithoutRecovery, type RunLease } from '../mcp/runLock.js';
@@ -147,7 +147,9 @@ export function summarizeRetrievalCampaign(
 /** A campaign driver over spawnRun, never another agent/supervision loop. */
 export async function runRetrievalCampaign(
   input: unknown, dataset: RetrievalDataset,
-  options: { repo: string; out: string; signal?: AbortSignal; hostEnv?: NodeJS.ProcessEnv },
+  options: { repo: string; out: string; signal?: AbortSignal; hostEnv?: NodeJS.ProcessEnv;
+    onAttempt?: (entry: RetrievalScheduleEntry, runId: string) => void;
+    onChild?: (pid: number | null) => void },
   overrides: Partial<CampaignDeps> = {}
 ): Promise<ReturnType<typeof summarizeRetrievalCampaign>> {
   const deps: CampaignDeps = {
@@ -207,24 +209,25 @@ export async function runRetrievalCampaign(
       const remainingMs = Math.max(1, registration.spec.timeoutMs - (Date.now() - start));
       env['ATOMA_BUILD_TIMEOUT_MS'] = String(remainingMs);
       try {
-        writeJson(join(attempt, 'start.json'), {
+        writeJson(join(attempt, 'start.json'), retrievalAttemptStartSchema.parse({
           entry, runId, goal: prepared.goal, initialState: project ?
             'synthetic project authorities; empty registry before bootstrap; empty skills; see start.db' :
             'empty store before runner bootstrap; empty skills',
           executionEnv: Object.fromEntries(Object.entries(env).filter(([key]) => key.startsWith('ATOMA_'))),
-        });
+        }));
+        options.onAttempt?.(entry, runId);
         childSettled = false;
         const pending = Promise.resolve().then(() => deps.spawn({
           cwd: options.repo, npmScript: 'run:build:dev', goal: prepared.goal,
           timeoutMs: remainingMs, logPath: join(attempt, 'run.log'),
-          env, signal, onSpawn: pid => lease.attachChild(pid),
+          env, signal, onSpawn: pid => { lease.attachChild(pid); options.onChild?.(pid); },
           extraArgs: [
             entry.arm === 'frontier-direct' ? '--baseline' : '--no-baseline',
             '--container', '--no-egress', '--worker-image', registration.spec.workerImage,
             '--no-learn-skills', '--no-promote-skills', '--no-direct-skills', '--seed', prepared.workspace,
           ],
         }));
-        const log = await withUnkillableBackstop(pending.finally(() => { childSettled = true; }),
+        const log = await withUnkillableBackstop(pending.finally(() => { childSettled = true; options.onChild?.(null); }),
           registration.spec.timeoutMs + DEFAULT_HARD_KILL_MARGIN_MS + UNKILLABLE_BACKSTOP_EXTRA_MS, id);
         // Keep the archive write mandatory even though spawnRun's best-effort log
         // write cannot reject a run that already completed.

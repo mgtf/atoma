@@ -181,8 +181,10 @@ import { McpOAuth } from '../auth/mcpOAuth.js';
 import { McpHttpHost } from '../mcp/http.js';
 import type { McpCaller } from '../mcp/identity.js';
 import { buildServer as buildMcpServer } from '../mcp/server.js';
-import { signalActiveRunOnExit } from '../mcp/run.js';
+import { repoRoot, signalActiveRunOnExit } from '../mcp/run.js';
 import type { McpToolDeps } from '../mcp/tools.js';
+import { retrievalCampaignHost } from '../cli/retrievalCampaignHost.js';
+import { BenchmarkRuns } from './benchmarkRuns.js';
 import { injectAppShellSeo, robotsTxt, sitemapXml } from './seo.js';
 // The MCP run lease, read for CONTEXT only (which pid holds the run slot) and
 // never as a detector. `src/sentinel/watch.ts` already reaches for it, so this
@@ -1183,7 +1185,9 @@ const ANALYST: ResidentAnalyst | null = (() => {
  * caller is the operator on loopback, as for the CLI. Host is pinned either
  * way so a page in a browser cannot address this port through DNS rebinding.
  */
+const BENCHMARK_RUNS = new BenchmarkRuns(join(RUNS_DIR, 'benchmarks'));
 const MCP_DEPS: McpToolDeps = {
+  benchmarkStart: retrievalCampaignHost(repoRoot(), BENCHMARK_RUNS.root),
   projects: PROJECTS_RUNTIME ? { service: PROJECTS_RUNTIME.projects, store: PROJECTS_RUNTIME.store } : null,
   auth: AUTH?.store ?? null,
   journal: EVENTS,
@@ -1632,20 +1636,20 @@ function listIndex(viewer: Viewer | null): VizRunIndexEntry[] {
   if (AUTH) {
     if (!PROJECTS_RUNTIME || !viewer) return [];
     // The platform admin reads every organisation's project traces.
-    return viewer.platformAdmin ? listAllRunIndex() : listOrganisationRunIndex(viewer.orgId);
+    return viewer.platformAdmin ? sortRunIndex([...listAllRunIndex(), ...BENCHMARK_RUNS.list(true)]) : listOrganisationRunIndex(viewer.orgId);
   }
-  return listOperatorRunIndex();
+  return sortRunIndex([...listOperatorRunIndex(), ...BENCHMARK_RUNS.list(true)]);
 }
 
 function resolveRunFile(id: string, viewer: Viewer | null): string | null {
   if (AUTH) {
     if (!PROJECTS_RUNTIME || !viewer) return null;
     return viewer.platformAdmin
-      ? PROJECTS_RUNTIME.store.findAnyRunTraceFile(id)
+      ? PROJECTS_RUNTIME.store.findAnyRunTraceFile(id) ?? BENCHMARK_RUNS.resolve(id, true)
       : PROJECTS_RUNTIME.store.findOrgRunTraceFile(viewer.orgId, id);
   }
   const primary = join(RUNS_DIR, `${id}.json`);
-  return existsSync(primary) ? primary : null;
+  return existsSync(primary) ? primary : BENCHMARK_RUNS.resolve(id, true);
 }
 
 interface RegistryHistoryEntry {

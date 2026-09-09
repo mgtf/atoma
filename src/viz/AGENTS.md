@@ -499,7 +499,8 @@ npm run viz:mark-turn:analyze
   hold. Neither may drift into the other's job — the second exists precisely
   because the first needs the whole document.
 ## Server and gated surfaces
-
+- `benchmarkRuns.ts` admits `<runs-dir>/benchmarks/` only for platform admins
+  or the ungated operator. Bounded receipts locate originals; reject escapes/symlinks, label campaign/question/arm, never create project rows.
 - Operator source launchers (`npm run viz`, `doctor:dev`, `auth:dev`) fill
   unset keys from checkout `.env`. Do not load `.env` inside `src/viz/server.ts`:
   process-level tests spawn it from the repository cwd with a cleaned env.

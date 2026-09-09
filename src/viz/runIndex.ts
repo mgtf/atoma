@@ -18,6 +18,7 @@ export const TRACE_HEADER_KEYS = [
   'degraded',
   'cancelled',
   'totals',
+  'events',
 ] as const satisfies readonly (keyof VizRun)[];
 
 type TraceFileHeader = {
@@ -115,6 +116,19 @@ export function summarizeTraceFile(file: string): VizRunIndexEntry | null {
     if (run.cancelled === true) entry.cancelled = true;
     if (typeof run.totals?.calls === 'number') entry.calls = run.totals.calls;
     if (typeof run.totals?.costUsd === 'number') entry.costUsd = run.totals.costUsd;
+    // Gated and benchmark indexes are rebuilt from traces, unlike the
+    // operator index.json. Preserve the recorder's live projection here too.
+    if (run.endedAt === undefined) {
+      entry.inFlight = true;
+      if (Array.isArray(run.events)) {
+        let last = 0;
+        for (const event of run.events as unknown[]) {
+          if (event && typeof event === 'object' && 'ts' in event &&
+            typeof event.ts === 'number' && Number.isFinite(event.ts)) last = Math.max(last, event.ts);
+        }
+        if (last > 0) entry.lastEventAt = last;
+      }
+    }
     return entry;
   } catch {
     return null;
