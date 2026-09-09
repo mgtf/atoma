@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "id": "haystack-citations-development-20260909",
+  "purpose": "Screen current Atoma with copyable exact citations and preserved semantic queries against current agentic Atoma and the shared frontier reference. All arms use the current runner; no causal before/after claim about individual corrections. Keep the two development questions, scorers, model selectors and budgets unchanged; Orchard remains held out.",
+  "kind": "haystack-development",
+  "treatment": {
+    "backend": "haystack",
+    "index": {
+      "storageVersion": 1,
+      "extractionVersion": "utf8-files-v1",
+      "chunkerVersion": "markdown-lines-v1",
+      "chunks": {
+        "maxBytes": 1400,
+        "maxLines": 16
+      },
+      "contextVersion": "path-headings-source-v1",
+      "tokenizer": "unicode61 remove_diacritics 2",
+      "normalization": "original-bytes; no overlap",
+      "embedding": null,
+      "generatedContext": null
+    },
+    "queryLimits": {
+      "maxQueryBytes": 2048,
+      "maxResults": 5,
+      "maxCandidates": 50,
+      "maxExcerptBytes": 1600,
+      "maxResponseBytes": 12000,
+      "timeoutMs": 2000
+    },
+    "launch": {
+      "python": "/Users/mgtf/.atoma/haystack/venv/bin/python",
+      "settings": {
+        "mode": "hybrid-rerank",
+        "embeddingPath": "/Users/mgtf/.atoma/haystack/embedding",
+        "rerankerPath": "/Users/mgtf/.atoma/haystack/reranker",
+        "queryPrefix": "Represent this sentence for searching relevant passages: ",
+        "embeddingRevision": "73f92974f1658714c46293725648a914cf2f4a68360374600b8e23f695968e96",
+        "rerankerRevision": "626066419752140b03cbdce61a92f31405be0ff8c2592261cf7fbbab2697fe44"
+      },
+      "runtimeSha256": "097b6a29a27e5a820dbfce925e010f2c484693d07fb963f425c8366ea4214d89"
+    }
+  },
+  "decision": {
+    "objective": "paired-full-pass",
+    "minimumGain": 0.5,
+    "maxElapsedRatio": 1.25,
+    "maxPriceEquivalentRatio": 1.25
+  },
+  "questionIds": [
+    "northstar-05",
+    "northstar-13"
+  ],
+  "repetitions": 1,
+  "firstArm": "atoma",
+  "models": {
+    "l1": "sub:anthropic:haiku",
+    "l2": "sub:anthropic:sonnet",
+    "l3": "sub:anthropic:opus",
+    "frontier": "sub:anthropic:opus"
+  },
+  "workerImage": "sha256:46d4fc0db5ca6d8585ef0e62f174fe9d84c25fb2a5e3b7f2ec08738d58d9c4e5",
+  "timeoutMs": 180000,
+  "maxWallMs": 1200000,
+  "stopAfterConsecutiveInfrastructureFailures": 1,
+  "thresholds": {
+    "trust": 3,
+    "promote": 3,
+    "demote": 2
+  }
+}

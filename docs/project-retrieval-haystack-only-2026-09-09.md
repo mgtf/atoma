@@ -155,6 +155,13 @@ between retries. No new validation gate, automatic search injection or line
 reranking is introduced. These changes require a fresh registered pilot to
 establish any task-success benefit; the historical scorer remains unchanged.
 
+The [subsequent six-attempt pilot](../benchmark/retrieval-citations-pilot-2026-09-09/README.md)
+did not meet its registered screen: A and B completed 0/2 tasks each, while the
+frontier reference completed 2/2. One B answer dropped a final newline from a
+correct returned citation. A's refund answer passed the artifact scorer but its
+run timed out. The archive separates these outcomes and preserves unreported
+usage on interrupted CLI calls; no individual correction has a proven causal gain.
+
 The former SQLite implementation lives only in
 `benchmark/haystack/sqliteBaseline.ts`, for the component comparator. Its native
 SQLite tests remain. This module is outside the product build and is not
