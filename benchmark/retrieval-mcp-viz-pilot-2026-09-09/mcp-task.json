@@ -1,0 +1,11 @@
+{
+  "task": {
+    "taskId": "5e951fd62e5e88501a384a53479fd47e",
+    "status": "working",
+    "ttl": 1800000,
+    "createdAt": "2026-09-09T12:28:57.090Z",
+    "lastUpdatedAt": "2026-09-09T12:28:57.090Z",
+    "pollInterval": 2000,
+    "statusMessage": "campaign haystack-mcp-diagnostic-20260909 validating"
+  }
+}

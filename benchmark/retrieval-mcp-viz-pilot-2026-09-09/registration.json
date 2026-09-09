@@ -1,0 +1,123 @@
+{
+  "version": 1,
+  "registeredAt": "2026-09-09T12:28:15.256Z",
+  "spec": {
+    "version": 1,
+    "id": "haystack-mcp-diagnostic-20260909",
+    "purpose": "Observe the unchanged two development questions and executable scorers through MCP in the authenticated visualizer. Compare current agentic Atoma, current Haystack Atoma and the real frontier reference on the same committed source. Diagnose timeouts and exact-citation failures; do not claim that this visibility integration fixes them or establishes production benefit. Orchard remains held out.",
+    "kind": "haystack-development",
+    "treatment": {
+      "backend": "haystack",
+      "index": {
+        "storageVersion": 1,
+        "extractionVersion": "utf8-files-v1",
+        "chunkerVersion": "markdown-lines-v1",
+        "chunks": {
+          "maxBytes": 1400,
+          "maxLines": 16
+        },
+        "contextVersion": "path-headings-source-v1",
+        "tokenizer": "unicode61 remove_diacritics 2",
+        "normalization": "original-bytes; no overlap",
+        "embedding": null,
+        "generatedContext": null
+      },
+      "queryLimits": {
+        "maxQueryBytes": 2048,
+        "maxResults": 5,
+        "maxCandidates": 50,
+        "maxExcerptBytes": 1600,
+        "maxResponseBytes": 12000,
+        "timeoutMs": 2000
+      },
+      "launch": {
+        "python": "/Users/mgtf/.atoma/haystack/venv/bin/python",
+        "settings": {
+          "mode": "hybrid-rerank",
+          "embeddingPath": "/Users/mgtf/.atoma/haystack/embedding",
+          "rerankerPath": "/Users/mgtf/.atoma/haystack/reranker",
+          "queryPrefix": "Represent this sentence for searching relevant passages: ",
+          "embeddingRevision": "73f92974f1658714c46293725648a914cf2f4a68360374600b8e23f695968e96",
+          "rerankerRevision": "626066419752140b03cbdce61a92f31405be0ff8c2592261cf7fbbab2697fe44"
+        },
+        "runtimeSha256": "097b6a29a27e5a820dbfce925e010f2c484693d07fb963f425c8366ea4214d89"
+      }
+    },
+    "decision": {
+      "objective": "paired-full-pass",
+      "minimumGain": 0.5,
+      "maxElapsedRatio": 1.25,
+      "maxPriceEquivalentRatio": 1.25
+    },
+    "questionIds": [
+      "northstar-05",
+      "northstar-13"
+    ],
+    "repetitions": 1,
+    "firstArm": "atoma",
+    "models": {
+      "l1": "sub:anthropic:haiku",
+      "l2": "sub:anthropic:sonnet",
+      "l3": "sub:anthropic:opus",
+      "frontier": "sub:anthropic:opus"
+    },
+    "workerImage": "sha256:3e045211ebfd1a18ff96a74d7defc3a732bbe06802c2e9dba7efa3f629a7793e",
+    "timeoutMs": 180000,
+    "maxWallMs": 1200000,
+    "stopAfterConsecutiveInfrastructureFailures": 1,
+    "thresholds": {
+      "trust": 3,
+      "promote": 3,
+      "demote": 2
+    }
+  },
+  "source": {
+    "revision": "84ecdade4f8ea4e76442cf473ace9b9253c03595",
+    "sha256": "1284af0af7ffa6f71fff48ea2362562a804c63d38ef24d40bedc3bf3fdf75075"
+  },
+  "instrumentsSha256": "0487c2320e74963f7535e1f05674e88e980617c2c1ef27971b4386460116499b",
+  "runtime": {
+    "node": "v24.20.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "policy": "project-container-no-egress; fresh-authority-and-registry-per-attempt; learning-promotion-direct-event-skills-off; prefilter-cache-off; provider-cache-uncontrolled; local-haystack-treatment",
+  "schedule": [
+    {
+      "ordinal": 1,
+      "questionId": "northstar-05",
+      "repetition": 1,
+      "arm": "atoma"
+    },
+    {
+      "ordinal": 2,
+      "questionId": "northstar-05",
+      "repetition": 1,
+      "arm": "atoma-haystack"
+    },
+    {
+      "ordinal": 3,
+      "questionId": "northstar-05",
+      "repetition": 1,
+      "arm": "frontier-direct"
+    },
+    {
+      "ordinal": 4,
+      "questionId": "northstar-13",
+      "repetition": 1,
+      "arm": "frontier-direct"
+    },
+    {
+      "ordinal": 5,
+      "questionId": "northstar-13",
+      "repetition": 1,
+      "arm": "atoma-haystack"
+    },
+    {
+      "ordinal": 6,
+      "questionId": "northstar-13",
+      "repetition": 1,
+      "arm": "atoma"
+    }
+  ]
+}
