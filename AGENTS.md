@@ -101,7 +101,12 @@ structured identities at the typed viz boundary instead of rewriting traces.
 
 ## Commands and workflow
 
-Use the repository's pinned Node version.
+Use the repository's pinned Node version (`.nvmrc`). For agent commands in
+fresh shells, resolve and verify that version's installed `bin` directory once
+per session, then prepend it to `PATH` for Node/npm commands. Do not source
+`nvm.sh` and run `nvm use` for every command; use nvm only when the pinned
+runtime needs to be located or installed. Keep the resolved path local to the
+session, since installation paths vary between machines.
 
 ```bash
 nvm use
