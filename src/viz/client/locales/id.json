@@ -1108,5 +1108,6 @@
   "settings.mcpHelpTitle": "Bantuan koneksi",
   "settings.mcpHelpHint": "Hubungkan kembali dari agen Anda jika akses berhenti berfungsi. Pastikan alamat diakhiri dengan /mcp dan Anda menyetujui organisasi yang benar. Untuk memverifikasi koneksi, minta agen Anda mencantumkan proyek Atoma Anda.",
   "skillReason.successNotFollowed": "Keberhasilan tidak diakui — validator mengamati bahwa run tidak mengikuti resep",
-  "skillReason.failureNotFollowed": "Kegagalan tidak diatribusikan — validator mengamati bahwa run tidak mengikuti resep"
+  "skillReason.failureNotFollowed": "Kegagalan tidak diatribusikan — validator mengamati bahwa run tidak mengikuti resep",
+  "sentinel.rule.trajectory-drift": "Satu eksekusi Molecule tertutup yang urutan elemennya jauh dari setiap eksekusi yang dikreditkan untuk Molecule dan skill yang sama dalam run yang telah selesai, setelah tiga diketahui. Belum dikalibrasi: baris untuk dibaca, bukan untuk menilai."
 }

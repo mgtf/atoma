@@ -1108,5 +1108,6 @@
   "settings.mcpHelpTitle": "Hilfe zur Verbindung",
   "settings.mcpHelpHint": "Stellen Sie die Verbindung über Ihren Agenten erneut her, falls der Zugriff nicht mehr funktioniert. Prüfen Sie, ob die Adresse auf /mcp endet und Sie die richtige Organisation genehmigt haben. Bitten Sie Ihren Agenten, Ihre Atoma-Projekte aufzulisten, um die Verbindung zu prüfen.",
   "skillReason.successNotFollowed": "Erfolg nicht angerechnet — der Validator hat festgestellt, dass der run dem Rezept nicht gefolgt ist",
-  "skillReason.failureNotFollowed": "Fehlschlag nicht zugerechnet — der Validator hat festgestellt, dass der run dem Rezept nicht gefolgt ist"
+  "skillReason.failureNotFollowed": "Fehlschlag nicht zugerechnet — der Validator hat festgestellt, dass der run dem Rezept nicht gefolgt ist",
+  "sentinel.rule.trajectory-drift": "Eine abgeschlossene Molekül-Ausführung, deren geordnete Elementfolge stark von jeder gewerteten Ausführung desselben Moleküls und skill in abgeschlossenen runs abweicht, sobald drei bekannt sind. Unkalibriert: eine Zeile zum Lesen, niemals ein Urteil."
 }
