@@ -4,16 +4,10 @@ import type { VizPreviewSummary } from '../client/types.js';
 /**
  * THE PREVIEW PLANE — where a member watches the app a run produced.
  *
- * It is a full-screen DOM plane, not an overlay panel, and that distinction
- * decides three things at once:
+ * It is a near-full-window modal with a dimmed backdrop.
  *
- * 1. IT OWNS THE SCREEN. The scene behind it is hidden and made `inert`, so
- *    there is no z-order question to lose: nothing of the product is
- *    underneath competing for the pointer light or for the hover bubble. That
- *    is why this is the one DOM surface allowed to paint its own frame
- *    without joining the grandfathered CSS-skin list in
- *    tests/viz-overlay-stack.test.ts — it is not over the canvas, it
- *    REPLACES it.
+ * 1. THE BACKGROUND IS INERT. The scene remains visible around the modal,
+ *    but cannot receive focus or clicks until the member closes it.
  * 2. THE CHROME IS OURS, ALWAYS. Identity, the untrusted-app warning and
  *    every control sit OUTSIDE the iframe, in this document. Generated
  *    content cannot cover them, cannot restyle them and cannot read them.
@@ -147,6 +141,9 @@ export function PreviewPlane({
       : t('preview.snapshot.delivered');
 
   return (
+    <div className="gpu-preview-backdrop" onPointerDown={(event) => {
+      if (event.target === event.currentTarget) onClose();
+    }}>
     <section
       className="gpu-preview-plane"
       role="dialog"
@@ -222,6 +219,7 @@ export function PreviewPlane({
         )}
       </div>
     </section>
+    </div>
   );
 }
 

@@ -72,7 +72,7 @@ describe('experimental Haystack host boundary', () => {
       filters: { field: 'meta.path', operator: 'in', value: ['price.md'] },
     });
     for (const filters of [{ orgId: 'other' }, { snapshotId: 'other' }, { paths: ['../secret.md'] },
-      { directories: ['docs/'] }, { formats: ['pdf'] }, { paths: [] }]) {
+      { directories: ['docs/'] }, { formats: ['exe'] }, { paths: [] }]) {
       expect(await tool.execute({ query: 'price', filters })).toEqual({ ok: false, status: 'invalid_request' });
     }
   });

@@ -64,7 +64,7 @@ valid_absolute_path "${MENDER_ENV}" || fail "ATOMA_DEPLOY_MENDER_ENV must be a n
 [[ -f "${APP_ENV}" && ! -L "${APP_ENV}" ]] || fail "application environment is missing or symlinked: ${APP_ENV}"
 id "${SERVICE_USER}" >/dev/null 2>&1 || fail "service user does not exist: ${SERVICE_USER}"
 
-for command in node npm docker curl systemctl runuser tar sha256sum realpath getent flock findmnt; do
+for command in node npm docker curl systemctl runuser tar sha256sum realpath getent flock findmnt soffice; do
   command -v "${command}" >/dev/null 2>&1 || fail "required command is missing: ${command}"
 done
 

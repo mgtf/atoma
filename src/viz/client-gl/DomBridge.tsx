@@ -222,6 +222,8 @@ export function DomBridge({
   const setRunPickerScrollY = useGpuStore((state) => state.setRunPickerScrollY);
   const selectedGithubInstallationId = useGpuStore((state) => state.selectedGithubInstallationId);
   const selectGithubInstallation = useGpuStore((state) => state.selectGithubInstallation);
+  const projectRepositoryMode = useGpuStore((state) => state.projectRepositoryMode);
+  const setProjectRepositoryMode = useGpuStore((state) => state.setProjectRepositoryMode);
   const projectVisibility = useGpuStore((state) => state.projectVisibility);
   const setProjectVisibility = useGpuStore((state) => state.setProjectVisibility);
   const selectProject = useGpuStore((state) => state.selectProject);
@@ -479,6 +481,20 @@ export function DomBridge({
             />
           ) : (
             <>
+              <div className="gpu-project-source">
+                <select className="gpu-dom-input gpu-dom-select" aria-label={t('projects.sourceMode')}
+                  value={projectRepositoryMode} disabled={projectBusy}
+                  onChange={event => setProjectRepositoryMode(event.target.value as 'new' | 'pull-request' | 'fork')}>
+                  <option value="new">{t('projects.sourceMode.new')}</option>
+                  <option value="pull-request">{t('projects.sourceMode.pullRequest')}</option>
+                  <option value="fork">{t('projects.sourceMode.fork')}</option>
+                </select>
+                {projectRepositoryMode !== 'new' ? <input className="gpu-dom-input"
+                  aria-label={t('projects.sourceRepository')} placeholder="https://github.com/owner/repository"
+                  value={search.projectSource} disabled={projectBusy}
+                  onFocus={() => setFocusedInput('projectSource')} onBlur={() => setFocusedInput(null)}
+                  onChange={event => setSearch('projectSource', event.target.value)} /> : null}
+              </div>
               <input
                 className="gpu-dom-input gpu-project-name"
                 aria-label={t('projects.name')}
@@ -492,6 +508,7 @@ export function DomBridge({
               <input
                 className="gpu-dom-input gpu-project-repo"
                 aria-label={t('projects.repository')}
+                disabled={projectRepositoryMode === 'pull-request' || projectBusy}
                 value={search.projectRepository}
                 placeholder={t('projects.repository')}
                 onFocus={() => setFocusedInput('projectRepository')}
@@ -522,6 +539,8 @@ export function DomBridge({
                 <select
                   className="gpu-dom-input gpu-dom-select gpu-project-visibility"
                   aria-label={t('projects.visibility')}
+                  hidden={projectRepositoryMode !== 'new'}
+                  disabled={projectRepositoryMode !== 'new' || projectBusy}
                   value={projectVisibility}
                   onChange={(event) =>
                     setProjectVisibility(
@@ -561,7 +580,7 @@ export function DomBridge({
           <p className="gpu-project-hint">
             {selectedProjectLabel
               ? t('projects.actionsHint.ready', { name: selectedProjectLabel })
-              : `${t('projects.actionsHint.new')} ${t(
+              : projectRepositoryMode !== 'new' ? t(projectRepositoryMode === 'fork' ? 'projects.sourceHint.fork' : 'projects.sourceHint.pullRequest') : `${t('projects.actionsHint.new')} ${t(
                   projectVisibility === 'public'
                     ? 'projects.visibility.publicHint'
                     : 'projects.visibility.privateHint'

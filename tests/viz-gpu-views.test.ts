@@ -591,6 +591,7 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     selectedProjectId: null,
     selectedGithubInstallationId: null,
     projectVisibility: 'private',
+    projectRepositoryMode: 'new',
     runFilters: { kind: 'all', role: 'all', branchId: 'all' },
     branchHeadingExpanded: true,
     runSummaryExpanded: true,
@@ -601,7 +602,7 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
       run: '',
       registry: '',
       skills: '',
-      projectName: '',
+      projectName: '', projectSource: '',
       projectPrompt: '',
       projectRepository: '',
       displayName: '',
@@ -645,6 +646,7 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     selectProject: noop,
     selectGithubInstallation: noop,
     setProjectVisibility: noop,
+    setProjectRepositoryMode: noop,
     setRunFilters: noop,
     toggleBranchHeading: noop,
     toggleRunSummary: noop,
@@ -3860,7 +3862,7 @@ describe('drawSkills scrolling honesty and search', () => {
             run: '',
             registry: '',
             skills: 'replay',
-            projectName: '',
+            projectName: '', projectSource: '',
             projectPrompt: '',
             projectRepository: '',
             displayName: '',
@@ -4599,7 +4601,7 @@ describe('drawRuns behavior', () => {
     }
   });
 
-  it('offers the preview beside the run summary, never inside its toggle', () => {
+  it.each([RUNS_TWO_PANE_MIN_WIDTH, 1200, WIDTH])('fits preview controls below the summary at viewport width %i', (viewportWidth) => {
     const event = makeLlmEvent('selected', { role: 'execute' });
     const ctx = createRecordingCtx();
     drawRuns(
@@ -4625,7 +4627,7 @@ describe('drawRuns behavior', () => {
           },
         }
       ),
-      WIDTH,
+      viewportWidth,
       HEIGHT
     );
 
@@ -4640,6 +4642,14 @@ describe('drawRuns behavior', () => {
     const toggle = ctx.metrics.hitTargets.find((target) => target.id === 'run.summary.toggle');
     expect(toggle).toBeDefined();
     expect(open!.y).toBeGreaterThanOrEqual(toggle!.y + toggle!.height);
+    for (const control of [open!, stop!]) {
+      expect(control.x).toBeGreaterThanOrEqual(toggle!.x);
+      expect(control.x + control.width).toBeLessThanOrEqual(toggle!.x + toggle!.width);
+      expect(control.width).toBeGreaterThanOrEqual(
+        ctx.measureText(control.label, { size: 11, weight: '600' }) + 20
+      );
+    }
+    expect(stop!.y >= open!.y + open!.height || stop!.x >= open!.x + open!.width + 8).toBe(true);
   });
 
   it('offers no preview control for a run this deployment cannot preview', () => {

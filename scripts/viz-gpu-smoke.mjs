@@ -2008,6 +2008,14 @@ try {
             endedAt: '2026-08-20T00:01:01.000Z',
             publication: null,
           },
+          {
+            projectRunId: 'eeeeeeee-1111-4222-8333-ffffffffffff', projectId,
+            goal: 'A delivered change ready for review.', status: 'delivered', traceId: null,
+            costUsd: 0.1, durationS: 1, error: null,
+            createdAt: '2026-08-20T00:00:00.000Z', endedAt: '2026-08-20T00:00:01.000Z',
+            publication: { status: 'published', commitSha: 'a'.repeat(40),
+              repositoryUrl: 'https://github.com/acme/app', pullRequestUrl: 'https://github.com/acme/app/pull/1' },
+          },
         ],
         '/api/github/installations': [],
         '/api/admin/announce/draft': {
@@ -2141,6 +2149,23 @@ try {
       await passArrivalGate(accountPage);
       await accountPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 900)));
 
+      // Exercise the real repository-source controls before selecting a project.
+      await accountPage.select('select[aria-label="Starting point"]', 'pull-request');
+      await accountPage.type('input[aria-label="Source GitHub repository"]', 'https://github.com/acme/app');
+      const prHint = await accountPage.$eval('.gpu-project-hint', node => node.textContent);
+      if (!prHint.includes('opens a pull request')) throw new Error('existing repository mode lost the PR consequence');
+      await accountPage.select('select[aria-label="Starting point"]', 'fork');
+      const forkHint = await accountPage.$eval('.gpu-project-hint', node => node.textContent);
+      if (!forkHint.includes('publishes changes directly')) throw new Error('fork mode lost direct publication');
+      await accountPage.evaluate(() => {
+        const field = document.querySelector('input[aria-label="Source GitHub repository"]');
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(field, '');
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await accountPage.select('select[aria-label="Starting point"]', 'new');
+      await accountPage.evaluate(() => document.activeElement?.blur());
+      console.log('GitHub project modes ok: source entry, PR per run, direct fork publication');
+
       // Real Pixi metrics, at the width that exposed the regression: a
       // character-count estimate is not enough for wide proportional glyphs.
       // Project metadata and a long run error must be one line AND fit their
@@ -2169,6 +2194,23 @@ try {
           `account scenario: project-row click navigated ${accountUrlBeforeProjectClick} -> ${accountPage.url()}`
         );
       }
+      const prTarget = 'project.pullRequest.eeeeeeee-1111-4222-8333-ffffffffffff';
+      await waitForHitTarget(accountPage, prTarget, 'delivered PR link did not render');
+      await accountPage.evaluate(() => {
+        window.__githubOpened = null;
+        window.__githubOriginalOpen = window.open;
+        window.open = (url, target, features) => { window.__githubOpened = { url, target, features }; return null; };
+      });
+      await clickAccountTarget(prTarget);
+      const openedPr = await accountPage.evaluate(() => {
+        window.open = window.__githubOriginalOpen;
+        return window.__githubOpened;
+      });
+      if (openedPr?.url !== 'https://github.com/acme/app/pull/1' || openedPr.features !== 'noopener,noreferrer') {
+        throw new Error(`canvas PR link did not open the run receipt: ${JSON.stringify(openedPr)}`);
+      }
+      console.log('GitHub PR canvas link ok: receipt opened in an isolated tab');
+
       // A real production page detects a new bundle without a SW change, keeps
       // a draft, then reloads automatically and restores the selected project.
       updateBuildAvailable = true;

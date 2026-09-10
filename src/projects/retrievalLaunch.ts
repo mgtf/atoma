@@ -5,9 +5,9 @@ import { openStoreHandle } from '../core/stores.js';
 import { eligibleProjectRun, projectRunPathsMatch } from './runAuthority.js';
 import { projectRunIdSchema, type ProjectRun } from '../contracts/projects.js';
 import { projectRetrievalLaunchSchema, type ProjectRetrievalLaunch } from '../contracts/projectRetrievalLaunch.js';
-import { projectRetrievalScopeSchema, type ProjectRetrievalScope } from '../contracts/projectRetrieval.js';
+import { projectDocumentFormat, projectRetrievalScopeSchema, type ProjectRetrievalScope } from '../contracts/projectRetrieval.js';
 import { canonicalRetrievalManifest, captureProjectDocument, assertRetrievalTime,
-  prepareProjectRetrievalCorpus, projectRetrievalHash, retrievalGeneration, retrievalIndexConfig } from './retrievalCorpus.js';
+  prepareProjectRetrievalCorpus, projectRetrievalHash, retrievalGeneration, retrievalConfigForManifest } from './retrievalCorpus.js';
 import { ProjectStore } from './store.js';
 import { artifactManifestHash, assertPublishableArtifactPath } from './artifacts.js';
 import type { ProjectRetrievalBinding, ProjectRetrievalCallContext, ProjectRetrievalService } from '../tools/projectRetrieval.js';
@@ -59,7 +59,7 @@ export class ProjectRetrievalLaunchStore {
             receipt.scope.runId !== run.projectRunId || receipt.scope.orgId !== run.orgId ||
             receipt.scope.projectId !== run.projectId || receipt.scope.principalId !== run.requestedByPrincipalId ||
             receipt.sourceRoot !== sourceRootFor(run) ||
-            receipt.scope.generation !== retrievalGeneration(canonicalRetrievalManifest(receipt.manifest), retrievalIndexConfig())) return null;
+            receipt.scope.generation !== retrievalGeneration(canonicalRetrievalManifest(receipt.manifest), retrievalConfigForManifest(receipt.manifest))) return null;
         if (receipt.sourceRunId) {
           const source = this.projects.getProjectRun(run.orgId, receipt.sourceRunId);
           if (!source || source.projectId !== run.projectId || source.status !== 'delivered' ||
@@ -89,7 +89,7 @@ export class ProjectRetrievalLaunchStore {
       if (sourceRunId && (!source || source.projectId !== run.projectId || source.status !== 'delivered')) throw new Error('invalid source run');
       if (source?.artifactManifest && artifactManifestHash(source.artifactManifest) !== source.artifactManifestHash) throw new Error('invalid source manifest');
       const documents = (source?.artifactManifest?.files ?? [])
-        .filter(file => /\.(md|txt)$/.test(file.path) && file.mode === '100644')
+        .filter(file => projectDocumentFormat(file.path) !== null && file.mode === '100644')
         .map(file => {
           assertPublishableArtifactPath(file.path);
           return { path: file.path, sha256: file.sha256, bytes: file.size };

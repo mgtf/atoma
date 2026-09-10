@@ -25,18 +25,28 @@ export const projectDocumentPathSchema = z.string().min(1).max(512).refine(path 
   !Array.from(path).some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127) &&
   path.split('/').every(part => part !== '' && part !== '.' && part !== '..'),
 'expected a normalized relative document path');
+export const PROJECT_DOCUMENT_FORMATS = ['md', 'txt', 'csv', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp', 'rtf'] as const;
+export const projectDocumentFormatSchema = z.enum(PROJECT_DOCUMENT_FORMATS);
+export function projectDocumentFormat(path: string): z.infer<typeof projectDocumentFormatSchema> | null {
+  const parsed = projectDocumentFormatSchema.safeParse(path.split('.').at(-1)?.toLowerCase());
+  return parsed.success ? parsed.data : null;
+}
+export function isPlainProjectDocument(path: string): boolean {
+  return ['md', 'txt', 'csv'].includes(projectDocumentFormat(path) ?? '');
+}
+
 /** Optional narrowing only; authority and snapshot are always host-owned. */
 export const projectRetrievalFiltersSchema = z.object({
   paths: z.array(projectDocumentPathSchema).min(1).max(20).optional(),
   directories: z.array(projectDocumentPathSchema).min(1).max(20).optional(),
-  formats: z.array(z.enum(['md', 'txt'])).min(1).max(2).optional(),
+  formats: z.array(projectDocumentFormatSchema).min(1).max(PROJECT_DOCUMENT_FORMATS.length).optional(),
 }).strict();
 export type ProjectRetrievalFilters = z.infer<typeof projectRetrievalFiltersSchema>;
 
 export function matchesProjectRetrievalFilters(path: string, filters?: ProjectRetrievalFilters): boolean {
   return !filters || ((!filters.paths || filters.paths.includes(path)) &&
     (!filters.directories || filters.directories.some(directory => path.startsWith(directory + '/'))) &&
-    (!filters.formats || filters.formats.some(format => path.endsWith('.' + format))));
+    (!filters.formats || filters.formats.some(format => projectDocumentFormat(path) === format)));
 }
 
 export const projectRetrievalRequestSchema = z.object({
@@ -92,9 +102,15 @@ export function parseProjectRetrievalQuery(
 const offset = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const line = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 
+const extractedTextSchema = z.object({
+  kind: z.literal('extracted-text'), version: z.literal('officeparser-7.8.0-v1'),
+  sha256: projectDocumentDigestSchema, bytes: z.number().int().nonnegative().max(1_000_000),
+}).strict();
+
 /** Copyable source reference; the quote retains original line endings. */
 export const projectRetrievalCitationSchema = z.object({
   path: projectDocumentPathSchema, sha256: projectDocumentDigestSchema,
+  extraction: extractedTextSchema.optional(),
   startLine: line, endLine: line, quote: z.string().min(1).max(4096),
 }).strict();
 
@@ -102,6 +118,7 @@ export const projectRetrievalPassageSchema = z.object({
   documentId: projectDocumentDigestSchema,
   path: projectDocumentPathSchema,
   sha256: projectDocumentDigestSchema,
+  extraction: extractedTextSchema.optional(),
   startByte: offset, endByte: offset,
   startLine: line, endLine: line,
   headingContext: z.array(z.string().max(256)).max(6),
@@ -116,7 +133,11 @@ export const projectRetrievalPassageSchema = z.object({
       Buffer.from(p.excerpt, 'utf8').toString('utf8') !== p.excerpt) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'inconsistent original-source span' });
   }
-  if (p.citation && (p.citation.path !== p.path || p.citation.sha256 !== p.sha256 ||
+  if ((!isPlainProjectDocument(p.path) && !p.extraction) ||
+      (p.extraction && (isPlainProjectDocument(p.path) || p.endByte > p.extraction.bytes))) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'missing or inconsistent extracted-text reference' });
+  }
+  if (p.citation && (JSON.stringify(p.citation.extraction) !== JSON.stringify(p.extraction) || p.citation.path !== p.path || p.citation.sha256 !== p.sha256 ||
       p.citation.startLine !== p.startLine || p.citation.endLine !== p.endLine || p.citation.quote !== p.excerpt)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'citation differs from original-source span' });
   }
@@ -124,7 +145,7 @@ export const projectRetrievalPassageSchema = z.object({
 export type ProjectRetrievalPassage = z.infer<typeof projectRetrievalPassageSchema>;
 
 export function projectRetrievalCitation(passage: ProjectRetrievalPassage): z.infer<typeof projectRetrievalCitationSchema> {
-  return { path: passage.path, sha256: passage.sha256, startLine: passage.startLine,
+  return { path: passage.path, sha256: passage.sha256, ...(passage.extraction ? { extraction: passage.extraction } : {}), startLine: passage.startLine,
     endLine: passage.endLine, quote: passage.excerpt };
 }
 

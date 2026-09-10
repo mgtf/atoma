@@ -114,6 +114,7 @@ import {
 } from '../preview/gatewayServer.js';
 import { PreviewManager } from '../preview/manager.js';
 import { PreviewHttpService } from '../preview/httpService.js';
+import { previewOpenOptionsSchema } from '../contracts/preview.js';
 import { DockerLauncher } from '../launcher/docker.js';
 import { DEFAULT_WORKER_IMAGE } from '../tools/containerExecutor.js';
 import { PushStore } from './push/store.js';
@@ -855,6 +856,7 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
     coordinator,
     github: githubStore,
     events: emit,
+    ...(publisher ? { publisher } : {}),
   });
   return {
     store: projectStore,
@@ -939,6 +941,7 @@ const PREVIEW_RUNTIME_PROMISE: Promise<PreviewRuntime | null> = (async () => {
     routes,
     claims,
     config,
+    copyOwnership: launcher.previewOwnership(),
     /**
      * HOST-OWNED, never a caller's — and READ, not recomputed.
      *
@@ -3838,9 +3841,14 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         }
         const inFlight = (body as { inFlight?: unknown }).inFlight === true;
         if (action === 'open' || action === 'restart') {
+          const options = previewOpenOptionsSchema.safeParse(body);
+          if (!options.success) {
+            sendJson(res, 400, { error: 'invalid preview open options' });
+            return;
+          }
           const answered =
             action === 'open'
-              ? await preview.service.open(viewer, projectId, projectRunId, { inFlight })
+              ? await preview.service.open(viewer, projectId, projectRunId, options.data)
               : await preview.service.restart(viewer, projectId, projectRunId, { inFlight });
           if (answered.body.retryAfterSeconds !== undefined) {
             res.setHeader('retry-after', String(answered.body.retryAfterSeconds));

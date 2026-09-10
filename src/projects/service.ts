@@ -11,7 +11,7 @@ import {
 } from '../contracts/projects.js';
 import { eventLabel, type PlatformEventSink } from '../contracts/platformEvents.js';
 import { GitHubStore } from '../github/store.js';
-import { PublicationSupersededError } from './publisher.js';
+import { PublicationSupersededError, type GitHubPublisher } from './publisher.js';
 import { ProjectStateConflict, resolveProjectRunTraceFile } from './store.js';
 import {
   ProjectRunBusy,
@@ -48,6 +48,7 @@ export interface ProjectServiceDeps {
   readonly store: import('./store.js').ProjectStore;
   readonly coordinator: ProjectRunCoordinator;
   readonly github: GitHubStore | null;
+  readonly publisher?: Pick<GitHubPublisher, 'inspectTarget'>;
   /**
    * Optional audit sink, injected rather than imported: the project control
    * plane must not learn about the viz server's event log to be testable.
@@ -90,6 +91,7 @@ function publicRun(run: ProjectRun, publication: import('../contracts/projects.j
           status: publication.status,
           repositoryUrl: publication.repositoryUrl,
           commitSha: publication.commitSha,
+          ...(publication.pullRequestUrl ? { pullRequestUrl: publication.pullRequestUrl } : {}),
         }
       : null,
   };
@@ -124,11 +126,13 @@ export class ProjectService {
   private readonly coordinator: ProjectRunCoordinator;
   private readonly github: GitHubStore | null;
   private readonly events: PlatformEventSink;
+  private readonly publisher?: Pick<GitHubPublisher, 'inspectTarget'>;
 
   constructor(deps: ProjectServiceDeps) {
     this.store = deps.store;
     this.coordinator = deps.coordinator;
     this.github = deps.github;
+    this.publisher = deps.publisher;
     // A no-op default keeps every emission site free of `?.` noise.
     this.events = deps.events ?? (() => undefined);
   }
@@ -184,7 +188,7 @@ export class ProjectService {
    * The same creation from an already-parsed payload: the MCP's door. The
    * HTTP route is a body reader in front of this; the checks live once.
    */
-  createProjectFromInput(viewer: Viewer, body: unknown): unknown {
+  async createProjectFromInput(viewer: Viewer, body: unknown): Promise<unknown> {
     if (!roleAtLeast(viewer.role, 'org:member')) {
       throw new ProjectHttpError(403, 'org:member role or above is required to create projects');
     }
@@ -200,6 +204,14 @@ export class ProjectService {
       }
     } else {
       throw new ProjectHttpError(503, 'GitHub App is not configured on this deployment');
+    }
+    if (input.data.repositoryTarget.source) {
+      if (!this.publisher) throw new ProjectHttpError(503, 'GitHub repository import is unavailable');
+      try {
+        input.data.repositoryTarget = await this.publisher.inspectTarget(input.data.repositoryTarget, viewer.orgId, viewer.principalId);
+      } catch (error) {
+        throw new ProjectHttpError(400, (error instanceof Error ? error.message : String(error)).slice(0, 500));
+      }
     }
     try {
       const project = this.store.createProject({

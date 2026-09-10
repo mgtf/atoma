@@ -74,19 +74,20 @@ be refused at the 1 MiB ceiling and journaled as noise.
 
 ### Permissions
 
-Three rows, all under **Repository permissions**. Nothing at organisation or
+Four rows, all under **Repository permissions**. Pull requests write is needed only for projects working on an existing repository through PRs. Nothing at organisation or
 account level.
 
 | Permission | Level | Why |
 |---|---|---|
 | **Administration** | Read and write | `POST /user/repos` and `POST /orgs/{org}/repos` — repository creation |
 | **Contents** | Read and write | the blob/tree/commit/ref writes and the first-commit `PUT /contents/{path}` |
+| **Pull requests** | Read and write | one pull request per delivered run in existing-repository PR mode |
 | **Metadata** | Read-only | `GET /repos/{owner}/{repo}`, the adoption read after a 422 |
 
 Those first two are also requested in the installation-token body
 (`GITHUB_PUBLISH_PERMISSIONS`,
 [`client.ts`](../src/github/client.ts)) and the token is refused
-unless both were granted, so the checkbox set is fully determined.
+unless both were granted. Existing-repository PR runs additionally request and verify `pull_requests: write`. Existing installations must accept that permission upgrade before selecting this mode.
 
 **Leave Workflows at No access.** It looks conditionally needed — GitHub
 requires it to write under `.github/workflows/` — but
@@ -272,3 +273,28 @@ including the personal-account branch where the installation token creates
 nothing. Narrowing that request to `contents` outside organisation repository
 creation would cost nothing and remove deletion and transfer authority from the
 common path. Not done; recorded here.
+
+## Starting a project from an existing repository
+
+In Projects, choose **Existing repository — a PR per run** or **Fork an existing
+repository**, then enter `owner/repository` or its GitHub HTTPS URL. Choose the
+GitHub account that owns the destination. The source visibility is inherited.
+
+PR mode requires the App to access the original repository. Each run reads the
+current default branch, preserves its commit as the run base, and publishes
+changes to `atoma/run-<id>` with a PR. Merge that PR before starting work that
+needs its changes. Runs with no changes create no empty PR.
+
+Fork mode creates a real fork under the selected account when the first run
+starts, then publishes directly to the fork's default branch. The original
+repository is never modified. The account must differ from the source owner.
+For a selected-repositories installation, grant the App access to the new fork
+and retry if it cannot read it yet. Fork creation is asynchronous; preparation
+waits briefly and otherwise reports a retryable failure before any model work.
+
+Import supports regular and executable files, at most 10,000 tree entries,
+10 MiB per file and 50 MiB total. Truncated trees, symlinks and submodules are
+refused. Publication retains the existing manifest policy: additions and updates
+only, with workflows and sensitive paths excluded. Changes to a fork's head
+during a run are refused instead of overwriting those changes; start a fresh run
+from the updated branch. GitHub credentials stay on the control plane.

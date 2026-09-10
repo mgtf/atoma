@@ -106,21 +106,15 @@ describe('the GL overlay stack', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('lets the preview plane paint its own frame, because it REPLACES the canvas', () => {
+  it('keeps the preview modal above an inert scene with a viewport backdrop', () => {
     const plane = readFileSync(join(GL_ROOT, 'PreviewPlane.tsx'), 'utf8');
     const app = readFileSync(join(GL_ROOT, 'GpuApp.tsx'), 'utf8');
     const styles = readFileSync(join(GL_ROOT, 'styles.css'), 'utf8');
 
-    // It is not an overlay OVER the canvas, so the grandfathered-skin rule
-    // does not reach it — but it must not smuggle the skin in either.
+    // The preview modal has its own frame and disables the scene underneath.
     expect(plane.includes('gpu-panel-skin')).toBe(false);
-    // What earns that exemption: the product tree goes INERT behind it, so
-    // there is nothing underneath competing for the pointer light or buried
-    // under a frame. Take this away and the plane becomes exactly the
-    // CSS-framed overlay the list above closes.
     expect(app).toMatch(/inert=\{previewOpen\}/);
-    // And it covers the viewport rather than floating in it.
-    const rule = styles.match(/\.gpu-preview-plane\s*\{[^}]*\}/);
+    const rule = styles.match(/\.gpu-preview-backdrop\s*\{[^}]*\}/);
     expect(rule).not.toBeNull();
     expect(rule![0]).toContain('position: fixed');
     expect(rule![0]).toContain('inset: 0');

@@ -152,7 +152,7 @@
   "settings.mcpManualTokenHint": "For a client that requires a manual API token, use the form below. Browser connections also appear in the access list and can be revoked here.",
   "settings.mcpConnectSteps": "Add this address in your agent’s MCP settings, then sign in and approve access in your browser. No API token is needed.",
   "settings.mcpChooseClient": "Choose your app",
-  "settings.mcpCodexMac": "Codex Desktop \u00b7 macOS (without CLI)",
+  "settings.mcpCodexMac": "Codex Desktop · macOS (without CLI)",
   "settings.mcpRunTerminal": "Copy and run this in your terminal:",
   "settings.mcpMacHint": "Uses the CLI bundled with ChatGPT.app in /Applications. No separate CLI installation is needed for this installation layout.",
   "settings.mcpCodexFinish": "Open the login link printed in the terminal and click Allow access once. After success, restart Codex Desktop to load the connection.",
@@ -1112,5 +1112,13 @@
   "settings.mcpCheckSteps": "In Claude Code or Codex, run /mcp and check that atoma is connected, then ask the agent to list your Atoma projects. In another client, refresh its MCP tools and try a read action. Creating a token alone does not establish a connection.",
   "settings.mcpCheckUsage": "The last-used date below updates after the client presents a valid token; reload Settings to refresh it. It does not prove a tool call succeeded. If atoma is already registered, edit or remove that existing client entry before adding it again.",
   "settings.mcpTroubleshootAuth": "401: sign in again from your MCP client, or replace a lost or revoked manual token. 403: check organisation permissions and the MCP address. Revoking an access entry also blocks OAuth renewal.",
-  "settings.mcpTroubleshoot404": "404 on the first connection: check the complete /mcp address and server routing. 404 after a working session: reconnect the client to start a new MCP session. For OAuth discovery errors, check that /.well-known/oauth-protected-resource/mcp and /.well-known/oauth-authorization-server are reachable."
+  "settings.mcpTroubleshoot404": "404 on the first connection: check the complete /mcp address and server routing. 404 after a working session: reconnect the client to start a new MCP session. For OAuth discovery errors, check that /.well-known/oauth-protected-resource/mcp and /.well-known/oauth-authorization-server are reachable.",
+  "projects.sourceMode": "Starting point",
+  "projects.sourceMode.new": "Create an empty repository",
+  "projects.sourceMode.pullRequest": "Existing repository — a PR per run",
+  "projects.sourceMode.fork": "Fork an existing repository",
+  "projects.sourceRepository": "Source GitHub repository",
+  "projects.pullRequest": "Pull request",
+  "projects.sourceHint.fork": "The first run creates your fork. Each run publishes changes directly there.",
+  "projects.sourceHint.pullRequest": "Each run opens a pull request. Merge it before starting dependent work."
 }

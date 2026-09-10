@@ -43,6 +43,7 @@ beforeEach(() => {
     locale: 'en',
     selectedRunId: 'run-1',
     selectedProjectId: null,
+    projectRepositoryMode: 'new',
     selectedDocsTheme: 'quick',
     focusedInput: null,
     runPickerActiveIndex: 0,
@@ -54,7 +55,7 @@ beforeEach(() => {
       run: '',
       registry: '',
       skills: '',
-      projectName: '',
+      projectName: '', projectSource: '',
       projectPrompt: '',
       projectRepository: '',
       displayName: '',
@@ -327,6 +328,21 @@ describe('full-GL minimal DOM bridge', () => {
     renderBridge(vi.fn(), runs, undefined, [], null);
     expect(screen.getByRole('combobox', { name: 'Repository visibility' })).toHaveValue('public');
     expect(screen.getByText(/PUBLIC and permanent/)).toBeInTheDocument();
+  });
+
+  it('offers an existing-repository PR mode and a fork with direct publication', () => {
+    useGpuStore.setState({ view: 'projects', entered: true });
+    renderBridge(vi.fn(), runs, undefined, [], null);
+    const mode = screen.getByRole('combobox', { name: 'Starting point' });
+    fireEvent.change(mode, { target: { value: 'pull-request' } });
+    const source = screen.getByRole('textbox', { name: 'Source GitHub repository' });
+    fireEvent.change(source, { target: { value: 'https://github.com/acme/app' } });
+    expect(useGpuStore.getState().search.projectSource).toBe('https://github.com/acme/app');
+    expect(screen.getByText(/opens a pull request/)).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Repository visibility' })).not.toBeInTheDocument();
+    fireEvent.change(mode, { target: { value: 'fork' } });
+    expect(screen.getByText(/publishes changes directly there/)).toBeInTheDocument();
+    expect(source).toHaveValue('https://github.com/acme/app');
   });
 
   it('drops the audience control with the rest of the create fields', () => {

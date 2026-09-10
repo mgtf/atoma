@@ -25,6 +25,7 @@ import { AnthropicLlmClient } from '../dist/core/llm.js';
 import { DEFAULT_LIMITS } from '../dist/core/limits.js';
 import { containerToolBackend, localToolBackend, withProjectRetrievalBackend } from '../dist/run/toolBackend.js';
 import { createProjectRetrievalTool } from '../dist/tools/projectRetrieval.js';
+import { prepareProjectRetrievalCorpus, projectRetrievalHash } from '../dist/projects/retrievalCorpus.js';
 import { startTask } from '../dist/run/runner.js';
 import { buildProfile } from '../dist/run/profiles/build.js';
 import { runHostSupported } from '../dist/run/platform.js';
@@ -120,6 +121,14 @@ if (process.argv.includes('--child')) {
   const realContainer = process.argv.includes('--container');
   const script = fileURLToPath(import.meta.url);
   try {
+    // Exercise the production dependency and packaged extraction subprocess without test fixtures.
+    const rtf = Buffer.from('{\\rtf1\\ansi Annual price: 190 euros.}');
+    writeFileSync(join(root, 'pricing.rtf'), rtf);
+    const corpus = await prepareProjectRetrievalCorpus(root, { version: 1, corpusId: 'smoke', snapshotId: 'smoke',
+      snapshotSha256: projectRetrievalHash(rtf), documents: [{ path: 'pricing.rtf', bytes: rtf.length, sha256: projectRetrievalHash(rtf) }] },
+    { signal: new AbortController().signal, deadlineAt: Date.now() + 30_000 });
+    assert.match(corpus.passages[0].excerpt, /190 euros/);
+    assert.equal(corpus.passages[0].extraction.kind, 'extracted-text');
     writeFileSync(join(root, 'package.json'), JSON.stringify({ private: true,
       scripts: { 'run:build': `node ${JSON.stringify(script)} --child` } }));
     const auth = AuthStore.open(dbPath);

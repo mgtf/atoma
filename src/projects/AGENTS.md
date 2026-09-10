@@ -144,7 +144,7 @@ Neighbours:
   set is model-declared at plan time, the filter is filenames only, publication
   is automatic on delivery, and the manifest never crosses the API — so a
   public default hands an unreviewed set to the internet whenever nobody looks.
-- The repository is created at PUBLICATION, not at project creation, so a
+- A new empty repository is created at PUBLICATION, not at project creation, so a
   project sits at `repository_status = 'pending'` until its first delivered
   run. Everything about the target is therefore validated late: create-project
   checks only that the installation row is active and belongs to the viewer's
@@ -248,7 +248,8 @@ Neighbours:
   — passed to the client as `expectedHead`
   ([src/github](../github/AGENTS.md)).
 - `base_sha` on a publication row is an OBSERVATION, never a pointer anything
-  decides from: the head found immediately before that publication. NULL means
+  decides from: the head found before publication (the captured run base for
+  imported projects). NULL means
   it created the branch, and `commit_sha = base_sha` means the attempt added no
   commit because the branch already held the manifest. There is deliberately NO
   last-published column on the projects row: "is the branch where we left it"
@@ -311,3 +312,16 @@ Neighbours:
   write into ([src/cli](../cli/AGENTS.md)) — a git history must not carry a
   number the tenant can influence, and the journal already has it; and the trace
   id, which means nothing outside this instance.
+
+## Starting from GitHub
+
+- `repositoryTarget.source` explicitly distinguishes work on an existing
+  repository (one PR per changed delivered run) from a fork (direct commits).
+  Creation reads the source identity and visibility; the first fork run creates
+  the real GitHub fork. Imported runs snapshot the current default branch before
+  model work instead of seeding the previous delivered workspace. Merge a PR
+  before starting work that depends on it. Forks advance their own branch.
+- The captured `repositoryBase` belongs to the run in the primary store;
+  publication uses that exact base and persists a PR URL when applicable.
+  Old projects retain their existing publication and seed behaviour. The source
+  choice is immutable; imported visibility is inherited, never chosen locally.

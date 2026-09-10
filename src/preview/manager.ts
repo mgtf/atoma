@@ -5,7 +5,7 @@ import type { PreviewConfig } from './config.js';
 import { previewGenerationHost, previewOrigin } from './gateway.js';
 import { PreviewRouteTable } from './gatewayServer.js';
 import { classifyDeliveredWorkspace } from './descriptor.js';
-import { materializePreviewWorkspace, PreviewPolicyError } from './policy.js';
+import { materializePreviewWorkspace, PreviewPolicyError, type PreviewCopyOwnership } from './policy.js';
 import { startPreview, teardownPreview, PreviewRuntimeError } from './runtime.js';
 import { effectiveEgressHosts, PreviewStateConflict, PreviewStore } from './store.js';
 import { readPreviewSummary } from './service.js';
@@ -35,6 +35,7 @@ export interface PreviewManagerDeps {
   readonly routes: PreviewRouteTable;
   readonly claims: PreviewClaimRegistry;
   readonly config: PreviewConfig;
+  readonly copyOwnership?: PreviewCopyOwnership | null;
   /** Where the delivered workspace of a run lives. Host-owned, never a caller's. */
   readonly workspaceOf: (orgId: string, projectId: string, projectRunId: string) => string;
   /** One request through the relay that must succeed before anything is exposed. */
@@ -89,6 +90,13 @@ export interface PreviewOpener {
   readonly sessionId: string | null;
 }
 
+interface PreviewOpenInput {
+  readonly orgId: string;
+  readonly projectId: string;
+  readonly projectRunId: string;
+  readonly opener: PreviewOpener;
+}
+
 export class PreviewManager {
   private readonly starting = new Set<string>();
 
@@ -126,15 +134,41 @@ export class PreviewManager {
    *
    * IDEMPOTENT: a second call while one is starting reuses the generation
    * rather than building a second isolate, and a call on a ready preview mints
-   * a fresh claim for the SAME generation — which is what makes "open in a new
-   * tab" work without ever copying a stale bearer.
+   * a fresh claim for the SAME delivered generation. A snapshot from before
+   * delivery is replaced so a new opening serves the final workspace.
    */
-  async open(input: {
-    readonly orgId: string;
-    readonly projectId: string;
-    readonly projectRunId: string;
-    readonly opener: PreviewOpener;
-  }): Promise<OpenedPreview> {
+  async open(input: PreviewOpenInput): Promise<OpenedPreview> {
+    return this.withOpening(input, () => this.openDelivered(input));
+  }
+
+  private pending(input: PreviewOpenInput): OpenedPreview {
+    return { summary: this.status(input.orgId, input.projectId, input.projectRunId), url: '' };
+  }
+
+  /** Claim an observed generation without taking another snapshot or allocating. */
+  claim(input: PreviewOpenInput, generation: number): OpenedPreview {
+    const row = this.deps.store.getInstance(input.orgId, input.projectRunId);
+    if (this.starting.has(this.key(input.orgId, input.projectRunId)) || row?.state === 'starting' || row?.state === 'stopping') {
+      return this.pending(input);
+    }
+    if (row?.state !== 'ready') throw new PreviewStateConflict('preview is not ready');
+    if (row.generation !== generation) return this.pending(input);
+    return this.claimFor(input, generation, []);
+  }
+
+  /** Reserve before any await, including replacing an older snapshot. */
+  private async withOpening(input: PreviewOpenInput, start: () => Promise<OpenedPreview>): Promise<OpenedPreview> {
+    const key = this.key(input.orgId, input.projectRunId);
+    if (this.starting.has(key)) return this.pending(input);
+    this.starting.add(key);
+    try {
+      return await start();
+    } finally {
+      this.starting.delete(key);
+    }
+  }
+
+  private async openDelivered(input: PreviewOpenInput): Promise<OpenedPreview> {
     const { store } = this.deps;
     const descriptor = store.getDescriptor(input.orgId, input.projectRunId);
     if (!descriptor) throw new PreviewUnavailableError('legacy-run');
@@ -143,19 +177,15 @@ export class PreviewManager {
     }
 
     const existing = store.getInstance(input.orgId, input.projectRunId);
-    if (existing?.state === 'ready') {
+    if (existing?.state === 'starting' || existing?.state === 'stopping') return this.pending(input);
+    if (existing?.state === 'ready' && existing.source === 'delivered') {
       return this.claimFor(input, existing.generation, descriptor.requestedHosts);
+    }
+    if (existing?.state === 'ready') {
+      await this.stop(input.orgId, input.projectId, input.projectRunId, 'restart');
     }
 
     this.assertCapacity(input.orgId);
-
-    const key = this.key(input.orgId, input.projectRunId);
-    if (this.starting.has(key)) {
-      // Someone else is already building this generation. Saying so is better
-      // than queueing behind it: the caller polls, which is what the route
-      // contract already tells it to do while `starting`.
-      throw new PreviewStateConflict('a preview for this run is already starting');
-    }
 
     const opened = store.openInstance({
       orgId: input.orgId,
@@ -169,7 +199,6 @@ export class PreviewManager {
       };
     }
 
-    this.starting.add(key);
     const generation = opened.instance.generation;
     const ownerId = this.ownerId(input.projectRunId, generation);
     try {
@@ -211,6 +240,7 @@ export class PreviewManager {
             runtime: this.deps.config.runtime,
             probe: this.deps.probe,
             copyMaxBytes: this.deps.config.copyMaxBytes,
+            copyOwnership: this.deps.copyOwnership,
             ...(this.deps.log ? { log: this.deps.log } : {}),
           },
           {
@@ -261,8 +291,6 @@ export class PreviewManager {
       }
       await this.teardownGeneration(input.orgId, input.projectRunId, generation);
       throw error;
-    } finally {
-      this.starting.delete(key);
     }
   }
 
@@ -291,17 +319,14 @@ export class PreviewManager {
    * is an application that starts and answers, which is exactly what was
    * asked for.
    */
-  async openInFlight(input: {
-    readonly orgId: string;
-    readonly projectId: string;
-    readonly projectRunId: string;
-    readonly opener: PreviewOpener;
-  }): Promise<OpenedPreview> {
+  async openInFlight(input: PreviewOpenInput): Promise<OpenedPreview> {
+    return this.withOpening(input, () => this.openSnapshot(input));
+  }
+
+  private async openSnapshot(input: PreviewOpenInput): Promise<OpenedPreview> {
     const { store } = this.deps;
     const existing = store.getInstance(input.orgId, input.projectRunId);
-    if (existing?.state === 'starting') {
-      throw new PreviewStateConflict('a preview for this run is already starting');
-    }
+    if (existing?.state === 'starting' || existing?.state === 'stopping') return this.pending(input);
     // A REOPEN IS A NEW SNAPSHOT, so a live generation is stopped first rather
     // than reused: a member reopening a run in flight wants the state now, not
     // the state ten minutes ago.
@@ -319,10 +344,9 @@ export class PreviewManager {
       snapshotAt,
       now: new Date(this.now()),
     });
+    if (!opened.started) return this.pending(input);
     const generation = opened.instance.generation;
     const ownerId = this.ownerId(input.projectRunId, generation);
-    const key = this.key(input.orgId, input.projectRunId);
-    this.starting.add(key);
     try {
       const workspace = await this.deps.launcher.createWorkspace(ownerId);
       if (!workspace.hostPath) throw new PreviewRuntimeError('internal', 'no host-side copy');
@@ -331,6 +355,7 @@ export class PreviewManager {
         sourceRoot,
         destinationRoot: workspace.hostPath,
         limits: { maxBytes: this.deps.config.copyMaxBytes },
+        ...(this.deps.copyOwnership ? { ownership: this.deps.copyOwnership } : {}),
       });
 
       // Classified from the COPY — its bytes cannot move under the classifier —
@@ -419,8 +444,6 @@ export class PreviewManager {
       }
       await this.teardownGeneration(input.orgId, input.projectRunId, generation);
       throw error;
-    } finally {
-      this.starting.delete(key);
     }
   }
 

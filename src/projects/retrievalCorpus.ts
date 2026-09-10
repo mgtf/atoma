@@ -8,7 +8,8 @@ import {
   projectRetrievalManifestSchema, type ProjectRetrievalChunkSettings,
   type ProjectRetrievalIndexConfig, type ProjectRetrievalManifest,
 } from '../contracts/projectRetrievalCorpus.js';
-import { projectRetrievalPassageSchema, type ProjectRetrievalPassage } from '../contracts/projectRetrieval.js';
+import { isPlainProjectDocument, projectRetrievalPassageSchema, type ProjectRetrievalPassage } from '../contracts/projectRetrieval.js';
+import { extractProjectDocument } from './retrievalExtract.js';
 import type { ProjectRetrievalCallContext } from '../tools/projectRetrieval.js';
 
 export function projectRetrievalHash(value: string | Buffer): string {
@@ -35,6 +36,14 @@ export function retrievalIndexConfig(chunks: Partial<ProjectRetrievalChunkSettin
     contextVersion: 'path-headings-source-v1', tokenizer: PROJECT_RETRIEVAL_TOKENIZER,
     normalization: 'original-bytes; no overlap', embedding: null, generatedContext: null,
   });
+}
+
+export function retrievalConfigForManifest(manifest: ProjectRetrievalManifest,
+  chunks: Partial<ProjectRetrievalChunkSettings> = {}): ProjectRetrievalIndexConfig {
+  const config = retrievalIndexConfig(chunks);
+  return manifest.documents.some(d => !isPlainProjectDocument(d.path))
+    ? projectRetrievalIndexConfigSchema.parse({ ...config, extractionVersion: 'officeparser-7.8.0-v1',
+      normalization: 'original-text-or-extracted-utf8; no overlap' }) : config;
 }
 
 export function retrievalGeneration(manifest: ProjectRetrievalManifest, config: ProjectRetrievalIndexConfig): string {
@@ -72,7 +81,7 @@ export async function captureProjectDocument(root: string, document: ProjectRetr
   try {
     const before = await handle.stat();
     if (!before.isFile() || (before.mode & 0o111) !== 0 || before.size !== document.bytes) {
-      throw new Error('document is not an admitted regular text file');
+      throw new Error('document is not an admitted regular file');
     }
     // Bounded even if a file grows after stat. Never readFile an unbounded descriptor.
     const bytes = Buffer.alloc(document.bytes + 1);
@@ -87,7 +96,7 @@ export async function captureProjectDocument(root: string, document: ProjectRetr
     const captured = bytes.subarray(0, count);
     if (count !== document.bytes || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs ||
         await realpath(file) !== canonical || projectRetrievalHash(captured) !== document.sha256 ||
-        captured.includes(0) || !Buffer.from(captured.toString('utf8'), 'utf8').equals(captured)) {
+        (isPlainProjectDocument(document.path) && (captured.includes(0) || !Buffer.from(captured.toString('utf8'), 'utf8').equals(captured)))) {
       throw new Error('document changed or is not the admitted UTF-8 source');
     }
     return captured;
@@ -108,7 +117,7 @@ function sourceLines(bytes: Buffer): SourceLine[] {
 }
 
 function chunkDocument(document: ProjectRetrievalManifest['documents'][number], bytes: Buffer,
-  settings: ProjectRetrievalChunkSettings): Readonly<ProjectRetrievalPassage>[] {
+  settings: ProjectRetrievalChunkSettings, extraction?: ProjectRetrievalPassage['extraction']): Readonly<ProjectRetrievalPassage>[] {
   const lines = sourceLines(bytes);
   const passages: Readonly<ProjectRetrievalPassage>[] = [];
   const headings: { level: number; title: string }[] = [];
@@ -117,10 +126,11 @@ function chunkDocument(document: ProjectRetrievalManifest['documents'][number], 
     if (start < 0) return;
     const passage = projectRetrievalPassageSchema.parse({
       documentId: retrievalDocumentId(document.path, document.sha256), path: document.path, sha256: document.sha256,
-      startByte: start, endByte: end, startLine, endLine,
+      startByte: start, endByte: end, startLine, endLine, ...(extraction ? { extraction } : {}),
       headingContext: headings.map(h => h.title), excerpt: bytes.subarray(start, end).toString('utf8'),
     });
     Object.freeze(passage.headingContext);
+    if (passage.extraction) Object.freeze(passage.extraction);
     passages.push(Object.freeze(passage));
     start = -1;
   };
@@ -140,7 +150,7 @@ function chunkDocument(document: ProjectRetrievalManifest['documents'][number], 
   };
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
-    const markdown = document.path.endsWith('.md');
+    const markdown = document.path.toLowerCase().endsWith('.md');
     const heading = markdown ? /^ {0,3}(#{1,6})[ \t]+(.+?)\s*#*\s*$/.exec(line.text) : null;
     const setext = markdown && !heading && line.text.trim() && i + 1 < lines.length ?
       /^ {0,3}(=+|-+)[ \t]*\r?\n?$/.exec(lines[i + 1]!.text) : null;
@@ -175,14 +185,24 @@ export async function prepareProjectRetrievalCorpus(root: string, input: unknown
   try {
     assertRetrievalTime(context);
     const manifest = canonicalRetrievalManifest(input);
-    const config = retrievalIndexConfig(chunks);
+    const config = retrievalConfigForManifest(manifest, chunks);
     const canonicalRoot = await realpath(root);
     if (!(await lstat(canonicalRoot)).isDirectory()) throw new Error('invalid snapshot root');
     const passages: Readonly<ProjectRetrievalPassage>[] = [];
+    let extractedBytes = 0;
     for (const document of manifest.documents) {
       assertRetrievalTime(context);
       const bytes = await captureProjectDocument(canonicalRoot, document, context);
-      passages.push(...chunkDocument(document, bytes, config.chunks));
+      if (isPlainProjectDocument(document.path)) passages.push(...chunkDocument(document, bytes, config.chunks));
+      else {
+        const extracted = await extractProjectDocument(document.path, bytes, context);
+        extractedBytes += extracted.length;
+        if (extractedBytes > PROJECT_RETRIEVAL_CORPUS_LIMITS.sourceBytes) throw new Error('extracted corpus too large');
+        passages.push(...chunkDocument(document, extracted, config.chunks, {
+          kind: 'extracted-text', version: 'officeparser-7.8.0-v1',
+          sha256: projectRetrievalHash(extracted), bytes: extracted.length,
+        }));
+      }
       if (passages.length > PROJECT_RETRIEVAL_CORPUS_LIMITS.passages) throw new Error('too many passages');
     }
     assertRetrievalTime(context);

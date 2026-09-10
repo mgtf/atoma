@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { once } from 'node:events';
 import { HAYSTACK_FRAME_BYTES, HAYSTACK_REPLY_BYTES, haystackReplySchema, haystackSettingsSchema,
   type HaystackReply, type HaystackSettings } from '../contracts/retrievalHaystack.js';
-import { matchesProjectRetrievalFilters, projectRetrievalPassageSchema } from '../contracts/projectRetrieval.js';
+import { matchesProjectRetrievalFilters, projectDocumentFormat, projectRetrievalPassageSchema } from '../contracts/projectRetrieval.js';
 import { PROJECT_RETRIEVAL_CORPUS_LIMITS } from '../contracts/projectRetrievalCorpus.js';
 import { haystackModelRevision } from './retrievalModelFiles.js';
 import { validateProjectRetrievalBinding, type ProjectRetrievalBinding,
@@ -101,7 +101,7 @@ export async function createHaystackRetrievalBinding(input: {
   const passages = new Map(input.corpus.passages.map(value => {
     const passage = projectRetrievalPassageSchema.parse(value);
     const document = manifest.documents.find(d => d.path === passage.path && d.sha256 === passage.sha256);
-    if (!document || passage.endByte > document.bytes || passage.documentId !== retrievalDocumentId(document.path, document.sha256)) {
+    if (!document || passage.endByte > (passage.extraction?.bytes ?? document.bytes) || passage.documentId !== retrievalDocumentId(document.path, document.sha256)) {
       throw new Error('Haystack passage source mismatch');
     }
     const id = projectRetrievalHash(JSON.stringify([passage.documentId, passage.startByte, passage.endByte]));
@@ -120,7 +120,7 @@ export async function createHaystackRetrievalBinding(input: {
     child = new HaystackProcess(input.python);
     const ready = await child.send({ op: 'init', settings, documents: [...passages].map(([id, p]) => ({
       id, content: retrievalPassageContext(manifest, p) + '\n' + p.excerpt,
-      meta: { path: p.path, format: p.path.endsWith('.md') ? 'md' : 'txt',
+      meta: { path: p.path, format: projectDocumentFormat(p.path),
         snapshotId: manifest.snapshotId, snapshotSha256: manifest.snapshotSha256 },
     })) }, input.context, true);
     if (ready.kind !== 'ready' || (input.runtimeSha256 !== undefined && ready.runtimeSha256 !== input.runtimeSha256) ||

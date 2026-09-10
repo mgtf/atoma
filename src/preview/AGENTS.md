@@ -19,9 +19,8 @@ Design of record:
 under the deployment shape fixed in
 [`docs/deployment-docker-launcher-2026-08-28.md`](../../docs/deployment-docker-launcher-2026-08-28.md).
 Built: classification, byte policy, instance state, the container runtime, the
-claim and origin model, the gateway, the manager that orders them, and the
-gated HTTP surface. NOT built: the GPU client, so a member cannot yet click
-Preview — the routes answer, nothing calls them. The Node path's isolation is
+claim and origin model, the gateway, the manager that orders them, the
+gated HTTP surface and the GPU client. The Node path's isolation is
 proved only where a real gVisor runtime exists
 (`tests/preview-isolation.test.ts`, and the manual CI job).
 
@@ -186,6 +185,11 @@ consumers, never a second copy that drifts.
   workers, storage and caches can never control the next.
 - `openInstance` reuses `starting`/`ready` rather than starting a second
   isolate: two members clicking Preview at once get one.
+- Opening after delivery replaces an existing in-flight snapshot. Concurrent
+  opens receive `202` before capacity checks, including while the old copy is
+  stopping. An open naming `generation` only joins that generation: it never
+  takes another snapshot. The client binds its URL to that generation and
+  acquires a fresh claim when polling observes a replacement.
 - Only a trusted UI heartbeat from the authenticated parent extends a preview.
   Application traffic, polling, SSE and WebSockets never count — abandoned
   generated code must not keep itself alive. A heartbeat for a generation that

@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import { projectDocumentDigestSchema, projectDocumentPathSchema,
-  projectRetrievalIdentitySchema } from './projectRetrieval.js';
+  projectRetrievalIdentitySchema, projectDocumentFormat } from './projectRetrieval.js';
 
 export const PROJECT_RETRIEVAL_CORPUS_LIMITS = Object.freeze({
-  documents: 200, documentBytes: 256_000, sourceBytes: 8_000_000, passages: 20_000,
+  documents: 200, documentBytes: 8_000_000, extractedDocumentBytes: 1_000_000, sourceBytes: 8_000_000, passages: 20_000,
 });
 
 /** Admission is supplied by the host snapshot owner, never inferred by a crawl. */
@@ -14,7 +14,7 @@ export const projectRetrievalManifestSchema = z.object({
   // Identity of the authority's snapshot, which may also contain non-indexed assets.
   snapshotSha256: projectDocumentDigestSchema,
   documents: z.array(z.object({
-    path: projectDocumentPathSchema.refine(p => /\.(md|txt)$/.test(p), 'expected Markdown or plain text'),
+    path: projectDocumentPathSchema.refine(p => projectDocumentFormat(p) !== null, 'unsupported document format'),
     sha256: projectDocumentDigestSchema,
     bytes: z.number().int().nonnegative().max(PROJECT_RETRIEVAL_CORPUS_LIMITS.documentBytes),
   }).strict().readonly()).max(PROJECT_RETRIEVAL_CORPUS_LIMITS.documents).readonly(),
@@ -38,11 +38,11 @@ export const PROJECT_RETRIEVAL_TOKENIZER = 'unicode61 remove_diacritics 2';
 
 /** Every index-affecting choice is pinned; unsupported future modes fail closed. */
 export const projectRetrievalIndexConfigSchema = z.object({
-  storageVersion: z.literal(1), extractionVersion: z.literal('utf8-files-v1'),
+  storageVersion: z.literal(1), extractionVersion: z.enum(['utf8-files-v1', 'officeparser-7.8.0-v1']),
   chunkerVersion: z.literal('markdown-lines-v1'), chunks: projectRetrievalChunkSettingsSchema,
   contextVersion: z.literal('path-headings-source-v1'),
   tokenizer: z.literal(PROJECT_RETRIEVAL_TOKENIZER),
-  normalization: z.literal('original-bytes; no overlap'),
+  normalization: z.enum(['original-bytes; no overlap', 'original-text-or-extracted-utf8; no overlap']),
   embedding: z.null(), generatedContext: z.null(),
 }).strict().readonly();
 export type ProjectRetrievalIndexConfig = z.infer<typeof projectRetrievalIndexConfigSchema>;

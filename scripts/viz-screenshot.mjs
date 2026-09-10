@@ -23,6 +23,7 @@
  *                        account arm), so the gate, the account orb and the
  *                        project surfaces all render as a member would see
  *                        them. Without it: the ungated developer rendering.
+ *   --repository-mode <pull-request|fork>  Show an existing-repository create form.
  *   --select-first       Click the first project row after arrival (the run
  *                        list + run form state).
  *   --notifications      Open the header bell's notification tray after
@@ -60,6 +61,7 @@ const view = arg('--view', 'Projects');
 const authed = has('--auth');
 const tuning = has('--tuning');
 const selectFirst = has('--select-first');
+const repositoryMode = arg('--repository-mode', '');
 const notifications = has('--notifications');
 const scrollEnd = has('--scroll-end');
 const cameraMode = arg('--camera', 'focus');
@@ -684,6 +686,11 @@ try {
     }
 
     await mkdir(dirname(outPath), { recursive: true });
+    if (repositoryMode) {
+      if (!['pull-request', 'fork'].includes(repositoryMode)) throw new Error('--repository-mode must be pull-request or fork');
+      await page.select('select[aria-label="Starting point"]', repositoryMode);
+      await page.type('input[aria-label="Source GitHub repository"]', 'https://github.com/acme/app');
+    }
     await page.screenshot({ path: outPath });
     console.log(`viz screenshot: ${outPath} (${view}, ${authed ? 'gated' : 'ungated'}, camera ${cameraMode}${selectFirst ? ', first project selected' : ''}${notifications ? ', notification tray open' : ''}, ${width}x${height})`);
   } finally {

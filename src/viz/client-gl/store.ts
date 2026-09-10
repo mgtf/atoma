@@ -95,6 +95,7 @@ export type InputKind =
   | 'run'
   | 'registry'
   | 'skills'
+  | 'projectSource'
   | 'projectName'
   | 'projectPrompt'
   | 'projectRepository'
@@ -191,6 +192,7 @@ export interface GpuUiState {
    * TEXT input, and a two-option select carries no focus state anyone reads.
    */
   projectVisibility: RepositoryVisibility;
+  projectRepositoryMode: 'new' | 'pull-request' | 'fork';
   runFilters: EventFilters;
   branchHeadingExpanded: boolean;
   runSummaryExpanded: boolean;
@@ -260,6 +262,7 @@ export interface GpuUiState {
   selectSkill: (selection: { l1Name: string; id: string } | null) => void;
   selectProject: (id: string | null) => void;
   selectGithubInstallation: (id: string | null) => void;
+  setProjectRepositoryMode: (mode: 'new' | 'pull-request' | 'fork') => void;
   setProjectVisibility: (visibility: RepositoryVisibility) => void;
   setRunFilters: (filters: EventFilters) => void;
   toggleBranchHeading: () => void;
@@ -360,6 +363,7 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
   selectedProjectId: null,
   selectedGithubInstallationId: null,
   projectVisibility: DEFAULT_REPOSITORY_VISIBILITY,
+  projectRepositoryMode: 'new',
   runFilters: { kind: 'all', role: 'all', branchId: 'all' },
   branchHeadingExpanded: true,
   runSummaryExpanded: true,
@@ -369,6 +373,7 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
     registry: '',
     skills: '',
     projectName: '',
+    projectSource: '',
     projectPrompt: '',
     projectRepository: '',
     displayName: '',
@@ -524,6 +529,7 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
   // Deliberately NOT persisted. A visibility carried over from the last
   // project would be a decision made by a previous session about a repository
   // that did not exist yet; every create starts from the stated default.
+  setProjectRepositoryMode: (projectRepositoryMode) => set({ projectRepositoryMode }),
   setProjectVisibility: (projectVisibility) => set({ projectVisibility }),
   setRunFilters: (runFilters) =>
     set((state) => ({

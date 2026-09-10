@@ -22,6 +22,8 @@ import {
   publicationSchema,
   publicationStatusSchema,
   repositoryReceiptSchema,
+  repositoryRunBaseSchema,
+  type RepositoryRunBase,
   repositoryStatusSchema,
   type ArtifactManifest,
   type CreateProjectInput,
@@ -218,6 +220,7 @@ interface ProjectRow {
   family: string;
   status: string;
   github_installation_id: string;
+  repository_source_json: string | null;
   repository_target_owner: string;
   repository_target_name: string;
   repository_visibility: string;
@@ -239,6 +242,7 @@ interface ProjectRunRow {
   request_key: string;
   goal: string;
   status: string;
+  repository_base_json: string | null;
   workspace_path: string;
   runs_path: string;
   log_path: string;
@@ -265,6 +269,7 @@ interface PublicationRow {
   repository_url: string | null;
   commit_sha: string | null;
   base_sha: string | null;
+  pull_request_url: string | null;
   error: string | null;
   created_at: string;
   updated_at: string;
@@ -294,6 +299,7 @@ function projectFromRow(row: ProjectRow): Project {
       owner: row.repository_target_owner,
       name: row.repository_target_name,
       visibility: row.repository_visibility,
+      ...(row.repository_source_json ? { source: parseJson(row.repository_source_json, 'repository source') } : {}),
     },
     repositoryStatus: row.repository_status,
     repositoryId: row.repository_id,
@@ -343,6 +349,7 @@ function runFromRow(row: ProjectRunRow): ProjectRun {
       runsPath: row.runs_path,
       logPath: row.log_path,
     },
+    ...(row.repository_base_json ? { repositoryBase: parseJson(row.repository_base_json, 'repository base') } : {}),
     traceId: row.trace_id,
     stats: row.stats_json === null ? null : runStatsSchema.parse(parseJson(row.stats_json, 'run stats')),
     artifactManifest:
@@ -374,6 +381,7 @@ function publicationFromRow(row: PublicationRow): Publication {
     // migration, so the column may be absent and better-sqlite3 yields
     // undefined. Degrade to null instead of failing the parse on every row.
     baseSha: row.base_sha ?? null,
+    ...(row.pull_request_url ? { pullRequestUrl: row.pull_request_url } : {}),
     error: row.error,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -497,6 +505,14 @@ export class ProjectStore {
       if (!publicationColumns.includes('base_sha')) {
         this.db.exec('ALTER TABLE project_publications ADD COLUMN base_sha TEXT');
       }
+      for (const [table, column] of [
+        ['projects', 'repository_source_json'],
+        ['project_runs', 'repository_base_json'],
+        ['project_publications', 'pull_request_url'],
+      ]) {
+        const columns = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+        if (!columns.some(item => item.name === column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`);
+      }
       // ONE PROJECT PER REPOSITORY, per organisation, COMPARED THE WAY GITHUB
       // COMPARES IT. Nothing forbade two
       // projects naming the same repository, and since publication became
@@ -554,6 +570,14 @@ export class ProjectStore {
   static open(dbPath: string): ProjectStore {
     if (!dbPath) throw new Error('ProjectStore.open requires the selected product DB path');
     return new ProjectStore(openStoreHandle(dbPath, PROJECT_TABLES_DDL));
+  }
+
+  saveRepositoryRunBase(orgId: string, runId: string, input: RepositoryRunBase): void {
+    const base = repositoryRunBaseSchema.parse(input);
+    const changed = this.db.prepare(`UPDATE project_runs SET repository_base_json = ?
+      WHERE org_id = ? AND project_run_id = ? AND status = 'running' AND repository_base_json IS NULL`)
+      .run(JSON.stringify(base), orgId, runId).changes;
+    if (changed !== 1) throw new ProjectStateConflict('repository base already captured or run is not running');
   }
 
   createProject(input: {
@@ -626,8 +650,8 @@ export class ProjectStore {
           `INSERT INTO projects (
              project_id, org_id, created_by_principal_id, name, slug, initial_prompt, family,
              status, github_installation_id, repository_target_owner, repository_target_name,
-             repository_visibility, repository_status, created_at, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, 'pending', ?, ?)`
+             repository_visibility, repository_source_json, repository_status, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, 'pending', ?, ?)`
         )
         .run(
           projectId,
@@ -641,6 +665,7 @@ export class ProjectStore {
           project.repositoryTarget.owner,
           project.repositoryTarget.name,
           project.repositoryTarget.visibility,
+          project.repositoryTarget.source ? JSON.stringify(project.repositoryTarget.source) : null,
           now,
           now
         );
@@ -1400,7 +1425,8 @@ export class ProjectStore {
           current.repositoryFullName !== receipt.fullName ||
           current.repositoryUrl !== receipt.url ||
           current.commitSha !== receipt.commitSha ||
-          current.baseSha !== receipt.baseSha)
+          current.baseSha !== receipt.baseSha ||
+          (current.pullRequestUrl ?? null) !== (receipt.pullRequestUrl ?? null))
       ) {
         throw new ProjectStateConflict('publication replay carries a different receipt');
       }
@@ -1420,7 +1446,7 @@ export class ProjectStore {
       .prepare(
         `UPDATE project_publications
          SET status = ?, repository_id = ?, repository_full_name = ?, repository_url = ?,
-             commit_sha = ?, base_sha = ?, error = ?, published_at = ?, updated_at = ?
+             commit_sha = ?, base_sha = ?, pull_request_url = ?, error = ?, published_at = ?, updated_at = ?
          WHERE publication_id = ? AND org_id = ? AND status = ?`
       )
       .run(
@@ -1430,6 +1456,7 @@ export class ProjectStore {
         receipt?.url ?? null,
         receipt?.commitSha ?? null,
         receipt?.baseSha ?? null,
+        receipt?.pullRequestUrl ?? null,
         error,
         to === 'published' ? now : null,
         now,

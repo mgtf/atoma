@@ -55,6 +55,12 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
+      - name: Install LibreOffice for document tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libreoffice-writer libreoffice-calc libreoffice-impress
+          soffice --headless --version
       - run: npm run release:check
 
       - name: Package the exact main revision for deployment

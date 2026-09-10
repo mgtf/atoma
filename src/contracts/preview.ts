@@ -37,6 +37,13 @@ import {
 
 const instantSchema = z.string().datetime();
 
+/** A generation asks only for access to that snapshot; omission opens anew. */
+export const previewOpenOptionsSchema = z.object({
+  inFlight: z.boolean().optional(),
+  generation: z.number().int().positive().optional(),
+}).strict();
+export type PreviewOpenOptions = z.infer<typeof previewOpenOptionsSchema>;
+
 /* ─────────────────────────── deliverable identity ─────────────────────────── */
 
 /**

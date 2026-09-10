@@ -15,7 +15,7 @@ export function projectRetrievalFixture(root: string, options: { subject?: strin
   const projects = ProjectStore.open(dbPath);
   const project = projects.createProject({ orgId: viewer.orgId, principalId: viewer.principalId,
     project: { name: 'Docs', slug: options.slug ?? 'docs', repositoryTarget: { installationId: '123', owner: 'owner', name: options.slug ?? 'docs', visibility: 'private' } } });
-  const makeRun = (files?: Record<string, string>) => {
+  const makeRun = (files?: Record<string, string | Buffer>) => {
     const runId = randomUUID();
     const layout = projectRunHostLayout(root, viewer.orgId, project.projectId, runId);
     const created = projects.createProjectRun({ orgId: viewer.orgId, projectId: project.projectId,

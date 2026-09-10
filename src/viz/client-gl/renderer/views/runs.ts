@@ -1244,6 +1244,19 @@ function drawRunPreviewControl(
         : preview.state === 'failed'
           ? snapshot.t('preview.retry')
           : snapshot.t('preview.start');
+  const availableWidth = Math.max(0, width - 20);
+  const gap = 8;
+  const stopLabel = snapshot.t('preview.stop');
+  const openMinWidth = Math.ceil(ctx.measureText(label, {
+    size: 11, weight: preview.state === 'starting' ? '700' : '600',
+  })) + 20;
+  const stopWidth = Math.ceil(ctx.measureText(stopLabel, { size: 11, weight: '600' })) + 20;
+  const showStop = preview.state === 'ready';
+  const stacked = showStop && openMinWidth + gap + stopWidth > availableWidth;
+  const openWidth = Math.min(
+    openMinWidth,
+    availableWidth - (showStop && !stacked ? stopWidth + gap : 0)
+  );
   ctx.button(
     ctx.root,
     'run.preview.open',
@@ -1251,26 +1264,26 @@ function drawRunPreviewControl(
     label,
     x + 10,
     y,
-    Math.min(220, width - 20),
+    openWidth,
     height,
     preview.state === 'starting',
     snapshot.onActivate
   );
-  if (preview.state === 'ready') {
+  if (showStop) {
     ctx.button(
       ctx.root,
       'run.preview.stop',
       'button',
-      snapshot.t('preview.stop'),
-      x + 10 + Math.min(220, width - 20) + 8,
-      y,
-      110,
+      stopLabel,
+      x + 10 + (stacked ? 0 : openWidth + gap),
+      y + (stacked ? height + gap : 0),
+      Math.min(stopWidth, availableWidth),
       height,
       false,
       snapshot.onActivate
     );
   }
-  return height + 12;
+  return height + 12 + (stacked ? height + gap : 0);
 }
 
 function drawEventDetail(

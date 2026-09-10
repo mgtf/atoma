@@ -1,7 +1,7 @@
 import type { Viewer } from '../auth/store.js';
 import { ProjectHttpError, roleAtLeast } from '../projects/service.js';
 import type { ProjectStore } from '../projects/store.js';
-import { previewEgressHostSchema, type PreviewSummary } from '../contracts/preview.js';
+import { previewEgressHostSchema, previewOpenOptionsSchema, type PreviewOpenOptions, type PreviewSummary } from '../contracts/preview.js';
 import {
   PreviewManager,
   PreviewQuotaError,
@@ -107,10 +107,12 @@ export class PreviewHttpService {
     viewer: Viewer,
     projectId: string,
     projectRunId: string,
-    options: { readonly inFlight?: boolean } = {}
+    options: PreviewOpenOptions = {}
   ): Promise<{ readonly status: number; readonly body: PreviewOpenResponse }> {
     this.requireMember(viewer, 'open previews');
     this.boundRun(viewer, projectId, projectRunId);
+    const parsed = previewOpenOptionsSchema.safeParse(options);
+    if (!parsed.success) throw new ProjectHttpError(400, 'invalid preview open options');
     // `Viewer` carries no session id; see `PreviewClaimBinding.sessionId`.
     const opener = { principalId: viewer.principalId, sessionId: null };
     // The caller ASKS; the run's own status ANSWERS. `inFlight` is a
@@ -118,7 +120,10 @@ export class PreviewHttpService {
     // request for one on a delivered run gets the delivered preview.
     const inFlight = options.inFlight === true && this.runInFlight(viewer, projectRunId);
     try {
-      const opened = inFlight
+      const input = { orgId: viewer.orgId, projectId, projectRunId, opener };
+      const opened = options.generation !== undefined
+        ? this.deps.manager.claim(input, options.generation)
+        : inFlight
         ? await this.deps.manager.openInFlight({ orgId: viewer.orgId, projectId, projectRunId, opener })
         : await this.deps.manager.open({ orgId: viewer.orgId, projectId, projectRunId, opener });
       if (!opened.url) {

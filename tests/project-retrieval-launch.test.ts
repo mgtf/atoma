@@ -28,6 +28,30 @@ async function preparedFixture() {
 }
 
 describe('authoritative project retrieval launch', () => {
+  it('admits a binary artifact, archives its bytes and returns an extracted-text citation through L1', async () => {
+    const f = projectRetrievalFixture(root);
+    const bytes = readFileSync(new URL('./fixtures/retrieval-documents/pricing.pdf', import.meta.url));
+    const source = f.makeRun({ 'pricing.PDF': bytes });
+    const current = f.makeRun();
+    const receipt = await ProjectRetrievalLaunchStore.open(f.dbPath).prepare(current.run.projectRunId,
+      source.run.projectRunId, retrievalContext());
+    expect(readFileSync(join(receipt.sourceRoot, 'pricing.PDF'))).toEqual(bytes);
+    const prepared = openProjectRunHaystack({ dbPath: f.dbPath, runId: current.run.projectRunId,
+      workspacePath: current.layout.workspacePath, runsPath: current.layout.runsPath,
+      skillsPath: current.layout.skillsPath }, haystackTestRuntime(root));
+    const tool = createProjectRetrievalTool(prepared.binding, retrievalContext());
+    try {
+      await prepared.prepare(retrievalContext());
+      const result = await tool.execute({ query: 'annual price', filters: { formats: ['pdf'] } });
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.passages[0]?.excerpt).toContain('190 euros');
+        expect(result.passages[0]?.citation).toMatchObject({ path: 'pricing.PDF',
+          extraction: { kind: 'extracted-text' } });
+      }
+    } finally { await tool.close(); }
+  });
+
   it('freezes only admitted documentation and serves the archive after the original workspace changes', async () => {
     const f = await preparedFixture();
     expect(f.receipt.manifest.documents.map(d => d.path)).toEqual(['docs/pricing.md']);

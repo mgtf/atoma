@@ -126,12 +126,36 @@ export const repositoryVisibilitySchema = z.enum(['private', 'public']);
 export const DEFAULT_REPOSITORY_VISIBILITY: z.infer<typeof repositoryVisibilitySchema> =
   'private';
 
+/** An existing repository is an explicit creation mode, never a name collision. */
+export const repositorySourceSchema = z.object({
+  owner: githubOwnerSchema,
+  name: githubRepositoryNameSchema,
+  mode: z.enum(['pull-request', 'fork']),
+  repositoryId: githubRepositoryIdSchema.optional(),
+}).strict();
+
+export function parseGitHubRepository(value: string): { owner: string; name: string } {
+  let text = value.trim();
+  if (text.startsWith('https://')) {
+    const url = new URL(text);
+    if (url.hostname !== 'github.com' || url.port || url.username || url.password || url.search || url.hash) {
+      throw new Error('Enter a github.com repository URL or owner/repository');
+    }
+    text = url.pathname.replace(/^\/|\/$/g, '');
+  }
+  text = text.replace(/\.git$/, '');
+  const parts = text.split('/');
+  if (parts.length !== 2) throw new Error('Enter a github.com repository URL or owner/repository');
+  return { owner: githubOwnerSchema.parse(parts[0]), name: githubRepositoryNameSchema.parse(parts[1]) };
+}
+
 export const repositoryTargetSchema = z
   .object({
     installationId: githubInstallationIdSchema,
     owner: githubOwnerSchema,
     name: githubRepositoryNameSchema,
     visibility: repositoryVisibilitySchema.default(DEFAULT_REPOSITORY_VISIBILITY),
+    source: repositorySourceSchema.optional(),
   })
   .strict();
 
@@ -256,6 +280,16 @@ export const artifactManifestSchema = z
     }
   });
 
+/** One definition of a git commit sha, written twice before this. */
+export const commitShaSchema = z.string().regex(/^[a-f0-9]{40}$/);
+
+export const repositoryRunBaseSchema = z.object({
+  repositoryId: githubRepositoryIdSchema,
+  branch: z.string().min(1).max(255),
+  commitSha: commitShaSchema,
+}).strict();
+export type RepositoryRunBase = z.infer<typeof repositoryRunBaseSchema>;
+
 export const projectRunSchema = z
   .object({
     projectRunId: projectRunIdSchema,
@@ -266,6 +300,7 @@ export const projectRunSchema = z
     goal: projectGoalSchema,
     status: projectRunStatusSchema,
     hostPaths: projectRunHostPathsSchema,
+    repositoryBase: repositoryRunBaseSchema.optional(),
     traceId: z.string().min(1).max(255).nullable(),
     stats: runStatsSchema.nullable(),
     artifactManifest: artifactManifestSchema.nullable(),
@@ -295,15 +330,13 @@ export const repositoryReceiptSchema = z
   })
   .strict();
 
-/** One definition of a git commit sha, written twice before this. */
-export const commitShaSchema = z.string().regex(/^[a-f0-9]{40}$/);
-
 export const publicationReceiptSchema = repositoryReceiptSchema
   .extend({
     commitSha: commitShaSchema,
     /**
-     * The branch head OBSERVED immediately before this publication. Null means
-     * the branch did not exist and this publication created it;
+     * The observed parent used for publication: the captured run base for
+     * imported projects, otherwise the head read just before publication. Null
+     * means the branch did not exist and this publication created it;
      * `commitSha === baseSha` means this ATTEMPT added no commit, because the
      * branch already held every byte the manifest declares.
      *
@@ -316,6 +349,7 @@ export const publicationReceiptSchema = repositoryReceiptSchema
      * must state what it built on rather than omitting it.
      */
     baseSha: commitShaSchema.nullable(),
+    pullRequestUrl: httpsUrlSchema.nullable().optional(),
   })
   .strict();
 
@@ -332,6 +366,7 @@ export const publicationSchema = z
     repositoryUrl: httpsUrlSchema.nullable(),
     commitSha: commitShaSchema.nullable(),
     baseSha: commitShaSchema.nullable(),
+    pullRequestUrl: httpsUrlSchema.nullable().optional(),
     error: boundedErrorSchema,
     createdAt: instantSchema,
     updatedAt: instantSchema,

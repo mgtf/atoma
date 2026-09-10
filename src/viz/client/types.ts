@@ -217,12 +217,7 @@ export interface VizProject {
   slug: string;
   status: 'active' | 'archived';
   family: string;
-  repositoryTarget: {
-    installationId: string;
-    owner: string;
-    name: string;
-    visibility: 'private' | 'public';
-  };
+  repositoryTarget: import('../../contracts/projects.js').RepositoryTarget;
   repositoryStatus: 'pending' | 'creating' | 'ready' | 'failed';
   repositoryFullName: string | null;
   repositoryUrl: string | null;
@@ -281,6 +276,7 @@ export interface VizProjectRun {
     status: 'pending' | 'publishing' | 'published' | 'failed';
     repositoryUrl: string | null;
     commitSha: string | null;
+    pullRequestUrl?: string | null;
   } | null;
 }
 

@@ -16,7 +16,7 @@ Neighbours:
 
 - The optional GitHub App (`ATOMA_GITHUB_APP_*`) is a separate install from
   GitHub login: register setup at `/auth/github/setup` and webhooks at
-  `/webhooks/github`. Repositories are created only after a delivered,
+  `/webhooks/github`. New empty repositories are created only after a delivered,
   validated artifact manifest, and a retry never creates a second repo. The
   operator procedure — the three repository permissions, the settings that are
   hard requirements, and what is recoverable — is
@@ -133,3 +133,16 @@ Neighbours:
   can also refuse to create a repository of that visibility, and
   `GitHubApiError` carries no body. See [`src/projects`](../projects/AGENTS.md).
 
+
+## Existing repositories
+
+- `publishRepositoryRun` consumes the captured run base: PR mode creates an
+  immutable `atoma/run-<id>` branch and one PR; fork mode advances the fork's
+  default branch directly. Neither mode force-pushes. Changed fork heads and
+  unrelated run branches are refused; matching tree+parent receipts converge
+  after a remote-write crash. An unchanged tree creates no empty PR.
+- Imported PR runs request `pull_requests: write` in addition to the ordinary
+  publish permissions. Forks and new repositories keep the ordinary token.
+- Repository snapshots read bounded immutable trees/blobs; truncated trees,
+  unsafe paths, symlinks and submodules fail before model work. No GitHub
+  credential enters the worker. Fork adoption requires the exact parent id.

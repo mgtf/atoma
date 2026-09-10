@@ -34,8 +34,9 @@ available without this configuration.
 There is no activation switch or child activation marker. Every new project run archives its
 admitted source documents, records its receipt and initializes Haystack before
 model execution. A first run still exposes search with an empty corpus. The
-corpus remains the previous delivered run's manifest-admitted Markdown/text
-artifacts; mandatory search does not expand which documents a tenant can read.
+corpus remains the previous delivered run's manifest-admitted document artifacts
+(see [document formats](#document-formats)); mandatory search does not expand
+which documents a tenant can read.
 
 The child reads the recorded receipt directly from the product store after
 validating project authority. An existing receipt requires Haystack even when
@@ -235,7 +236,7 @@ The host derives Haystack document metadata (`path`, `format`, `snapshotId`,
 to admitted paths and passes a native `meta.path in [...]` filter to BOTH BM25
 and dense retrieval before fusion and reranking. Returned IDs are checked
 against the same selection on the host; a backend violation is unavailable,
-not a silently truncated result. Citations still come from original bytes.
+not a silently truncated result. Plain-text citations still come from original bytes; binary documents identify their extracted text explicitly.
 
 Filters cannot select another organisation, project, corpus or snapshot.
 Admission and live authority checks remain mandatory and separate from ranking.
@@ -245,3 +246,31 @@ there is no persistent Haystack index to migrate. Existing model/runtime pins
 remain valid. Restart the development host to load the changed source; packaged
 hosts require a new build. No new live agent benchmark accompanies this change;
 retrieval-quality and run-cost improvements remain unmeasured.
+
+## Document formats
+
+Document admission now accepts Markdown, UTF-8 text and CSV, PDF with a text
+layer, Word (`docx`, `doc`), Excel (`xlsx`, `xls`), PowerPoint (`pptx`, `ppt`),
+OpenDocument (`odt`, `ods`, `odp`) and RTF. Extensions are case-insensitive.
+These are files admitted from the previous delivered run's artifact manifest;
+this does not introduce an upload endpoint or crawl undeclared files.
+
+Modern binary formats use the pinned production `officeparser` dependency in a
+short-lived host subprocess. PDF.js is overridden to 6.2.108 to include its
+security fix. Legacy DOC/XLS/PPT additionally require `soffice` (LibreOffice) on
+the host PATH. Each conversion uses a private disposable profile with macros
+disabled. No converter or document parser runs inside the L1 worker.
+
+The original file path and SHA-256 remain the source identity. Binary passages
+and their citations include `extraction`: its SHA-256 identifies the extracted
+UTF-8 text, and byte/line offsets refer to that text, not to binary file offsets
+or printed page numbers. Plain-text citations retain their existing exact-byte
+semantics. Extraction is deterministic for a fixed parser/converter runtime;
+provision the same LibreOffice version on hosts that need legacy documents.
+
+Source files are limited to 8 MB, with 8 MB of source bytes per corpus. Extracted
+text is limited to 1 MB per binary document and 8 MB per corpus. Conversion is
+bounded by cancellation, the run deadline and a 60-second per-file ceiling.
+Malformed, encrypted, empty-text or truncated documents fail ingestion instead
+of silently disappearing from search. OCR, embedded attachments and image text
+are not extracted; scanned PDFs need a text layer supplied beforehand.

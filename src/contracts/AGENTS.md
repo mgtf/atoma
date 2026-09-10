@@ -121,7 +121,7 @@ Neighbours:
 
 - `baseSha` on a publication is OBSERVED, never a pointer anything decides
   from — the same rule `attestation.ts` states for a tool observation. It
-  records the branch head found immediately before that publication; the
+  records the publication parent (the captured run base for imported projects); the
   authority to publish onto an existing branch is read from GitHub at publish
   time. A required KEY with a nullable VALUE on a `.strict()` object, so a
   writer must state what it built on rather than omitting it.

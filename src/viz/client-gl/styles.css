@@ -87,7 +87,8 @@ button, input, textarea, select { font: inherit; }
   position: fixed;
   top: 0;
   left: 0;
-  z-index: 20;
+  /* Above the preview plane and keyboard palette while the native cursor is hidden. */
+  z-index: 40;
   width: 52px;
   height: 54px;
   opacity: 0;
@@ -274,7 +275,7 @@ html.atoma-cursor-active * {
   top: 104px;
   left: calc(var(--gpu-sidebar) + (var(--gpu-content) - var(--gpu-frame)) / 2 + 16px);
   width: calc(var(--gpu-frame) - 32px);
-  height: 140px;
+  height: 186px;
   /* The declared height is a contract with the GL list below it, so content
      that outgrows it must scroll rather than spill: a longer locale, a raised
      default font size, or a future field. `auto`, not `hidden` — hiding could
@@ -283,6 +284,7 @@ html.atoma-cursor-active * {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr);
   grid-template-areas:
+    "source source source"
     "name repo install"
     "actions actions actions"
     "hint hint hint";
@@ -402,11 +404,22 @@ html.atoma-cursor-active * {
    rail is 208px). Stack browser-native fields and reserve the SAME measured
    band in projectsGpuContentTop; wrapping actions/hints must never spill over
    the GL list below. */
+
+.gpu-project-source {
+  grid-area: source;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+.gpu-project-source > * { flex: 1; min-width: 0; }
+
 @media (max-width: 687px) {
+  .gpu-project-source { flex-direction: column; }
   .gpu-project-form {
-    height: 272px;
+    height: 364px;
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
+      "source"
       "name"
       "repo"
       "install"
@@ -1291,18 +1304,27 @@ html.atoma-cursor-active * {
   font: 12px/1.2 ui-sans-serif, system-ui, sans-serif;
 }
 
-/* THE PREVIEW PLANE.
-   The one DOM surface that paints its own frame without joining the
-   grandfathered `.gpu-panel-skin` list, because it is not an overlay OVER the
-   canvas: it REPLACES it. The scene is hidden and inert while this is up, so
-   there is nothing underneath to compete for the pointer light or to be
-   buried under a frame. See tests/viz-overlay-stack.test.ts. */
-.gpu-preview-plane {
+/* The preview is a modal over the inert scene; the cursor stays above it. */
+.gpu-preview-backdrop {
   position: fixed;
   inset: 0;
   z-index: 26;
   display: flex;
+  padding: clamp(8px, 2vw, 28px);
+  box-sizing: border-box;
+  background: rgba(2, 6, 12, .72);
+}
+
+.gpu-preview-plane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
   flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(110, 168, 255, .3);
+  border-radius: 12px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, .55);
   background: #070b13;
   color: #e6edf7;
 }

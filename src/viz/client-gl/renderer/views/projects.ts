@@ -129,11 +129,11 @@ export const PROJECTS_DOM_FORM_TOP =
  * is the create fields; with one it is the run prompt. Measuring one height
  * for both left a band of dead space under whichever form was shorter.
  */
-export const PROJECTS_DOM_FORM_HEIGHT = { create: 140, run: 184 } as const;
+export const PROJECTS_DOM_FORM_HEIGHT = { create: 186, run: 184 } as const;
 /** Below this content width the DOM form stacks fields instead of squeezing them. */
 export const PROJECTS_NARROW_CONTENT_WIDTH = 480;
 /** Must match the narrow media query in styles.css. */
-export const PROJECTS_DOM_FORM_NARROW_HEIGHT = { create: 272, run: 248 } as const;
+export const PROJECTS_DOM_FORM_NARROW_HEIGHT = { create: 364, run: 248 } as const;
 
 export type ProjectsFormMode = keyof typeof PROJECTS_DOM_FORM_HEIGHT;
 
@@ -841,7 +841,7 @@ export function drawProjects(
         if (run.publication && run.publication.status === 'published' && run.publication.commitSha) {
           const commit = ctx.text(
             pane.content,
-            truncate(run.publication.commitSha, 12),
+            run.publication.pullRequestUrl ? snapshot.t('projects.pullRequest') : truncate(run.publication.commitSha, 12),
             compactRunRows ? runColumnX : statusRight,
             cursor + (compactRunRows ? 48 : RUN_SECOND_LINE_Y),
             {
@@ -853,6 +853,12 @@ export function drawProjects(
             }
           );
           if (!compactRunRows) commit.anchor.x = 1;
+          if (run.publication.pullRequestUrl) {
+            ctx.linkRegion(pane.content, `project.pullRequest.${run.projectRunId}`,
+              snapshot.t('projects.pullRequest'), compactRunRows ? runColumnX : statusRight - statusCol,
+              cursor + (compactRunRows ? 34 : RUN_SECOND_LINE_Y - 14),
+              compactRunRows ? goalWidth : statusCol, 22, snapshot.onActivate);
+          }
         } else if (run.error) {
           const boundedError = run.error.replace(/\s+/g, ' ');
           // Starts on the LABEL's vertical, not the button's border: this line

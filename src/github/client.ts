@@ -88,6 +88,7 @@ export interface GitHubRepository {
   readonly defaultBranch: string;
   readonly private: boolean;
   readonly htmlUrl: string;
+  readonly parentId?: string;
 }
 
 export interface GitHubPublishFile {
@@ -130,8 +131,8 @@ export interface GitHubPublishedCommit {
   readonly commitSha: string;
   readonly ref: string;
   /**
-   * The branch head OBSERVED immediately before this publication; null when the
-   * branch did not exist and this publication created it. An observation, never
+   * The observed publication parent (the captured run base for imported
+   * projects); null when this publication started the history. An observation, never
    * a pointer anything decides from.
    */
   readonly baseSha: string | null;
@@ -297,6 +298,8 @@ interface RequestInput {
   readonly token: string;
   readonly body?: unknown;
   readonly accepted?: readonly number[];
+  readonly responseMaxBytes?: number;
+  readonly signal?: AbortSignal;
 }
 
 interface RequestOutput {
@@ -441,6 +444,7 @@ function parseRepository(value: unknown): GitHubRepository {
     defaultBranch: branchName(responseString(object['default_branch'], 'GitHub default branch', 255)),
     private: responseBoolean(object['private'], 'GitHub repository visibility'),
     htmlUrl: parsedUrl.toString(),
+    ...(object['parent'] ? { parentId: canonicalGitHubId(asObject(object['parent'], 'fork parent')['id']) } : {}),
   });
 }
 
@@ -524,7 +528,7 @@ export class GitHubAppClient {
     });
   }
 
-  private async readJson(response: Response, method: string, path: string): Promise<unknown> {
+  private async readJson(response: Response, method: string, path: string, maxBytes = this.responseMaxBytes): Promise<unknown> {
     if (response.status === 204) return null;
     const reader = response.body?.getReader();
     if (!reader) return null;
@@ -535,7 +539,7 @@ export class GitHubAppClient {
         const result = await reader.read();
         if (result.done) break;
         length += result.value.byteLength;
-        if (length > this.responseMaxBytes) {
+        if (length > maxBytes) {
           try {
             await reader.cancel();
           } catch {
@@ -581,7 +585,7 @@ export class GitHubAppClient {
     if (body !== undefined && Buffer.byteLength(body, 'utf8') > MAX_GITHUB_REQUEST_BODY_BYTES) {
       throw new Error('GitHub API request body exceeds the configured publish bound');
     }
-    const signal = AbortSignal.timeout(this.timeoutMs);
+    const signal = AbortSignal.any([AbortSignal.timeout(this.timeoutMs), ...(input.signal ? [input.signal] : [])]);
     let response: Response;
     try {
       response = await this.fetchImpl(`${this.config.apiBaseUrl}${input.path}`, {
@@ -620,7 +624,7 @@ export class GitHubAppClient {
     }
     return Object.freeze({
       status: response.status,
-      json: await this.readJson(response, method, input.path),
+      json: await this.readJson(response, method, input.path, input.responseMaxBytes),
     });
   }
 
@@ -686,13 +690,13 @@ export class GitHubAppClient {
     return appInstallation;
   }
 
-  async createInstallationToken(installationId: string): Promise<GitHubInstallationToken> {
+  async createInstallationToken(installationId: string, pullRequests = false): Promise<GitHubInstallationToken> {
     const id = canonicalGitHubId(installationId, 'GitHub installation id');
     const result = await this.request({
       method: 'POST',
       token: this.appJwt(),
       path: `/app/installations/${id}/access_tokens`,
-      body: { permissions: GITHUB_PUBLISH_PERMISSIONS },
+      body: { permissions: { ...GITHUB_PUBLISH_PERMISSIONS, ...(pullRequests ? { pull_requests: 'write' } : {}) } },
     });
     const object = asObject(result.json, 'GitHub installation token response');
     const token = safeToken(responseString(object['token'], 'GitHub installation token', 16_384));
@@ -708,7 +712,8 @@ export class GitHubAppClient {
     const grantedPermissions = permissions(object['permissions']);
     if (
       grantedPermissions['administration'] !== 'write' ||
-      grantedPermissions['contents'] !== 'write'
+      grantedPermissions['contents'] !== 'write' ||
+      (pullRequests && grantedPermissions['pull_requests'] !== 'write')
     ) {
       throw new Error('GitHub installation token lacks required publish permissions');
     }
@@ -782,6 +787,109 @@ export class GitHubAppClient {
     });
     if (result.status === 404) return null;
     return parseRepository(result.json);
+  }
+
+  async createFork(input: {
+    token: string; owner: string; name: string; targetName: string; organisation?: string;
+  }): Promise<GitHubRepository> {
+    const result = await this.request({
+      token: input.token, method: 'POST', accepted: [202],
+      path: `/repos/${encodeSegment(ownerLogin(input.owner))}/${encodeSegment(repositoryName(input.name))}/forks`,
+      body: { name: repositoryName(input.targetName), default_branch_only: true,
+        ...(input.organisation ? { organization: ownerLogin(input.organisation) } : {}) },
+    });
+    return parseRepository(result.json);
+  }
+
+  /** Read immutable git objects; never follow archive redirects carrying credentials. */
+  async readRepositoryFiles(input: {
+    token: string; owner: string; name: string; commitSha: string; signal: AbortSignal;
+  }): Promise<readonly GitHubPublishFile[]> {
+    input.signal.throwIfAborted();
+    const commit = await this.getCommit(input.token, input.owner, input.name, input.commitSha);
+    const result = await this.request({ token: input.token,
+      path: this.gitPath(input.owner, input.name, `trees/${commit.treeSha}?recursive=1`),
+      responseMaxBytes: 8 * 1024 * 1024, signal: input.signal });
+    const tree = asObject(result.json, 'GitHub tree');
+    if (tree['truncated'] !== false || !Array.isArray(tree['tree'])) throw new Error('Repository tree is incomplete');
+    const entries = tree['tree'].map(value => asObject(value, 'GitHub tree entry'));
+    if (entries.length > 10_000) throw new Error('Repository exceeds the 10000-entry import limit');
+    const files: GitHubPublishFile[] = [];
+    const seen = new Set<string>();
+    let total = 0;
+    for (const entry of entries) {
+      input.signal.throwIfAborted();
+      const name = filePath(responseString(entry['path'], 'repository path', 1024));
+      if (name.split('/').some(part => part.toLowerCase() === '.git')) throw new Error('Repository contains a reserved git path');
+      if (entry['type'] === 'tree') continue;
+      if (entry['type'] !== 'blob' || (entry['mode'] !== '100644' && entry['mode'] !== '100755')) {
+        throw new Error('Repository import does not support symbolic links or submodules');
+      }
+      if (seen.has(name.toLowerCase())) throw new Error('Repository contains conflicting file paths');
+      seen.add(name.toLowerCase());
+      const blob = await this.request({ token: input.token,
+        path: this.gitPath(input.owner, input.name, `blobs/${sha(entry['sha'], 'blob sha')}`),
+        responseMaxBytes: MAX_GITHUB_REQUEST_BODY_BYTES, signal: input.signal });
+      const object = asObject(blob.json, 'GitHub blob');
+      if (object['encoding'] !== 'base64' || typeof object['content'] !== 'string') throw new Error('Unsupported repository blob encoding');
+      const content = Buffer.from(object['content'], 'base64');
+      if (content.length > 10 * 1024 * 1024) throw new Error('Repository file exceeds the 10 MiB import limit');
+      if (content.length !== object['size']) throw new Error('Repository blob is incomplete');
+      total += content.length;
+      if (total > MAX_GITHUB_PUBLISH_TOTAL_BYTES) throw new Error('Repository exceeds the 50 MiB import limit');
+      files.push({ path: name, mode: entry['mode'], content });
+    }
+    if (!files.length) throw new Error('Repository has no files to import');
+    return files;
+  }
+
+  /** Publish from the captured run base, to its own PR branch or directly into a fork. */
+  async publishRepositoryRun(input: PublishGitHubManifestInput & {
+    baseBranch: string; baseSha: string; pullRequest: boolean;
+  }): Promise<GitHubPublishedCommit & { pullRequestUrl: string | null }> {
+    const { owner, repository, branch, files } = this.normalizeManifestFiles(input);
+    if (input.pullRequest && branch === input.baseBranch) throw new Error('A run branch must differ from its base');
+    if (!input.pullRequest && branch !== input.baseBranch) throw new Error('Direct publication must target its base branch');
+    const baseSha = sha(input.baseSha, 'run base sha');
+    const base = await this.getCommit(input.token, owner, repository, baseSha);
+    const entries = await this.blobEntries(input.token, owner, repository, files);
+    const treeSha = await this.createTree({ token: input.token, owner, repository, entries, baseTreeSha: base.treeSha });
+    if (treeSha === base.treeSha) return { branch, treeSha, commitSha: baseSha,
+      ref: `refs/heads/${branch}`, baseSha, publishKind: 'unchanged', pullRequestUrl: null };
+    const head = await this.readBranchHead(input.token, owner, repository, branch);
+    let commitSha: string;
+    if (head.state === 'head' && (input.pullRequest || head.sha !== baseSha)) {
+      const existing = await this.getCommit(input.token, owner, repository, head.sha);
+      if (existing.treeSha !== treeSha || existing.parents.length !== 1 || existing.parents[0] !== baseSha) {
+        throw new GitHubDivergenceError(owner, repository, branch, head.sha);
+      }
+      commitSha = head.sha;
+    } else {
+      commitSha = await this.createCommit({ token: input.token, owner, repository,
+        message: input.message, treeSha, parents: [baseSha] });
+      if (input.pullRequest) {
+        await this.createReference({ token: input.token, owner, repository, branch, commitSha });
+      } else {
+        if (head.state !== 'head') throw new Error('Fork branch disappeared since the run started');
+        await this.moveBranch({ token: input.token, owner, repository, branch, expectedSha: baseSha, commitSha });
+      }
+    }
+    if (!input.pullRequest) return { branch, treeSha, commitSha, ref: `refs/heads/${branch}`, baseSha,
+      publishKind: 'extended', pullRequestUrl: null };
+    const pullsPath = `/repos/${encodeSegment(owner)}/${encodeSegment(repository)}/pulls`;
+    const found = await this.request({ token: input.token,
+      path: `${pullsPath}?state=all&head=${encodeURIComponent(`${owner}:${branch}`)}&base=${encodeURIComponent(input.baseBranch)}&per_page=100` });
+    if (!Array.isArray(found.json)) throw new Error('Invalid pull request list');
+    const existing = found.json[0] as unknown;
+    const pr = existing ? asObject(existing, 'pull request') : asObject((await this.request({
+      token: input.token, method: 'POST', path: pullsPath,
+      body: { title: input.message.split('\n')[0]!.slice(0, 240), body: input.message,
+        head: branch, base: branchName(input.baseBranch) },
+    })).json, 'pull request');
+    const url = responseString(pr['html_url'], 'pull request URL', 2048);
+    if (new URL(url).protocol !== 'https:') throw new Error('Invalid pull request URL');
+    return { branch, treeSha, commitSha, ref: `refs/heads/${branch}`, baseSha,
+      publishKind: 'created', pullRequestUrl: url };
   }
 
   /**

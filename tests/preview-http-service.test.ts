@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readdirSync, existsSync, chownSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AUTH_TABLES_DDL } from '../src/auth/store.js';
@@ -14,6 +14,8 @@ import { PreviewRouteTable } from '../src/preview/gatewayServer.js';
 import { PreviewManager } from '../src/preview/manager.js';
 import { PreviewHttpService } from '../src/preview/httpService.js';
 import { recordDeliveredPreview } from '../src/preview/service.js';
+import { DockerLauncher } from '../src/launcher/docker.js';
+import type { PreviewCopyOwnership } from '../src/preview/policy.js';
 import type { PreviewConfig } from '../src/preview/config.js';
 import type {
   ContainerLauncher,
@@ -27,6 +29,11 @@ import type {
   LauncherUnitSummary,
   LauncherWorkspaceHandle,
 } from '../src/contracts/launcher.js';
+
+vi.mock('node:fs', async (original) => ({
+  ...await original<typeof import('node:fs')>(),
+  chownSync: vi.fn(),
+}));
 
 /**
  * WHO MAY ASK, AND WHAT AN ANSWER MEANS.
@@ -83,7 +90,7 @@ class WorkspaceOnlyLauncher implements ContainerLauncher {
     return true;
   }
   async startUnit(spec: LauncherUnitSpec): Promise<LauncherUnitHandle> {
-    return { kind: spec.kind, ownerId: spec.ownerId, name: this.unitName(spec.kind, spec.ownerId) };
+    return { kind: spec.kind, ownerId: spec.ownerId, name: this.unitName(spec.kind, spec.ownerId), ...(spec.kind === 'preview-ingress' ? { hostPort: 49154 } : {}) };
   }
   async awaitUnitReady(): Promise<void> {}
   async stopUnit(): Promise<void> {}
@@ -211,7 +218,23 @@ function seedRunningRun(a: Actor, projectId: string, key: string): string {
   return run.projectRunId;
 }
 
+function makeManager(copyOwnership?: PreviewCopyOwnership | null): PreviewManager {
+  return new PreviewManager({
+    store: previews,
+    launcher: new WorkspaceOnlyLauncher(join(root, 'copies')),
+    routes: new PreviewRouteTable(),
+    claims,
+    config,
+    copyOwnership,
+    // The host owns this mapping; the test records what it seeded.
+    workspaceOf: (_o, _p, runId) => workspaces.get(runId) ?? join(root, 'absent'),
+    probe: async () => true,
+    log: () => undefined,
+  });
+}
+
 beforeEach(() => {
+  vi.clearAllMocks();
   workspaces.clear();
   claimsNow = 1_000;
   claims = new PreviewClaimRegistry(() => claimsNow);
@@ -221,21 +244,12 @@ beforeEach(() => {
   db.exec(AUTH_TABLES_DDL);
   projects = new ProjectStore(db);
   previews = new PreviewStore(db);
-  manager = new PreviewManager({
-    store: previews,
-    launcher: new WorkspaceOnlyLauncher(join(root, 'copies')),
-    routes: new PreviewRouteTable(),
-    claims,
-    config,
-    // The host owns this mapping; the test records what it seeded.
-    workspaceOf: (_o, _p, runId) => workspaces.get(runId) ?? join(root, 'absent'),
-    probe: async () => true,
-    log: () => undefined,
-  });
+  manager = makeManager();
   service = new PreviewHttpService({ manager, store: previews, projects });
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   db.close();
   rmSync(root, { recursive: true, force: true });
 });
@@ -551,5 +565,103 @@ describe('failed preview startup cleans its generation', () => {
       expect(previews.getInstance(a.orgId, runId)?.state).toBe('failed');
       expect(existsSync(join(root, 'copies')) ? readdirSync(join(root, 'copies')) : []).toEqual([]);
     }
+  });
+});
+
+describe('preview lifecycle audit', () => {
+  it('opens final bytes after a running preview reaches delivery', async () => {
+    const a = actor('audit');
+    const p = seedProject(a, 'audit');
+    const r = seedRunningRun(a, p, 'audit-live');
+    const first = await service.open(viewerFor(a), p, r, { inFlight: true });
+    const workspace = workspaces.get(r)!;
+    writeFileSync(join(workspace, 'index.html'), '<h1>final</h1>');
+    projects.transitionProjectRun({
+      orgId: a.orgId, projectRunId: r, from: 'running', to: 'delivered', traceId: r,
+      stats: {
+        outcome: 'delivered', costUsd: 0.01, llmCalls: 1, opusCalls: 1,
+        sonnetCalls: 0, haikuCalls: 0, otherCalls: 0, deterministicPhases: 0,
+        escalations: 0, learnedSkills: 0, learnedEventSkills: 0, promotions: 0,
+        refusals: 0, compileErrors: 0, demotions: 0, dispatchFallbacks: 0,
+        uncoveredObligations: 0,
+      },
+    });
+    recordDeliveredPreview(previews, { orgId: a.orgId, projectId: p, projectRunId: r, workspaceRoot: workspace });
+    const final = await service.open(viewerFor(a), p, r, { inFlight: true });
+    const { readFileSync } = await import('node:fs');
+    const copy = join(root, 'copies', `preview-${r}-${final.body.summary.generation}`, 'index.html');
+    expect(final.body.summary.source).toBe('delivered');
+    expect(final.body.summary.generation).toBeGreaterThan(first.body.summary.generation);
+    expect(readFileSync(copy, 'utf8')).toBe('<h1>final</h1>');
+  });
+
+  it('answers concurrent opens with ready or retry, never conflict', async () => {
+    const a = actor('audit');
+    const p = seedProject(a, 'audit');
+    const r = seedDeliveredRun(a, p, 'audit-done');
+    const results = await Promise.all([
+      service.open(viewerFor(a), p, r).then(x => x.status).catch(status),
+      service.open(viewerFor(a), p, r).then(x => x.status).catch(status),
+    ]);
+    expect(results).toEqual([200, 202]);
+  });
+});
+
+describe('joining a preview generation', () => {
+  it.each([false, true])('joins concurrent opens without another generation (inFlight=%s)', async (inFlight) => {
+    const a = actor('join');
+    const p = seedProject(a, 'join');
+    // Fill one slot: joining must precede the capacity refusal too.
+    const other = seedDeliveredRun(a, p, 'other');
+    await service.open(viewerFor(a), p, other);
+    const r = inFlight ? seedRunningRun(a, p, 'join') : seedDeliveredRun(a, p, 'join');
+    const [first, second] = await Promise.all([
+      service.open(viewerFor(a), p, r, { inFlight }),
+      service.open(viewerFor(a), p, r, { inFlight }),
+    ]);
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(202);
+    expect(second.body.retryAfterSeconds).toBe(2);
+    const joined = await service.open(viewerFor(a), p, r, { generation: first.body.summary.generation });
+    expect(joined.status).toBe(200);
+    expect(joined.body.summary.generation).toBe(first.body.summary.generation);
+    expect(joined.body.url).not.toBe(first.body.url);
+    expect(previews.countLiveInstances(a.orgId).org).toBe(2);
+  });
+
+  it('does not allocate for an obsolete or stopped generation', async () => {
+    const a = actor('join');
+    const p = seedProject(a, 'join');
+    const r = seedRunningRun(a, p, 'join');
+    const first = await service.open(viewerFor(a), p, r, { inFlight: true });
+    const second = await service.restart(viewerFor(a), p, r, { inFlight: true });
+    const stale = await service.open(viewerFor(a), p, r, { generation: first.body.summary.generation });
+    expect(stale.status).toBe(202);
+    expect(stale.body.summary.generation).toBe(second.body.summary.generation);
+    expect(stale.body.url).toBeUndefined();
+    await service.stop(viewerFor(a), p, r);
+    await expect(service.open(viewerFor(a), p, r, { generation: second.body.summary.generation })).rejects.toMatchObject({ status: 409 });
+    expect(previews.countLiveInstances(a.orgId).org).toBe(0);
+  });
+});
+
+describe('root-owned Node preview copies', () => {
+  it.each([false, true])('hands private copied files to the container uid (inFlight=%s)', async (inFlight) => {
+    vi.spyOn(process, 'getuid').mockReturnValue(0);
+    const ownership = new DockerLauncher({ image: config.image }).previewOwnership();
+    expect(ownership?.uid).toBeGreaterThan(0);
+    const a = actor('root');
+    const p = seedProject(a, 'root');
+    const r = seedRunningRun(a, p, 'root');
+    const workspace = workspaces.get(r)!;
+    writeFileSync(join(workspace, 'server.js'), 'console.log("LISTENING_ON_PORT=8080")');
+    writeFileSync(join(workspace, '.atoma-probes.json'), JSON.stringify({ version: 1, entries: [{ probe: 'http', method: 'GET', path: '/', status: 200, entry: 'server.js' }] }));
+    if (!inFlight) recordDeliveredPreview(previews, { orgId: a.orgId, projectId: p, projectRunId: r, workspaceRoot: workspace });
+    const ownManager = makeManager(ownership);
+    const input = { orgId: a.orgId, projectId: p, projectRunId: r, opener: { principalId: a.principalId, sessionId: null } };
+    const opened = await (inFlight ? ownManager.openInFlight(input) : ownManager.open(input));
+    expect(opened.summary.state).toBe('ready');
+    expect(chownSync).toHaveBeenCalledWith(join(root, 'copies', `preview-${r}-1`, 'server.js'), ownership!.uid, ownership!.gid);
+    expect(vi.mocked(chownSync).mock.calls.every(([path]) => String(path).startsWith(join(root, 'copies')))).toBe(true);
   });
 });

@@ -64,6 +64,7 @@ import { HAYSTACK_LAUNCH_ENV, readHaystackLaunch } from '../contracts/retrievalH
 const MAX_CONTROL_JSON_BYTES = 512 * 1024;
 
 export interface ProjectRunPublisher {
+  prepareRun?(project: Project, run: ProjectRun, signal: AbortSignal): Promise<string>;
   publish(input: {
     readonly project: Project;
     readonly run: ProjectRun;
@@ -1175,7 +1176,7 @@ export class ProjectRunCoordinator {
     });
 
     const seedRun = previousDeliveredRun(this.store, input.orgId, input.projectId);
-    const seedFrom = seedRun?.hostPaths.workspacePath;
+    let seedFrom = seedRun?.hostPaths.workspacePath;
     let driven: Promise<string>;
     try {
       const deadlineAt = Date.now() + this.timeoutMs;
@@ -1202,6 +1203,10 @@ export class ProjectRunCoordinator {
       });
       driven = (async () => {
         const preparationSignal = AbortSignal.any([controller.signal, AbortSignal.timeout(this.timeoutMs)]);
+        if (project.repositoryTarget.source) {
+          if (!this.publisher?.prepareRun) throw new ProjectRunConfigurationError('GitHub repository import is unavailable');
+          seedFrom = await this.publisher.prepareRun(project, run, preparationSignal);
+        }
         await ProjectRetrievalLaunchStore.open(this.dbPath).prepare(run.projectRunId,
           seedRun?.projectRunId ?? null, { signal: preparationSignal, deadlineAt });
         if (preparationSignal.aborted || Date.now() >= deadlineAt) throw new Error('project document preparation cancelled');

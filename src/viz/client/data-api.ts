@@ -27,6 +27,7 @@ import type {
   VizRun,
 } from './types.js';
 import { redirectIfAuthenticationRequired } from './session-guard.js';
+import type { PreviewOpenOptions } from '../../contracts/preview.js';
 
 let activeMutations = 0;
 export function pendingApiMutations(): number { return activeMutations; }
@@ -83,7 +84,7 @@ export const api = {
     fetchJson<VizPreviewSummary>(
       `/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/preview`
     ),
-  openPreview: (projectId: string, runId: string, body: { inFlight?: boolean } = {}) =>
+  openPreview: (projectId: string, runId: string, body: PreviewOpenOptions = {}) =>
     mutateJson<VizPreviewOpen>(
       `/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/preview/open`,
       body

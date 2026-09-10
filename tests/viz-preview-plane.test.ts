@@ -167,6 +167,15 @@ describe('the preview plane', () => {
     expect(live!.textContent).toContain(t('preview.status.ready'));
   });
 
+  it('closes from the backdrop without closing when the modal is clicked', async () => {
+    const onClose = vi.fn();
+    const { container } = render(plane({ onClose }));
+    await userEvent.click(screen.getByRole('dialog'));
+    expect(onClose).not.toHaveBeenCalled();
+    await userEvent.click(container.querySelector('.gpu-preview-backdrop')!);
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
   it('takes focus on entry and leaves on Escape', async () => {
     const onClose = vi.fn();
     render(plane({ onClose }));

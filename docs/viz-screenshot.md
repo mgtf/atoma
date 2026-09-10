@@ -11,6 +11,7 @@ release gate: nothing in `check` or `release:check` depends on it.
 ```bash
 npm run viz:shot                                    # anonymous visitor (login gate when auth is armed)
 npm run viz:shot -- --auth                          # logged-in member, Projects view
+npm run viz:shot -- --auth --repository-mode fork   # existing-repository creation form
 npm run viz:shot -- --auth --select-first           # first project selected: run list + run form
 npm run viz:shot -- --auth --view Runs              # any nav tab by its label
 npm run viz:shot -- --auth --view Settings          # account menu, not a rail tab

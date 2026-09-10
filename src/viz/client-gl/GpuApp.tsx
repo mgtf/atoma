@@ -5,7 +5,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { projectSlugFromName } from '../../contracts/projects.js';
+import { projectSlugFromName, parseGitHubRepository } from '../../contracts/projects.js';
 import { isLocale } from '../../contracts/locales.js';
 import { applyDocumentLocale, translate } from '../client/i18n-catalog.js';
 import { loginBounceParams, providerLoginHref } from '../client/session-guard.js';
@@ -28,7 +28,8 @@ import { GpuDomBridge, SettingsProfileForm } from './DomBridge.js';
 import { McpAccess } from './McpAccessPanel.js';
 import { OrgModelsForm } from './OrgModelsForm.js';
 import { EntryVeilLayer } from './EntryVeilLayer.js';
-import { PreviewPlane, type PreviewPlaneStatus } from './PreviewPlane.js';
+import { PreviewPlane } from './PreviewPlane.js';
+import { usePreviewSession } from './usePreviewSession.js';
 import { useEntryFade } from './entry-fade.js';
 import { GpuSurface } from './GpuSurface.js';
 import { SceneCameraPlane } from './SceneCameraPlane.js';
@@ -83,30 +84,6 @@ declare global {
       dispatch: (id: string) => void;
     };
   }
-}
-
-/**
- * How often the plane tells the host it is still being watched.
- *
- * It must be comfortably shorter than the SHORTER of the two clocks it feeds:
- * the instance's idle TTL (15 minutes by default) and the browser's grant on
- * the preview origin (5 minutes, fixed). One minute leaves room for a beat to
- * be lost without the member losing the preview.
- */
-const PREVIEW_HEARTBEAT_MS = 60_000;
-
-/**
- * One bounded sentence for a refused preview.
- *
- * The server's own message is preferred when it has one — it names the actual
- * reason, and every one of them is already bounded by `PreviewHttpService`.
- * The three fallbacks exist for a transport failure that produced no message
- * at all.
- */
-function previewErrorMessage(error: unknown, t: (key: string) => string): string {
-  const message = error instanceof Error ? error.message : '';
-  if (message) return message;
-  return t('preview.error.generic');
 }
 
 function errorMessage(errors: unknown[], t: (key: string) => string) {
@@ -454,7 +431,7 @@ function GpuAppContent({
           !ui.accountMenuOpen && !ui.localeMenuOpen && !ui.notificationsMenuOpen && !latest.projectBusy && !latest.pendingLoginProvider && !latest.adminInvitation &&
           pendingApiMutations() === 0 && queryClient.isMutating() === 0 &&
           !['settings', 'announce', 'admin'].includes(ui.view) && !ui.tuningPanelOpen &&
-          !ui.search.projectName && !ui.search.projectPrompt && !ui.search.projectRepository && !ui.search.displayName;
+          !ui.search.projectSource && !ui.search.projectName && !ui.search.projectPrompt && !ui.search.projectRepository && !ui.search.displayName;
       },
       beforeReload: () => {
         const auth = updateState.current.authSnapshot;
@@ -564,13 +541,18 @@ function GpuAppContent({
     setProjectBusy(true);
     setProjectError(null);
     try {
+      const ui = useGpuStore.getState();
+      const source = ui.projectRepositoryMode === 'new' ? undefined : {
+        ...parseGitHubRepository(ui.search.projectSource), mode: ui.projectRepositoryMode,
+      };
       const created = await api.createProject({
         name,
         slug,
         repositoryTarget: {
           installationId: installation.installationId,
-          owner: installation.accountLogin,
-          name: repository || slug,
+          owner: source?.mode === 'pull-request' ? source.owner : installation.accountLogin,
+          name: source?.mode === 'pull-request' ? source.name : repository || slug,
+          ...(source ? { source } : {}),
           // The operator's choice, from the form's own select. The default it
           // starts at lives in ONE place, `DEFAULT_REPOSITORY_VISIBILITY`.
           visibility: useGpuStore.getState().projectVisibility,
@@ -588,23 +570,11 @@ function GpuAppContent({
     }
   }, [githubInstallationsQuery.data, projectBusy, queryClient, t]);
 
-  // THE PREVIEW SESSION, and it lives HERE rather than in the store on
+  // THE PREVIEW SESSION stays in a local hook rather than in the store on
   // purpose: `previewUrl` carries a one-time claim in its fragment, so it is a
   // credential — never the store (which a devtools reader can dump), never a
   // query cache, never a log line. Nothing on the canvas reads any of it, so
   // there is no shared transition for the store to own either.
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [previewStatus, setPreviewStatus] = useState<PreviewPlaneStatus>('idle');
-  const [previewError, setPreviewError] = useState<string | null>(null);
-  // Bumped by Reload. It is what makes the frame remount, and it also tells
-  // the plane the claim in `previewUrl` has been spent — see `frameSrc`.
-  const [previewReloadNonce, setPreviewReloadNonce] = useState(0);
-  // Where focus was when the plane took the screen. A keyboard member arrived
-  // from the mirrored Preview button in the semantic bridge and must land back
-  // on it; one who clicked the canvas had focus on the body, and restoring
-  // that is a no-op rather than a jump.
-  const previewOpener = useRef<HTMLElement | null>(null);
   const previewSummary = previewQuery.data ?? null;
   const previewProject = previewTarget
     ? projectsQuery.data?.find((project) => project.projectId === previewTarget.projectId) ?? null
@@ -614,133 +584,8 @@ function GpuAppContent({
       (run) => run.projectRunId === previewTarget?.projectRunId
     )?.goal ?? '';
 
-  const requestPreview = useCallback(
-    async (mode: 'open' | 'restart'): Promise<void> => {
-      if (!previewTarget) return;
-      const { projectId, projectRunId } = previewTarget;
-      setPreviewStatus('opening');
-      setPreviewError(null);
-      previewOpener.current =
-        document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      // The plane opens BEFORE the answer, showing "starting" — a member who
-      // clicked deserves the surface they asked for immediately, and the
-      // container start is measured in seconds.
-      setPreviewOpen(true);
-      // Back to zero: the answer below carries a FRESH claim, and the frame
-      // must use it rather than the origin root a previous reload left behind.
-      setPreviewReloadNonce(0);
-      try {
-        // `inFlight` is a REQUEST, never an assertion: a run that has
-        // delivered gets its delivered preview back and the flag is ignored.
-        // The client is not the one that decides which of the two this is.
-        const answered =
-          mode === 'open'
-            ? await api.openPreview(projectId, projectRunId, { inFlight: true })
-            : await api.restartPreview(projectId, projectRunId, { inFlight: true });
-        setPreviewUrl(answered.url ?? null);
-        setPreviewStatus('idle');
-        // A 202 means another caller is building this generation. Nothing to
-        // do but let `usePreviewStatus` poll, which it already does while the
-        // state is `starting`.
-      } catch (error) {
-        setPreviewStatus('error');
-        setPreviewError(previewErrorMessage(error, t));
-      } finally {
-        await queryClient.invalidateQueries({
-          queryKey: ['viz', 'preview', projectId, projectRunId],
-        });
-      }
-    },
-    [previewTarget, queryClient, t]
-  );
-
-  const reloadPreview = useCallback(() => {
-    setPreviewReloadNonce((nonce) => nonce + 1);
-  }, []);
-
-  const closePreview = useCallback(() => {
-    setPreviewOpen(false);
-    // The URL is dropped with the plane. Its claim is spent anyway, and a
-    // credential kept past the surface that used it is a credential waiting
-    // to be found.
-    setPreviewUrl(null);
-    setPreviewStatus('idle');
-    setPreviewError(null);
-    const opener = previewOpener.current;
-    previewOpener.current = null;
-    // After the plane unmounts, or the focus call lands on an element React is
-    // about to remove.
-    if (opener?.isConnected) requestAnimationFrame(() => opener.focus());
-  }, []);
-
-  const stopPreview = useCallback(async (): Promise<void> => {
-    if (!previewTarget) return;
-    const { projectId, projectRunId } = previewTarget;
-    // The plane goes with it. Stopping IS "I am done looking", and leaving it
-    // up would also race the claim effect below: the status poll lags the
-    // stop, so a plane still open against a summary that still says `ready`
-    // would immediately ask for a new claim on the preview just stopped.
-    closePreview();
-    try {
-      await api.stopPreview(projectId, projectRunId);
-    } catch (error) {
-      setPreviewStatus('error');
-      setPreviewError(previewErrorMessage(error, t));
-    } finally {
-      await queryClient.invalidateQueries({
-        queryKey: ['viz', 'preview', projectId, projectRunId],
-      });
-    }
-  }, [previewTarget, queryClient, t]);
-
-  // THE HEARTBEAT — the only thing that keeps a preview alive, and it beats
-  // only while the plane is actually up. That is the D6 contract made
-  // mechanical: the generated app's own traffic never reaches this, so an
-  // abandoned tab full of polling code cannot keep its own container running.
-  // The interval sits well inside BOTH clocks it feeds: the container's idle
-  // TTL and the browser's grant, the shorter of which is five minutes.
-  useEffect(() => {
-    if (!previewOpen || !previewTarget) return;
-    const generation = previewSummary?.generation ?? 0;
-    if (previewSummary?.state !== 'ready' || generation <= 0) return;
-    const { projectId, projectRunId } = previewTarget;
-    let cancelled = false;
-    const beat = () => {
-      void api.previewHeartbeat(projectId, projectRunId, generation).catch(() => {
-        // A failed beat is not worth a banner: the next status poll says what
-        // happened, and the container stops on its own if none arrive.
-      });
-    };
-    const timer = window.setInterval(() => {
-      if (!cancelled) beat();
-    }, PREVIEW_HEARTBEAT_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [previewOpen, previewSummary?.generation, previewSummary?.state, previewTarget]);
-
-  // A generation someone ELSE was building has become ready, and this browser
-  // holds no claim for it: `open` answered 202 because another caller was
-  // already starting it, so there was no URL to hand over. Without this the
-  // plane sits on its placeholder for a preview that is running and reachable.
-  // ONE ask, and it cannot loop: a success sets the URL and a failure sets the
-  // error status, and both falsify the guard.
-  useEffect(() => {
-    if (!previewOpen || previewUrl || previewStatus !== 'idle') return;
-    if (previewSummary?.state !== 'ready') return;
-    void requestPreview('open');
-  }, [previewOpen, previewStatus, previewSummary?.state, previewUrl, requestPreview]);
-
-  // A preview that stopped underneath the plane — idle expiry, a restart
-  // elsewhere, an operator stop — takes its frame down with it rather than
-  // leaving a dead iframe that still looks like the app.
-  useEffect(() => {
-    if (!previewOpen) return;
-    if (previewSummary && previewSummary.state !== 'ready' && previewSummary.state !== 'starting') {
-      setPreviewUrl(null);
-    }
-  }, [previewOpen, previewSummary]);
+  const { previewOpen, previewUrl, previewStatus, previewError, previewReloadNonce,
+    requestPreview, closePreview, stopPreview, reloadPreview } = usePreviewSession({ previewTarget, previewSummary, t });
 
   const startProjectRun = useCallback(async (): Promise<void> => {
     if (projectBusy) return;
@@ -928,6 +773,11 @@ function GpuAppContent({
       const projectId = id.slice('project.repository.'.length);
       const project = projectsQuery.data?.find((candidate) => candidate.projectId === projectId);
       openGitHubRepository(project?.repositoryUrl);
+      return;
+    }
+    if (id.startsWith('project.pullRequest.')) {
+      const run = projectRunsQuery.data?.find(candidate => candidate.projectRunId === id.slice('project.pullRequest.'.length));
+      openGitHubRepository(run?.publication?.pullRequestUrl);
       return;
     }
     if (id.startsWith('project.run.')) {
