@@ -4,7 +4,7 @@ import { request as httpRequest } from 'node:http';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DockerLauncher, launcherObjectId } from '../src/launcher/docker.js';
+import { DockerLauncher, launcherObjectId, LAUNCHER_PREVIEW_LABEL } from '../src/launcher/docker.js';
 import { startPreview, teardownPreview } from '../src/preview/runtime.js';
 
 /**
@@ -224,10 +224,15 @@ describeRunsc('preview isolation, against a real gVisor sandbox', () => {
     expect(readFileSync(join(workspace, 'server.js'), 'utf8')).toContain('LISTENING_ON_PORT');
     expect(() => readFileSync(join(workspace, 'written-by-the-app.txt'))).toThrow();
 
-    // And nothing labelled survives the teardown.
+    // Only this generation must be gone: the parallel egress suite owns
+    // other live previews, which this teardown must never remove.
     const survivors = execFileSync(
       'docker',
-      ['ps', '-a', '--filter', 'label=dev.atoma.owner=preview', '--format', '{{.Names}}'],
+      [
+        'ps', '-a', '--filter', 'label=dev.atoma.owner=preview',
+        '--filter', `label=${LAUNCHER_PREVIEW_LABEL}=${launcherObjectId(ownerId)}`,
+        '--format', '{{.Names}}',
+      ],
       { encoding: 'utf8' }
     ).trim();
     expect(survivors).toBe('');
@@ -269,7 +274,11 @@ describeRunsc('preview isolation, against a real gVisor sandbox', () => {
     // A refused start leaves nothing behind.
     const survivors = execFileSync(
       'docker',
-      ['ps', '-a', '--filter', 'label=dev.atoma.owner=preview', '--format', '{{.Names}}'],
+      [
+        'ps', '-a', '--filter', 'label=dev.atoma.owner=preview',
+        '--filter', `label=${LAUNCHER_PREVIEW_LABEL}=${launcherObjectId(ownerId)}`,
+        '--format', '{{.Names}}',
+      ],
       { encoding: 'utf8' }
     ).trim();
     expect(survivors).toBe('');
