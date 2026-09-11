@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 import { mkdirSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { isIPv4 } from 'node:net';
 import path from 'node:path';
 import type {
   ContainerLauncher,
@@ -612,6 +613,19 @@ export class DockerLauncher implements ContainerLauncher {
     const labels = this.labels('preview', spec.ownerId);
     if (spec.kind === 'preview-app') {
       const workspace = this.workspacePath(spec.workspace.ownerId);
+      // Docker's embedded DNS was unavailable inside a production gVisor
+      // preview. Resolve the proxy's endpoint on THIS isolated network
+      // through the engine, before starting the application. Never use its
+      // uplink address or give the app a route onto that network.
+      let proxyAddress: string | undefined;
+      if (spec.egress) {
+        proxyAddress = (await this.runDocker([
+          'inspect', '--format',
+          `{{with index .NetworkSettings.Networks ${JSON.stringify(attach.name)}}}{{.IPAddress}}{{end}}`,
+          this.unitName('preview-egress-proxy', spec.ownerId),
+        ])).trim();
+        if (!isIPv4(proxyAddress)) throw new Error('Preview proxy has no isolated network address');
+      }
       await this.runDocker([
         'run',
         '-d',
@@ -674,8 +688,8 @@ export class DockerLauncher implements ContainerLauncher {
         '-e',
         'ATOMA_DATA_DIR=/data',
         ...(spec.egress ? [
-          '-e', `HTTP_PROXY=http://${this.unitName('preview-egress-proxy', spec.ownerId)}:${PROXY_PORT}`,
-          '-e', `HTTPS_PROXY=http://${this.unitName('preview-egress-proxy', spec.ownerId)}:${PROXY_PORT}`,
+          '-e', `HTTP_PROXY=http://${proxyAddress}:${PROXY_PORT}`,
+          '-e', `HTTPS_PROXY=http://${proxyAddress}:${PROXY_PORT}`,
           '-e', 'NO_PROXY=127.0.0.1,localhost,::1',
           '-e', 'NODE_USE_ENV_PROXY=1',
         ] : []),

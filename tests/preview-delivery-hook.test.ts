@@ -2,6 +2,7 @@ import { haystackTestEnvironment } from './helpers/haystack.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ANTHROPIC_PINS } from './tier-pins.js';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AuthStore } from '../src/auth/store.js';
@@ -191,6 +192,51 @@ async function runOnce(
 }
 
 describe('the delivered-preview hook fires exactly once, on delivery, for this run', () => {
+  it.each(['.atoma-probes.json', './.atoma-probes.json'])(
+    'delivers a child-produced Node app declaring %s without publishing its probe record', async (probePath) => {
+      const f = fixture();
+      const previews = PreviewStore.open(f.dbPath);
+      const publisher = publisherSpy();
+      const driver = vi.fn(async (options: SpawnRunOptions) => {
+        // Cross the runner/host boundary: the host consumes files left by a
+        // separate process, including the accepted plan's internal output.
+        execFileSync(process.execPath, ['--input-type=module', '-e', `
+          import { mkdirSync, writeFileSync } from 'node:fs';
+          import { join } from 'node:path';
+          const workspace = process.env.ATOMA_BUILD_WORKSPACE;
+          const runs = process.env.ATOMA_RUNS_DIR;
+          const runId = process.env.ATOMA_RUN_ID;
+          mkdirSync(workspace, { recursive: true });
+          mkdirSync(runs, { recursive: true });
+          writeFileSync(join(workspace, 'server.js'), 'console.log("app")');
+          writeFileSync(join(workspace, '.atoma-probes.json'), JSON.stringify({
+            version: 1, entries: [{ probe: 'http', path: '/health', status: 200, entry: 'server.js' }]
+          }));
+          writeFileSync(process.env.ATOMA_ARTIFACT_MANIFEST_PATH, JSON.stringify({
+            version: 1, runId, generatedAt: new Date().toISOString(),
+            outputs: ['server.js', process.argv[1]]
+          }));
+          writeFileSync(join(runs, runId + '.json'), JSON.stringify({
+            id: runId, endedAt: new Date().toISOString(), result: { summary: 'verified' }
+          }));
+        `, probePath], { env: options.env });
+        return formatRunStatsEpilogue(DELIVERED_STATS);
+      });
+      const coordinator = coordinatorFor(f, driver, {
+        publisher,
+        describeDeliveredPreview: (subject) => { recordDeliveredPreview(previews, subject); },
+      });
+      const { started, row } = await runOnce(f, coordinator, 'node-probes');
+      expect(row.status).toBe('delivered');
+      expect(row.stats).toEqual(DELIVERED_STATS);
+      expect(row.artifactManifest?.files.map((file) => file.path)).toEqual(['server.js']);
+      expect(publisher.publish).toHaveBeenCalledOnce();
+      expect(previews.getDescriptor(f.viewer.orgId, started.projectRunId)).toMatchObject({
+        availability: 'available', kind: 'node', entry: 'server.js',
+      });
+    }
+  );
+
   it('describes a delivered run once, with its identity and its OWN workspace', async () => {
     const f = fixture();
     const describeDeliveredPreview = vi.fn((_subject: DeliveredPreviewSubject) => undefined);

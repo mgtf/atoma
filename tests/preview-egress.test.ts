@@ -21,7 +21,7 @@ const runtime = process.env['CI_REQUIRE_PREVIEW_RUNTIME'] === '1' ? 'runsc' : 'r
 const previewImage = process.env['ATOMA_TEST_PREVIEW_IMAGE'] ?? 'docker.io/library/atoma-worker:latest';
 
 // A controlled origin on the proxy uplink avoids any dependency on a public CDN.
-it.skipIf(!dockerAvailable)('allows approved preview egress and refuses the control plane', async () => {
+it.skipIf(!dockerAvailable).each([false, true])('allows approved preview egress and refuses the control plane (DNS unavailable: %s)', async (disableDns) => {
   const root = mkdtempSync(join(tmpdir(), 'atoma-preview-network-'));
   const source = join(root, 'source');
   mkdirSync(source);
@@ -33,6 +33,18 @@ it.skipIf(!dockerAvailable)('allows approved preview egress and refuses the cont
   });
   writeFileSync(join(source, 'server.mjs'), `
 import http from 'node:http';
+import dns from 'node:dns';
+import { isIP } from 'node:net';
+// Reproduce the production EAI_AGAIN at the application's DNS boundary even
+// on a developer runtime whose embedded Docker DNS happens to work.
+if (${disableDns}) {
+  const lookup = dns.lookup;
+  dns.lookup = (host, options, callback) => {
+    if (isIP(host)) return lookup(host, options, callback);
+    if (typeof options === 'function') callback = options;
+    callback(Object.assign(new Error('DNS unavailable'), { code: 'EAI_AGAIN' }));
+  };
+}
 const server = http.createServer(async (req, res) => {
   if (req.url !== '/check') { res.end('ready'); return; }
   try {

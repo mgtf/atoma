@@ -3,6 +3,7 @@ import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { parseRunLog, spawnRun, type RunStats } from '../cli/burnin.js';
+import { PROBE_MANIFEST_FILENAME } from '../contracts/probeManifest.js';
 import { declaredArtifactManifestSchema } from '../contracts/artifactManifest.js';
 import type {
   ArtifactManifest,
@@ -56,7 +57,7 @@ import {
   type RunLeaseAcquirer,
 } from '../mcp/runLock.js';
 import { repoRoot } from '../mcp/run.js';
-import { buildArtifactManifest } from './artifacts.js';
+import { buildArtifactManifest, normalizeArtifactPath } from './artifacts.js';
 import { ProjectStateConflict, ProjectStore } from './store.js';
 import { ProjectRetrievalLaunchStore } from './retrievalLaunch.js';
 import { HAYSTACK_LAUNCH_ENV, readHaystackLaunch } from '../contracts/retrievalHaystack.js';
@@ -1256,7 +1257,12 @@ export class ProjectRunCoordinator {
       }
       const built = buildArtifactManifest({
         workspaceRoot: reservedRun.hostPaths.workspacePath,
-        declaredPaths: declarations.outputs,
+        // The accepted plan may name its machine-owned verification record.
+        // Keep it for preview classification, but never publish its contents.
+        // All other paths still pass the unchanged publication policy.
+        declaredPaths: declarations.outputs.filter(
+          (output) => normalizeArtifactPath(output) !== PROBE_MANIFEST_FILENAME
+        ),
       });
       let completed = this.store.transitionProjectRun({
         orgId: reservedRun.orgId,

@@ -170,7 +170,10 @@ about, and each was wrong before it was measured:
 
 The optional `preview-egress-proxy` belongs to the preview family and is
 removed with its generation. The app receives only a derived proxy address
-and loopback bypass; it remains on the internal network.
+and loopback bypass; it remains on the internal network. The Docker backend
+reads the proxy IPv4 endpoint on that exact internal network before starting
+the app, so gVisor does not depend on Docker embedded DNS. A missing endpoint
+refuses startup; the uplink address is never used.
 
 ## Workspaces: the launcher issues, the caller fills
 

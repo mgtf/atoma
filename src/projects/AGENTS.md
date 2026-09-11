@@ -222,6 +222,13 @@ list. These values come from the host snapshot, never a tenant prompt.
 
 ## Delivery, and the evidence it is decided from
 
+- The accepted plan may declare the root `.atoma-probes.json` verification
+  record. The coordinator removes that one canonical path from publication
+  inputs, retaining the file for preview classification. Every other path
+  still passes the publication policy unchanged; an empty deliverable still
+  fails. Internal evidence must neither be published nor block an otherwise
+  valid delivery.
+
 - DELIVERY IS DECIDED FROM SIX DEPTH-1 TRACE MEMBERS, never from the whole
   document. `verifiedTrace` reads `id`, `endedAt`, `cancelled` and `degraded` as
   values and `result`/`error` as shapes, through

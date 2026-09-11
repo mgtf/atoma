@@ -237,7 +237,7 @@ describe('launcher preview profiles', () => {
       workspaceRoot: '/var/lib/atoma/previews',
       runDocker: async (args) => {
         calls.push(args);
-        return args[0] === 'port' ? '127.0.0.1:49154' : '';
+        return args[0] === 'port' ? '127.0.0.1:49154' : args[0] === 'inspect' ? '172.30.0.2' : '';
       },
       waitUntilReady: async () => undefined,
       sleep: async () => undefined,
@@ -265,11 +265,29 @@ describe('launcher preview profiles', () => {
       kind: 'preview-app', ownerId: 'prev-net', entry: 'server.js', egress: true,
       workspace: { ownerId: 'prev-net', id: launcherObjectId('prev-net') },
     }, [net]);
-    expect(calls.at(-1)).toContain(`HTTPS_PROXY=http://${launcher.unitName('preview-egress-proxy', 'prev-net')}:3128`);
+    expect(calls).toContainEqual([
+      'inspect', '--format',
+      `{{with index .NetworkSettings.Networks ${JSON.stringify(net.name)}}}{{.IPAddress}}{{end}}`,
+      launcher.unitName('preview-egress-proxy', 'prev-net'),
+    ]);
+    expect(calls.at(-1)).toContain('HTTPS_PROXY=http://172.30.0.2:3128');
+    expect(calls.at(-1)).toContain('HTTP_PROXY=http://172.30.0.2:3128');
     expect(calls.at(-1)).toContain('NODE_USE_ENV_PROXY=1');
     await launcher.purgeOwner('preview', 'prev-net');
     expect(calls).toContainEqual(['rm', '-f', launcher.unitName('preview-egress-proxy', 'prev-net')]);
   });
+
+  it.each(['', '<no value>', 'proxy.example', '172.30.0.2 172.31.0.2'])(
+    'refuses to start when the isolated proxy endpoint is invalid: %s', async (address) => {
+      const { launcher, calls } = recordingLauncher(() => address);
+      const net = await launcher.createNetwork({ family: 'preview', kind: 'internal', ownerId: 'missing-proxy' });
+      await expect(launcher.startUnit({
+        kind: 'preview-app', ownerId: 'missing-proxy', entry: 'server.js', egress: true,
+        workspace: { ownerId: 'missing-proxy', id: launcherObjectId('missing-proxy') },
+      }, [net])).rejects.toThrow('no isolated network address');
+      expect(calls.some((args) => args[0] === 'run')).toBe(false);
+    }
+  );
 
   it('runs the application under gVisor, read-only, non-root and bounded', async () => {
     const { launcher, calls } = previewLauncher();
