@@ -1112,5 +1112,13 @@
   "sentinel.rule.trajectory-drift": "একটি বন্ধ হওয়া Molecule সম্পাদন, যার উপাদানগুলোর ক্রম সমাপ্ত run-এ একই Molecule ও skill-এর প্রতিটি স্বীকৃত সম্পাদনের ক্রম থেকে অনেক দূরে অবস্থান করে—যখন এমন তিনটি সম্পাদনের তথ্য জানা থাকে। ক্যালিব্রেশনহীন অবস্থায়: এটি পড়ার জন্য একটি সারি, কখনোই কোনো বিচার নয়।",
   "summary.usagePending": "ব্যবহারের তথ্যের অপেক্ষায়",
   "summary.usageUnavailable": "ব্যবহারের তথ্য উপলভ্য নয়",
-  "summary.usagePartial": "{{value}} (আংশিক)"
+  "summary.usagePartial": "{{value}} (আংশিক)",
+  "projects.sourceMode": "সূচনা বিন্দু",
+  "projects.sourceMode.new": "একটি খালি রিপোজিটরি তৈরি করুন",
+  "projects.sourceMode.pullRequest": "বিদ্যমান রিপোজিটরি — প্রতি run-এ একটি PR",
+  "projects.sourceMode.fork": "বিদ্যমান রিপোজিটরি ফর্ক করুন",
+  "projects.sourceRepository": "উৎস GitHub রিপোজিটরি",
+  "projects.pullRequest": "পুল রিকোয়েস্ট",
+  "projects.sourceHint.fork": "প্রথম run-এ আপনার ফর্ক তৈরি হয়। প্রতিটি run পরিবর্তনগুলো সরাসরি সেখানে প্রকাশ করে।",
+  "projects.sourceHint.pullRequest": "প্রতিটি run একটি পুল রিকোয়েস্ট খোলে। নির্ভরশীল কাজ শুরু করার আগে এটি মার্জ করুন।"
 }

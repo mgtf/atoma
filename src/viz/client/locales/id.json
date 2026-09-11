@@ -1112,5 +1112,13 @@
   "sentinel.rule.trajectory-drift": "Satu eksekusi Molecule tertutup yang urutan elemennya jauh dari setiap eksekusi yang dikreditkan untuk Molecule dan skill yang sama dalam run yang telah selesai, setelah tiga diketahui. Belum dikalibrasi: baris untuk dibaca, bukan untuk menilai.",
   "summary.usagePending": "Menunggu data penggunaan",
   "summary.usageUnavailable": "Data penggunaan tidak tersedia",
-  "summary.usagePartial": "{{value}} (sebagian)"
+  "summary.usagePartial": "{{value}} (sebagian)",
+  "projects.sourceMode": "Titik awal",
+  "projects.sourceMode.new": "Buat repositori kosong",
+  "projects.sourceMode.pullRequest": "Repositori yang ada — satu PR per run",
+  "projects.sourceMode.fork": "Buat fork dari repositori yang ada",
+  "projects.sourceRepository": "Repositori GitHub sumber",
+  "projects.pullRequest": "Permintaan pull",
+  "projects.sourceHint.fork": "run pertama membuat fork Anda. Setiap run menerbitkan perubahan langsung di sana.",
+  "projects.sourceHint.pullRequest": "Setiap run membuka permintaan pull. Gabungkan sebelum memulai pekerjaan yang bergantung padanya."
 }

@@ -1112,5 +1112,13 @@
   "sentinel.rule.trajectory-drift": "同じMoleculeおよびskillについて既知の実行が3件に達した時点で、完了したrun内で実績として認められたすべての実行から、順序付き要素シーケンスが大きく乖離している、終了済みのMolecule実行1件。未較正：確認用の行であり、決して判定ではありません。",
   "summary.usagePending": "使用量を待機中",
   "summary.usageUnavailable": "使用量を取得できません",
-  "summary.usagePartial": "{{value}}（一部）"
+  "summary.usagePartial": "{{value}}（一部）",
+  "projects.sourceMode": "開始方法",
+  "projects.sourceMode.new": "空のリポジトリを作成",
+  "projects.sourceMode.pullRequest": "既存のリポジトリ—runごとにPRを作成",
+  "projects.sourceMode.fork": "既存のリポジトリをフォーク",
+  "projects.sourceRepository": "ソースGitHubリポジトリ",
+  "projects.pullRequest": "プルリクエスト",
+  "projects.sourceHint.fork": "最初のrunでフォークが作成されます。各runの変更はそこに直接反映されます。",
+  "projects.sourceHint.pullRequest": "各runでプルリクエストが作成されます。依存する作業を開始する前にマージしてください。"
 }

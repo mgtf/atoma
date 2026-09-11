@@ -1112,5 +1112,13 @@
   "sentinel.rule.trajectory-drift": "Одно завершённое выполнение Molecule, упорядоченная последовательность элементов которого далека от последовательности каждого зачтённого выполнения тех же Molecule и skill в завершённых run, как только становятся известны три таких выполнения. Не откалибровано: строка для ознакомления, а не оценка.",
   "summary.usagePending": "Ожидание данных об использовании",
   "summary.usageUnavailable": "Данные об использовании недоступны",
-  "summary.usagePartial": "{{value}} (частично)"
+  "summary.usagePartial": "{{value}} (частично)",
+  "projects.sourceMode": "Отправная точка",
+  "projects.sourceMode.new": "Создать пустой репозиторий",
+  "projects.sourceMode.pullRequest": "Существующий репозиторий — PR для каждого run",
+  "projects.sourceMode.fork": "Создать форк существующего репозитория",
+  "projects.sourceRepository": "Исходный репозиторий GitHub",
+  "projects.pullRequest": "Пул-реквест",
+  "projects.sourceHint.fork": "Первый run создаёт ваш форк. Каждый run публикует изменения прямо в нём.",
+  "projects.sourceHint.pullRequest": "Каждый run создаёт пул-реквест. Объедините его перед началом зависимых работ."
 }

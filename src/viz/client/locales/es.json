@@ -1112,5 +1112,13 @@
   "sentinel.rule.trajectory-drift": "Una ejecución cerrada de Molecule cuya secuencia ordenada de elementos se aleja mucho de todas las ejecuciones acreditadas del mismo Molecule y skill en runs finalizados, una vez que se conocen tres. Sin calibrar: una fila para leer, nunca un juicio.",
   "summary.usagePending": "Esperando datos de uso",
   "summary.usageUnavailable": "Datos de uso no disponibles",
-  "summary.usagePartial": "{{value}} (parcial)"
+  "summary.usagePartial": "{{value}} (parcial)",
+  "projects.sourceMode": "Punto de partida",
+  "projects.sourceMode.new": "Crear un repositorio vacío",
+  "projects.sourceMode.pullRequest": "Repositorio existente — una PR por run",
+  "projects.sourceMode.fork": "Bifurcar un repositorio existente",
+  "projects.sourceRepository": "Repositorio de GitHub de origen",
+  "projects.pullRequest": "Solicitud de incorporación de cambios",
+  "projects.sourceHint.fork": "El primer run crea tu bifurcación. Cada run publica los cambios directamente allí.",
+  "projects.sourceHint.pullRequest": "Cada run abre una solicitud de incorporación de cambios. Fusiónala antes de iniciar un trabajo que dependa de ella."
 }

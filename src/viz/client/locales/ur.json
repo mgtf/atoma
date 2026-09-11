@@ -1112,5 +1112,13 @@
   "sentinel.rule.trajectory-drift": "ایک بند شدہ مالیکیول کا عمل درآمد، جس میں عناصر کی مرتب ترتیب، تین معلوم ہو جانے کے بعد، مکمل شدہ run میں اسی مالیکیول اور skill کے ہر تسلیم شدہ عمل درآمد سے بہت دور ہو۔ غیر کیلیبریٹ شدہ: پڑھنے کے لیے ایک قطار، فیصلہ ہرگز نہیں۔",
   "summary.usagePending": "استعمال کا انتظار ہے",
   "summary.usageUnavailable": "استعمال دستیاب نہیں",
-  "summary.usagePartial": "{{value}} (جزوی)"
+  "summary.usagePartial": "{{value}} (جزوی)",
+  "projects.sourceMode": "نقطۂ آغاز",
+  "projects.sourceMode.new": "ایک خالی ریپوزٹری بنائیں",
+  "projects.sourceMode.pullRequest": "موجودہ ریپوزٹری — ہر run کے لیے ایک PR",
+  "projects.sourceMode.fork": "موجودہ ریپوزٹری کو فورک کریں",
+  "projects.sourceRepository": "ماخذ GitHub ریپوزٹری",
+  "projects.pullRequest": "پُل ریکویسٹ",
+  "projects.sourceHint.fork": "پہلا run آپ کا فورک بناتا ہے۔ ہر run تبدیلیاں براہِ راست وہیں شائع کرتا ہے۔",
+  "projects.sourceHint.pullRequest": "ہر run ایک پُل ریکویسٹ کھولتا ہے۔ اس پر منحصر کام شروع کرنے سے پہلے اسے ضم کریں۔"
 }

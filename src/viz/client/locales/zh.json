@@ -1112,5 +1112,13 @@
   "sentinel.rule.trajectory-drift": "当已知的已计入执行达到三次后，某次已结束的 Molecule 执行，其有序元素序列与已完成 run 中同一 Molecule 和 skill 的每次已计入执行都相差甚远。未校准：只是供查看的一行信息，绝非判断。",
   "summary.usagePending": "正在等待用量数据",
   "summary.usageUnavailable": "用量数据不可用",
-  "summary.usagePartial": "{{value}}（部分）"
+  "summary.usagePartial": "{{value}}（部分）",
+  "projects.sourceMode": "起点",
+  "projects.sourceMode.new": "创建空仓库",
+  "projects.sourceMode.pullRequest": "现有仓库——每个 run 创建一个 PR",
+  "projects.sourceMode.fork": "复刻现有仓库",
+  "projects.sourceRepository": "源 GitHub 仓库",
+  "projects.pullRequest": "拉取请求",
+  "projects.sourceHint.fork": "首次 run 会创建你的复刻仓库。每次 run 都会直接将更改发布到该仓库。",
+  "projects.sourceHint.pullRequest": "每次 run 都会发起一个拉取请求。请先合并，再开始依赖它的工作。"
 }

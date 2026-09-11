@@ -1112,5 +1112,13 @@
   "sentinel.rule.trajectory-drift": "تنفيذ مغلق واحد لـ Molecule، يقع تسلسل عناصره المرتّب بعيدًا عن كل تنفيذ مُحتسب لـ Molecule وskill نفسيهما في عمليات run مكتملة، حالما تصبح ثلاثة منها معروفة. غير مُعاير: صفّ للقراءة، وليس حكمًا أبدًا.",
   "summary.usagePending": "في انتظار بيانات الاستخدام",
   "summary.usageUnavailable": "بيانات الاستخدام غير متاحة",
-  "summary.usagePartial": "{{value}} (جزئي)"
+  "summary.usagePartial": "{{value}} (جزئي)",
+  "projects.sourceMode": "نقطة البداية",
+  "projects.sourceMode.new": "إنشاء مستودع فارغ",
+  "projects.sourceMode.pullRequest": "مستودع موجود — طلب سحب لكل run",
+  "projects.sourceMode.fork": "إنشاء نسخة متفرعة من مستودع موجود",
+  "projects.sourceRepository": "مستودع GitHub المصدر",
+  "projects.pullRequest": "طلب سحب",
+  "projects.sourceHint.fork": "ينشئ أول run نسختك المتفرعة. وينشر كل run التغييرات فيها مباشرةً.",
+  "projects.sourceHint.pullRequest": "يفتح كل run طلب سحب. ادمجه قبل بدء العمل المعتمد عليه."
 }

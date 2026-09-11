@@ -1112,5 +1112,13 @@
   "sentinel.rule.trajectory-drift": "Eine abgeschlossene Molekül-Ausführung, deren geordnete Elementfolge stark von jeder gewerteten Ausführung desselben Moleküls und skill in abgeschlossenen runs abweicht, sobald drei bekannt sind. Unkalibriert: eine Zeile zum Lesen, niemals ein Urteil.",
   "summary.usagePending": "Nutzung ausstehend",
   "summary.usageUnavailable": "Nutzung nicht verfügbar",
-  "summary.usagePartial": "{{value}} (teilweise)"
+  "summary.usagePartial": "{{value}} (teilweise)",
+  "projects.sourceMode": "Ausgangspunkt",
+  "projects.sourceMode.new": "Leeres Repository erstellen",
+  "projects.sourceMode.pullRequest": "Bestehendes Repository — ein PR pro run",
+  "projects.sourceMode.fork": "Fork eines bestehenden Repositorys erstellen",
+  "projects.sourceRepository": "GitHub-Quell-Repository",
+  "projects.pullRequest": "Pull-Request",
+  "projects.sourceHint.fork": "Der erste run erstellt Ihren Fork. Jeder run veröffentlicht Änderungen direkt dort.",
+  "projects.sourceHint.pullRequest": "Jeder run öffnet einen Pull-Request. Mergen Sie ihn, bevor Sie mit davon abhängigen Arbeiten beginnen."
 }

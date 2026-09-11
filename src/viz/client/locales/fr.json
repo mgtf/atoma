@@ -1112,5 +1112,13 @@
   "sentinel.rule.trajectory-drift": "Une exécution de Molécule clôturée dont la séquence ordonnée d’éléments s’écarte fortement de toutes les exécutions créditées de la même Molécule et du même skill dans les runs terminés, dès que trois sont connues. Non calibré : une ligne à lire, jamais un jugement.",
   "summary.usagePending": "En attente de l’usage",
   "summary.usageUnavailable": "Usage indisponible",
-  "summary.usagePartial": "{{value}} (partiel)"
+  "summary.usagePartial": "{{value}} (partiel)",
+  "projects.sourceMode": "Point de départ",
+  "projects.sourceMode.new": "Créer un dépôt vide",
+  "projects.sourceMode.pullRequest": "Dépôt existant — une PR par run",
+  "projects.sourceMode.fork": "Forker un dépôt existant",
+  "projects.sourceRepository": "Dépôt GitHub source",
+  "projects.pullRequest": "Pull request",
+  "projects.sourceHint.fork": "Le premier run crée ton fork. Chaque run y publie directement les modifications.",
+  "projects.sourceHint.pullRequest": "Chaque run ouvre une pull request. Fusionne-la avant de commencer un travail qui en dépend."
 }
