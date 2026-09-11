@@ -28,6 +28,12 @@ Neighbours:
   product store selected by viz, and browser redirects always use
   `${ATOMA_VIZ_PUBLIC_ORIGIN}/auth/callback`, never request Host headers.
 
+HTTPS session and OAuth cookies use the `__Host-` prefix, Secure, Path=/ and
+no Domain. Readers select those names from the configured public origin and
+never accept legacy unprefixed cookies on HTTPS. This requires re-login after
+the upgrade and prevents a preview subdomain from planting an auth bearer.
+Loopback HTTP keeps its development cookie names and paths.
+
 ## Platform admin
 
 - PLATFORM ADMIN is one instance-wide operator flag on a principal

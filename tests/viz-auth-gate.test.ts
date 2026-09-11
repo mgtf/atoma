@@ -1871,8 +1871,31 @@ describe('viz auth gate (process level)', () => {
     });
     expect(response.status).toBe(302);
     expect(response.headers.get('set-cookie')).toContain('Secure');
+    expect(response.headers.get('set-cookie')).toMatch(/^__Host-atoma_oauth_tx=/);
+    expect(response.headers.get('set-cookie')).toContain('Path=/;');
+    expect(response.headers.get('set-cookie')).not.toContain('Domain=');
     const target = new URL(response.headers.get('location')!);
     expect(target.searchParams.get('redirect_uri')).toBe('https://viz.example/auth/callback');
+    const authorized = await fetch(target, { redirect: 'manual' });
+    const callback = new URL(authorized.headers.get('location')!);
+    const completed = await fetch(localBase + callback.pathname + callback.search, {
+      redirect: 'manual',
+      headers: { cookie: response.headers.getSetCookie()[0]!.split(';')[0]! },
+    });
+    expect(completed.status).toBe(302);
+    const session = completed.headers.getSetCookie().find(value => value.startsWith('__Host-atoma_session='));
+    expect(session).toBeDefined();
+    const cookie = session!.split(';')[0]!;
+    expect((await fetch(`${localBase}/api/runs`, { headers: { cookie } })).status).toBe(200);
+    expect((await fetch(`${localBase}/api/runs`, { headers: { cookie: cookie.replace('__Host-', '') } })).status).toBe(401);
+    expect((await fetch(`${localBase}/auth/logout`, { method: 'POST', redirect: 'manual',
+      headers: { cookie, origin: 'https://g1.previews.viz.example' } })).status).toBe(403);
+    const logout = await fetch(`${localBase}/auth/logout`, { method: 'POST', redirect: 'manual',
+      headers: { cookie, origin: publicOrigin } });
+    expect(logout.status).toBe(302);
+    expect(logout.headers.getSetCookie().some(value => value.startsWith('__Host-atoma_session=logged_out;'))).toBe(true);
+    expect((await fetch(`${localBase}/api/runs`, { headers: { cookie } })).status).toBe(401);
+
   });
 
   it('rate-limits public login starts before the database cap is reached', async () => {

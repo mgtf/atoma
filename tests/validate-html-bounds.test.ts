@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { createServer } from 'node:http';
 import { ToolSandbox } from '../src/tools/sandbox.js';
 import {
   validateHtmlTool,
@@ -59,6 +60,39 @@ async function serve(sandbox: ToolSandbox): Promise<string> {
 }
 
 describe('validate_html form input', () => {
+  it('loads external assets through the configured proxy while serving loopback directly', async () => {
+    const requests: string[] = [];
+    const proxy = createServer((req, res) => {
+      requests.push(req.url ?? '');
+      res.writeHead(200, { 'content-type': 'text/css' });
+      res.end('body { --proxy-loaded: yes; }');
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+    const address = proxy.address();
+    if (!address || typeof address === 'string') throw new Error('proxy did not listen');
+    const oldProxy = process.env['HTTPS_PROXY'];
+    const sandbox = makeWorkspace({
+      'index.html': '<link rel="stylesheet" href="http://assets.atoma-test.invalid/style.css"><h1>Local app</h1>',
+    });
+    try {
+      process.env['HTTPS_PROXY'] = `http://127.0.0.1:${address.port}`;
+      const tool = validateHtmlTool({ sandbox });
+      const result = await tool.execute({
+        url: await serve(sandbox), waitMs: 50,
+        smoke: '({ok: getComputedStyle(document.body).getPropertyValue("--proxy-loaded").trim() === "yes"})',
+      });
+      expect(result).toMatchObject({ ok: true, smokeResult: { ok: true } });
+      expect(requests).toContain('http://assets.atoma-test.invalid/style.css');
+      expect(requests.some((url) => url.includes('localhost') || url.includes('127.0.0.1'))).toBe(false);
+    } finally {
+      if (oldProxy === undefined) delete process.env['HTTPS_PROXY'];
+      else process.env['HTTPS_PROXY'] = oldProxy;
+      await sandbox.cleanup();
+      proxy.closeAllConnections();
+      await new Promise<void>((resolve) => proxy.close(() => resolve()));
+    }
+  });
+
   it('scrolls selector targets into view before typing and clicking', async () => {
     const sandbox = makeWorkspace({
       'index.html': '<input id="name" value="old"><div style="height:1800px"></div><input id="quantity" type="number" value="0"><div style="height:1800px"></div><button id="save" onclick="document.getElementById(\'result\').textContent=document.getElementById(\'quantity\').value">Save</button><p id="result"></p>',

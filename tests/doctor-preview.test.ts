@@ -163,15 +163,15 @@ describe('doctor --preview', () => {
     expect(find(checks, 'preview-origin').remedy).toBeUndefined();
   });
 
-  it('refuses a preview domain sharing a registrable domain with the visualizer', async () => {
+  it('refuses a preview namespace containing the visualizer', async () => {
     const checks = await run({
       ...GATED_ENV,
-      ATOMA_PREVIEW_DOMAIN: 'previews.example.com',
+      ATOMA_PREVIEW_DOMAIN: 'example.com',
     });
 
     const config = find(checks, 'preview-config');
     expect(config.status).toBe('fail');
-    expect(config.detail).toContain('separate registrable domain');
+    expect(config.detail).toContain('separate host namespace');
   });
 
   it('reads the runtime list from the ENGINE, not from $PATH', async () => {

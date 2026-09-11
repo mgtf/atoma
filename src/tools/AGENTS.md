@@ -43,6 +43,9 @@ Neighbours:
   project run gets a fresh path every time. `tests/container-executor-lifecycle`
   asserts the property at the seam: the source is a directory at spawn time.
 - Network allowlists compare parsed hostnames; lookalikes and IP literals fail.
+  Default egress includes package registries and the shared public resource
+  hosts in `contracts/webResources.ts`. Chromium receives the worker proxy
+  explicitly; its loopback bypass keeps local application probes direct.
 - Cleanup is mandatory on success, failure, timeout, signal, and hard-exit paths.
   Network teardown races need bounded retry.
 - Docker image packaging is verified statically against the worker import graph

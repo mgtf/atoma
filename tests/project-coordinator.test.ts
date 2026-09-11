@@ -148,6 +148,7 @@ describe('project run environment', () => {
     expect(env['OPENAI_API_KEY']).toBeUndefined();
     expect(env['ATOMA_REQUIRE_ISOLATION']).toBe('1');
     expect(env['ATOMA_CONTAINER']).toBe('1');
+    expect(env['ATOMA_EGRESS']).toBe('1');
     expect(env['ATOMA_GITHUB_APP_PRIVATE_KEY']).toBeUndefined();
     expect(env['ATOMA_AUTH_GITHUB_CLIENT_SECRET']).toBeUndefined();
     // No `ATOMA_LLM`: every tier carries its own selector.

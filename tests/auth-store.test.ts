@@ -694,7 +694,17 @@ describe('session cookies', () => {
     expect(cookie).toContain('Secure');
     expect(cookie).toContain('Max-Age=60');
     const parsed = parseCookieHeader(cookie);
-    expect(parsed).toEqual([{ name: 'atoma_session', value: 'tok' }]);
+    expect(parsed).toEqual([{ name: '__Host-atoma_session', value: 'tok' }]);
+  });
+
+  it('binds HTTPS cookies to the host and ignores legacy bearers', () => {
+    const token = 'A'.repeat(43);
+    expect(serializeCookie('atoma_oauth_tx', token, { secure: true, path: '/auth' }))
+      .toContain('__Host-atoma_oauth_tx=' + token + '; Path=/;');
+    expect(sessionTokenFromCookieHeader('atoma_session=' + token, true)).toBeNull();
+    expect(sessionTokenFromCookieHeader('__Host-atoma_session=' + token, true)).toBe(token);
+    expect(logoutSessionCandidatesFromCookieHeader('__Host-atoma_session=' + token, true))
+      .toEqual({ overflow: false, tokens: [token] });
   });
 
   it('sessionTokenFromCookieHeader finds the token among siblings', () => {

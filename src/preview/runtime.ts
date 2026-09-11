@@ -87,6 +87,7 @@ export interface StartPreviewInput {
   readonly preparedWorkspace?: LauncherWorkspaceHandle;
   /** Workspace-relative entry the descriptor resolved. */
   readonly entry: string;
+  readonly allowedHosts?: readonly string[];
 }
 
 interface Created {
@@ -95,6 +96,7 @@ interface Created {
   networks?: LauncherNetworkHandle[];
   app?: LauncherUnitHandle;
   relay?: LauncherUnitHandle;
+  proxy?: LauncherUnitHandle;
 }
 
 /**
@@ -129,6 +131,9 @@ export async function teardownPreview(
   }
   if (created.app) {
     await attempt('application', () => deps.launcher.stopUnit(created.app!, 'caller-requested'));
+  }
+  if (created.proxy) {
+    await attempt('egress proxy', () => deps.launcher.stopUnit(created.proxy!, 'caller-requested'));
   }
   for (const network of created.networks ?? []) {
     await attempt('network', () => deps.launcher.removeNetwork(network));
@@ -231,10 +236,23 @@ export async function startPreview(
     return fail('runtime-unavailable', 'the preview network could not be created');
   }
 
+  const egress = Boolean(input.allowedHosts?.length);
+  if (egress) {
+    try {
+      created.proxy = await launcher.startUnit({
+        kind: 'preview-egress-proxy', ownerId: input.ownerId,
+        allowlist: [...input.allowedHosts!],
+      }, [internal, publishable]);
+      await launcher.awaitUnitReady(created.proxy);
+    } catch {
+      return fail('runtime-unavailable', 'the preview egress proxy could not be started');
+    }
+  }
   try {
     created.app = await launcher.startUnit(
       {
         kind: 'preview-app',
+        ...(egress ? { egress: true } : {}),
         ownerId: input.ownerId,
         entry: input.entry,
         workspace: { ownerId: created.workspace.ownerId, id: created.workspace.id },

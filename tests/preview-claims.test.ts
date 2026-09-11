@@ -324,6 +324,8 @@ describe('preview gateway header policy', () => {
     expect(csp).toContain("object-src 'none'");
     expect(csp).toContain("base-uri 'none'");
     expect(csp).toContain("form-action 'self'");
+    expect(csp).toContain('sandbox allow-scripts allow-same-origin allow-forms');
+    expect(headers['permissions-policy']).toContain('document-domain=()');
   });
 
   it('opens exactly the approved hosts, and nothing wider', () => {

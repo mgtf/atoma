@@ -68,6 +68,7 @@ export const launcherUnitKindSchema = z.enum([
   'egress-proxy',
   'preview-app',
   'preview-ingress',
+  'preview-egress-proxy',
 ]);
 
 /**
@@ -140,6 +141,7 @@ export const egressProxyUnitSpecSchema = z
 export const previewAppUnitSpecSchema = z
   .object({
     kind: z.literal('preview-app'),
+    egress: z.boolean().optional(),
     ownerId: launcherOwnerIdSchema,
     entry: z.string().min(1).max(512),
     workspace: z.object({ ownerId: launcherOwnerIdSchema, id: z.string().min(1).max(255) }).strict(),
@@ -160,6 +162,7 @@ export const previewIngressUnitSpecSchema = z
 
 export const launcherUnitSpecSchema = z.discriminatedUnion('kind', [
   egressProxyUnitSpecSchema,
+  egressProxyUnitSpecSchema.extend({ kind: z.literal('preview-egress-proxy') }),
   previewAppUnitSpecSchema,
   previewIngressUnitSpecSchema,
 ]);

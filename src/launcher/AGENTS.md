@@ -132,7 +132,7 @@ what a member is still connected to.
   `no-new-privileges`, memory equal to memory-swap (otherwise the cap is
   escapable by swapping), bounded CPU/pids/nofile, two bounded tmpfs (`/tmp`
   and `/data`, both dying with the container, which is what makes a restart
-  begin again from the immutable copy), rotated logs, and **exactly five**
+  begin again from the immutable copy), rotated logs, and a fixed set of
   environment variables — never a spread of the parent environment, whose
   variables are credentials and store paths. One mount: the launcher-issued
   workspace. The command is exactly `node <entry>`, never a shell.
@@ -167,6 +167,10 @@ about, and each was wrong before it was measured:
 - **The command must not be the image's.** `--entrypoint node` is passed
   explicitly, because an image ENTRYPOINT would otherwise wrap the one start
   command the profile is allowed to run.
+
+The optional `preview-egress-proxy` belongs to the preview family and is
+removed with its generation. The app receives only a derived proxy address
+and loopback bypass; it remains on the internal network.
 
 ## Workspaces: the launcher issues, the caller fills
 

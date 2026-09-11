@@ -444,6 +444,7 @@ export async function startTask(
   const suppliedProviderEnv =
     opts?.providerEnv ?? (process.env['ATOMA_TENANT_RUN'] === '1' ? process.env : undefined);
   const providerEnv = suppliedProviderEnv ?? process.env;
+  const egressAllowlist = providerEnv['ATOMA_EGRESS_ALLOWLIST']?.split(',').map((host) => host.trim()).filter(Boolean);
   // HOST snapshot first — before any pin write — so a previous in-process
   // run that applied a snapshot cannot become the next run's "operator
   // intent". Same sticky-env fix as the lifecycle toggles, for the three
@@ -721,6 +722,7 @@ export async function startTask(
         workspaceRoot,
         ...(args.workerImage ? { image: args.workerImage } : {}),
         egress: args.egress,
+        ...(egressAllowlist ? { egressAllowlist } : {}),
         runId: `${profile.id}-${process.pid}`,
       })
     : localToolBackend({ workspaceRoot, logger: consoleLogger });

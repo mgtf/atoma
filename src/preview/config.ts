@@ -1,4 +1,5 @@
-import { previewRuntimeSchema, type PreviewRuntime } from '../contracts/preview.js';
+import { previewRuntimeSchema, previewEgressHostsSchema, type PreviewRuntime } from '../contracts/preview.js';
+import { DEFAULT_WEB_RESOURCE_HOSTS } from '../contracts/webResources.js';
 import { isLoopbackHost, isLoopbackOrigin } from '../auth/providers.js';
 
 /**
@@ -30,6 +31,7 @@ export const PREVIEW_ENV = {
   idleMs: 'ATOMA_PREVIEW_IDLE_MS',
   hardMs: 'ATOMA_PREVIEW_HARD_MS',
   copyMaxBytes: 'ATOMA_PREVIEW_COPY_MAX_BYTES',
+  allowedHosts: 'ATOMA_PREVIEW_ALLOWED_HOSTS',
 } as const;
 
 export const PREVIEW_DEFAULTS = {
@@ -61,6 +63,8 @@ export interface PreviewConfig {
   readonly idleMs: number;
   readonly hardMs: number;
   readonly copyMaxBytes: number;
+  /** Operator-approved destinations shared by browser assets and Node previews. */
+  readonly allowedHosts?: readonly string[];
 }
 
 export class PreviewConfigError extends Error {
@@ -110,42 +114,21 @@ function boundedInteger(
 
 const DNS_NAME = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
 
-/**
- * The lowest two labels of a host — a deliberately CONSERVATIVE stand-in for
- * the registrable domain.
- *
- * A correct answer needs the Public Suffix List, and taking that dependency is
- * its own decision. Two labels over-groups multi-label suffixes (`co.uk`), and
- * over-grouping makes this check refuse MORE configurations than strictly
- * necessary — which is the safe direction for a check whose whole job is to
- * keep a session cookie away from generated code.
- */
-export function conservativeRegistrableDomain(host: string): string {
-  return host.toLowerCase().replace(/\.$/, '').split('.').slice(-2).join('.');
-}
-
-/**
- * Do the visualizer and the previews share a registrable domain?
- *
- * THE ORIGIN IS THE ASSET. The session cookie is host-only, so it is never
- * sent to a preview host — but a shared registrable domain puts generated code
- * within reach of cookie-scoping tricks and same-site assumptions the design
- * relies on. Refused at boot, where it is a configuration mistake, rather than
- * discovered as a security property nobody has.
+/** Refuse a namespace that can contain the control-plane host itself.
+ * Child and sibling namespaces are distinct origins, including same-site ones.
+ * HTTPS auth uses __Host- cookies; gateway CSP sandboxes every document.
  */
 export function previewDomainCollides(previewDomain: string, visualizerOrigin: string): boolean {
-  let visualizerHost: string;
+  let visualizer: string;
   try {
-    visualizerHost = new URL(visualizerOrigin).hostname;
+    const origin = new URL(visualizerOrigin);
+    if (!['https:', 'http:'].includes(origin.protocol)) return true;
+    visualizer = origin.hostname.toLowerCase().replace(/\.$/, '');
   } catch {
-    // An unparseable origin is not proof of safety.
     return true;
   }
   const preview = previewDomain.toLowerCase().replace(/\.$/, '');
-  const visualizer = visualizerHost.toLowerCase().replace(/\.$/, '');
-  if (preview === visualizer) return true;
-  if (preview.endsWith(`.${visualizer}`) || visualizer.endsWith(`.${preview}`)) return true;
-  return conservativeRegistrableDomain(preview) === conservativeRegistrableDomain(visualizer);
+  return preview === visualizer || visualizer.endsWith(`.${preview}`);
 }
 
 /**
@@ -166,8 +149,8 @@ export function snapshotPreviewConfig(
   }
   if (options.visualizerOrigin && previewDomainCollides(domain, options.visualizerOrigin)) {
     throw new PreviewConfigError(
-      `${PREVIEW_ENV.domain} must be a separate registrable domain from the visualizer origin; ` +
-        'previews serve model-authored code and must never share an origin family with the session cookie'
+      `${PREVIEW_ENV.domain} must be a separate host namespace from the visualizer origin; ` +
+        'the preview namespace must not contain the control-plane host'
     );
   }
 
@@ -317,6 +300,10 @@ export function snapshotPreviewConfig(
 
   return {
     domain,
+    allowedHosts: previewEgressHostsSchema.parse(
+      env[PREVIEW_ENV.allowedHosts] === undefined ? [...DEFAULT_WEB_RESOURCE_HOSTS]
+        : env[PREVIEW_ENV.allowedHosts]!.split(',').map((host) => host.trim()).filter(Boolean)
+    ),
     gatewayHost,
     gatewayPort,
     publicScheme: wantsHttp ? 'http' : 'https',

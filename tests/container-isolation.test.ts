@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ContainerToolExecutor, workerRunArgs } from '../src/tools/containerExecutor.js';
 import { containerToolBackend } from '../src/run/toolBackend.js';
+import { egressObjectId } from '../src/tools/egressSidecar.js';
 import { drainLines, encodeMessage, isWorkerHello } from '../src/tools/containerProtocol.js';
 
 /**
@@ -262,12 +263,25 @@ describeDocker('a containerised run cannot reach the stores', () => {
   it('keeps HTTP loopback working when proxied egress is enabled', async () => {
     const egressWorkspace = join(dir, 'egress-ws');
     mkdirSync(egressWorkspace, { recursive: true });
+    const runId = `test-loopback-${process.pid}`;
+    const assetServer = `atoma-network-fixture-${process.pid}`;
     const backend = await containerToolBackend({
       workspaceRoot: egressWorkspace,
       egress: true,
-      runId: `test-loopback-${process.pid}`,
+      runId,
+      egressAllowlist: ['registry.npmjs.org', 'assets.atoma-test.invalid'],
     });
     try {
+      // A separate origin on the proxy's uplink: the worker cannot reach it
+      // directly. This exercises the real container boundary without a CDN.
+      execFileSync('docker', [
+        'run', '-d', '--rm', '--name', assetServer,
+        '--network', `atoma-uplink-${egressObjectId(runId)}`,
+        '--network-alias', 'assets.atoma-test.invalid',
+        'atoma-worker:latest', 'node', '-e',
+        'require("http").createServer((q,r)=>{r.setHeader("content-type","text/css");r.end("body{--external-asset:loaded}")}).listen(80,"0.0.0.0",()=>console.log("READY"))',
+      ], { stdio: 'ignore' });
+      await vi.waitFor(() => expect(execFileSync('docker', ['logs', assetServer], { encoding: 'utf8' })).toContain('READY'));
       await backend.executor.execute('write_file', {
         path: 'server.js',
         content: [
@@ -290,7 +304,23 @@ describeDocker('a containerised run cannot reach the stores', () => {
       })) as { status?: number; body?: string; error?: string };
       expect(external.status, JSON.stringify(external)).toBe(200);
       expect(external.body).toContain('"name":"left-pad"');
+      await backend.executor.execute('write_file', {
+        path: 'index.html',
+        content: '<link rel="stylesheet" href="http://assets.atoma-test.invalid/style.css"><p>Network preview</p>',
+      });
+      const staticSite = await backend.executor.execute('start_static_server', {}) as { url: string };
+      const browser = await backend.executor.execute('validate_html', {
+        url: staticSite.url, waitMs: 100,
+        smoke: '({ok: getComputedStyle(document.body).getPropertyValue("--external-asset").trim() === "loaded"})',
+      });
+      expect(browser).toMatchObject({ ok: true, failedRequests: [], smokeResult: { ok: true } });
+      const denied = await backend.executor.execute('fetch_url', {
+        url: 'http://host.docker.internal:4111/api/runs', timeoutMs: 3000,
+      }) as { status?: number; ok?: boolean; error?: string };
+      // Node's env proxy uses CONNECT; a proxy refusal is a fetch error.
+      expect(denied).toMatchObject({ ok: false, error: expect.any(String) });
     } finally {
+      try { execFileSync('docker', ['rm', '-f', assetServer], { stdio: 'ignore' }); } catch { /* never started */ }
       await backend.cleanup();
     }
   }, 120_000);

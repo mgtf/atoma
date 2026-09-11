@@ -680,8 +680,8 @@ export class PreviewStore {
 }
 
 /**
- * The effective policy for one preview: what the run asked for, intersected
- * with what this project's admins approved.
+ * The effective policy for one preview: operator-approved destinations plus
+ * what the run asked for, intersected with this project's admin approvals.
  *
  * INTERSECTION, in one place, because the two halves are written by different
  * people at different times — a run declares its needs, an admin approves a
@@ -690,13 +690,14 @@ export class PreviewStore {
  */
 export function effectiveEgressHosts(
   requested: readonly string[],
-  approved: readonly string[]
+  approved: readonly string[],
+  operatorAllowed: readonly string[] = []
 ): { readonly allowed: string[]; readonly blocked: string[] } {
-  const approvedSet = new Set(approved);
-  const allowed: string[] = [];
+  const approvedSet = new Set([...approved, ...operatorAllowed]);
+  const allowed: string[] = [...new Set(operatorAllowed)];
   const blocked: string[] = [];
   for (const host of requested) {
-    if (approvedSet.has(host)) allowed.push(host);
+    if (approvedSet.has(host)) { if (!allowed.includes(host)) allowed.push(host); }
     else blocked.push(host);
   }
   return { allowed, blocked };

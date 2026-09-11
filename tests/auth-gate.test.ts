@@ -75,11 +75,11 @@ describe('viz authentication configuration', () => {
     }
   });
 
-  it('rejects duplicate session cookie names instead of choosing one', () => {
+  it.each([false, true])('rejects duplicate cookies and legacy HTTPS cookies (secure=%s)', (secure) => {
     const root = mkdtempSync(join(tmpdir(), 'atoma-auth-gate-cookie-'));
     roots.push(root);
     const gate = openAuthGate({
-      env: { ATOMA_VIZ_AUTH: '1' },
+      env: { ATOMA_VIZ_AUTH: '1', ...(secure ? { ATOMA_VIZ_PUBLIC_ORIGIN: 'https://atoma.run' } : {}) },
       dbPath: join(root, 'atoma.db'),
     });
     const store = gate.store;
@@ -106,13 +106,15 @@ describe('viz authentication configuration', () => {
     const request = (cookie: string): IncomingMessage =>
       ({ headers: { cookie } }) as IncomingMessage;
 
-    expect(gate.resolve(request(`other=1; atoma_session=${token}`))?.principalId)
+    const name = secure ? '__Host-atoma_session' : 'atoma_session';
+    if (secure) expect(gate.resolve(request(`atoma_session=${token}`))).toBeNull();
+    expect(gate.resolve(request(`other=1; ${name}=${token}`))?.principalId)
       .toBe(login.viewer.principalId);
     expect(
-      gate.resolve(request(`atoma_session=${token}; atoma_session=${token}`))
+      gate.resolve(request(`${name}=${token}; ${name}=${token}`))
     ).toBeNull();
     expect(
-      gate.resolve(request(`atoma_session=attacker; atoma_session=${token}`))
+      gate.resolve(request(`${name}=attacker; ${name}=${token}`))
     ).toBeNull();
   });
 });

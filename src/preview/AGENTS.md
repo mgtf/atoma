@@ -75,8 +75,8 @@ manager knows about the instance, never about the run.
 Three rules make it safe: the run's workspace is only ever READ; the COPY is
 classified, never the live workspace, so the classifier sees bytes that cannot
 move under it; and a reopen takes a NEW snapshot on a NEW generation, because a
-member reopening wants the state now. In-flight egress is denied outright — a
-run has declared no hosts, the right default for unfinished code.
+member reopening wants the state now. In-flight previews use only the operator-approved resource hosts; they never
+infer additional destinations from unfinished code.
 
 Two seams of that path were wrong and are pinned by `tests/preview-end-to-end`
 (measured on a live run, 2026-09-02). The COPY policy strips every `.atoma*`
@@ -284,11 +284,11 @@ check, so a deployment that set four of the six is told so.
   throws: the flag, a `.localhost` domain, a visualizer origin that is PRESENT
   and loopback — absence is the ungated caller and must never read as privacy
   — and a loopback gateway bind.
-- The preview domain must not share a registrable domain with the visualizer
-  origin. The check is deliberately CONSERVATIVE — two labels, no Public Suffix
-  List — so it refuses more than strictly necessary, the safe direction for a
-  check whose job is keeping a session cookie away from generated code. An
-  origin that will not parse is not proof of safety.
+- The preview namespace must not equal or contain the visualizer host. A
+  dedicated child namespace such as `previews.atoma.run` is supported.
+  HTTPS auth uses `__Host-` cookies without legacy fallback; the gateway adds
+  CSP sandbox and disables document-domain relaxation even outside the iframe.
+  Control-plane mutations require the exact application Origin.
 - Every bound REFUSES rather than falls back — an operator who asked for a
   two-hour idle bound and silently got fifteen minutes is the defect the
   project-run timeout already records. Contradictory settings too: a per-org
@@ -297,7 +297,7 @@ check, so a deployment that set four of the six is told so.
 
 ## The origin, and who may open it
 
-A preview lives on its own registrable domain, so no Atoma cookie ever reaches
+A preview lives on its own host namespace, so no host-only Atoma cookie reaches
 it — which is exactly why the gateway needs its own way to know the browser in
 front of it was sent by an authenticated member.
 
@@ -371,7 +371,7 @@ like.
   approved but hostile domain could still observe what they type. The chrome
   says so permanently, and no header here can fix it.
 
-## Egress is requested by a run and approved by a person
+## Egress policy
 
 - Hosts are exact, lower-case, dotted public DNS names. No wildcards, no
   `.domain` subdomain form, no ports, no IP literals, no reserved or
@@ -379,11 +379,15 @@ like.
   `DEFAULT_EGRESS_ALLOWLIST`'s two forms, because that list is an operator
   allowlisting dependency registries while this is a tenant admin approving
   what generated code may reach from a member's browser.
-- The effective policy is `intersection(requested by this run, approved for
-  this project)`, computed in ONE place: computing it twice is how a CSP and a
+- The effective policy is the union of operator-approved resource hosts and
+  `intersection(requested by this run, approved for this project)`, computed in ONE place: computing it twice is how a CSP and a
   sidecar come to disagree about the same preview.
 - An unapproved requested host stays blocked and VISIBLE. It never prevents a
   no-egress preview from starting.
+- `ATOMA_PREVIEW_ALLOWED_HOSTS` sets exact operator-approved hosts (empty
+  disables them). Defaults come from `contracts/webResources.ts`. The same
+  effective hosts feed browser CSP and a per-generation Node egress proxy.
+  Node fetch uses that proxy; the app has no direct external network route.
 - `requestedHosts` is empty in v1 and the column is not decoration: there is no
   run-side channel through which a run declares the hosts its deliverable
   needs. Inventing one from the probe manifest would read localhost probes as

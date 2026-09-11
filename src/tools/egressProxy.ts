@@ -109,7 +109,7 @@ if (process.argv[1] && /egressProxy\.(ts|js)$/.test(process.argv[1])) {
   const ports = process.env['ATOMA_EGRESS_PORTS'];
   void startEgressProxy({
     port: Number(process.env['ATOMA_EGRESS_PORT'] ?? 3128),
-    ...(raw ? { allowlist: raw.split(',').map((s) => s.trim()).filter(Boolean) } : {}),
+    ...(raw !== undefined ? { allowlist: raw.split(',').map((s) => s.trim()).filter(Boolean) } : {}),
     ...(ports
       ? { allowedPorts: ports.split(',').map((p) => Number(p.trim())).filter(Number.isInteger) }
       : {}),

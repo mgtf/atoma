@@ -12,7 +12,8 @@ import { isSessionToken, MAX_LOGOUT_SESSION_CANDIDATES } from './values.js';
  *
  * Cookie shape follows the conservative set the viz origin needs:
  * HttpOnly + SameSite=Lax always; `Secure` is derived from the configured
- * public HTTPS origin. Plain HTTP is accepted only for loopback development.
+ * public HTTPS origin. HTTPS names use __Host- with Path=/ and no Domain.
+ * Plain HTTP is accepted only for loopback development.
  */
 export const SESSION_COOKIE = 'atoma_session';
 export const OAUTH_TX_COOKIE = 'atoma_oauth_tx';
@@ -32,9 +33,14 @@ export interface CookieOptions {
   maxAgeSeconds?: number;
 }
 
+/** HTTPS cookies cannot be planted by a sibling or child domain. */
+export function authCookieName(name: string, secure: boolean): string {
+  return secure ? `__Host-${name}` : name;
+}
+
 /** Serialize one cookie header value. */
 export function serializeCookie(name: string, value: string, opts: CookieOptions): string {
-  const parts = [`${name}=${value}`, 'Path=' + (opts.path ?? '/'), 'HttpOnly', 'SameSite=Lax'];
+  const parts = [`${authCookieName(name, opts.secure)}=${value}`, 'Path=' + (opts.secure ? '/' : (opts.path ?? '/')), 'HttpOnly', 'SameSite=Lax'];
   if (opts.secure) parts.push('Secure');
   if (opts.maxAgeSeconds !== undefined) parts.push(`Max-Age=${Math.floor(opts.maxAgeSeconds)}`);
   return parts.join('; ');
@@ -115,8 +121,8 @@ export function retireSessionCookie(opts: { secure: boolean }): string {
 }
 
 /** Read the session token out of a request's Cookie header, if present. */
-export function sessionTokenFromCookieHeader(header: string | undefined): string | null {
-  const found = parseCookieHeader(header).filter((cookie) => cookie.name === SESSION_COOKIE);
+export function sessionTokenFromCookieHeader(header: string | undefined, secure = false): string | null {
+  const found = parseCookieHeader(header).filter((cookie) => cookie.name === authCookieName(SESSION_COOKIE, secure));
   // Duplicate same-name cookies have ambiguous Path precedence. Fail closed
   // rather than letting a caller and a browser disagree about which bearer
   // was authenticated or revoked.
@@ -137,11 +143,12 @@ export type LogoutSessionCandidates =
  * partial batch so an attacker cannot choose which token survives by order.
  */
 export function logoutSessionCandidatesFromCookieHeader(
-  header: string | undefined
+  header: string | undefined,
+  secure = false
 ): LogoutSessionCandidates {
   const tokens = new Set<string>();
   for (const cookie of parseCookieHeader(header)) {
-    if (cookie.name !== SESSION_COOKIE || !isSessionToken(cookie.value)) continue;
+    if (cookie.name !== authCookieName(SESSION_COOKIE, secure) || !isSessionToken(cookie.value)) continue;
     tokens.add(cookie.value);
     if (tokens.size > MAX_LOGOUT_SESSION_CANDIDATES) {
       return { overflow: true, tokens: [] };

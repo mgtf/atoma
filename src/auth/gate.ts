@@ -1,6 +1,6 @@
 import type { IncomingMessage } from 'node:http';
 import { AuthStore, type Viewer } from './store.js';
-import { parseCookieHeader, SESSION_COOKIE } from './sessions.js';
+import { authCookieName, parseCookieHeader, SESSION_COOKIE } from './sessions.js';
 import { isLoopbackHost } from './providers.js';
 
 /**
@@ -70,6 +70,7 @@ export function openAuthGate(options: OpenAuthGateOptions = {}): AuthGate {
   if (!vizAuthEnabled(env)) {
     return { enabled: false, store: null, resolve: () => null };
   }
+  const secure = env[VIZ_PUBLIC_ORIGIN_ENV] !== undefined && authPublicOrigin(env).protocol === 'https:';
   const store = AuthStore.open(options.dbPath);
   return {
     enabled: true,
@@ -79,7 +80,7 @@ export function openAuthGate(options: OpenAuthGateOptions = {}): AuthGate {
       // with different paths differently. Never let cookie tossing choose the
       // session the gate resolves.
       const sessionCookies = parseCookieHeader(req.headers.cookie)
-        .filter((cookie) => cookie.name === SESSION_COOKIE);
+        .filter((cookie) => cookie.name === authCookieName(SESSION_COOKIE, secure));
       if (sessionCookies.length !== 1 || !sessionCookies[0]!.value) return null;
       try {
         return store.resolveSession(sessionCookies[0]!.value);

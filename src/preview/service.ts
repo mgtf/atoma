@@ -61,6 +61,7 @@ export function previewSummary(input: {
   readonly descriptor: PreviewDescriptor | null;
   readonly instance: PreviewInstance | null;
   readonly approvedHosts: readonly string[];
+  readonly operatorAllowedHosts?: readonly string[];
   /**
    * Whether the run is still going. Without it this projection could only
    * describe previews that ALREADY EXIST, and a run in flight was told it had
@@ -82,7 +83,7 @@ export function previewSummary(input: {
   // decide it.
   const inFlight = instance?.source === 'in-flight' || input.runInFlight === true;
   const requestedHosts = descriptor?.requestedHosts ?? [];
-  const { allowed, blocked } = effectiveEgressHosts(requestedHosts, input.approvedHosts);
+  const { allowed, blocked } = effectiveEgressHosts(requestedHosts, input.approvedHosts, input.operatorAllowedHosts);
   return previewSummarySchema.parse({
     availability: descriptor?.availability ?? (inFlight ? 'available' : 'unavailable'),
     kind: descriptor?.kind ?? null,
@@ -108,6 +109,7 @@ export function readPreviewSummary(
     readonly projectId: string;
     readonly projectRunId: string;
     readonly runInFlight?: boolean;
+    readonly operatorAllowedHosts?: readonly string[];
   }
 ): PreviewSummary {
   const descriptor = store.getDescriptor(input.orgId, input.projectRunId);
@@ -115,6 +117,7 @@ export function readPreviewSummary(
     descriptor,
     instance: store.getInstance(input.orgId, input.projectRunId),
     approvedHosts: store.listApprovedHosts(input.orgId, input.projectId),
+    operatorAllowedHosts: input.operatorAllowedHosts,
     runInFlight: input.runInFlight,
   });
 }

@@ -12,6 +12,12 @@ Neighbours:
 - [`src/github`](../github/AGENTS.md) — where publication lands
 - [`src/platform`](../platform/AGENTS.md) — the journal this domain emits into
 
+## Run network
+
+Project runs enable isolated, proxied egress by default. The operator may set
+`ATOMA_EGRESS=0` to disable it or `ATOMA_EGRESS_ALLOWLIST` to replace the host
+list. These values come from the host snapshot, never a tenant prompt.
+
 ## Scoping and storage
 
 - Projects, GitHub App installations and publications are organisation-scoped;

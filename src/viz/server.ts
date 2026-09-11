@@ -68,6 +68,7 @@ import {
   type TrustedProxySnapshot,
 } from '../auth/rate-limit.js';
 import {
+  authCookieName,
   OAUTH_TX_COOKIE,
   OAUTH_TX_TTL_MS,
   issueSession,
@@ -2189,7 +2190,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       const code = url.searchParams.get('code');
       const state = url.searchParams.get('state');
       const errorParam = url.searchParams.get('error');
-      const txCookies = parseCookieHeader(req.headers.cookie).filter((cookie) => cookie.name === OAUTH_TX_COOKIE);
+      const txCookies = parseCookieHeader(req.headers.cookie).filter((cookie) => cookie.name === authCookieName(OAUTH_TX_COOKIE, AUTH_RUNTIME.secureCookies));
       const txCookie = txCookies.length === 1 ? txCookies[0]!.value : null;
       // Login failures land back on the APP SHELL's arrival gate with a
       // bounded notice code — the GL welcome renders the message from its
@@ -2385,7 +2386,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         sendJson(res, 403, { error: 'origin mismatch' });
         return;
       }
-      const candidates = logoutSessionCandidatesFromCookieHeader(req.headers.cookie);
+      const candidates = logoutSessionCandidatesFromCookieHeader(req.headers.cookie, AUTH_RUNTIME.secureCookies);
       if (candidates.overflow) {
         sendJson(res, 431, { error: 'too many session cookie candidates' });
         return;
@@ -2464,7 +2465,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         sendJson(res, 400, { error: 'invalid organisation id' });
         return;
       }
-      const token = sessionTokenFromCookieHeader(req.headers.cookie);
+      const token = sessionTokenFromCookieHeader(req.headers.cookie, AUTH_RUNTIME.secureCookies);
       if (!token) {
         sendJson(res, 401, { error: 'authentication required' });
         return;

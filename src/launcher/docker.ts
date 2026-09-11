@@ -430,6 +430,7 @@ export class DockerLauncher implements ContainerLauncher {
     // container resolves its relay by, so these names are wire contracts
     // between two containers, not cosmetics.
     if (kind === 'egress-proxy') return `atoma-proxy-${id}`;
+    if (kind === 'preview-egress-proxy') return `atoma-preview-proxy-${id}`;
     if (kind === 'preview-app') return `atoma-preview-app-${id}`;
     return `atoma-preview-relay-${id}`;
   }
@@ -446,6 +447,7 @@ export class DockerLauncher implements ContainerLauncher {
         containers: [
           this.unitName('preview-ingress', ownerId),
           this.unitName('preview-app', ownerId),
+          this.unitName('preview-egress-proxy', ownerId),
         ],
         networks: [
           this.networkName({ family, kind: 'internal', ownerId }),
@@ -551,7 +553,7 @@ export class DockerLauncher implements ContainerLauncher {
     const name = this.unitName(spec.kind, spec.ownerId);
     const attach = networks[0];
     if (!attach) throw new Error('a unit must be attached to at least one network');
-    if (spec.kind !== 'egress-proxy') {
+    if (spec.kind !== 'egress-proxy' && spec.kind !== 'preview-egress-proxy') {
       return this.startPreviewUnit(spec, name, attach, networks.slice(1));
     }
     await this.runDocker([
@@ -559,7 +561,7 @@ export class DockerLauncher implements ContainerLauncher {
       '-d',
       '--name',
       name,
-      ...this.labels('egress', spec.ownerId),
+      ...this.labels(spec.kind === 'preview-egress-proxy' ? 'preview' : 'egress', spec.ownerId),
       '--network',
       attach.name,
       '--cap-drop',
@@ -659,8 +661,8 @@ export class DockerLauncher implements ContainerLauncher {
         `max-size=${PREVIEW_LOG_MAX_SIZE}`,
         '--log-opt',
         'max-file=1',
-        // EXACTLY these five. Never a spread of the parent environment: the
-        // control plane's own variables are credentials and store paths.
+        // Fixed application variables and, when enabled, derived proxy values.
+        // Never spread the parent's credentials or control-plane store paths.
         '-e',
         `PORT=${PREVIEW_APP_PORT}`,
         '-e',
@@ -671,6 +673,12 @@ export class DockerLauncher implements ContainerLauncher {
         'HOME=/tmp',
         '-e',
         'ATOMA_DATA_DIR=/data',
+        ...(spec.egress ? [
+          '-e', `HTTP_PROXY=http://${this.unitName('preview-egress-proxy', spec.ownerId)}:${PROXY_PORT}`,
+          '-e', `HTTPS_PROXY=http://${this.unitName('preview-egress-proxy', spec.ownerId)}:${PROXY_PORT}`,
+          '-e', 'NO_PROXY=127.0.0.1,localhost,::1',
+          '-e', 'NODE_USE_ENV_PROXY=1',
+        ] : []),
         // The single mount: the filtered copy, writable because the app may
         // keep state — on the COPY, which is deleted at teardown.
         '-v',
@@ -774,7 +782,7 @@ export class DockerLauncher implements ContainerLauncher {
       await this.waitUntilReady(handle.name);
       return;
     }
-    if (handle.kind !== 'egress-proxy') {
+    if (handle.kind !== 'egress-proxy' && handle.kind !== 'preview-egress-proxy') {
       // The app announces the port it bound; a marker naming a DIFFERENT port
       // is a refusal, not readiness — the contract is that it honours `PORT`.
       const marker =
@@ -800,6 +808,7 @@ export class DockerLauncher implements ContainerLauncher {
   /** Which name prefix belongs to which kind, for reading a sweep back. */
   private kindOfName(name: string): LauncherUnitKind | null {
     if (name.startsWith('atoma-proxy-')) return 'egress-proxy';
+    if (name.startsWith('atoma-preview-proxy-')) return 'preview-egress-proxy';
     if (name.startsWith('atoma-preview-app-')) return 'preview-app';
     if (name.startsWith('atoma-preview-relay-')) return 'preview-ingress';
     return null;

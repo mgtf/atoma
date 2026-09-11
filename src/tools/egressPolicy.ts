@@ -13,11 +13,14 @@
  * inside the container can widen it.
  */
 
-/** Destinations every run may reach. Package registries only, by default. */
+/** Destinations available when the operator enables proxied run egress. */
+import { DEFAULT_WEB_RESOURCE_HOSTS } from '../contracts/webResources.js';
+
 export const DEFAULT_EGRESS_ALLOWLIST: readonly string[] = [
   'registry.npmjs.org',
   '.npmjs.org',
   'registry.yarnpkg.com',
+  ...DEFAULT_WEB_RESOURCE_HOSTS,
 ];
 
 export interface EgressDecision {

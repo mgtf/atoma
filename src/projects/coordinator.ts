@@ -245,6 +245,7 @@ const FORWARDED_HOST_ENV = [
   'CI',
   'DOCKER_HOST',
   'DOCKER_CONFIG',
+  'ATOMA_EGRESS_ALLOWLIST',
   'HTTPS_PROXY',
   'HTTP_PROXY',
   'NO_PROXY',
@@ -607,7 +608,7 @@ export function projectRunEnvironment(input: {
   Object.assign(environment, {
     ATOMA_REQUIRE_ISOLATION: '1',
     ATOMA_CONTAINER: '1',
-    ATOMA_EGRESS: '0',
+    ATOMA_EGRESS: input.hostEnv['ATOMA_EGRESS'] === '0' ? '0' : '1',
     ATOMA_DB_PATH: path.resolve(input.dbPath),
     ATOMA_LEDGER_DB: path.resolve(input.dbPath),
     ATOMA_BUILD_WORKSPACE: path.resolve(input.workspacePath),

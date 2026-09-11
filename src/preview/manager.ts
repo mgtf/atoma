@@ -126,6 +126,7 @@ export class PreviewManager {
       projectId,
       projectRunId,
       runInFlight: options.runInFlight,
+      operatorAllowedHosts: this.deps.config.allowedHosts,
     });
   }
 
@@ -204,7 +205,7 @@ export class PreviewManager {
     try {
       const host = `${previewGenerationHost(input.orgId, input.projectRunId, generation)}.${this.deps.config.domain}`;
       const approved = store.listApprovedHosts(input.orgId, input.projectId);
-      const { allowed } = effectiveEgressHosts(descriptor.requestedHosts, approved);
+      const { allowed } = effectiveEgressHosts(descriptor.requestedHosts, approved, this.deps.config.allowedHosts);
 
       if (descriptor.kind === 'static') {
         // No container at all: the gateway serves the copy. It still gets an
@@ -251,6 +252,7 @@ export class PreviewManager {
               input.projectRunId
             ),
             entry: descriptor.entry ?? '',
+            allowedHosts: allowed,
           }
         );
         // THE ROUTE IS PUBLISHED LAST. `startPreview` has already proved the
@@ -370,9 +372,9 @@ export class PreviewManager {
       const host = `${previewGenerationHost(input.orgId, input.projectRunId, generation)}.${this.deps.config.domain}`;
       const approved = store.listApprovedHosts(input.orgId, input.projectId);
       // A run in flight has declared no hosts, so the effective set is empty
-      // and egress is denied — which is the right default for code nobody has
+      // and only operator-approved resource egress is available to code nobody has
       // finished writing.
-      const { allowed } = effectiveEgressHosts([], approved);
+      const { allowed } = effectiveEgressHosts([], approved, this.deps.config.allowedHosts);
 
       if (classified.kind === 'static') {
         this.deps.routes.set(host, {
@@ -407,6 +409,7 @@ export class PreviewManager {
             // recreates the directory it is about to mount.
             preparedWorkspace: workspace,
             entry: classified.entry ?? '',
+            allowedHosts: allowed,
           }
         );
         this.deps.routes.set(host, {
@@ -602,6 +605,7 @@ export class PreviewManager {
         ],
         app: { kind: 'preview-app', ownerId, name: this.deps.launcher.unitName('preview-app', ownerId) },
         relay: { kind: 'preview-ingress', ownerId, name: this.deps.launcher.unitName('preview-ingress', ownerId) },
+        proxy: { kind: 'preview-egress-proxy', ownerId, name: this.deps.launcher.unitName('preview-egress-proxy', ownerId) },
       }
     );
   }

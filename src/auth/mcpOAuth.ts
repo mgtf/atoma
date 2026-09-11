@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { z } from 'zod';
 import type { AuthGate } from './gate.js';
 import { MCP_CODE_TTL_MS, MCP_OAUTH_SCOPE, oauthHash } from './mcpOAuthStore.js';
-import { parseCookieHeader, serializeCookie, SESSION_COOKIE } from './sessions.js';
+import { authCookieName, parseCookieHeader, serializeCookie, SESSION_COOKIE } from './sessions.js';
 import { BoundedFixedWindowRateLimiter } from './rate-limit.js';
 import type { PlatformEventSink } from '../contracts/platformEvents.js';
 
@@ -77,7 +77,7 @@ export class McpOAuth {
 
   /** Only an opaque pending request can resume after the existing upstream login. */
   loginReturn(req: IncomingMessage): { location: string; cookie: string } {
-    const id = singleCookie(req, RETURN_COOKIE);
+    const id = singleCookie(req, authCookieName(RETURN_COOKIE, this.options.origin.protocol === 'https:'));
     const pending = id ? this.pending.get(id) : null;
     return { location: pending && pending.expiresAt > Date.now() ? `/oauth/authorize?request=${id}` : '/',
       cookie: serializeCookie(RETURN_COOKIE, '', { secure: this.options.origin.protocol === 'https:', path: '/auth', maxAgeSeconds: 0 }) };
@@ -189,7 +189,7 @@ export class McpOAuth {
     }
     if (!id || !pending) throw new Error('expired authorization request');
     const viewer = this.options.gate.resolve(req);
-    const session = singleCookie(req, SESSION_COOKIE);
+    const session = singleCookie(req, authCookieName(SESSION_COOKIE, this.options.origin.protocol === 'https:'));
     if (!viewer || !session) {
       if (req.method !== 'GET') { json(res, 401, { error: 'login_required' }); return; }
       res.setHeader('set-cookie', serializeCookie(RETURN_COOKIE, id, { secure: this.options.origin.protocol === 'https:',

@@ -4,7 +4,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
  * WHO MAY OPEN THIS PREVIEW, AND FOR HOW LONG.
  *
  * A preview lives on its own origin, which carries no Atoma cookie — that is
- * the whole point of putting it on a separate registrable domain. So the
+ * the whole point of putting it on a separate host namespace. So the
  * gateway needs its own way to know that the browser in front of it was sent
  * by an authenticated member, and a CLAIM is that way: a one-time secret the
  * control plane mints after checking the session, which the gateway exchanges
@@ -232,7 +232,7 @@ export class PreviewClaimRegistry {
    * This is what the parent's heartbeat calls, and it is BY BINDING rather
    * than by token on purpose: the grant token is a cookie on the preview
    * origin, which the control plane can neither read nor be sent — that
-   * separation is the whole reason the preview lives on its own registrable
+   * separation is the whole reason the preview lives on its own host
    * domain. So the parent proves the right to extend the way it proves
    * everything else, with its own authenticated session, and the registry
    * matches on the binding that session establishes.

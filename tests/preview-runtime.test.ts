@@ -162,6 +162,17 @@ function deps(launcher: FakeLauncher, probe = async (): Promise<boolean> => true
 const input = () => ({ ownerId: 'prev-1', sourceWorkspace: source, entry: 'server.js' });
 
 describe('preview start order', () => {
+  it('starts the egress proxy before the app and cleans it up if readiness fails', async () => {
+    const launcher = new FakeLauncher({ readyFails: 'preview-app' });
+    await expect(startPreview(deps(launcher), {
+      ...input(), allowedHosts: ['fonts.googleapis.com'],
+    })).rejects.toMatchObject({ code: 'readiness-timeout' });
+    const calls = launcher.calls.join('\n');
+    expect(calls).toContain('preview-egress-proxy');
+    expect(calls).toContain('stop:preview-egress-proxy');
+    expect(launcher.armed).toBe(false);
+  });
+
   it('purges, arms, then creates in dependency order', async () => {
     const launcher = new FakeLauncher();
 
@@ -385,19 +396,27 @@ describe('preview configuration', () => {
     expect(snapshotPreviewConfig(valid).image).toBe(`atoma-preview@${DIGEST}`);
   });
 
-  it('refuses a preview domain that shares a registrable domain with the visualizer', () => {
-    expect(previewDomainCollides('previews.example.com', 'https://app.example.com')).toBe(true);
+  it('defaults to public asset hosts and accepts an explicit empty network policy', () => {
+    expect(snapshotPreviewConfig(valid).allowedHosts).toContain('fonts.googleapis.com');
+    expect(snapshotPreviewConfig({ ...valid, [PREVIEW_ENV.allowedHosts]: '' }).allowedHosts).toEqual([]);
+    expect(() => snapshotPreviewConfig({ ...valid, [PREVIEW_ENV.allowedHosts]: '127.0.0.1' })).toThrow();
+  });
+
+  it('accepts same-site preview namespaces but refuses control-plane overlap', () => {
+    expect(previewDomainCollides('previews.example.com', 'https://app.example.com')).toBe(false);
     expect(previewDomainCollides('app.example.com', 'https://app.example.com')).toBe(true);
     expect(previewDomainCollides('previews.example.net', 'https://app.example.com')).toBe(false);
+    expect(snapshotPreviewConfig({ ...valid, [PREVIEW_ENV.domain]: 'previews.atoma.run' },
+      { visualizerOrigin: 'https://atoma.run' }).domain).toBe('previews.atoma.run');
     // An origin that will not parse is not proof of safety.
     expect(previewDomainCollides('previews.example.net', 'not-a-url')).toBe(true);
 
     expect(() =>
       snapshotPreviewConfig(
-        { ...valid, [PREVIEW_ENV.domain]: 'previews.example.com' },
+        { ...valid, [PREVIEW_ENV.domain]: 'example.com' },
         { visualizerOrigin: 'https://app.example.com' }
       )
-    ).toThrow(/separate registrable domain/);
+    ).toThrow(/separate host namespace/);
   });
 
   it('refuses runc without the explicit escape hatch, and always behind the gate', () => {
@@ -460,7 +479,7 @@ describe('preview configuration', () => {
     // refused one check earlier. Unparseable is never proof of safety in
     // either place.
     expect(() => snapshotPreviewConfig(dev, { visualizerOrigin: 'not-a-url' })).toThrow(
-      /separate registrable domain/
+      /separate host namespace/
     );
   });
 

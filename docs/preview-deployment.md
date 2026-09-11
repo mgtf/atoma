@@ -96,21 +96,20 @@ wildcard proxy the preview origins need in front of it.
 
 ## 2. The domain
 
-**It must be a separate registrable domain from the visualizer's**, and atoma
-refuses to boot otherwise. The session cookie is host-only, so it is never sent
-to a preview host — but a shared registrable domain puts model-authored code
-within reach of cookie-scoping tricks and same-site assumptions the design
-relies on. The check is conservative on purpose (it compares the lowest two
-labels), so it refuses more configurations than strictly necessary.
+A dedicated subdomain is supported, including `previews.atoma.run` for a
+visualizer at `https://atoma.run`. The preview namespace must not equal or
+contain the visualizer host. A separate registrable domain remains supported.
 
-```
-visualizer   atoma.run
-previews    *.previews.example.net      A/AAAA -> the same host
-```
+HTTPS authentication uses `__Host-` cookies (Secure, Path=/, no Domain), and
+never accepts the former unprefixed cookies. Existing HTTPS users must log in
+again after this upgrade. Preview responses carry a CSP sandbox even when
+opened directly, disallow domain relaxation and restrict resource requests;
+control-plane mutations still require the exact application Origin.
 
-`atoma.run` is the one public name of the product. Previews cannot live under
-it: a subdomain such as `previews.atoma.run` shares its registrable domain and
-is refused at boot, so the preview domain is a second, purpose-bought name.
+For this deployment, create `*.previews.atoma.run` pointing at the VPS, arrange
+wildcard TLS, and proxy that wildcard host to `127.0.0.1:4311`. Configure
+`ATOMA_PREVIEW_DOMAIN=previews.atoma.run` (without `*.`). Do not enable previews
+until the image digest, DNS and TLS are ready.
 
 One host per preview GENERATION, derived from `(orgId, runId, generation)`. A
 restart mints a new generation and therefore a new origin, which is what makes
@@ -129,7 +128,7 @@ atoma.run {
     reverse_proxy 127.0.0.1:4111
 }
 
-*.previews.example.net {
+*.previews.atoma.run {
     tls {
         dns <your-provider>          # wildcard needs a DNS-01 challenge
     }
@@ -164,9 +163,11 @@ from [automatic deployment](automatic-deployment.md):
 ATOMA_VIZ_AUTH=1
 ATOMA_VIZ_PUBLIC_ORIGIN=https://atoma.run
 ATOMA_PREVIEW=1
-ATOMA_PREVIEW_DOMAIN=previews.example.net
+ATOMA_PREVIEW_DOMAIN=previews.atoma.run
 ATOMA_PREVIEW_IMAGE=<registry>/atoma-preview@sha256:...
+ATOMA_PREVIEW_GATEWAY_HOST=127.0.0.1
 ATOMA_PREVIEW_GATEWAY_PORT=4311
+ATOMA_PREVIEW_RUNTIME=runsc
 ```
 
 The auth gate is a PRECONDITION, not a companion setting: a preview belongs to
@@ -195,13 +196,31 @@ the caller gets `429` with a `Retry-After`.
 
 ## 6. Egress
 
-Denied by default. A preview reaches nothing — not the internet, not the
-control plane, not another tenant's container. An organisation admin may
-approve specific hosts, and only hosts a delivered run of that project actually
-requested: an approval for a host nobody asked for is a standing permission
-nobody reviewed. Changing the set stops that project's live previews, so the
-next generation gets a coherent policy rather than a running one whose rules
-changed underneath it.
+Only approved destinations are reachable. The operator resource baseline below
+applies to delivered and in-flight previews. Organisation admins may additionally
+approve hosts a delivered project requested. Changing project approvals stops
+its live previews so the next generation gets a coherent policy.
 
-Previews of a run still IN FLIGHT get no egress at all: the run has declared no
-hosts yet, which is the right default for code nobody has finished writing.
+## Operator-approved network access
+
+`ATOMA_PREVIEW_ALLOWED_HOSTS` is a comma-separated list of exact public DNS
+hosts. An explicitly empty value disables operator-approved external access.
+The default permits Google Fonts (`fonts.googleapis.com`, `fonts.gstatic.com`),
+jsDelivr and unpkg. Browser resource policy and Node preview proxies use the
+same effective list. Each Node preview gets a proxy owned by its generation;
+its application container retains an isolated internal network.
+
+Project runs now enable proxied egress by default. `ATOMA_EGRESS=0` disables
+it; `ATOMA_EGRESS_ALLOWLIST` replaces its default registry and resource hosts.
+Chromium uses the worker proxy explicitly, while localhost probes remain direct.
+Changes take effect for new runs and preview generations after server restart.
+
+To exercise the live network path locally (Docker and the worker image required):
+
+```bash
+ATOMA_NETWORK_LIVE_TEST=1 npx vitest run tests/preview-egress.test.ts
+```
+
+This smoke checks an approved HTTPS destination and refusal of the control-plane
+host from a Node preview. It uses the local `runc` development runtime; the
+separate gVisor isolation suite remains the production confinement proof.

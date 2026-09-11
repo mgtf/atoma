@@ -255,6 +255,22 @@ describe('launcher preview profiles', () => {
     expect(args).toContain('com.docker.network.bridge.gateway_mode_ipv4=isolated');
   });
 
+  it('derives a preview app proxy from its own generation and labels its proxy for cleanup', async () => {
+    const { launcher, calls } = previewLauncher();
+    const net = await launcher.createNetwork({ family: 'preview', kind: 'internal', ownerId: 'prev-net' });
+    await launcher.startUnit({ kind: 'preview-egress-proxy', ownerId: 'prev-net', allowlist: ['fonts.googleapis.com'] }, [net]);
+    const proxy = calls.find((args) => args.includes('/app/dist/tools/egressProxy.js'))!;
+    expect(proxy).toContain('dev.atoma.owner=preview');
+    await launcher.startUnit({
+      kind: 'preview-app', ownerId: 'prev-net', entry: 'server.js', egress: true,
+      workspace: { ownerId: 'prev-net', id: launcherObjectId('prev-net') },
+    }, [net]);
+    expect(calls.at(-1)).toContain(`HTTPS_PROXY=http://${launcher.unitName('preview-egress-proxy', 'prev-net')}:3128`);
+    expect(calls.at(-1)).toContain('NODE_USE_ENV_PROXY=1');
+    await launcher.purgeOwner('preview', 'prev-net');
+    expect(calls).toContainEqual(['rm', '-f', launcher.unitName('preview-egress-proxy', 'prev-net')]);
+  });
+
   it('runs the application under gVisor, read-only, non-root and bounded', async () => {
     const { launcher, calls } = previewLauncher();
     const net = await launcher.createNetwork({

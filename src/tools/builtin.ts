@@ -1319,6 +1319,10 @@ function observedDocumentFor(
 }
 
 export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
+  // Chromium does not consume HTTP(S)_PROXY like Node and package managers.
+  // Capture the operator/worker environment before any generated code runs.
+  const proxy = process.env['HTTPS_PROXY'] ?? process.env['HTTP_PROXY'];
+  const proxyArgs = proxy ? [`--proxy-server=${proxy}`] : [];
   // One shared browser per sandbox so we don't pay the 500ms+ launch cost on
   // every validation iteration.
   let sharedBrowser: Browser | null = null;
@@ -1326,7 +1330,7 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
     if (sharedBrowser && sharedBrowser.connected) return sharedBrowser;
     const browser = await puppeteer.launch({
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      args: ['--no-sandbox', '--disable-setuid-sandbox', ...proxyArgs],
       // Puppeteer defaults this to 180s, so a single wedged CDP command
       // stalls for three minutes. Observed: one call spent 546s mostly
       // inside `Input.dispatchMouseEvent timed out`. Local pages answer in

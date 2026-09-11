@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
  * transport; these are the decisions.
  *
  * THE ORIGIN IS THE ASSET. A preview serves model-authored code to a member's
- * browser, so it gets its own registrable domain (no Atoma cookie ever reaches
+ * browser, so it gets its own host namespace (no host-only Atoma cookie ever reaches
  * it) and its own host PER GENERATION. A restart mints a new generation and
  * therefore a new origin, which is what makes stale service workers, storage
  * and caches from a previous generation unable to control the next — a
@@ -161,6 +161,8 @@ export function previewResponseHeaders(
   const self = ["'self'", ...hosts].join(' ');
   return {
     'content-security-policy': [
+      // Enforce the iframe boundary even when a preview is opened directly.
+      'sandbox allow-scripts allow-same-origin allow-forms',
       `default-src ${self}`,
       `connect-src ${self}`,
       // `'unsafe-inline'` IS A DEVIATION from the design's literal
@@ -188,6 +190,7 @@ export function previewResponseHeaders(
       "form-action 'self'",
     ].join('; '),
     'permissions-policy': [
+      'document-domain=()',
       'accelerometer=()',
       'camera=()',
       'clipboard-read=()',
