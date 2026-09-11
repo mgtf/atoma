@@ -7,6 +7,12 @@ import type { LlmCompletionRequest, LlmCompletionResponse, ToolInvocationInfo } 
 const actionSchema = z.object({
   type: z.enum(['tool', 'final']), name: z.string(), argumentsJson: z.string(), text: z.string(),
 }).strict();
+
+/** Recognize the same envelope the dispatcher validates, without executing it. */
+export function isCodexToolAction(text: string): boolean {
+  try { return actionSchema.safeParse(JSON.parse(text)).success; }
+  catch { return false; }
+}
 const OUTPUT_SCHEMA = {
   type: 'object', additionalProperties: false,
   properties: { type: { type: 'string', enum: ['tool', 'final'] }, name: { type: 'string' }, argumentsJson: { type: 'string' }, text: { type: 'string' } },
@@ -18,6 +24,9 @@ You have no native tools. Never use Codex built-in tools or access its working d
 To request ONE of the tools listed below, return exactly one JSON object:
 {"type":"tool","name":"<declared tool name>","argumentsJson":"<JSON object encoded as a string>","text":""}
 The Atoma host executes it and returns the observed result in the next transcript.
+Emit this object as your final response and end the turn immediately, even for a tool request.
+Do not emit actions as progress messages. Only the first action is accepted;
+anything after it is discarded because its required tool result is not available yet.
 Choose subsequent actions from those results. Never invent execution or verification.
 When finished, return {"type":"final","name":"","argumentsJson":"{}","text":"<your complete final response>"}.
 The text field contains the response required by the task, including any requested JSON.
@@ -62,15 +71,20 @@ export async function completeCodexToolLoop(
       try { action = actionSchema.parse(JSON.parse(response.text)); }
       catch { throw new Error('Codex returned an invalid Atoma tool-protocol response'); }
       if (action.type === 'final') return { ...response, text: action.text, usage };
-      let args: Record<string, unknown>;
-      try { args = z.record(z.string(), z.unknown()).parse(JSON.parse(action.argumentsJson)); }
-      catch { throw new Error('Codex returned invalid Atoma tool arguments'); }
       if (finalizing) throw new Error('Codex requested a tool after its tool budget was exhausted');
       transcript.push({ role: 'assistant', content: action });
       const startedAt = Date.now();
       let result: unknown;
       let error: string | undefined;
-      if (!declared.has(action.name)) {
+      let args: Record<string, unknown> = {};
+      try { args = z.record(z.string(), z.unknown()).parse(JSON.parse(action.argumentsJson)); }
+      catch {
+        error = 'Invalid Atoma tool arguments: argumentsJson must encode a JSON object. No tool was executed. Escape quotes and newlines inside string values and resend the corrected action.';
+      }
+      if (error !== undefined) {
+        // Return a failed observation within the existing iteration budget.
+        // Never guess or repair executable arguments on the model's behalf.
+      } else if (!declared.has(action.name)) {
         error = offScopeToolMessage(declared, action.name);
       } else {
         try { result = await req.executor.execute(action.name, args); }

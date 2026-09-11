@@ -875,6 +875,31 @@ describe('Codex L1 host-side action loop', () => {
     return [JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: JSON.stringify(action) } }),
       JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 10, output_tokens: 3, cached_input_tokens: 2 } })];
   }
+  it('executes only the first action in a multi-message turn before requesting continuation', async () => {
+    const execute = vi.fn(async () => ({ content: 'observed-file' }));
+    const observe = vi.fn();
+    const inputs: string[] = [];
+    const client = new CodexCliLlmClient({ env: {}, spawnFn: (_args, input) => {
+      inputs.push(input);
+      return fakeChild({ lines: inputs.length === 1 ? [
+        JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'Starting work' } }),
+        ...messages({ type: 'tool', name: 'read_file', arguments: { path: 'proof.txt' } }).slice(0, 1),
+        ...messages({ type: 'tool', name: 'write_file', arguments: { path: 'unobserved.txt', content: 'invented' } }).slice(0, 1),
+        ...messages({ type: 'final', text: 'No tool results were returned' }),
+      ] : messages({ type: 'final', text: 'Verified observed-file' }) });
+    } });
+    const result = await client.complete(req({ tools: makeTools(['read_file', 'write_file']),
+      executor: { execute, has: () => true }, onToolInvocation: observe }));
+    expect(execute).toHaveBeenCalledExactlyOnceWith('read_file', { path: 'proof.txt' });
+    expect(observe).toHaveBeenCalledTimes(1);
+    expect(inputs).toHaveLength(2);
+    expect(inputs[1]).toContain('observed-file');
+    expect(inputs[1]).not.toContain('unobserved.txt');
+    expect(inputs[1]).not.toContain('No tool results were returned');
+    expect(result.text).toBe('Verified observed-file');
+    expect(result.usage).toMatchObject({ inputTokens: 16, outputTokens: 6, cacheReadInputTokens: 4 });
+  });
+
   it('keeps each subprocess isolated, refuses off-scope tools, and feeds observed results back', async () => {
     const execute = vi.fn(async () => 'observed-' + 'x'.repeat(25000));
     const observe = vi.fn();
@@ -913,11 +938,39 @@ describe('Codex L1 host-side action loop', () => {
     expect(calls).toBe(2);
     expect(execute).toHaveBeenCalledTimes(1);
   });
-  it('rejects malformed actions without execution and retains their usage', async () => {
+  it('returns invalid arguments without execution so the next turn can correct them', async () => {
+    const execute = vi.fn(async () => 'written');
+    const observe = vi.fn();
+    const inputs: string[] = [];
+    const actions = [
+      { type: 'tool', name: 'write_file', arguments: 'bad' },
+      { type: 'tool', name: 'write_file', arguments: { path: 'proof.txt', content: 'hello\nworld' } },
+      { type: 'final', text: 'done' },
+    ];
+    const client = new CodexCliLlmClient({ env: {}, spawnFn: (_args, input) => {
+      inputs.push(input);
+      const lines = messages(actions.shift());
+      if (inputs.length === 1) {
+        const event = JSON.parse(lines[0]!);
+        const action = JSON.parse(event.item.text);
+        action.argumentsJson = '{"path":"proof.txt","content":"hello\nworld"}';
+        event.item.text = JSON.stringify(action);
+        lines[0] = JSON.stringify(event);
+      }
+      return fakeChild({ lines });
+    } });
+    const result = await client.complete(req({ tools: makeTools(['write_file']),
+      executor: { execute, has: () => true }, onToolInvocation: observe }));
+    expect(execute).toHaveBeenCalledExactlyOnceWith('write_file', { path: 'proof.txt', content: 'hello\nworld' });
+    expect(inputs[1]).toContain('No tool was executed');
+    expect(observe.mock.calls[0]?.[0]).toMatchObject({ error: expect.stringContaining('Invalid Atoma') });
+    expect(result.usage).toMatchObject({ inputTokens: 24, outputTokens: 9 });
+  });
+  it('bounds repeated invalid arguments by the existing tool budget', async () => {
     const execute = vi.fn();
     const client = new CodexCliLlmClient({ env: {}, spawnFn: () => fakeChild({ lines: messages({ type: 'tool', name: 'write_file', arguments: 'bad' }) }) });
-    await expect(client.complete(req({ tools: makeTools(['write_file']), executor: { execute, has: () => true } })))
-      .rejects.toMatchObject({ message: expect.stringContaining('invalid Atoma'), partialUsage: { inputTokens: 8, outputTokens: 3 } });
+    await expect(client.complete(req({ tools: makeTools(['write_file']), executor: { execute, has: () => true }, maxToolIterations: 1 })))
+      .rejects.toMatchObject({ message: expect.stringContaining('budget was exhausted'), partialUsage: { inputTokens: 16, outputTokens: 6 } });
     expect(execute).not.toHaveBeenCalled();
   });
   it('does not issue another model call after cancellation during an action', async () => {

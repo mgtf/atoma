@@ -32,8 +32,14 @@ Neighbours:
   `sub:openai`/`own:openai` stay on the Codex CLI on all three tiers.
   Tool-bearing requests use `codexToolLoop`: a strict JSON action protocol
   over isolated text completions. Only declared names reach `req.executor`;
-  results are observed before model-facing truncation. A finite tool budget
-  permits one finalization, which cannot execute tools. Abort and partial
+  results are observed before model-facing truncation. The loop consumes
+  only the first valid action envelope per subprocess response;
+  later messages cannot have observed its result and are discarded. The
+  child is still drained and reaped so usage, errors and profile leases remain honest.
+  Invalid argument JSON returns a failed observation without executing a tool;
+  the model may correct it within the same iteration budget. Never repair or
+  reinterpret executable arguments on its behalf.
+  A finite tool budget permits one finalization, which cannot execute tools. Abort and partial
   usage propagate across the complete loop. No Codex-native tools are enabled.
   Acceptance evidence: [codex-all-tiers-2026-09-08](../../docs/incidents/codex-all-tiers-2026-09-08.md).
 - Effort settings belong on strategy calls only. Validators and prefilters are

@@ -1,4 +1,4 @@
-import { completeCodexToolLoop } from './codexToolLoop.js';
+import { completeCodexToolLoop, isCodexToolAction } from './codexToolLoop.js';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
@@ -444,10 +444,12 @@ export interface CodexOutcome {
  * Fold Codex's JSONL event stream into an outcome. Tolerant by design: an
  * unparseable line is skipped rather than fatal (the CLI is free to add
  * event types, and a cosmetic addition must not take a run down), and the
- * LAST agent message wins so a preamble cannot displace the real payload.
+ * LAST agent message wins for text completions. In the tool protocol the
+ * FIRST valid action wins: later messages have not observed its result.
  */
-export function foldCodexEvents(lines: readonly string[]): CodexOutcome {
+export function foldCodexEvents(lines: readonly string[], toolProtocol = false): CodexOutcome {
   let text = '';
+  let firstAction: string | undefined;
   let usage: LlmCompletionResponse['usage'] = { inputTokens: 0, outputTokens: 0 };
   let error: CodexFailureCode | undefined;
   for (const line of lines) {
@@ -464,6 +466,11 @@ export function foldCodexEvents(lines: readonly string[]): CodexOutcome {
       const item = e['item'] as { type?: string; text?: string; message?: string } | undefined;
       if (item?.type === 'agent_message' && typeof item.text === 'string' && item.text.trim()) {
         text = item.text;
+        // Subsequent actions cannot have observed the first action's result.
+        // Preserve its envelope, but still drain the child for usage/errors.
+        if (toolProtocol && firstAction === undefined && isCodexToolAction(item.text)) {
+          firstAction = item.text;
+        }
       }
       // An `error` ITEM is Codex commentary (e.g. "model metadata not
       // found, defaulting to fallback"), NOT a failed turn — it arrives
@@ -492,7 +499,7 @@ export function foldCodexEvents(lines: readonly string[]): CodexOutcome {
       }
     }
   }
-  return { text, usage, ...(error !== undefined ? { error } : {}) };
+  return { text: firstAction ?? text, usage, ...(error !== undefined ? { error } : {}) };
 }
 
 /**
@@ -735,7 +742,7 @@ export class CodexCliLlmClient implements LlmClient {
       };
     }
 
-    const outcome = foldCodexEvents(lines);
+    const outcome = foldCodexEvents(lines, outputSchema !== undefined);
     // A dead subprocess that emitted neither an answer nor a typed error
     // (missing CLI, auth failure, crash) must not read as an empty answer.
     if (outcome.error === undefined && outcome.text.trim().length === 0) {
