@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { PREVIEW_BROWSER_SANDBOX } from '../../contracts/preview.js';
 import type { VizPreviewSummary } from '../client/types.js';
 
 /**
@@ -209,7 +210,7 @@ export function PreviewPlane({
             // would not work for any app built from more than one file.
             // `allow-popups` is deliberately absent: generated code opening
             // windows over the member's browser is not review evidence.
-            sandbox="allow-scripts allow-same-origin allow-forms"
+            sandbox={PREVIEW_BROWSER_SANDBOX}
             referrerPolicy="no-referrer"
             allow=""
             onLoad={() => setLoaded(true)}

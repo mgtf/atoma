@@ -665,3 +665,20 @@ describe('root-owned Node preview copies', () => {
     expect(vi.mocked(chownSync).mock.calls.every(([path]) => String(path).startsWith(join(root, 'copies')))).toBe(true);
   });
 });
+
+
+describe('a terminal run with an old snapshot', () => {
+  it.each(['failed', 'cancelled'] as const)('does not advertise reopening a %s run', async (terminal) => {
+    const a = actor('terminal');
+    const p = seedProject(a, 'terminal');
+    const r = seedRunningRun(a, p, 'terminal');
+    await service.open(viewerFor(a), p, r, { inFlight: true });
+    projects.transitionProjectRun({ orgId: a.orgId, projectRunId: r, from: 'running', to: terminal, error: 'run stopped' });
+    expect(service.status(viewerFor(a), p, r).availability).toBe('unavailable');
+    const stopped = await service.stop(viewerFor(a), p, r);
+    expect(stopped.availability).toBe('unavailable');
+    expect(stopped.state).toBe('stopped');
+    expect(service.heartbeat(viewerFor(a), p, r, stopped.generation).availability).toBe('unavailable');
+    await expect(service.open(viewerFor(a), p, r, { inFlight: true })).rejects.toThrow('preview unavailable');
+  });
+});

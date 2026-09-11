@@ -70,7 +70,9 @@ hides the control for exactly that answer — so the preview could not be asked
 for, therefore never existed, therefore stayed unavailable. `runInFlight`
 closes that loop and still allocates nothing. It is also why `stop` re-reads
 through the service, and why the client re-asks on a run-status change: the
-manager knows about the instance, never about the run.
+manager knows about the instance, never about the run. An explicit terminal
+run status overrides the historical in-flight source: a stopped snapshot must
+not advertise a reopening that requires a delivered descriptor.
 
 Three rules make it safe: the run's workspace is only ever READ; the COPY is
 classified, never the live workspace, so the classifier sees bytes that cannot
@@ -472,7 +474,8 @@ HERE is what the preview's own shape forces on it.
   nothing and every separate script or stylesheet is blocked — nothing built
   from more than one file would work. The isolation is the separate registrable
   domain carrying no Atoma cookie, not the sandbox flag. `allow-popups` stays
-  absent.
+  absent. Downloads are permitted for application exports. The iframe and CSP
+  share `PREVIEW_BROWSER_SANDBOX`; neither grants top-level navigation.
 - **NO "open in a new tab", and it is not an omission.** The grant cookie is
   `Partitioned`, keyed to the visualizer as the embedding site, so a TOP-LEVEL
   tab on the preview origin is a different partition and would arrive with no

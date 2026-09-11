@@ -102,6 +102,7 @@ describe('the preview plane', () => {
     expect(frame!.getAttribute('referrerpolicy')).toBe('no-referrer');
     const sandbox = frame!.getAttribute('sandbox') ?? '';
     expect(sandbox.split(/\s+/)).toContain('allow-scripts');
+    expect(sandbox.split(/\s+/)).toContain('allow-downloads');
     // Granted deliberately: the preview is already isolated by its own
     // registrable domain, and an opaque origin would make the gateway's
     // `default-src 'self'` match nothing.

@@ -81,7 +81,9 @@ export function previewSummary(input: {
   // out" rather than "there is nothing here". What the snapshot then contains
   // is decided by classifying the COPY, which is the only honest moment to
   // decide it.
-  const inFlight = instance?.source === 'in-flight' || input.runInFlight === true;
+  // An explicit host status wins over the historical source of an instance.
+  // A stopped snapshot does not make a failed/cancelled run reopenable.
+  const inFlight = input.runInFlight ?? (instance?.source === 'in-flight');
   const requestedHosts = descriptor?.requestedHosts ?? [];
   const { allowed, blocked } = effectiveEgressHosts(requestedHosts, input.approvedHosts, input.operatorAllowedHosts);
   return previewSummarySchema.parse({

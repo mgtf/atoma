@@ -431,3 +431,8 @@ export const EXAMPLE_UNAVAILABLE_DESCRIPTOR: PreviewDescriptor = previewDescript
   requestedHosts: [],
   createdAt: '2026-08-31T12:00:00.000Z',
 });
+
+/** Shared browser permissions for the frame and gateway CSP.
+ * Downloads support local exports; popups and top-level navigation stay blocked.
+ */
+export const PREVIEW_BROWSER_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-downloads';

@@ -1,11 +1,12 @@
 import { it, expect } from 'vitest';
 import { createServer } from 'node:https';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import puppeteer from 'puppeteer';
 import { previewResponseHeaders } from '../src/preview/gateway.js';
+import { PREVIEW_BROWSER_SANDBOX } from '../src/contracts/preview.js';
 import { serializeCookie } from '../src/auth/sessions.js';
 
 it('isolates a same-site preview in a real HTTPS browser while preserving local storage', async () => {
@@ -20,12 +21,20 @@ it('isolates a same-site preview in a real HTTPS browser while preserving local 
     if (req.headers.host?.startsWith('atoma.test:')) {
       appRequests++;
       if (req.url === '/') res.setHeader('set-cookie', serializeCookie('atoma_session', 'trusted', { secure: true }));
-      res.end(req.headers.cookie ?? '');
+      if (req.url === '/') {
+        res.setHeader('content-type', 'text/html');
+        res.end(`<iframe sandbox="${PREVIEW_BROWSER_SANDBOX}" src="https://g1.previews.atoma.test:${req.headers.host.split(':')[1]}"></iframe>`);
+      } else res.end(req.headers.cookie ?? '');
       return;
     }
     res.writeHead(200, { ...previewResponseHeaders({ visualizerOrigin: origin, allowedHosts: [] }),
       'content-type': 'text/html' });
-    res.end('<!doctype html><title>Preview</title>');
+    res.end(`<!doctype html><title>Preview</title><button id="export">Export JSON</button>
+      <script>document.querySelector('#export').onclick = () => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([JSON.stringify({checks: [200]})], {type: 'application/json'}));
+        a.download = 'checks.json'; a.click();
+      };</script>`);
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
@@ -35,7 +44,15 @@ it('isolates a same-site preview in a real HTTPS browser while preserving local 
     '--ignore-certificate-errors', '--host-resolver-rules=MAP atoma.test 127.0.0.1, MAP g1.previews.atoma.test 127.0.0.1'] });
   try {
     const page = await browser.newPage();
+    const session = await page.createCDPSession();
+    await session.send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: root });
     await page.goto(origin);
+    const frameElement = await page.waitForSelector('iframe');
+    const frame = await frameElement!.contentFrame();
+    await frame.waitForSelector('#export');
+    await frame.click('#export');
+    await expect.poll(() => existsSync(join(root, 'checks.json')), { timeout: 5000 }).toBe(true);
+    expect(JSON.parse(readFileSync(join(root, 'checks.json'), 'utf8'))).toEqual({ checks: [200] });
     await page.goto(`https://g1.previews.atoma.test:${address.port}`);
     const before = appRequests;
     const result = await page.evaluate(async (appOrigin) => {

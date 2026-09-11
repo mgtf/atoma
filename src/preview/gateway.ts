@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { PREVIEW_BROWSER_SANDBOX } from '../contracts/preview.js';
 
 /**
  * THE GATEWAY'S POLICY — what a preview origin is, and what it may say.
@@ -162,7 +163,7 @@ export function previewResponseHeaders(
   return {
     'content-security-policy': [
       // Enforce the iframe boundary even when a preview is opened directly.
-      'sandbox allow-scripts allow-same-origin allow-forms',
+      `sandbox ${PREVIEW_BROWSER_SANDBOX}`,
       `default-src ${self}`,
       `connect-src ${self}`,
       // `'unsafe-inline'` IS A DEVIATION from the design's literal
