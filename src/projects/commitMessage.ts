@@ -148,7 +148,7 @@ export function publicationCommitMessage(input: PublicationCommitMessageInput): 
     '',
     `Published by atoma from run ${shortRun} of project ${project.slug}.`,
     '',
-    `Declared by this run — ${manifest.files.length} ${plural}, ${manifest.totalBytes} bytes.`,
+    `${manifest.source === 'workspace' ? 'Delivered workspace' : 'Declared by this run'} — ${manifest.files.length} ${plural}, ${manifest.totalBytes} bytes.`,
     'These are committed onto what the previous run published, so a path this',
     'repository holds that is absent below came from an earlier run and is',
     'not in this diff.',

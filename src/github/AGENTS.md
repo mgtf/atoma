@@ -69,8 +69,8 @@ Neighbours:
   repository. So a FIRST publication SEEDS the branch through the contents API
   with a real manifest file — never a placeholder, so no commit needs
   explaining later — and completes the tree with git data only when there is
-  more than one file. One file is one commit and the git data API is never
-  touched.
+  more than one file or an executable mode needs preserving. A single regular
+  file needs only the seed commit.
 - That defect survived because every publisher test mocks this client: the
   suite pinned a sequence GitHub refuses. The tests now encode the real one,
   and the shape was verified end to end against a throwaway private repository
@@ -87,7 +87,12 @@ Neighbours:
   repository on a 422 name collision, and nothing in the projects DDL forbids
   two projects of one organisation naming the same repository. A null
   `expectedHead` against a populated branch is therefore still a refusal with
-  zero writes — that refusal used to be a side effect of the empty-branch
+  zero writes unless this same publication holds a durable root-seed receipt.
+  That receipt is persisted before uploading the remaining tree: retry may
+  finish the exact seed or recognize its direct child with the exact desired
+  tree. Unrecorded seeds and unrelated heads remain refused. A crash between
+  the remote seed and persisting its receipt still requires operator recovery.
+  The unowned-branch refusal used to be a side effect of the empty-branch
   precondition, and it is now the stated guard.
 - `readBranchHead` DISCRIMINATES 404 from 409, which the old `getReference`
   collapsed into one `null` a line from the decision. 409 is "this repository
@@ -97,10 +102,10 @@ Neighbours:
   rather than re-seeded, because a second root history in a repository a tenant
   has already cloned is worse than a stopped publication.
 - An incremental commit MERGES onto the parent's tree (`base_tree`) and never
-  replaces it, so publication can add and overwrite but never remove. A
-  manifest is a model's plan-time list of what one run would write, and the
-  workspace is seeded from the previous delivered workspace, so absence from a
-  manifest says nothing about intent. Replacing would let "run 2 only touched
+  replaces it, so publication can add and overwrite but never remove. Legacy
+  manifests are model plan-time lists, while new manifests inventory the
+  finished workspace. This API remains additive for both: absence is never
+  translated into deletion implicitly. Replacing would let "run 2 only touched
   index.html" delete `app.js` from the tip while `app.js` still sits on disk in
   that very run. Deletion is therefore not expressible by publication at all —
   that is registered, not built.

@@ -1,9 +1,14 @@
+import { execFileSync, spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { haystackTestEnvironment } from './helpers/haystack.js';
+import { ANTHROPIC_PINS } from './tier-pins.js';
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { closeStoreHandles } from '../src/core/stores.js';
 import { AUTH_TABLES_DDL } from '../src/auth/store.js';
 import {
   GitHubApiError,
@@ -17,7 +22,9 @@ import { publicationCommitMessage } from '../src/projects/commitMessage.js';
 import { GitHubPublisher, PublicationSupersededError } from '../src/projects/publisher.js';
 import { ProjectStore } from '../src/projects/store.js';
 import { FakeGitHub } from './github-api-fake.js';
-import type { RunStats } from '../src/contracts/runStats.js';
+import { formatRunStatsEpilogue, type RunStats } from '../src/contracts/runStats.js';
+import { PreviewStore } from '../src/preview/store.js';
+import { recordDeliveredPreview } from '../src/preview/service.js';
 
 let root: string;
 let db: Database.Database;
@@ -46,7 +53,7 @@ const deliveredStats: RunStats = {
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'atoma-publisher-'));
-  db = new Database(':memory:');
+  db = new Database(join(root, 'product.db'));
   db.pragma('foreign_keys = ON');
   db.exec(AUTH_TABLES_DDL);
   store = new ProjectStore(db);
@@ -54,6 +61,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  closeStoreHandles();
   db.close();
   rmSync(root, { recursive: true, force: true });
 });
@@ -503,11 +511,11 @@ describe('coordinator publication retry', () => {
  * `GitHub repository branch already exists; initial publish refused`.
  */
 describe('two delivered runs of one project both reach the repository', () => {
-  function realClient(fake: FakeGitHub): GitHubAppClient {
+  function realClient(fake: FakeGitHub, fetcher: typeof fetch = fake.fetch): GitHubAppClient {
     const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
     return new GitHubAppClient(
       { appId: '123456', appSlug: 'atoma-test', privateKey, apiBaseUrl: 'https://api.github.test' },
-      { fetch: fake.fetch, now: () => Date.UTC(2026, 7, 23, 12, 0, 0) }
+      { fetch: fetcher, now: () => Date.UTC(2026, 7, 23, 12, 0, 0) }
     );
   }
 
@@ -555,6 +563,140 @@ describe('two delivered runs of one project both reach the repository', () => {
     const run = store.saveArtifactManifest(owner.orgId, reserved.run.projectRunId, built.manifest)!;
     return { run, workspace, hash: built.hash };
   }
+
+  it('preserves executable mode on the first single-file publication', async () => {
+    const fake = new FakeGitHub({ existing: ['alice/weather-lab'] });
+    await realClient(fake).publishManifestCommit({ token: 'test',
+      repository: { owner: 'alice', name: 'weather-lab' }, message: 'Deliver', expectedHead: null,
+      files: [{ path: 'start.sh', content: '#!/bin/sh\necho ready\n', mode: '100755' }] });
+    expect(fake.filesOn('alice', 'weather-lab', 'main').get('start.sh')?.mode).toBe('100755');
+  });
+
+  it('refuses a changed branch after recording an initial seed', async () => {
+    const fake = new FakeGitHub({ existing: ['alice/weather-lab'] });
+    const client = realClient(fake);
+    let seedCommitSha: string | null = null;
+    const input = { token: 'test', repository: { owner: 'alice', name: 'weather-lab' },
+      branch: 'main', message: 'Deliver', expectedHead: null,
+      files: [{ path: 'README.md', content: 'Read me' }, { path: 'index.html', content: 'App' }] };
+    await expect(client.publishManifestCommit({ ...input, onSeed: seed => {
+      seedCommitSha = seed; throw new Error('interrupted');
+    } })).rejects.toThrow('interrupted');
+    await client.putContentsFile({ token: 'test', owner: 'alice', repository: 'weather-lab',
+      branch: 'main', path: 'human.txt', content: 'Keep', message: 'Human change' });
+    const head = fake.refSha('alice', 'weather-lab', 'main');
+    await expect(client.publishManifestCommit({ ...input, seedCommitSha })).rejects.toThrow(/branch already exists/);
+    expect(fake.refSha('alice', 'weather-lab', 'main')).toBe(head);
+    expect(fake.filesOn('alice', 'weather-lab', 'main').get('human.txt')?.text).toBe('Keep');
+    expect(fake.forcedUpdates).toBe(0);
+  });
+
+  it.each(['none', 'upload', 'receipt'] as const)('publishes a runnable clean checkout after failure at %s', async (failure) => {
+    const owner = actor('Alice');
+    const first = await deliveredRun(owner, 'User', 'alice');
+    const fake = new FakeGitHub();
+    let failUpload = failure === 'upload';
+    const client = realClient(fake, async (url, init) => {
+      if ((typeof url === 'string' ? url : url instanceof URL ? url.href : url.url).endsWith('/git/trees') && init?.method === 'POST' && failUpload) {
+        failUpload = false;
+        return new Response('{}', { status: 503 });
+      }
+      return fake.fetch(url, init);
+    });
+    if (failure === 'receipt') db.exec(`CREATE TRIGGER fail_publication_receipt BEFORE UPDATE ON project_publications
+      WHEN NEW.status = 'published' BEGIN SELECT RAISE(ABORT, 'receipt disk failure'); END`);
+    const publisher = new GitHubPublisher({ client, github, store, resolveUserAccessToken: async () => 'ghu_user-token' });
+    const previews = new PreviewStore(db);
+    const application = {
+      'server.js': `const http=require('node:http'),fs=require('node:fs');
+        const server=http.createServer((req,res)=>{
+          if(req.url==='/health'){res.end('healthy');return;}
+          const files={'/':'index.html','/app.js':'app.js','/assets/style.css':'assets/style.css'};
+          if(!files[req.url]){res.writeHead(404).end();return;}
+          fs.readFile(files[req.url],(err,bytes)=>{if(err)res.writeHead(500).end();else res.end(bytes);});
+        });server.listen(0,'127.0.0.1',()=>console.log(server.address().port));`,
+      'package.json': JSON.stringify({ scripts: { start: 'node server.js' } }),
+      'README.md': 'Run npm start',
+      'index.html': '<link rel="stylesheet" href="/assets/style.css"><h1>Postcard</h1><script src="/app.js"></script>',
+      'app.js': 'document.body.dataset.ready="true";',
+      'assets/style.css': 'body { color: navy; }',
+      '.atoma-probes.json': JSON.stringify({ version: 1, entries: [{ probe: 'http', path: '/health', status: 200, entry: 'server.js' }] }),
+      '.env': 'TOKEN=must-not-publish',
+    };
+    const coordinator = new ProjectRunCoordinator({
+      store, dbPath: join(root, 'product.db'), projectsRoot: root,
+      hostEnv: { ...haystackTestEnvironment(root), PATH: process.env.PATH, ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'test-key' },
+      publisher,
+      acquireLease: async () => ({ path: '/test/lease', attachChild: () => undefined, release: () => undefined }),
+      describeDeliveredPreview: subject => { recordDeliveredPreview(previews, subject); },
+      driver: async options => {
+        // Model calls are replaced; the runner/host files still cross a real
+        // child-process boundary before the real coordinator and GitHub client.
+        execFileSync(process.execPath, ['--input-type=module', '-e', `
+          import {mkdirSync,writeFileSync} from 'node:fs';
+          import {join,dirname} from 'node:path';
+          const files=JSON.parse(process.argv[1]),env=process.env;
+          for(const [name,bytes] of Object.entries(files)){
+            const target=join(env.ATOMA_BUILD_WORKSPACE,name);
+            mkdirSync(dirname(target),{recursive:true});writeFileSync(target,bytes);
+          }
+          mkdirSync(env.ATOMA_RUNS_DIR,{recursive:true});
+          writeFileSync(join(env.ATOMA_RUNS_DIR,env.ATOMA_RUN_ID+'.json'),JSON.stringify({
+            id:env.ATOMA_RUN_ID,endedAt:new Date().toISOString(),result:{summary:'delivered'}
+          }));
+          writeFileSync(env.ATOMA_ARTIFACT_MANIFEST_PATH,JSON.stringify({
+            version:1,runId:env.ATOMA_RUN_ID,generatedAt:new Date().toISOString(),
+            outputs:['package.json','README.md','server.js','.atoma-probes.json']
+          }));
+        `, JSON.stringify(application)], { env: options.env });
+        return formatRunStatsEpilogue(deliveredStats);
+      },
+    });
+    const started = await coordinator.start({ orgId: owner.orgId, principalId: owner.principalId,
+      projectId: first.project.projectId, request: { idempotencyKey: 'complete-app', goal: 'Build Network Postcard' } });
+    await coordinator.waitForIdle();
+    const finished = store.getProjectRun(owner.orgId, started.projectRunId)!;
+    expect(finished.status, finished.error ?? '').toBe('delivered');
+    expect(previews.getDescriptor(owner.orgId, started.projectRunId)).toMatchObject({ availability: 'available', kind: 'node' });
+    if (failure !== 'none') {
+      expect(store.getPublicationForRun(owner.orgId, started.projectRunId)?.status).toBe('failed');
+      expect(finished.stats).toEqual(deliveredStats);
+      const publicationId = store.getPublicationForRun(owner.orgId, started.projectRunId)!.publicationId;
+      const seed = new ProjectStore(db).publicationSeed(owner.orgId, publicationId);
+      expect(seed).toMatch(/^[a-f0-9]{40}$/);
+      expect(store.publicationSeed(randomUUID(), publicationId)).toBeNull();
+      expect(() => store.recordPublicationSeed(owner.orgId, publicationId, 'f'.repeat(40))).toThrow(/could not be recorded/);
+      if (failure === 'receipt') db.exec('DROP TRIGGER fail_publication_receipt');
+      await coordinator.retryPublication(owner.orgId, started.projectRunId);
+    }
+    expect(store.getPublicationForRun(owner.orgId, started.projectRunId)?.status).toBe('published');
+    const remote = fake.filesOn('alice', 'weather-lab', 'main');
+    expect([...remote.keys()].sort()).toEqual(['README.md','app.js','assets/style.css','index.html','package.json','server.js'].sort());
+    const published = join(root, 'published');
+    mkdirSync(published);
+    for (const [name, file] of remote) { mkdirSync(dirname(join(published,name)),{recursive:true}); writeFileSync(join(published,name),file.text); }
+    execFileSync('git',['init','-q',published]);
+    execFileSync('git',['-C',published,'add','.']);
+    execFileSync('git',['-C',published,'-c','user.name=Test','-c','user.email=test@example.test','commit','-qm','Published app']);
+    const checkout = join(root,'checkout');
+    execFileSync('git',['clone','-q',published,checkout]);
+    rmSync(started.hostPaths.workspacePath,{recursive:true,force:true});
+    const child=spawn(process.execPath,['server.js'],{cwd:checkout,stdio:['ignore','pipe','pipe']});
+    try {
+      const [chunk] = await once(child.stdout,'data',{signal:AbortSignal.timeout(5000)});
+      const port=Number(String(chunk).trim());
+      for (const [route, expected] of [['/health','healthy'],['/',application['index.html']],['/app.js',application['app.js']],['/assets/style.css',application['assets/style.css']]]) {
+        const response=await fetch(`http://127.0.0.1:${port}${route}`,{signal:AbortSignal.timeout(5000)});
+        expect(response.status).toBe(200); expect(await response.text()).toBe(expected);
+      }
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        const exited = once(child, 'exit', { signal: AbortSignal.timeout(5000) });
+        child.kill();
+        await exited;
+      }
+    }
+  }, 20000);
 
   it('commits the second run on top of the first, keeping what it did not declare', async () => {
     const owner = actor('Alice');

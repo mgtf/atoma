@@ -493,7 +493,10 @@ export class GitHubPublisher {
             branch: project.repositoryTarget.source.mode === 'pull-request' ? `atoma/run-${run.projectRunId}` : base.branch,
             baseBranch: base.branch, baseSha: base.commitSha,
             pullRequest: project.repositoryTarget.source.mode === 'pull-request' })
-        : await this.client.publishManifestCommit(commitInput);
+        : await this.client.publishManifestCommit({ ...commitInput,
+            seedCommitSha: this.store.publicationSeed(project.orgId, publication.publicationId),
+            onSeed: seed => this.store.recordPublicationSeed(project.orgId, publication.publicationId, seed),
+          });
 
       publishing = this.store.transitionPublication({
         orgId: project.orgId,

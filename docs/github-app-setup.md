@@ -92,9 +92,8 @@ unless both were granted. Existing-repository PR runs additionally request and v
 **Leave Workflows at No access.** It looks conditionally needed — GitHub
 requires it to write under `.github/workflows/` — but
 `assertPublishableArtifactPath`
-([`artifacts.ts`](../src/projects/artifacts.ts)) rejects any such
-path during manifest collection, before a single GitHub call, and its error
-message names this permission. Granting it changes nothing until that policy
+([`artifacts.ts`](../src/projects/artifacts.ts)) excludes these paths from finished-workspace inventories before upload.
+Legacy explicit-file manifests still refuse them with a permission error. Granting it changes nothing until that policy
 changes.
 
 **Organization permissions: none.** Repository creation under an organisation is
@@ -298,3 +297,13 @@ refused. Publication retains the existing manifest policy: additions and updates
 only, with workflows and sensitive paths excluded. Changes to a fork's head
 during a run are refused instead of overwriting those changes; start a fresh run
 from the updated branch. GitHub credentials stay on the control plane.
+
+
+Delivered runs publish a bounded inventory of the finished workspace, rather
+than only the root plan's predicted files. This includes generated frontend
+assets, lockfiles and nested application files. Atoma records, `.git`,
+`node_modules`, workflow files and secret-like paths are excluded. Other
+symlinks, special files and oversized inventories are refusals, never silent
+truncations. The inventory is rechecked before upload. This is a filename
+policy, not a review of file contents; repository visibility remains the
+choice made when the project was created.

@@ -147,7 +147,7 @@ list. These values come from the host snapshot, never a tenant prompt.
   is the ONE definition, read by the schema default and by the create form, and
   it is `private`. The reasons are recorded beside it, including the one that
   decides it: nothing in this pipeline reviews what gets published — the file
-  set is model-declared at plan time, the filter is filenames only, publication
+  set is the finished workspace inventory, the filter is filenames only, publication
   is automatic on delivery, and the manifest never crosses the API — so a
   public default hands an unreviewed set to the internet whenever nobody looks.
 - A new empty repository is created at PUBLICATION, not at project creation, so a
@@ -222,12 +222,18 @@ list. These values come from the host snapshot, never a tenant prompt.
 
 ## Delivery, and the evidence it is decided from
 
-- The accepted plan may declare the root `.atoma-probes.json` verification
-  record. The coordinator removes that one canonical path from publication
-  inputs, retaining the file for preview classification. Every other path
-  still passes the publication policy unchanged; an empty deliverable still
-  fails. Internal evidence must neither be published nor block an otherwise
-  valid delivery.
+- New delivery manifests inventory every publishable regular file in the
+  finished workspace, including files child work added after the root plan.
+  `source: workspace` distinguishes them from legacy plan-only manifests;
+  existing hashes and rows are never rewritten. The root plan declaration is
+  retained as run evidence, not used as the publication file allowlist.
+- Inventory uses the existing path jail, size/count limits and exclusions.
+  Internal records, VCS, dependencies, workflows and secret-like paths are
+  excluded before traversal; other symlinks and special files refuse delivery.
+  Revalidation of a workspace manifest compares the complete inventory again,
+  so added files cannot silently miss publication after delivery.
+- Delivery status and its manifest commit in one SQLite transaction. A failure
+  rolls both back; previews and publication run only after that transaction.
 
 - DELIVERY IS DECIDED FROM SIX DEPTH-1 TRACE MEMBERS, never from the whole
   document. `verifiedTrace` reads `id`, `endedAt`, `cancelled` and `degraded` as
@@ -239,19 +245,21 @@ list. These values come from the host snapshot, never a tenant prompt.
   made the NEXT run of that project seed from an older workspace, silently
   skipping the work, because `previousDeliveredWorkspace` reads only rows whose
   status is `delivered`.
+- First publication checkpoints its root seed in the private
+  `project_publications.seed_commit_sha` column before uploading the rest.
+  It is scoped to the same org/publication and survives failed retries and
+  restarts; it is never inferred from a ready repository or an observed head.
+  The exact retry authority lives in [src/github](../github/AGENTS.md).
 - `MAX_CONTROL_JSON_BYTES` now governs `declared-artifacts.json` ALONE, and the
   difference between the two files is the whole point: a declared manifest is
   small by contract and its CONTENT is model-chosen, so a size bound plus a
   whole-document parse fits it; a trace is a control-plane-owned path whose
   SIZE grows with the work. Bounding them the same way is what caused the
   erasure. Do not reunify them.
-- A trace-refused delivery still records NO cost: `finish()` keys its stats
-  exclusion on the PARSED outcome (`stats.outcome !== 'delivered'`), so a run
-  the runner called delivered and the trace refused persists
-  `stats_json = NULL` — `2857a579` lost $0.8421 and one learned skill that way.
-  Recorded, not fixed: a `failed` row may not carry `delivered` stats, so the
-  repair is a store-contract decision
-  ([register](../../docs/decided-not-built-2026-08-23.md)).
+- Host-side finalization failures retain the runner's measured spend. The
+  project stats outcome becomes failed/cancelled to match its persisted status;
+  the original runner outcome remains in the trace. No delivered stats are
+  attached to a failed row, and no paid work disappears from the accounting.
 - PUBLICATION IS A SEQUENCE, one row per run, and every delivered run reaches
   the repository. Exactly one commit used to be possible per project, because
   `repository_status = 'ready'` is terminal and routed every later run into the
@@ -307,12 +315,12 @@ list. These values come from the host snapshot, never a tenant prompt.
   repository, and public if they chose a public one. It is rendered once, by
   `publicationCommitMessage`, and its shape is a decision rather than a format.
 - SUBJECT: the goal through `eventLabel`, cut at a word boundary. BODY: the
-  provenance, the run's DECLARED output set, and the goal in full. TRAILERS:
+  provenance, the run's publication file set, and the goal in full. TRAILERS:
   `Atoma-Project` and `Atoma-Run`, so a machine can read them.
-- THE DECLARED SET IS THE REASON THE BODY EXISTS. Publication merges the
-  manifest onto the parent's tree, so the tree carries paths from earlier runs
-  and the diff shows only what changed — the run's declared outputs are NOT
-  recoverable from git. Nothing else in the message earns its place that way.
+- The body labels workspace inventories as delivered files and legacy
+  manifests as declared files. Publication still merges onto the parent's
+  tree: additions and updates are supported; deletion remains unimplemented
+  and must never be inferred from a legacy manifest's absent paths.
 - The goal is quoted INDENTED, and that is a guard, not a style. Git trailers
   are unindented `Key: value` lines at the end, and a goal is up to 4 000
   characters of tenant text that permits newlines — so a goal shaped like a

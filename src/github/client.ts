@@ -117,6 +117,10 @@ export interface PublishGitHubManifestInput {
    * second project of the same organisation is publishing into — out of reach.
    */
   readonly expectedHead: string | null;
+  /** Host-persisted receipt from this same publication, never an observed head. */
+  readonly seedCommitSha?: string | null;
+  /** Must persist before subsequent remote writes. */
+  readonly onSeed?: (commitSha: string) => void | Promise<void>;
 }
 
 /** What a branch reference read found. 404 and 409 mean different things. */
@@ -1269,11 +1273,30 @@ export class GitHubAppClient {
     const head = await this.readBranchHead(input.token, owner, repository, branch);
 
     if (input.expectedHead === null) {
-      // A FIRST publication. A branch that already has commits is refused with
-      // zero writes: this product has no authority over that history.
-      if (head.state === 'head') {
-        throw new GitHubDivergenceError(owner, repository, branch, head.sha);
+      if (input.seedCommitSha) {
+        const seedSha = sha(input.seedCommitSha, 'GitHub seed commit sha');
+        if (head.state !== 'head') throw new GitHubDivergenceError(owner, repository, branch);
+        const seed = await this.getCommit(input.token, owner, repository, seedSha);
+        const current = head.sha === seedSha ? seed : await this.getCommit(input.token, owner, repository, head.sha);
+        if (seed.parents.length !== 0 || (head.sha !== seedSha &&
+          (current.parents.length !== 1 || current.parents[0] !== seedSha))) {
+          throw new GitHubDivergenceError(owner, repository, branch, head.sha);
+        }
+        const entries = await this.blobEntries(input.token, owner, repository, files);
+        const treeSha = await this.createTree({ token: input.token, owner, repository, entries });
+        // A completed remote write whose local receipt failed converges only
+        // on the exact tree and direct parent recorded by this publication.
+        if (current.treeSha === treeSha) return Object.freeze({ branch, treeSha,
+          commitSha: head.sha, ref, baseSha: null, publishKind: 'created' as const });
+        if (head.sha !== seedSha) throw new GitHubDivergenceError(owner, repository, branch, head.sha);
+        const commitSha = await this.createCommit({ token: input.token, owner, repository,
+          message: input.message, treeSha, parents: [seedSha] });
+        await this.moveBranch({ token: input.token, owner, repository, branch,
+          expectedSha: seedSha, commitSha });
+        return Object.freeze({ branch, treeSha, commitSha, ref, baseSha: null, publishKind: 'created' as const });
       }
+      // Without a durable receipt, populated branches remain unowned.
+      if (head.state === 'head') throw new GitHubDivergenceError(owner, repository, branch, head.sha);
       // THE BRANCH IS SEEDED THROUGH THE CONTENTS API, always. A repository
       // with no commits refuses `git/blobs` and `git/trees` alike (409, "Git
       // Repository is empty"), so the first write cannot be a git-data write.
@@ -1296,7 +1319,8 @@ export class GitHubAppClient {
       // window. One file has been written by then, and saying so loudly beats
       // publishing the rest on top of content this product never saw.
       if (seeded.parents > 0) throw new GitHubDivergenceError(owner, repository, branch);
-      if (files.length === 1) {
+      await input.onSeed?.(seeded.commitSha);
+      if (files.length === 1 && seed.mode !== '100755') {
         return Object.freeze({
           branch,
           treeSha: seeded.treeSha,

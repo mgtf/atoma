@@ -18,6 +18,14 @@ interface Actor {
   principalId: string;
 }
 
+it('adds the private seed receipt to an existing publication table without changing rows', () => {
+  db.exec('ALTER TABLE project_publications DROP COLUMN seed_commit_sha');
+  new ProjectStore(db);
+  const columns = db.prepare('PRAGMA table_info(project_publications)').all() as { name: string }[];
+  expect(columns.some(column => column.name === 'seed_commit_sha')).toBe(true);
+  expect(store.publicationSeed(randomUUID(), randomUUID())).toBeNull();
+});
+
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'atoma-project-store-'));
   db = new Database(join(root, 'product.db'));
@@ -330,6 +338,23 @@ describe('ProjectStore — idempotency and CAS state machines', () => {
         error: 'late writer',
       })
     ).toThrow(ProjectStateConflict);
+  });
+
+  it('rolls back delivery when manifest persistence fails, then completes both together', () => {
+    const alice = actor('Alice');
+    const project = createProject(alice);
+    const run = store.createProjectRun({
+      orgId: alice.orgId, projectId: project.projectId, principalId: alice.principalId,
+      request: runRequest('atomic-delivery'), hostPaths: hostPaths('atomic-delivery'),
+    })!.run;
+    store.transitionProjectRun({ orgId: alice.orgId, projectRunId: run.projectRunId, from: 'queued', to: 'running' });
+    db.exec(`CREATE TRIGGER fail_manifest BEFORE UPDATE OF artifact_manifest_json ON project_runs
+      BEGIN SELECT RAISE(ABORT, 'simulated disk failure'); END;`);
+    const input = { orgId: alice.orgId, projectRunId: run.projectRunId, traceId: 'atomic-trace', stats: deliveredStats, manifest };
+    expect(() => store.completeProjectRun(input)).toThrow('simulated disk failure');
+    expect(store.getProjectRun(alice.orgId, run.projectRunId)).toMatchObject({ status: 'running', artifactManifest: null, stats: null });
+    db.exec('DROP TRIGGER fail_manifest');
+    expect(store.completeProjectRun(input)).toMatchObject({ status: 'delivered', artifactManifest: manifest, stats: deliveredStats });
   });
 
   it('attaches one immutable manifest, then reserves and publishes exactly once', () => {

@@ -3,7 +3,6 @@ import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { parseRunLog, spawnRun, type RunStats } from '../cli/burnin.js';
-import { PROBE_MANIFEST_FILENAME } from '../contracts/probeManifest.js';
 import { declaredArtifactManifestSchema } from '../contracts/artifactManifest.js';
 import type {
   ArtifactManifest,
@@ -57,7 +56,7 @@ import {
   type RunLeaseAcquirer,
 } from '../mcp/runLock.js';
 import { repoRoot } from '../mcp/run.js';
-import { buildArtifactManifest, normalizeArtifactPath } from './artifacts.js';
+import { buildWorkspaceArtifactManifest } from './artifacts.js';
 import { ProjectStateConflict, ProjectStore } from './store.js';
 import { ProjectRetrievalLaunchStore } from './retrievalLaunch.js';
 import { HAYSTACK_LAUNCH_ENV, readHaystackLaunch } from '../contracts/retrievalHaystack.js';
@@ -1240,7 +1239,7 @@ export class ProjectRunCoordinator {
           projectRunId: reservedRun.projectRunId,
           from: 'running',
           to: 'cancelled',
-          ...(stats.outcome === 'cancelled' || stats.outcome === 'error' ? { stats } : {}),
+          stats: { ...stats, outcome: 'cancelled' },
         });
         return;
       }
@@ -1255,30 +1254,17 @@ export class ProjectRunCoordinator {
       if (declarations.runId !== reservedRun.projectRunId) {
         throw new Error('declared artifact manifest belongs to another run');
       }
-      const built = buildArtifactManifest({
+      const built = buildWorkspaceArtifactManifest({
         workspaceRoot: reservedRun.hostPaths.workspacePath,
-        // The accepted plan may name its machine-owned verification record.
-        // Keep it for preview classification, but never publish its contents.
-        // All other paths still pass the unchanged publication policy.
-        declaredPaths: declarations.outputs.filter(
-          (output) => normalizeArtifactPath(output) !== PROBE_MANIFEST_FILENAME
-        ),
       });
-      let completed = this.store.transitionProjectRun({
+      const completed = this.store.completeProjectRun({
         orgId: reservedRun.orgId,
         projectRunId: reservedRun.projectRunId,
-        from: 'running',
-        to: 'delivered',
         traceId: reservedRun.projectRunId,
         stats,
+        manifest: built.manifest,
       });
       if (!completed) throw new Error('project run disappeared before completion');
-      completed = this.store.saveArtifactManifest(
-        reservedRun.orgId,
-        reservedRun.projectRunId,
-        built.manifest
-      );
-      if (!completed) throw new Error('project run disappeared before artifact persistence');
       // BEFORE publication and AFTER the run is durably delivered, in its own
       // guard. The surrounding catch only repairs a row that is still
       // `running`, so a throw from here would be swallowed silently and the
@@ -1321,16 +1307,10 @@ export class ProjectRunCoordinator {
             from: 'running',
             to: signal.aborted ? 'cancelled' : 'failed',
             ...(existsSync(tracePath) ? { traceId: reservedRun.projectRunId } : {}),
-            // WHAT THE FAILURE COST. The outcome vocabulary is
-            // delivered | failed | error | cancelled, and this condition
-            // enumerated two of the three non-delivered values — so the most
-            // ordinary failure, `outcome: 'failed'`, had its stats dropped and
-            // the row recorded no cost at all. Measured: a tenant run that
-            // burned $1.10 over 41 calls persisted `stats_json = NULL`, which
-            // on a platform that bills is not a rounding error. `delivered` is
-            // the only outcome that cannot ride a failure, and the store
-            // refuses the remaining contradictions itself.
-            ...(stats && stats.outcome !== 'delivered' ? { stats } : {}),
+            // Preserve the actual spend when host-side finalization refuses
+            // a runner delivery. Only the outcome changes to match this row;
+            // the original runner outcome remains in its immutable trace.
+            ...(stats ? { stats: { ...stats, outcome: signal.aborted ? 'cancelled' as const : stats.outcome === 'delivered' ? 'failed' as const : stats.outcome } } : {}),
             ...(signal.aborted
               ? {}
               : {

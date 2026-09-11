@@ -119,6 +119,11 @@ Neighbours:
 
 ## Publication receipts
 
+- An artifact manifest with `source: workspace` records the complete filtered
+  workspace inventory. Absence of this optional field retains the legacy
+  explicit-file meaning and its exact hash. Revalidation follows the recorded
+  coverage; it never upgrades historical evidence implicitly.
+
 - `baseSha` on a publication is OBSERVED, never a pointer anything decides
   from — the same rule `attestation.ts` states for a tool observation. It
   records the publication parent (the captured run base for imported projects); the

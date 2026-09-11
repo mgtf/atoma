@@ -5,6 +5,7 @@ import {
   fstatSync,
   lstatSync,
   openSync,
+  opendirSync,
   readSync,
   realpathSync,
   type Stats,
@@ -335,6 +336,76 @@ export function secureReadWorkspaceFile(
   }
 }
 
+export function buildWorkspaceArtifactManifest(input: {
+  readonly workspaceRoot: string;
+  readonly limits?: Partial<ArtifactLimits>;
+}): BuiltArtifactManifest {
+  try {
+    return inventoryWorkspace(input);
+  } catch (error) {
+    // Filesystem errors must not expose control-plane paths to a member.
+    if (error instanceof ArtifactPolicyError) {
+      throw new ArtifactPolicyError(error.code, error.message.replaceAll(path.resolve(input.workspaceRoot), '<workspace>'));
+    }
+    throw new ArtifactPolicyError('changed', 'finished workspace could not be inventoried');
+  }
+}
+
+/** Inventory the finished workspace, using the publication jail and exclusions.
+ * Plans are intentions, not an inventory: child work and generated assets may
+ * add files the root plan did not name. Never infer dependencies from source.
+ */
+function inventoryWorkspace(input: {
+  readonly workspaceRoot: string;
+  readonly limits?: Partial<ArtifactLimits>;
+}): BuiltArtifactManifest {
+  const limits = resolvedLimits(input.limits);
+  const root = path.resolve(input.workspaceRoot);
+  const rootStat = lstatSync(root);
+  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
+    throw new ArtifactPolicyError('special', 'workspace root must be a real directory');
+  }
+  const files: string[] = [];
+  const directories = [''];
+  let visited = 0;
+  while (directories.length) {
+    const relative = directories.pop()!;
+    const directory = relative
+      ? resolveWorkspaceFile(root, relative, limits).absolute
+      : root;
+    const handle = opendirSync(directory);
+    try {
+      for (let entry = handle.readSync(); entry !== null; entry = handle.readSync()) {
+        if (++visited > limits.maxFiles * 4) {
+          throw new ArtifactPolicyError('limit', 'workspace inventory exceeds the entry limit');
+        }
+        const name = normalizeArtifactPath(relative ? `${relative}/${entry.name}` : entry.name, limits.maxPathChars);
+        try {
+          assertPublishableArtifactPath(name);
+        } catch (error) {
+          if (error instanceof ArtifactPolicyError && error.code === 'excluded') continue;
+          throw error;
+        }
+        // Reuse the path jail even for directories; never descend through a
+        // symlink or silently publish half an application after a refusal.
+        const target = resolveWorkspaceFile(root, name, limits);
+        const stat = lstatSync(target.absolute);
+        if (stat.isDirectory()) directories.push(name);
+        else if (stat.isFile()) {
+          files.push(name);
+          if (files.length > limits.maxFiles) throw new ArtifactPolicyError('limit', 'workspace exceeds the artifact count limit');
+        } else throw new ArtifactPolicyError('special', `artifact is not a regular file: ${name}`);
+      }
+    } finally {
+      handle.closeSync();
+    }
+  }
+  if (!files.length) throw new ArtifactPolicyError('empty', 'finished workspace contains no publishable files');
+  const built = buildArtifactManifest({ ...input, declaredPaths: files });
+  const manifest = artifactManifestSchema.parse({ ...built.manifest, source: 'workspace' });
+  return { manifest, hash: artifactManifestHash(manifest) };
+}
+
 export function artifactManifestHash(manifest: ArtifactManifest): string {
   const parsed = artifactManifestSchema.parse(manifest);
   return createHash('sha256').update(JSON.stringify(parsed)).digest('hex');
@@ -403,11 +474,13 @@ export function revalidateArtifactManifest(input: {
   if (artifactManifestHash(expected) !== expectedHash) {
     throw new ArtifactPolicyError('hash', 'artifact manifest hash does not match its contents');
   }
-  const rebuilt = buildArtifactManifest({
-    workspaceRoot: input.workspaceRoot,
-    declaredPaths: expected.files.map((file) => file.path),
-    ...(input.limits ? { limits: input.limits } : {}),
-  });
+  const rebuilt = expected.source === 'workspace'
+    ? buildWorkspaceArtifactManifest(input)
+    : buildArtifactManifest({
+        workspaceRoot: input.workspaceRoot,
+        declaredPaths: expected.files.map((file) => file.path),
+        ...(input.limits ? { limits: input.limits } : {}),
+      });
   if (rebuilt.hash !== expectedHash || JSON.stringify(rebuilt.manifest) !== JSON.stringify(expected)) {
     throw new ArtifactPolicyError('changed', 'artifact files changed after the manifest was recorded');
   }

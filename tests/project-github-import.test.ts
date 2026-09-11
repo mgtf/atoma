@@ -73,6 +73,25 @@ async function fixture(mode: 'pull-request' | 'fork', transform?: (fake: FakeGit
 }
 
 describe('existing GitHub projects through service, coordinator and publication', () => {
+  it.each(['fork', 'pull-request'] as const)('includes child-created assets omitted from the root plan in %s mode', async mode => {
+    const f = await fixture(mode);
+    const driver = f.driver.getMockImplementation()!;
+    f.driver.mockImplementationOnce(async options => {
+      const log = await driver(options);
+      const workspace = options.env!['ATOMA_BUILD_WORKSPACE']!;
+      mkdirSync(join(workspace, 'assets'));
+      writeFileSync(join(workspace, 'assets', 'app.js'), 'document.title="Complete";');
+      return log;
+    });
+    const run = await f.start('<script src="assets/app.js"></script>');
+    expect(run.status).toBe('delivered');
+    expect(run.artifactManifest?.source).toBe('workspace');
+    const owner = mode === 'fork' ? 'alice' : 'upstream';
+    const branch = mode === 'fork' ? 'main' : `atoma/run-${run.projectRunId}`;
+    expect(f.fake.filesOn(owner, 'app', branch).get('assets/app.js')?.text).toBe('document.title="Complete";');
+    expect(f.projects.getPublicationForRun(f.viewer.orgId, run.projectRunId)?.status).toBe('published');
+  });
+
   it('seeds current main, creates one PR per delivered change and leaves main intact', async () => {
     const f = await fixture('pull-request');
     const original = f.fake.refSha('upstream', 'app', 'main');

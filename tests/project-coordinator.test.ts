@@ -968,7 +968,7 @@ describe('ProjectRunCoordinator', () => {
     await coordinator.waitForIdle();
     const failed = f.store.getProjectRun(f.viewer.orgId, started.projectRunId)!;
     expect(failed.status).toBe('failed');
-    expect(failed.error).toMatch(/excluded/);
+    expect(failed.error).toMatch(/no publishable files/);
   });
 
   it('keeps failed traces under the owning project run directory', async () => {
@@ -1650,19 +1650,9 @@ describe('ProjectRunCoordinator — a large trace is evidence, not a refusal', (
     expect(row.error).not.toContain(f.root);
   });
 
-  /**
-   * KNOWN GAP, pinned deliberately rather than hidden. When the runner reports
-   * `delivered` and the TRACE refuses, `finish()`'s failure path drops the
-   * stats — its condition is `stats.outcome !== 'delivered'`, keyed on the
-   * PARSED outcome rather than on the status actually written. So run
-   * `2857a579` is recorded `failed` with `stats_json = NULL` despite $0.8421
-   * spent and one skill learned. It is the same class of loss the ordinary
-   * failure path already fixed, reopened through a different door, and it is
-   * recorded in `docs/decided-not-built-2026-08-23.md` because the repair is a
-   * store-contract question (a `failed` row may not carry `outcome:
-   * 'delivered'` stats), not a one-line change.
-   */
-  it('does NOT yet record what a trace-refused delivery cost', async () => {
+  // A runner delivery refused by the host still incurred its recorded spend.
+  // The stored project outcome changes; the trace remains the runner evidence.
+  it('preserves the cost of a trace-refused delivery with the project outcome', async () => {
     const f = fixture();
     const driver = bigTraceDriver({
       targetBytes: 600_000,
@@ -1671,7 +1661,7 @@ describe('ProjectRunCoordinator — a large trace is evidence, not a refusal', (
     });
     const { row } = await runOnce(f, driver, 'run-cost-dropped');
     expect(row.status).toBe('failed');
-    expect(row.stats).toBeNull();
+    expect(row.stats).toMatchObject({ outcome: 'failed', costUsd: 0.8421, llmCalls: 20 });
   });
 });
 

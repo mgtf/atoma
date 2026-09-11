@@ -15,6 +15,7 @@ import {
   ArtifactPolicyError,
   artifactManifestHash,
   buildArtifactManifest,
+  buildWorkspaceArtifactManifest,
   normalizeArtifactPath,
   readManifestArtifact,
   revalidateArtifactManifest,
@@ -258,5 +259,44 @@ describe('project artifact publication revalidation', () => {
       () => readManifestArtifact({ workspaceRoot: root, expected: built.manifest.files[0]! }),
       'symlink'
     );
+  });
+});
+
+
+describe('finished workspace publication inventory', () => {
+  it('includes nested assets and files absent from the root plan, excluding private and internal trees', () => {
+    for (const name of ['public/assets', 'node_modules/pkg', '.git', '.github/workflows']) mkdirSync(join(root, name), { recursive: true });
+    for (const [name, contents] of Object.entries({
+      'server.js': 'server', 'index.html': 'page', 'app.js': 'client',
+      'public/assets/icon.bin': 'binary', 'package-lock.json': 'lock',
+      '.env': 'credential', '.atoma-probes.json': 'evidence',
+      'node_modules/pkg/index.js': 'dependency', '.git/config': 'private',
+      '.github/workflows/deploy.yml': 'workflow',
+    })) writeFileSync(join(root, name), contents);
+    const built = buildWorkspaceArtifactManifest({ workspaceRoot: root });
+    expect(built.manifest.source).toBe('workspace');
+    expect(built.manifest.files.map(file => file.path)).toEqual([
+      'app.js', 'index.html', 'package-lock.json', 'public/assets/icon.bin', 'server.js',
+    ]);
+    expect(revalidateArtifactManifest({ workspaceRoot: root, manifest: built.manifest }).hash).toBe(built.hash);
+    writeFileSync(join(root, 'late.js'), 'new asset');
+    expectPolicyError(() => revalidateArtifactManifest({ workspaceRoot: root, manifest: built.manifest }), 'changed');
+  });
+
+  it('refuses symlinks rather than silently omitting an application dependency', () => {
+    writeFileSync(join(root, 'app.js'), 'client');
+    symlinkSync(join(root, 'app.js'), join(root, 'linked.js'));
+    expectPolicyError(() => buildWorkspaceArtifactManifest({ workspaceRoot: root }), 'symlink');
+  });
+
+  it('refuses oversized or empty inventories without truncating', () => {
+    expectPolicyError(() => buildWorkspaceArtifactManifest({ workspaceRoot: root }), 'empty');
+    writeFileSync(join(root, '.env'), 'private');
+    expectPolicyError(() => buildWorkspaceArtifactManifest({ workspaceRoot: root }), 'empty');
+    writeFileSync(join(root, 'one.js'), '1234');
+    expectPolicyError(() => buildWorkspaceArtifactManifest({ workspaceRoot: root, limits: { maxFileBytes: 3 } }), 'limit');
+    writeFileSync(join(root, 'two.js'), '1234');
+    expectPolicyError(() => buildWorkspaceArtifactManifest({ workspaceRoot: root, limits: { maxFiles: 1 } }), 'limit');
+    expectPolicyError(() => buildWorkspaceArtifactManifest({ workspaceRoot: root, limits: { maxTotalBytes: 7 } }), 'limit');
   });
 });

@@ -244,6 +244,8 @@ export const artifactFileSchema = z
 export const artifactManifestSchema = z
   .object({
     version: z.literal(1),
+    // Absent on legacy plan-only manifests. Never infer complete coverage.
+    source: z.literal('workspace').optional(),
     files: z.array(artifactFileSchema).min(1),
     totalBytes: z.number().int().nonnegative(),
   })

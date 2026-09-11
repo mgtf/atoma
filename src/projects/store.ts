@@ -6,6 +6,7 @@ import { openStoreHandle } from '../core/stores.js';
 import { runStatsSchema, type RunStats } from '../contracts/runStats.js';
 import {
   artifactManifestSchema,
+  commitShaSchema,
   createProjectInputSchema,
   createProjectRunInputSchema,
   idempotencyKeySchema,
@@ -126,6 +127,7 @@ CREATE TABLE IF NOT EXISTS project_publications (
   -- CHECK by ALTER TABLE, so constraining it would leave fresh and migrated
   -- stores with different constraints.
   base_sha                      TEXT,
+  seed_commit_sha               TEXT,
   error                         TEXT,
   created_at                    TEXT NOT NULL,
   updated_at                    TEXT NOT NULL,
@@ -509,6 +511,7 @@ export class ProjectStore {
         ['projects', 'repository_source_json'],
         ['project_runs', 'repository_base_json'],
         ['project_publications', 'pull_request_url'],
+        ['project_publications', 'seed_commit_sha'],
       ]) {
         const columns = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
         if (!columns.some(item => item.name === column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`);
@@ -1251,6 +1254,26 @@ export class ProjectStore {
     return this.getProjectRun(orgId, projectRunId)!;
   }
 
+  /** Delivery and its immutable file inventory become visible together. */
+  completeProjectRun(input: {
+    readonly orgId: string;
+    readonly projectRunId: string;
+    readonly traceId: string;
+    readonly stats: RunStats;
+    readonly manifest: ArtifactManifest;
+  }): ProjectRun | null {
+    return this.db.transaction(() => {
+      const completed = this.transitionProjectRun({
+        orgId: input.orgId, projectRunId: input.projectRunId,
+        from: 'running', to: 'delivered', traceId: input.traceId, stats: input.stats,
+      });
+      if (!completed) return null;
+      const saved = this.saveArtifactManifest(input.orgId, input.projectRunId, input.manifest);
+      if (!saved) throw new ProjectStateConflict('project run disappeared before artifact persistence');
+      return saved;
+    }).immediate();
+  }
+
   saveArtifactManifest(
     orgIdInput: string,
     projectRunIdInput: string,
@@ -1344,6 +1367,26 @@ export class ProjectStore {
       .prepare('SELECT * FROM project_publications WHERE publication_id = ? AND org_id = ?')
       .get(publicationId, orgId) as PublicationRow | undefined;
     return row ? publicationFromRow(row) : null;
+  }
+
+  /** Durable ownership receipt for an interrupted first publication. */
+  recordPublicationSeed(orgIdInput: string, publicationIdInput: string, shaInput: string): void {
+    const orgId = organisationIdSchema.parse(orgIdInput);
+    const publicationId = publicationIdSchema.parse(publicationIdInput);
+    const seed = commitShaSchema.parse(shaInput);
+    const result = this.db.prepare(`UPDATE project_publications SET seed_commit_sha = ?
+      WHERE org_id = ? AND publication_id = ? AND status = 'publishing'
+      AND (seed_commit_sha IS NULL OR seed_commit_sha = ?)`).run(seed, orgId, publicationId, seed);
+    if (result.changes !== 1) throw new Error('Publication seed receipt could not be recorded');
+  }
+
+  publicationSeed(orgIdInput: string, publicationIdInput: string): string | null {
+    const orgId = organisationIdSchema.parse(orgIdInput);
+    const publicationId = publicationIdSchema.parse(publicationIdInput);
+    const row = this.db.prepare(`SELECT seed_commit_sha FROM project_publications
+      WHERE org_id = ? AND publication_id = ?`).get(orgId, publicationId) as
+      { seed_commit_sha: string | null } | undefined;
+    return row?.seed_commit_sha ? commitShaSchema.parse(row.seed_commit_sha) : null;
   }
 
   getPublicationForRun(orgIdInput: string, projectRunIdInput: string): Publication | null {
