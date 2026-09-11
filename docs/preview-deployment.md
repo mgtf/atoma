@@ -218,9 +218,10 @@ Changes take effect for new runs and preview generations after server restart.
 To exercise the live network path locally (Docker and the worker image required):
 
 ```bash
-ATOMA_NETWORK_LIVE_TEST=1 npx vitest run tests/preview-egress.test.ts
+npx vitest run tests/preview-egress.test.ts
 ```
 
-This smoke checks an approved HTTPS destination and refusal of the control-plane
-host from a Node preview. It uses the local `runc` development runtime; the
-separate gVisor isolation suite remains the production confinement proof.
+This smoke uses a controlled origin on the proxy uplink and checks refusal of
+unapproved hosts and the control plane. The worker CI job runs it against the
+real preview image under `runc`; the manual gVisor job repeats it under `runsc`
+alongside the isolation suite. Missing Docker is a hard failure in both CI jobs.

@@ -302,13 +302,16 @@ jobs:
           docker info --format '{{json .Runtimes}}' | grep -q '"runsc"'
           docker run --rm --runtime=runsc hello-world
       - run: npm run build:worker:dev
-      - name: Preview isolation
-        run: npx vitest run tests/preview-isolation.test.ts
+      - run: npm run build:preview
+      - name: Preview isolation and network
+        run: npx vitest run tests/preview-isolation.test.ts tests/preview-egress.test.ts
         env:
           # Absence becomes a hard failure HERE and nowhere else: the suite
           # skips this file everywhere a contributor lacks gVisor, and a job
           # that installed it must never report a skip as a pass.
           CI_REQUIRE_PREVIEW_RUNTIME: "1"
+          CI_REQUIRE_DOCKER: "1"
+          ATOMA_TEST_PREVIEW_IMAGE: atoma-preview:latest
 
   worker:
     name: Fresh worker image
@@ -324,6 +327,8 @@ jobs:
       - run: npm ci
       - run: npm run build:worker:dev
       - run: test -f dist/tools/worker.js && test -f dist/contracts/probeManifest.js
-      - run: npx vitest run tests/container-isolation.test.ts
+      - run: npm run build:preview
+      - run: npx vitest run tests/container-isolation.test.ts tests/preview-egress.test.ts
         env:
           CI_REQUIRE_DOCKER: "1"
+          ATOMA_TEST_PREVIEW_IMAGE: atoma-preview:latest
