@@ -1,5 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { createServer, type Server } from 'node:http';
+import { spawn } from 'node:child_process';
+import { connect } from 'node:net';
 import { startEgressProxy, type RunningEgressProxy } from '../src/tools/egressProxy.js';
 
 /**
@@ -55,6 +57,45 @@ async function through(proxyPort: number, url: string): Promise<{ status: number
 }
 
 describe('egress proxy', () => {
+  it('keeps its process alive when a denied CONNECT client resets the socket', async () => {
+    const port = await startOrigin();
+    const child = spawn(process.execPath, ['--import', 'tsx', 'src/tools/egressProxy.ts'], {
+      env: { PATH: process.env.PATH, ATOMA_EGRESS_PORT: '0', ATOMA_EGRESS_ALLOWLIST: 'localhost', ATOMA_EGRESS_PORTS: String(port) },
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    let logs = '';
+    const exited = new Promise<void>(resolve => child.once('exit', () => resolve()));
+    try {
+      const proxyPort = await new Promise<number>((resolve, reject) => {
+        child.on('error', reject);
+        child.once('exit', () => reject(new Error(logs)));
+        child.stderr.on('data', (chunk: Buffer) => {
+          logs = (logs + chunk.toString()).slice(-16_000);
+          const match = /listening on (\d+)/.exec(logs);
+          if (match) resolve(Number(match[1]));
+        });
+      });
+      for (let i = 0; i < 20 && child.exitCode === null; i += 1) {
+        await new Promise<void>(resolve => {
+          const socket = connect(proxyPort, '127.0.0.1', () => {
+            socket.write('CONNECT denied.invalid:443 HTTP/1.1\r\nHost: denied.invalid:443\r\n\r\n');
+            setImmediate(() => { socket.resetAndDestroy(); resolve(); });
+          });
+          socket.on('error', () => resolve());
+        });
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
+      expect(child.exitCode, logs).toBeNull();
+      expect(logs).toContain('DENY  CONNECT denied.invalid:443');
+      const result = await through(proxyPort, `http://localhost:${port}/after-reset`);
+      expect(result.status).toBe(200);
+      expect(result.body).toContain('ORIGIN_PAYLOAD');
+    } finally {
+      child.kill('SIGKILL');
+      await exited;
+    }
+  }, 15_000);
+
   it('relays an ALLOWED host', async () => {
     const port = await startOrigin();
     proxy = await startEgressProxy({ port: 0, allowlist: ['localhost'], allowedPorts: [port], log: () => {} });

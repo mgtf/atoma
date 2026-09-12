@@ -69,6 +69,9 @@ export function startEgressProxy(opts: EgressProxyOptions): Promise<RunningEgres
     const d = decideEgress(req.url ?? '', { allowlist, defaultPort: 443, ...(opts.allowedPorts ? { allowedPorts: opts.allowedPorts } : {}) });
     log(`[egress] ${d.allowed ? 'ALLOW' : 'DENY '} CONNECT ${d.host}:${d.port} — ${d.reason}`);
     if (!d.allowed) {
+      // A refused client may already have reset its socket. Handle a failed
+      // reply locally: an unhandled EPIPE would kill every tunnel in this proxy.
+      clientSocket.on('error', () => clientSocket.destroy());
       clientSocket.end(`HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\negress denied: ${d.reason}\n`);
       return;
     }
