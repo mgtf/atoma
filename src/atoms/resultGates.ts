@@ -334,10 +334,11 @@ const RESULT_GATES: readonly ResultGate[] = [
     },
   },
   {
-    // Portable docs: a README the task requires to stay port-agnostic must
-    // not embed a live numeric loopback port (thirty-third iteration).
+    // Portability is inferred from phase prose, which may coexist with an
+    // explicitly requested fixed port. Show the observation to the validator;
+    // a lexical match cannot override the user's startup contract.
     id: 'portable-http-docs',
-    disposition: 'reject-once',
+    disposition: 'requires-review',
     check: async (env) => {
       const phaseDescription = stripLiteralContractBlock(env.task.description);
       if (
@@ -349,7 +350,7 @@ const RESULT_GATES: readonly ResultGate[] = [
       const read = await env.readWorkspaceFile('README.md');
       if (read.status === 'no-tool') return null;
       const coaching =
-        'Replace every durable numeric localhost port and LISTENING_ON_PORT number in README.md with <port>. Keep live numeric URLs only in run evidence, then read README.md back before returning.';
+        'Compare the README port with the full task: preserve an explicitly requested fixed port. Replace copied OS-assigned ports with <port> placeholders only when the task does not require that value.';
       if (read.status === 'unreadable') {
         return {
           reasoning:
@@ -357,10 +358,11 @@ const RESULT_GATES: readonly ResultGate[] = [
           coaching,
         };
       }
-      return DURABLE_HTTP_PORT_LITERAL_RE.test(read.content)
+      const literal = read.content.match(DURABLE_HTTP_PORT_LITERAL_RE)?.[0];
+      return literal
         ? {
             reasoning:
-              'the task requires portable README.md port placeholders, but README.md contains a numeric loopback URL or LISTENING_ON_PORT value',
+              `README.md contains a numeric loopback URL or LISTENING_ON_PORT value (${JSON.stringify(literal)}), while the phase mentions portable documentation; check whether the full task explicitly requires that fixed port`,
             coaching,
           }
         : null;

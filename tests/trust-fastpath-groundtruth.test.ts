@@ -506,6 +506,7 @@ describe('trust fast-path × ground-truth probe', () => {
     const { l2, l1, ctx, exec } = setup({
       'README.md': 'Start server\nLISTENING_ON_PORT=3000\nhttp://localhost:<port>/',
     });
+    ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'README.md contains a numeric port forbidden by this task', scope: 'ephemeral' }));
     const verdict = await l2.validateResult(
       l1,
       result({
@@ -521,8 +522,30 @@ describe('trust fast-path × ground-truth probe', () => {
     );
     expect(verdict.approved).toBe(false);
     expect(verdict.reasoning).toMatch(/README\.md contains a numeric/);
-    expect(ctx.llm.calls).toHaveLength(0);
+    expect(ctx.llm.calls).toHaveLength(1);
+    expect(ctx.llm.calls[0]!.userContent).toContain('LISTENING_ON_PORT=3000');
     expect(exec.calls).toEqual(['read_file']);
+  });
+
+  it('lets the validator honor a requested fixed port despite portable wording in the phase', async () => {
+    const { l2, l1, ctx } = setup({
+      'README.md': 'PORT=3000 npm start\nOpen http://localhost:3000/',
+    });
+    ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'the user explicitly requested port 3000' }));
+    const verdict = await l2.validateResult(l1, result({
+      output: { files: ['README.md'] }, summary: 'documented the requested command',
+      toolCallResults: [{ name: 'write_file', ok: true }],
+    }), {
+      description: withInheritedLiteralContract(
+        'Update README.md with portable startup documentation.',
+        'Document PORT=3000 npm start and http://localhost:3000/.',
+      ),
+    }, { ...ctx, requireObservedToolAction: true });
+
+    expect(verdict.approved).toBe(true);
+    expect(ctx.llm.calls).toHaveLength(1);
+    expect(ctx.llm.calls[0]!.userContent).toContain('http://localhost:3000/');
+    expect(ctx.llm.calls[0]!.userContent).toContain('portable-http-docs');
   });
 
   it('does not impose inherited portable-doc requirements on another phase', async () => {
