@@ -10,13 +10,14 @@ import { isIndexEntryLive, isRunLive, projectRunUpdate } from '../client/run-uti
 import type { RunIndexEntry, SkillSummary, VizRun } from '../client/types.js';
 
 export function useRunsIndex(active: boolean) {
-  return useQuery({
+  const query = useQuery({
     queryKey: ['viz', 'runs'],
     queryFn: api.runs,
     enabled: active,
     refetchInterval: active ? 2000 : false,
     staleTime: 750,
   });
+  return { ...query, error: active ? query.error : null };
 }
 
 export function useRunTrace(runId: string | null, active: boolean, indexEntry?: RunIndexEntry) {

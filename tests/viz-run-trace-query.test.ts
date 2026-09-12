@@ -5,12 +5,24 @@ import { createElement, type ReactNode } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { api } from '../src/viz/client/data-api.js';
 import type { RunIndexEntry, VizRun } from '../src/viz/client/types.js';
-import { useRunTrace } from '../src/viz/client-gl/queries.js';
+import { useRunsIndex, useRunTrace } from '../src/viz/client-gl/queries.js';
 
 const clients: QueryClient[] = [];
 afterEach(() => { cleanup(); clients.splice(0).forEach(client => client.clear()); vi.restoreAllMocks(); });
 const entry: RunIndexEntry = { id: 'new-run', label: 'new run', startedAt: new Date().toISOString(), inFlight: true };
 const trace: VizRun = { ...entry, endedAt: new Date().toISOString(), events: [] };
+it('keeps a failed run index from poisoning another view after a deployment', async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  clients.push(client);
+  vi.spyOn(api, 'runs').mockRejectedValue(new Error('HTTP 502'));
+  const hook = renderHook(({ active }) => useRunsIndex(active), {
+    initialProps: { active: true },
+    wrapper: ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client }, children),
+  });
+  await waitFor(() => expect(hook.result.current.error).toBeTruthy());
+  hook.rerender({ active: false });
+  expect(hook.result.current.error).toBeNull();
+});
 function fixture() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   clients.push(client);
