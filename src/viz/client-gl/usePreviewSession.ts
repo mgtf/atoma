@@ -17,9 +17,13 @@ export function usePreviewSession({ previewTarget, previewSummary, t }: {
   t: (key: string) => string;
 }) {
   const queryClient = useQueryClient();
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const [claim, setClaim] = useState<{ url: string; generation: number } | null>(null);
-  const previewUrl = previewSummary?.state === 'ready' && claim?.generation === previewSummary.generation
+  const [openedTarget, setOpenedTarget] = useState<typeof previewTarget>(null);
+  const previewOpen = openedTarget !== null && openedTarget.projectId === previewTarget?.projectId
+    && openedTarget.projectRunId === previewTarget.projectRunId;
+  const [claim, setClaim] = useState<{ url: string; generation: number; projectId: string; projectRunId: string } | null>(null);
+  const previewUrl = previewOpen && previewSummary?.state === 'ready'
+    && claim?.generation === previewSummary.generation
+    && claim.projectId === previewTarget?.projectId && claim.projectRunId === previewTarget.projectRunId
     ? claim.url : null;
   const requestSequence = useRef(0);
   const [previewStatus, setPreviewStatus] = useState<PreviewPlaneStatus>('idle');
@@ -45,7 +49,7 @@ export function usePreviewSession({ previewTarget, previewSummary, t }: {
       // The plane opens BEFORE the answer, showing "starting" — a member who
       // clicked deserves the surface they asked for immediately, and the
       // container start is measured in seconds.
-      setPreviewOpen(true);
+      setOpenedTarget(previewTarget);
       // Back to zero: the answer below carries a FRESH claim, and the frame
       // must use it rather than the origin root a previous reload left behind.
       setPreviewReloadNonce(0);
@@ -63,7 +67,7 @@ export function usePreviewSession({ previewTarget, previewSummary, t }: {
         await queryClient.cancelQueries({ queryKey: ['viz', 'preview', projectId, projectRunId] });
         if (sequence !== requestSequence.current) return;
         queryClient.setQueryData(['viz', 'preview', projectId, projectRunId], answered.summary);
-        setClaim(answered.url ? { url: answered.url, generation: answered.summary.generation } : null);
+        setClaim(answered.url ? { url: answered.url, generation: answered.summary.generation, projectId, projectRunId } : null);
         setPreviewStatus('idle');
         // A 202 means another caller is building this generation. Nothing to
         // do but let `usePreviewStatus` poll, which it already does while the
@@ -87,7 +91,7 @@ export function usePreviewSession({ previewTarget, previewSummary, t }: {
 
   const closePreview = useCallback(() => {
     requestSequence.current += 1;
-    setPreviewOpen(false);
+    setOpenedTarget(null);
     // The URL is dropped with the plane. Its claim is spent anyway, and a
     // credential kept past the surface that used it is a credential waiting
     // to be found.
@@ -109,9 +113,11 @@ export function usePreviewSession({ previewTarget, previewSummary, t }: {
     // stop, so a plane still open against a summary that still says `ready`
     // would immediately ask for a new claim on the preview just stopped.
     closePreview();
+    const sequence = requestSequence.current;
     try {
       await api.stopPreview(projectId, projectRunId);
     } catch (error) {
+      if (sequence !== requestSequence.current) return;
       setPreviewStatus('error');
       setPreviewError(previewErrorMessage(error, t));
     } finally {
@@ -171,7 +177,17 @@ export function usePreviewSession({ previewTarget, previewSummary, t }: {
     }
   }, [previewOpen, previewSummary]);
 
-  useEffect(() => () => { requestSequence.current += 1; }, [previewTarget?.projectId, previewTarget?.projectRunId]);
+  // Generations are scoped to a run, not globally unique. Changing the target
+  // must discard the old session even when both previews use generation 1.
+  useEffect(() => {
+    setOpenedTarget(null);
+    setClaim(null);
+    setPreviewStatus('idle');
+    setPreviewError(null);
+    setPreviewReloadNonce(0);
+    previewOpener.current = null;
+    return () => { requestSequence.current += 1; };
+  }, [previewTarget?.projectId, previewTarget?.projectRunId]);
 
   return { previewOpen, previewUrl, previewStatus, previewError, previewReloadNonce,
     requestPreview, closePreview, stopPreview, reloadPreview };

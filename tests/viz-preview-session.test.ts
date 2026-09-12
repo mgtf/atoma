@@ -23,16 +23,16 @@ function fixture() {
   let current = summary(0, 'stopped');
   client.setQueryData(key, current);
   vi.spyOn(api, 'previewStatus').mockImplementation(async () => current);
-  const hook = renderHook(() => {
-    const status = usePreviewStatus(target.projectId, target.projectRunId, true);
-    return usePreviewSession({ previewTarget: target, previewSummary: status.data ?? null, t });
-  }, { wrapper: ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client }, children) });
+  const hook = renderHook(({ selected = target }) => {
+    const status = usePreviewStatus(selected.projectId, selected.projectRunId, true);
+    return usePreviewSession({ previewTarget: selected, previewSummary: status.data ?? null, t });
+  }, { initialProps: { selected: target }, wrapper: ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client }, children) });
   function publish(value: VizPreviewSummary) { current = value; client.setQueryData(key, value); }
   function answer(generation: number): VizPreviewOpen {
     current = summary(generation);
     return { summary: current, url: `https://g${generation}.previews.example.net/#claim-${generation}` };
   }
-  return { hook, publish, answer };
+  return { hook, publish, answer, client };
 }
 afterEach(() => { cleanup(); clients.splice(0).forEach(client => client.clear()); vi.restoreAllMocks(); });
 
@@ -100,4 +100,48 @@ describe('the production preview session', () => {
     expect(hook.result.current.previewUrl).toBeNull();
     expect(open).toHaveBeenCalledTimes(2);
   });
+});
+
+
+describe('preview session identity changes', () => {
+  it.each([false, true])('closes the old preview when selecting another run (cached=%s)', async (cached) => {
+    const { hook, answer, client } = fixture();
+    const open = vi.spyOn(api, 'openPreview').mockImplementation(async () => answer(1));
+    await act(async () => hook.result.current.requestPreview('open'));
+    await waitFor(() => expect(hook.result.current.previewUrl).toContain('g1.'));
+    if (cached) act(() => { client.setQueryData(['viz', 'preview', 'other-project', 'other-run'], summary(1)); });
+    hook.rerender({ selected: { projectId: 'other-project', projectRunId: 'other-run' } });
+    await waitFor(() => expect(hook.result.current.previewOpen).toBe(false));
+    expect(hook.result.current.previewUrl).toBeNull();
+    expect(open).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores an old stop failure after opening a new preview session', async () => {
+    const { hook, answer } = fixture();
+    vi.spyOn(api, 'openPreview').mockImplementation(async () => answer(1));
+    let rejectStop!: (error: Error) => void;
+    vi.spyOn(api, 'stopPreview').mockImplementation(() => new Promise((_resolve, reject) => { rejectStop = reject; }));
+    await act(async () => hook.result.current.requestPreview('open'));
+    let stopping!: Promise<void>;
+    act(() => { stopping = hook.result.current.stopPreview(); });
+    await act(async () => hook.result.current.requestPreview('open'));
+    await act(async () => { rejectStop(new Error('old stop failed')); await stopping; });
+    expect(hook.result.current.previewStatus).toBe('idle');
+    expect(hook.result.current.previewError).toBeNull();
+    expect(hook.result.current.previewUrl).toContain('g1.');
+  });
+});
+
+
+it('discards an opening response after the selected run changes', async () => {
+  const { hook, answer } = fixture();
+  let finish!: (value: VizPreviewOpen) => void;
+  vi.spyOn(api, 'openPreview').mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  let opening!: Promise<void>;
+  act(() => { opening = hook.result.current.requestPreview('open'); });
+  hook.rerender({ selected: { projectId: 'project', projectRunId: 'another-run' } });
+  await act(async () => { finish(answer(1)); await opening; });
+  expect(hook.result.current.previewOpen).toBe(false);
+  expect(hook.result.current.previewUrl).toBeNull();
+  expect(hook.result.current.previewError).toBeNull();
 });
