@@ -16,6 +16,7 @@ import { attestingExecutor, baseExecutorOf, createAttestationLog } from '../src/
 import {
   establishesDomInteraction,
   parseBrowserObservation,
+  renderObservation,
   type AttestationRecord,
 } from '../src/contracts/attestation.js';
 import { checkProofCoverage, effectiveObligations } from '../src/atoms/proofCoverage.js';
@@ -138,6 +139,16 @@ describe('browser observation — requested and executed are separate facts', ()
     );
     expect(observed!.requestedInteractions).toBe(2);
     expect(observed!.executedInteractions).toEqual([]);
+  });
+
+  it('bounds oversized observed smoke output and labels its truncation', () => {
+    const observation = parseBrowserObservation({}, {
+      ...STOPWATCH_RESULT, smokeResult: { ok: false, detail: 'x'.repeat(5000) },
+    })!;
+    const text = renderObservation({ eventId: 'large', tool: 'validate_html', observation });
+    expect(text).toContain('"ok":false');
+    expect(text).toContain('[truncated]');
+    expect(text.length).toBeLessThan(1500);
   });
 
   it('is null for anything that is not a browser observation', () => {
@@ -566,6 +577,24 @@ describe('L2 — an uncovered obligation withholds METHOD credit, never approval
     ).toMatch(/no transport-observed attestation/);
     expect(ctx.skillEvents.some((e) => e.op === 'success')).toBe(false);
     expect(ctx.stats).toContain('uncovered-obligation');
+  });
+
+  it.each([true, false])('passes observed smoke checks to the result validator (ok=%s)', async (ok) => {
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
+    const ctx = liveCtx({
+      ...STOPWATCH_RESULT,
+      smokeResult: { ok, checks: { blobCaptured: ok, timestampMatches: ok } },
+    });
+    enqueuePlanCycle(ctx);
+    ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'test verdict' }));
+
+    await neuron.handleDirect(TASK, ctx);
+
+    const prompt = ctx.llm.calls.find((call) => call.userContent.includes('RESULT — the child claims'))!.userContent;
+    expect(prompt).toContain('TRANSPORT-OBSERVED BROWSER EVIDENCE');
+    expect(prompt).toContain(`"blobCaptured":${ok}`);
+    expect(prompt).toContain(`"timestampMatches":${ok}`);
+    expect(prompt).toContain('requested=2, executed=2');
   });
 
   it('credits atom trust and the skill when the obligation is covered', async () => {

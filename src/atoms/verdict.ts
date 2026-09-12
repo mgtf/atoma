@@ -1,6 +1,7 @@
 import type { GenerationParams, Result, RunContext, Task, Tier, Verdict } from '../core/types.js';
 import type { Atom } from '../core/atom.js';
 import { parseVerdict } from './json.js';
+import { transportWitnesses } from '../contracts/witness.js';
 import { probeGroundTruth } from './groundTruth.js';
 import { BUILTIN_TOOL_NAMES, HOST_TOOL_NAMES } from '../contracts/toolTaxonomy.js';
 
@@ -751,6 +752,16 @@ export async function llmVerdict(args: {
       child: args.child,
     }));
 
+  // These witnesses are attached by L1 from the runtime observation log,
+  // independently of the model-authored result. Preserve failed checks too.
+  const observed = args.subject === 'RESULT' ? transportWitnesses(args.evidence) : [];
+  const browserEvidence = observed.length === 0 ? '' : [
+    '== TRANSPORT-OBSERVED BROWSER EVIDENCE ==',
+    'The runtime observed these tool results. Smoke checks are model-authored expressions evaluated by the browser; judge what they actually establish. This is historical evidence, not a fresh replay.',
+    ...(observed.length > 8 ? [`${observed.length - 8} earlier observations omitted; latest 8 follow.`] : []),
+    ...observed.slice(-8).map((w) => `${w.eventId}: ${w.observed}`),
+  ].join('\n');
+
   const userContent = [
     `Supervisor: "${args.supervisorName}" (tier ${args.supervisorTier})`,
     `Child: "${args.child.name}" (tier ${args.child.tier})`,
@@ -767,6 +778,7 @@ export async function llmVerdict(args: {
     args.targetContext ? `Delegation target(s):\n${args.targetContext}` : '',
     `${args.subject}: ${JSON.stringify(args.payload)}`,
     groundTruthBlock,
+    browserEvidence,
     args.mechanicalFindingsBlock ?? '',
     args.proofCoverageBlock ?? '',
     // Adherence is a RESULT-phase judgment: a plan merely STATES intent to

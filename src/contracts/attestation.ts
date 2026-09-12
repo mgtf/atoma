@@ -183,5 +183,14 @@ export function renderObservation(record: AttestationRecord): string {
   ];
   if (o.ignoredInteractions > 0) bits.push(`FILTERED=${o.ignoredInteractions}`);
   if (o.document) bits.push(`doc=${o.document.path}`);
+  bits.push(`consoleErrors=${o.consoleErrors}`, `failedRequests=${o.failedRequests}`);
+  if (o.smokeResult !== undefined) {
+    try {
+      const smoke = JSON.stringify(o.smokeResult) ?? '[not JSON serializable]';
+      bits.push(`smokeResult=${smoke.length > 1200 ? `${smoke.slice(0, 1200)} [truncated]` : smoke}`);
+    } catch {
+      bits.push('smokeResult=[not JSON serializable]');
+    }
+  }
   return `${record.tool}: ${bits.join(', ')}`;
 }
