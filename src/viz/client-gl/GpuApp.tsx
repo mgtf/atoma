@@ -160,7 +160,11 @@ function GpuAppContent({
     apiReady && (authSnapshot === null || authSnapshot.viewer.platformAdmin);
   const isPlatformAdmin = authSnapshot?.viewer.platformAdmin === true;
   const runsQuery = useRunsIndex(state.view === 'runs' && apiReady);
-  const runQuery = useRunTrace(state.selectedRunId, state.view === 'runs' && apiReady);
+  const runQuery = useRunTrace(
+    state.selectedRunId,
+    state.view === 'runs' && apiReady,
+    runsQuery.data?.find((entry) => entry.id === state.selectedRunId)
+  );
   const registriesQuery = useRegistries(state.view === 'registry' && operatorSurfaces);
   const registryQuery = useRegistry(
     state.selectedRegistryId,

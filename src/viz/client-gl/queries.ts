@@ -6,8 +6,8 @@ import {
 } from '@tanstack/react-query';
 import { useRef } from 'react';
 import { api } from '../client/data-api.js';
-import { isRunLive, projectRunUpdate } from '../client/run-utils.js';
-import type { SkillSummary, VizRun } from '../client/types.js';
+import { isIndexEntryLive, isRunLive, projectRunUpdate } from '../client/run-utils.js';
+import type { RunIndexEntry, SkillSummary, VizRun } from '../client/types.js';
 
 export function useRunsIndex(active: boolean) {
   return useQuery({
@@ -19,9 +19,9 @@ export function useRunsIndex(active: boolean) {
   });
 }
 
-export function useRunTrace(runId: string | null, active: boolean) {
+export function useRunTrace(runId: string | null, active: boolean, indexEntry?: RunIndexEntry) {
   const queryClient = useQueryClient();
-  return useQuery({
+  const query = useQuery({
     queryKey: ['viz', 'run', runId],
     enabled: active && !!runId,
     queryFn: async () => {
@@ -32,10 +32,15 @@ export function useRunTrace(runId: string | null, active: boolean) {
     },
     refetchInterval: (query) => {
       const run = query.state.data;
-      return run && isRunLive(run) ? 1000 : false;
+      // The index can precede the first trace flush. Keep the existing live
+      // poll until that trace arrives, using the same liveness contract.
+      const live = run ? isRunLive(run) : indexEntry?.id === runId && isIndexEntryLive(indexEntry);
+      return active && live ? 1000 : false;
     },
     staleTime: 750,
   });
+  // Cached errors belong to the selected view, not every later destination.
+  return { ...query, error: active ? query.error : null };
 }
 
 export function useRegistries(active: boolean) {
