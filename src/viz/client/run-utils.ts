@@ -453,6 +453,8 @@ export const EVENT_KIND_FILTERS = [
   'cache',
   'context',
   'registry',
+  'topology',
+  'acceptance',
 ] as const;
 
 export function visibleEventKindFilters(
@@ -462,7 +464,8 @@ export function visibleEventKindFilters(
   const hasContext = events.some((event) => event.kind === 'context');
   return EVENT_KIND_FILTERS.filter(
     (kind) =>
-      (kind !== 'cache' || hasCache) && (kind !== 'context' || hasContext)
+      (kind !== 'cache' || hasCache) && (kind !== 'context' || hasContext) &&
+      (!['topology', 'acceptance'].includes(kind) || events.some((event) => event.kind === kind))
   );
 }
 

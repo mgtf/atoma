@@ -181,8 +181,9 @@ describe('the discard warning states its consequence', () => {
     expect(res.warnings[0]).toMatch(/DISCARDED and never ran/);
     expect(res.requestedInteractions).toBe(2);
     expect(res.ignoredInteractions).toBe(2);
-    expect(res.document?.path).toBe('index.html');
-    expect(res.document?.sha256).toMatch(/^[0-9a-f]{64}$/);
+    // Since 2026-09-13 the binding is established on the response the browser
+    // loaded; a refused call opens no page, so it is attested and NOT bound.
+    expect(res.document).toBeUndefined();
   });
 });
 

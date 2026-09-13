@@ -24,6 +24,8 @@ export interface ToolBackend {
   readonly rootLabel: string;
   /** Release children/containers. Must be safe to call twice. */
   cleanup(): Promise<void>;
+  /** Strict quiescence before an experiment replaces this backend's workspace. */
+  drain?(): Promise<void>;
 }
 
 /** Assemble the host capability around either backend, before L1/trace wrappers. */
@@ -45,7 +47,9 @@ export async function withProjectRetrievalBackend(
   try {
     retrieval = createProjectRetrievalTool(binding, context);
     const composite = projectRetrievalExecutor(backend.executor, backend.toolDecls, retrieval);
-    return { ...backend, ...composite, cleanup: close };
+    return { ...backend, ...composite, cleanup: close,
+      ...(backend.drain ? { drain: async () => { await retrieval?.close(); await backend.drain!(); } } : {}),
+    };
   } catch (error) {
     await close();
     throw error;
@@ -62,6 +66,7 @@ export function localToolBackend(opts: { workspaceRoot: string; logger: Logger }
     toolDecls: registry.declarations(),
     rootLabel: sandbox.root,
     cleanup: () => sandbox.cleanup(),
+    drain: () => sandbox.drain(),
   };
 }
 

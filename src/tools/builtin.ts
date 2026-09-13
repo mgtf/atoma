@@ -27,23 +27,57 @@ import {
 export { appendHttpProbe, mergeProbeManifestWrite, mergeShellProbe, probeManifestWriteRefusal };
 import { elementForTool } from '../contracts/toolTaxonomy.js';
 import puppeteer, { type Browser } from 'puppeteer';
+import { processHoldsListeningPort } from './listeningPorts.js';
 
 /**
- * Which entry file `start_node_server` actually spawned, by bound port.
+ * Which server THIS tool set bound on which loopback port.
  *
- * THE ONE CHANNEL BETWEEN TWO TOOLS, and it exists because the two halves of
- * the same fact are observed in different places: `start_node_server` knows
- * the entry file (it is the argument it hands to `spawn`) and never writes the
- * manifest; `fetch_url record:true` writes the http entry and only ever sees a
- * URL. Without this the recorded evidence says a server answered and cannot
- * say which file was the server — which is precisely what a later reader needs
- * in order to start it again.
+ * THE ONE CHANNEL BETWEEN THE SERVER TOOLS AND THEIR OBSERVERS, and it exists
+ * because the halves of one fact are observed in different places:
+ * `start_node_server` knows the entry file (the argument it hands to `spawn`)
+ * and `start_static_server` knows it serves the workspace root, while
+ * `fetch_url record:true` and `validate_html` only ever see a URL. Without it
+ * the recorded evidence says a server answered and cannot say which file was
+ * the server, nor whether the origin the browser reached was ours at all.
  *
- * MACHINE-OBSERVED, not declared: the value is the spawned argument, already
- * jailed by `sandbox.resolve`, never a model's prose about its own layout.
- * Per tool set, so it dies with the run and two runs cannot see each other's.
+ * MACHINE-OBSERVED, not declared: `entry` is the spawned argument, already
+ * jailed by `sandbox.resolve`; `pid` is the child the sandbox tracks. Per tool
+ * set, so it dies with the run — one sandbox per attempt means a former
+ * attempt's port attribution cannot survive into the next.
+ *
+ * Reading it is not proof of the document served: a Node server we launched
+ * may serve another file, or generated HTML. `bindObservedDocument` therefore
+ * also compares the bytes the browser received (2026-09-13).
  */
-export type NodeServerEntries = Map<number, string>;
+export interface ServedOrigin {
+  readonly kind: 'static' | 'node';
+  readonly pid: number | undefined;
+  /** Node only: the entry file that IS the server, workspace-relative. */
+  readonly entry?: string;
+}
+export type ServedOrigins = Map<number, ServedOrigin>;
+
+/**
+ * A registered origin whose process HOLDS the listening socket on `port` at
+ * the time of asking. Alive is necessary and not sufficient: a server that
+ * closed its listener and stayed alive on a timer while a stranger bound the
+ * same port was reproduced with a real browser (2026-09-13). Ownership is
+ * asked of the kernel (`listeningPorts.ts`) and an unanswerable platform
+ * yields no origin — the binding fails closed.
+ */
+export async function servedOriginHoldsPort(
+  origins: ServedOrigins | undefined,
+  port: number
+): Promise<ServedOrigin | undefined> {
+  const origin = origins?.get(port);
+  if (!origin || origin.pid === undefined) return undefined;
+  try {
+    process.kill(origin.pid, 0);
+  } catch {
+    return undefined;
+  }
+  return (await processHoldsListeningPort(origin.pid, port)) ? origin : undefined;
+}
 
 export interface BuiltinToolOptions {
   sandbox: ToolSandbox;
@@ -52,8 +86,11 @@ export interface BuiltinToolOptions {
   shellAllowlist?: string[];
   /** Hard timeout for shell commands in ms. Defaults to 30s. */
   shellTimeoutMs?: number;
-  /** Shared by `start_node_server` and `fetch_url`; `defaultBuiltinTools` supplies one. */
-  nodeServers?: NodeServerEntries;
+  /**
+   * Shared by both server tools, `fetch_url` and `validate_html`;
+   * `defaultBuiltinTools` supplies one per tool set.
+   */
+  servedOrigins?: ServedOrigins;
 }
 
 /** Simple declaration + implementation bundle for an atom tool. */
@@ -913,6 +950,7 @@ export function startStaticServerTool(opts: BuiltinToolOptions): BuiltinTool {
           `[tool:start_static_server] python3 http.server :${actualPort} in ${opts.sandbox.root}` +
             (isRetry ? ` (auto-retry after ${requestedPort} was busy)` : '')
         );
+        opts.servedOrigins?.set(actualPort, { kind: 'static', pid: child.pid });
 
         return {
           ok: true,
@@ -1088,7 +1126,7 @@ export function fetchUrlTool(opts: BuiltinToolOptions): BuiltinTool {
             parsedUrl.hostname === '[::1]' ||
             parsedUrl.hostname === '::1';
           if (loopback && parsedUrl.port) {
-            const servedByEntry = opts.nodeServers?.get(Number(parsedUrl.port));
+            const servedByEntry = opts.servedOrigins?.get(Number(parsedUrl.port))?.entry;
             if (servedByEntry) entry.entry = servedByEntry;
           }
           const manifestPath = opts.sandbox.resolve(PROBE_MANIFEST_FILENAME);
@@ -1251,14 +1289,15 @@ export function startNodeServerTool(opts: BuiltinToolOptions): BuiltinTool {
         `[tool:start_node_server] node ${entry} :${port} in ${opts.sandbox.root}`
       );
 
-      // WHICH FILE IS THE SERVER. Recorded against the bound port so
-      // `fetch_url record:true` can stamp it onto the http evidence it writes.
-      // The value is the argument that was spawned — `sandbox.resolve` above
-      // already refused anything outside the workspace — so it is an
+      // WHICH FILE IS THE SERVER, AND WHOSE PORT THIS IS. Recorded against the
+      // bound port so `fetch_url record:true` can stamp the entry onto the http
+      // evidence it writes and `validate_html` can tell our origin from a
+      // stranger's. The value is the argument that was spawned — `sandbox.resolve`
+      // above already refused anything outside the workspace — so it is an
       // observation, never a claim. Canonicalising is the READER's job:
       // `src/tools` deliberately imports nothing outside node builtins and its
       // own siblings, which is what keeps the worker image's closure small.
-      opts.nodeServers?.set(port, entry);
+      opts.servedOrigins?.set(port, { kind: 'node', pid: child.pid, entry });
 
       return {
         ok: true,
@@ -1280,42 +1319,93 @@ export function startNodeServerTool(opts: BuiltinToolOptions): BuiltinTool {
  * This is the fix-loop signal the L1 worker needs to know whether the app it
  * just built actually runs.
  */
+/** `scheme://host:port` of a URL, or the raw string when it does not parse. */
+function originOf(rawUrl: string): string {
+  try {
+    return new URL(rawUrl).origin;
+  } catch {
+    return rawUrl;
+  }
+}
+
 /**
- * The workspace file a `start_static_server` URL actually serves, with its
- * content digest AT OBSERVATION TIME. `start_static_server` serves the
- * WORKSPACE ROOT, so the mapping is deterministic: pathname → sandbox file,
- * with a directory request meaning `index.html`.
+ * The workspace file a loopback URL DESIGNATES: pathname → sandbox file, a
+ * directory request meaning `index.html`. A designation only. Whether the
+ * server actually returned that file is what `bindObservedDocument` proves.
  *
- * WHY the tool resolves this and not the caller: the digest is what relates
- * a browser observation to an artifact revision, and it has to be taken
- * while the observation is being taken. Recomputed later at verdict time it
- * would only ever prove the file's CURRENT state, which is the question, not
- * the answer.
- *
- * Silent on anything it cannot resolve (external URL, a Node server, a path
- * outside the sandbox, a missing file). An absent document means "no
- * revision binding", which is a weaker observation — never a failure.
+ * Silent on anything it cannot resolve (non-loopback host, a path outside the
+ * sandbox, a missing file).
  */
-function observedDocumentFor(
+export function designatedDocumentFor(
   sandbox: ToolSandbox,
   rawUrl: string
-): { path: string; sha256: string } | undefined {
+): { path: string; abs: string; port: number } | undefined {
   try {
     const parsed = new URL(rawUrl);
     if (parsed.hostname !== 'localhost' && parsed.hostname !== '127.0.0.1') return undefined;
+    const port = parsed.port ? Number(parsed.port) : parsed.protocol === 'https:' ? 443 : 80;
     let pathname = decodeURIComponent(parsed.pathname);
     if (pathname.endsWith('/')) pathname = `${pathname}index.html`;
     const relPath = pathname.replace(/^[\\/]+/, '');
     if (relPath.length === 0) return undefined;
     const abs = sandbox.resolve(relPath);
     if (!existsSync(abs) || !lstatSync(abs).isFile()) return undefined;
-    return {
-      path: relPath,
-      sha256: createHash('sha256').update(readFileSync(abs)).digest('hex'),
-    };
+    return { path: relPath, abs, port };
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Bind a browser observation to the workspace document it was TAKEN AGAINST,
+ * or to nothing.
+ *
+ * Established on the response the browser actually loaded, never on the URL
+ * alone (2026-09-13). `url` MUST be the FINAL response URL after redirects:
+ * a registered server that answers `302 → stranger` hands the browser a
+ * stranger's bytes under our port's name, and binding on the requested URL
+ * was reproduced as a false binding. Three conditions, all mechanical:
+ *
+ *   1. ORIGIN KNOWN AND STILL VALID — the final URL's port was bound by this
+ *      tool set's `start_static_server` or `start_node_server`, and that
+ *      process HOLDS the listening socket now (`servedOriginHoldsPort`). A
+ *      stranger's server on a loopback port, our own server that exited, or
+ *      our own server that closed its listener while something else answers
+ *      on the port, is an unknown origin.
+ *   2. CONTENT CORRESPONDENCE AT THIS INSTANT — the main-frame response bytes
+ *      equal the designated file's bytes read now. `/` → `index.html` is a
+ *      designation, not a proof: a Node server we launched may serve another
+ *      file or generated HTML, and an unchanged `index.html` at the workspace
+ *      root while the server returns a different page must NOT bind.
+ *   3. NO DEMONSTRATED BINDING, NO DECLARED BINDING — the observation stays
+ *      (interactions, smoke, requests); only `document` is absent. Absence is
+ *      a weaker observation and never a failure.
+ *
+ * What it attests: that these bytes were the document at that instant. Not
+ * the application's dependency chain, scripts included. The digest is of the
+ * response bytes, which the equality makes the file's digest too, so
+ * `documentStillMatches` in proof coverage keeps its meaning unchanged.
+ */
+export async function bindObservedDocument(args: {
+  sandbox: ToolSandbox;
+  /** The FINAL response URL, after every redirect. */
+  url: string;
+  origins: ServedOrigins | undefined;
+  response: Buffer | undefined;
+}): Promise<{ path: string; sha256: string } | undefined> {
+  const { sandbox, url, origins, response } = args;
+  if (!response) return undefined;
+  const designated = designatedDocumentFor(sandbox, url);
+  if (!designated) return undefined;
+  if (!(await servedOriginHoldsPort(origins, designated.port))) return undefined;
+  let fileBytes: Buffer;
+  try {
+    fileBytes = readFileSync(designated.abs);
+  } catch {
+    return undefined;
+  }
+  if (!fileBytes.equals(response)) return undefined;
+  return { path: designated.path, sha256: createHash('sha256').update(response).digest('hex') };
 }
 
 export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
@@ -1507,14 +1597,13 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
       // `smoke evaluation threw: Unexpected token 'const'`. Rejecting
       // here also teaches the model the right pattern via a clear error
       // instead of an opaque "unexpected token".
-      // Hoisted above the pre-flight, and it costs nothing: the digest and the
-      // requested/ignored split are facts about the REQUEST. A refusal that
-      // reports none of them is indistinguishable from a call that sent no
-      // interactions at all — which is exactly the confusion the attestation
-      // field pair exists to prevent. Resolved BEFORE the page opens either
-      // way, so the digest is the revision the browser is about to load rather
-      // than whatever the file becomes later in the phase.
-      const document = observedDocumentFor(opts.sandbox, url);
+      // The requested/ignored split is a fact about the REQUEST and is
+      // reported on every path, refusal included: a refusal that reports
+      // neither is indistinguishable from a call that sent no interactions at
+      // all. The `document` binding is NOT a fact about the request — it is
+      // established on the response the browser actually loads
+      // (`bindObservedDocument`), so it exists only once the page has opened.
+      let document: { path: string; sha256: string } | undefined;
       const discardWarning =
         ignoredInteractions > 0
           ? [DISCARDED_INTERACTIONS_WARNING(ignoredInteractions)]
@@ -1532,7 +1621,6 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
             interactionLog: [],
             requestedInteractions,
             ignoredInteractions,
-            ...(document ? { document } : {}),
             smokeResult: {
               error: refusals.map((r) => r.message).join(' ALSO: '),
               ...(hint !== undefined ? { hint } : {}),
@@ -1597,12 +1685,33 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
           timeout: 15_000,
         });
         if (waitMs > 0) await new Promise((r) => setTimeout(r, waitMs));
-        let pageRevision: string;
+        // The main-frame response BYTES serve two readers: the stuck detector
+        // keys on the loaded source revision, and the document binding
+        // compares them to the designated workspace file. Unavailable bytes
+        // (about:blank, a body Puppeteer cannot hand back) fall back to the
+        // rendered content for the detector and to NO binding for the proof.
+        let responseBytes: Buffer | undefined;
         try {
-          pageRevision = (await navigation?.text()) ?? (await page.content());
+          responseBytes = await navigation?.buffer();
         } catch {
-          pageRevision = await page.content();
+          responseBytes = undefined;
         }
+        const pageRevision: string = responseBytes ? responseBytes.toString('utf8') : await page.content();
+        // The binding follows the FINAL response: its URL names the document
+        // and the port, whatever the caller asked for. A redirect off the
+        // requested origin is reported as evidence in its own right.
+        const finalUrl = navigation?.url() ?? url;
+        if (originOf(finalUrl) !== originOf(url)) {
+          warnings.push(
+            `navigation redirected to ${finalUrl}; the document binding follows the final response, not the requested URL`
+          );
+        }
+        document = await bindObservedDocument({
+          sandbox: opts.sandbox,
+          url: finalUrl,
+          origins: opts.servedOrigins,
+          response: responseBytes,
+        });
 
         // The detector is scoped to the loaded SOURCE revision. The same
         // smoke failing before an edit and passing after it is normal
@@ -2965,11 +3074,12 @@ export function recordProbeTool(opts: BuiltinToolOptions): BuiltinTool {
 }
 
 export function defaultBuiltinTools(options: BuiltinToolOptions): BuiltinTool[] {
-  // ONE map for this tool set, so `start_node_server` and `fetch_url` share
-  // the channel by construction rather than by both remembering to.
+  // ONE registry for this tool set, so the server tools, `fetch_url` and
+  // `validate_html` share the channel by construction rather than by each
+  // remembering to.
   const opts: BuiltinToolOptions = {
     ...options,
-    nodeServers: options.nodeServers ?? new Map(),
+    servedOrigins: options.servedOrigins ?? new Map(),
   };
   return [
     writeFileTool(opts),

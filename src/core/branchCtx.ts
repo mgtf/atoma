@@ -82,10 +82,13 @@ export function forkBranch(ctx: RunContext, branchId: string): RunContext {
   // handed, so a nested fork re-wraps the BASE executor instead of stacking
   // one append per ancestor branch.
   const wrappedTools = attestingExecutor(ctx.tools, attestations, branchId, (message) =>
-    ctx.logger.warn(`[attestation] ${message}`)
+    ctx.logger.warn(`[attestation] ${message}`), ctx.attempt
   );
 
   const out: RunContext = {
+    ...(ctx.attempt !== undefined ? { attempt: ctx.attempt } : {}),
+    ...(ctx.beforeFallback ? { beforeFallback: ctx.beforeFallback } : {}),
+    ...(ctx.recordPhaseCoverage ? { recordPhaseCoverage: ctx.recordPhaseCoverage } : {}),
     logger: ctx.logger,
     signal: ctx.signal,
     ...(ctx.deadlineAt !== undefined ? { deadlineAt: ctx.deadlineAt } : {}),

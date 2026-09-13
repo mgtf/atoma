@@ -83,6 +83,25 @@ Neighbours:
 
 ## Run accounting
 
+- The opt-in build depth pilot (`--depth deep|short`) keeps model pins and
+  one run deadline, cost ledger and trace. Its profile freezes the delivery
+  `proofFloor` before routing, without adding it to phase `proofObligations`.
+  Deep enters through L3; short plans and executes
+  through the canonical L2, including its peers. Every result goes through
+  the same root acceptance; rejection fails delivery without remediation.
+- Only the first short attempt may deepen, at the existing supervision
+  fallback moment after its branch retry. Cancel and drain all branches,
+  confirm tool processes have exited, archive the workspace, then construct
+  a new backend and run the original task through L3. Deep fallbacks remain
+  allowed. Gains already earned stay in this run; old attestations cannot
+  cover the new attempt. Mechanical plan/result one-shot memos reset per
+  attempt and stay fork-shared within it. Lifecycle settings are resolved
+  once at launch and stay identical in both attempts; `--depth` does not
+  override them. This pilot currently requires the local backend;
+  container teardown does not yet provide this confirmed-exit contract.
+- Design and remaining measurement protocol:
+  [depth experiment](../../docs/depth-routing-experiment-2026-09-13.md).
+
 - The runner's `ATOMA_RUN_STATS` JSON epilogue is the burn-in accounting
   contract. `parseRunLog` keeps text parsing only for interrupted legacy runs;
   never add global regexes over model-authored prose.

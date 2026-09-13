@@ -90,6 +90,14 @@ export const BUILD_TASK_CONSTRAINTS: readonly string[] = [
  * belongs to this family.
  */
 export const buildProfile: TaskProfile = {
+  depthExperiment: {
+    floor: [{ obligation: 'dom-interaction', deliverable: 'index.html' }],
+    entryCell({ registry, toolDecls }) {
+      const cell = ensureCanonicalFullStack(registry, toolDecls, 2);
+      if (!cell) throw new Error('The depth pilot requires the full-stack tool set');
+      return cell;
+    },
+  },
   id: 'build',
   traceLabelPrefix: 'build-app: ',
   defaultGoal:

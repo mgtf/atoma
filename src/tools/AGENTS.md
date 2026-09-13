@@ -48,11 +48,16 @@ Neighbours:
   explicitly; its loopback bypass keeps local application probes direct.
 - Cleanup is mandatory on success, failure, timeout, signal, and hard-exit paths.
   Network teardown races need bounded retry.
+- `ToolSandbox.drain()` is the stronger local contract before workspace
+  replacement: await cleanup, kill surviving owned children/groups and confirm
+  their exit; a surviving process prevents replacement.
 - Docker image packaging is verified statically against the worker import graph
   and dynamically by booting the real image.
 - `start_static_server` and `start_node_server` use OS-selected ports and explicit
-  readiness markers. Do not kill arbitrary process groups; only safe integer
-  PGIDs greater than 1 may reach group syscalls.
+  readiness markers, and register `{ port → kind, pid, entry }` in the tool
+  set's ONE `servedOrigins` registry, which `fetch_url` and `validate_html`
+  read. Do not kill arbitrary process groups; only safe integer PGIDs greater
+  than 1 may reach group syscalls.
 - `validate_html` treats smoke input as a JS expression, bounds every supplied
   duration, and ignores Chrome's own favicon 404. Browser console errors remain
   evidence but not every one is a mechanical failure.
@@ -117,10 +122,21 @@ Neighbours:
   preserves one coherent state-transition path and is deliberately unchanged.
   What changed is that its effect is now reported as a number instead of only a
   warning string, so a consumer can act on it.
-- The document digest is resolved BEFORE the page opens, from the URL against
-  the sandbox root (`start_static_server` serves the workspace root). Anything
-  unresolvable — an external URL, a Node server, a missing file — yields NO
-  document, which is a weaker observation and never a failure.
+- The `document` binding is established on the FINAL RESPONSE the browser
+  loaded, after every redirect, never on the requested URL
+  (`bindObservedDocument`, 2026-09-13): the final URL's port must be one this
+  tool set's server tools bound whose process HOLDS the listening socket NOW —
+  asked of the kernel through `listeningPorts.ts`, `/proc` on Linux and `lsof`
+  on darwin, failing closed elsewhere; alive is necessary, not sufficient —
+  and the main-frame response bytes must equal the designated workspace file
+  read at that instant (`/` → `index.html` is a designation, not a proof). A
+  stranger's server, our server that exited or closed its listener while a
+  stranger reuses the port, a registered server redirecting to a stranger, a
+  Node server returning another file or generated HTML, an unchanged root
+  `index.html` while the server serves a different page — all yield NO
+  document. Absence is a weaker observation and never a failure, and it
+  attests content correspondence at that instant, not the application's
+  dependency chain.
 
 ## Intentional choices and rejected shortcuts
 
@@ -145,10 +161,11 @@ Neighbours:
   change a disposition and is NOT done here — see
   [`docs/decided-not-built-2026-08-23.md`](../../docs/decided-not-built-2026-08-23.md).
 - A refused call is still ATTESTED. The pre-flight early return carries
-  `requestedInteractions`, `ignoredInteractions`, the document digest and the
-  discard warning, because a refusal reporting none of them is
-  indistinguishable from a call that sent no interactions at all — the exact
-  confusion that field pair exists to prevent.
+  `requestedInteractions`, `ignoredInteractions` and the discard warning,
+  because a refusal reporting none of them is indistinguishable from a call
+  that sent no interactions at all — the exact confusion that field pair
+  exists to prevent. It carries NO `document` since 2026-09-13: no page was
+  loaded, and a binding is established on the loaded response.
 - Moving smoke guidance closer to the call site is NOT the untried variable.
   The erased-intermediate-state rule already sits in the `smoke` PARAMETER
   description and the model still violated it six times across two batches.

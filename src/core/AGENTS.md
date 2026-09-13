@@ -1,5 +1,10 @@
 # Core — AGENTS.md
 
+Depth attempts share the run deadline and accounting. `forkBranch` forwards
+attempt identity and the pre-fallback/phase-coverage hooks. Attestations are
+read by attempt at root acceptance; optional trace snapshots resolve their
+references but are never loaded back as execution proof.
+
 `src/core/` owns the LLM client and its transports, model and tier resolution,
 the cost formula, the product store, the ledger, metrics and limits.
 

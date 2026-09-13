@@ -29,6 +29,7 @@ import {
 } from '../src/tools/containerProtocol.js';
 import { makeCtx, jsonText, nsOf } from './helpers.js';
 import type { RunContext, SkillEventInfo, Tool, ToolExecutor } from '../src/core/types.js';
+import type { PhaseCoverageRecord } from '../src/contracts/depthRouting.js';
 
 /**
  * SUPERVISOR-HELD PROOF ATTESTATION (A1).
@@ -182,6 +183,7 @@ describe('attesting executor — the transport seam', () => {
         throw new Error('log exploded');
       },
       forBranch: () => [],
+      forAttempt: () => [],
       size: 0,
     };
     const messages: string[] = [];
@@ -564,7 +566,10 @@ describe('L2 — an uncovered obligation withholds METHOD credit, never approval
     ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'the page works' }));
     const before = reg.getByName('Water')!.successes;
 
-    const result = await neuron.handleDirect(TASK, ctx);
+    const phaseCoverage: PhaseCoverageRecord[] = [];
+    const result = await neuron.handleDirect(TASK, { ...ctx, attempt: 1,
+      recordPhaseCoverage: (record) => phaseCoverage.push(record) });
+    expect(phaseCoverage).toMatchObject([{ attempt: 1, obligations: [{ covered: false }] }]);
 
     // The deliverable is delivered: approval is a judgment about the artifact.
     expect(result.summary).toMatch(/counter built/);

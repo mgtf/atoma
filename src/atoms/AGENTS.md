@@ -39,6 +39,19 @@ Neighbours:
 - Run-scoped integrity flags and memos must retain the same reference across
   every `forkBranch`; add fork-propagation coverage for new optional fields.
 
+## Root delivery acceptance in the depth pilot
+
+- The opt-in depth pilot's `rootAcceptance.ts` owns delivery acceptance:
+  delegated result gates retain their dispositions, `probe.requiresReview`
+  forces review, and the profile floor requires an executed DOM interaction
+  bound to the named, still-unchanged file in the accepted attempt. Any review
+  finding gets one existing validator call at `modelForTier(1)`; no findings
+  gets a mechanical acceptance. The root changes no phase credits or learning
+  state. The probe receives only `output` and `summary`, as at L3; internal
+  plan/verdict/fallback trace quotes are not delivery claims. Phase coverage
+  is collected with its original attempt and branch, never reevaluated
+  against the root floor. The floor is not inherited by phases.
+
 ## Planning, prefilter, and trust
 
 Read this section before changing any LLM call site here; the cost rules are

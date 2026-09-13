@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type { ContextCitation, ContextSource } from '../contracts/llmTrace.js';
 import type { AtomType } from '../registry/atomRegistry.js';
 import type { Task, Tier } from '../core/types.js';
+import type { AcceptanceInfo, TopologyInfo } from '../contracts/depthRouting.js';
 
 /**
  * Minimal structured event log for the web visualizer. One run corresponds to
@@ -302,7 +303,7 @@ export interface VizBranchEvent {
   actor: VizAtomRef;
 }
 
-export type VizEvent =
+export type VizEvent = (
   | VizLlmEvent
   | VizLlmStartEvent
   | VizRegistryEvent
@@ -311,7 +312,10 @@ export type VizEvent =
   | VizSkillEvent
   | VizCacheEvent
   | VizContextEvent
-  | VizBranchEvent;
+  | VizBranchEvent
+  | ({ id: string; ts: number; kind: 'topology' } & TopologyInfo)
+  | ({ id: string; ts: number; kind: 'acceptance' } & AcceptanceInfo)
+) & { attempt?: number };
 
 export interface VizRunIndexEntry {
   id: string;
@@ -393,6 +397,8 @@ export interface VizRunTotals {
 }
 
 export interface VizRun {
+  /** Resolves floor/phase coverage references, including abandoned attempts. */
+  attestations?: import('../contracts/attestation.js').AttestationRecord[];
   id: string;
   label: string;
   task: Task;
@@ -452,6 +458,7 @@ export class TraceRecorder {
    * by `endRun` so the final synchronous flush wins the race.
    */
   private persistTimer: NodeJS.Timeout | null = null;
+  private attempt: number | undefined;
   private static readonly PERSIST_THROTTLE_MS = 300;
 
   constructor(runsDir: string = './runs') {
@@ -463,6 +470,7 @@ export class TraceRecorder {
     label?: string,
     opts?: { initialTypes?: readonly AtomType[]; runId?: string }
   ): VizRun {
+    this.attempt = undefined;
     const generatedId = `${new Date()
       .toISOString()
       .replace(/[:.]/g, '-')
@@ -490,7 +498,22 @@ export class TraceRecorder {
 
   record(event: VizEvent): void {
     if (!this.run) return;
-    this.run.events.push(event);
+    this.run.events.push(this.attempt === undefined ? event : { ...event, attempt: this.attempt });
+    this.schedulePartialPersist();
+  }
+
+  recordTopology(info: TopologyInfo): void {
+    this.attempt = info.attempt;
+    this.record({ id: randomUUID(), ts: Date.now(), kind: 'topology', ...info });
+  }
+
+  recordAcceptance(info: AcceptanceInfo): void {
+    this.record({ id: randomUUID(), ts: Date.now(), kind: 'acceptance', ...info });
+  }
+
+  recordAttestation(record: import('../contracts/attestation.js').AttestationRecord): void {
+    if (!this.run) return;
+    (this.run.attestations ??= []).push(record);
     this.schedulePartialPersist();
   }
 

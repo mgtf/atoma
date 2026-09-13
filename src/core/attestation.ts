@@ -28,13 +28,20 @@ import {
 
 class MemoryAttestationLog implements AttestationLog {
   private readonly records: AttestationRecord[] = [];
+  constructor(private readonly onAppend?: (record: AttestationRecord) => void) {}
 
   append(record: AttestationRecord): void {
     this.records.push(record);
+    // Persistence is observability; failure must not alter the proof held here.
+    try { this.onAppend?.(record); } catch { /* trace is fail-open */ }
   }
 
   forBranch(branchId: string | undefined): readonly AttestationRecord[] {
     return this.records.filter((record) => record.branchId === branchId);
+  }
+
+  forAttempt(attempt: number): readonly AttestationRecord[] {
+    return this.records.filter((record) => (record.attempt ?? 1) === attempt);
   }
 
   get size(): number {
@@ -42,8 +49,8 @@ class MemoryAttestationLog implements AttestationLog {
   }
 }
 
-export function createAttestationLog(): AttestationLog {
-  return new MemoryAttestationLog();
+export function createAttestationLog(onAppend?: (record: AttestationRecord) => void): AttestationLog {
+  return new MemoryAttestationLog(onAppend);
 }
 
 /**
@@ -73,7 +80,8 @@ export function attestingExecutor(
   inner: ToolExecutor | undefined,
   log: AttestationLog | undefined,
   branchId: string | undefined,
-  onError?: (message: string) => void
+  onError?: (message: string) => void,
+  attempt?: number
 ): ToolExecutor | undefined {
   if (!inner || !log) return inner;
   const base = baseExecutorOf(inner);
@@ -88,6 +96,7 @@ export function attestingExecutor(
         if (observation) {
           log.append({
             eventId: randomUUID(),
+            ...(attempt !== undefined ? { attempt } : {}),
             ...(branchId !== undefined ? { branchId } : {}),
             tool: name,
             observation,

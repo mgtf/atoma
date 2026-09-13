@@ -200,6 +200,7 @@ export class ToolSandbox {
    */
   private readonly realRoot: string;
   private readonly children: ChildProcess[] = [];
+  private readonly childGroups = new Set<number>();
   private readonly cleanupHooks: Array<() => Promise<void> | void> = [];
 
   constructor(root: string) {
@@ -283,12 +284,36 @@ export class ToolSandbox {
 
   trackChild(child: ChildProcess): void {
     this.children.push(child);
+    if (child.pid && ownedGroupExists(child.pid)) this.childGroups.add(child.pid);
     ALL_TRACKED_CHILDREN.add(child);
     child.once('exit', () => {
       const idx = this.children.indexOf(child);
       if (idx !== -1) this.children.splice(idx, 1);
       ALL_TRACKED_CHILDREN.delete(child);
+      if (child.pid && !ownedGroupExists(child.pid)) this.childGroups.delete(child.pid);
     });
+  }
+
+  /** Required before replacing a workspace: SIGTERM sent is not exit confirmed. */
+  async drain(): Promise<void> {
+    const children = [...this.children];
+    const groups = [...this.childGroups];
+    await this.cleanup();
+    for (const pid of groups) {
+      if (!ownedGroupExists(pid)) continue;
+      try { process.kill(-pid, 'SIGKILL'); } catch { /* confirmed below */ }
+    }
+    for (const child of children) {
+      if (child.exitCode !== null || child.signalCode !== null) continue;
+      try { child.kill('SIGKILL'); } catch { /* confirmed below */ }
+    }
+    const deadline = Date.now() + 5000;
+    while (groups.some(ownedGroupExists) || children.some((child) =>
+      child.pid !== undefined && child.exitCode === null && child.signalCode === null)) {
+      if (Date.now() >= deadline) throw new Error('Sandbox processes did not exit; workspace cannot be replaced');
+      await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+    }
+    this.childGroups.clear();
   }
 
   /**
@@ -326,4 +351,10 @@ export class ToolSandbox {
     // Small grace period before returning so sockets unbind.
     await new Promise((r) => setTimeout(r, 150));
   }
+}
+
+function ownedGroupExists(pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 1) return false;
+  try { process.kill(-pid, 0); return true; }
+  catch (error) { return (error as NodeJS.ErrnoException).code !== 'ESRCH'; }
 }

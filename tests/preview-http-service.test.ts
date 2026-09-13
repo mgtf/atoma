@@ -581,6 +581,7 @@ describe('preview lifecycle audit', () => {
       stats: {
         outcome: 'delivered', costUsd: 0.01, llmCalls: 1, opusCalls: 1,
         sonnetCalls: 0, haikuCalls: 0, otherCalls: 0, deterministicPhases: 0,
+        deepenings: 0,
         escalations: 0, learnedSkills: 0, learnedEventSkills: 0, promotions: 0,
         refusals: 0, compileErrors: 0, demotions: 0, dispatchFallbacks: 0,
         uncoveredObligations: 0,

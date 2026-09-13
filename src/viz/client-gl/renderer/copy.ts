@@ -88,6 +88,9 @@ export function timelineBranchLabel(
 
 
 export function eventDecision(event: VizEvent, t: GpuTranslate): string {
+  if (event.kind === 'acceptance') {
+    return t(event.approved ? 'outcome.approved' : 'outcome.rejected');
+  }
   if (event.kind !== 'llm') return '';
   const parsed = tryParseJson(event.response) as Record<string, unknown> | undefined;
   if (!parsed || Array.isArray(parsed)) return '';
@@ -210,15 +213,25 @@ export function gpuEventCardCopy(event: VizEvent, t: GpuTranslate): GpuEventCard
           : event.name ?? 'tool'
         : event.kind === 'skill'
           ? skillEventTitle(event, t)
+          : event.kind === 'topology' || event.kind === 'acceptance'
+            ? t(`depth.${event.kind}`)
           : `${event.kind}${event.op ? ` · ${event.op}` : ''}`;
   const meta = [
     event.actor?.name ? `L${event.actor.tier ?? '?'} ${event.actor.name}` : '',
     event.child?.name ? `→ ${event.child.name}` : '',
     event.subject ?? '',
     event.branchId ? `⑂ ${event.branchId.slice(0, 6)}` : '',
+    event.attempt ? t('depth.attempt', { attempt: event.attempt }) : '',
   ].filter(Boolean).join(' · ');
   let body = event.error ?? skillEventReasoning(event, t) ?? '';
-  if (event.kind === 'tool' && !event.error) {
+  if (event.kind === 'topology') {
+    body = t(event.at === 'deepening' ? 'depth.deepening' : `depth.entry.${event.mode}`);
+  } else if (event.kind === 'acceptance') {
+    body = [event.reasoning, t('depth.coverage', {
+      covered: event.floorCoverage?.filter((item) => item.status === 'covered').length ?? 0,
+      total: event.floorCoverage?.length ?? 0,
+    })].filter(Boolean).join(' · ');
+  } else if (event.kind === 'tool' && !event.error) {
     body = [toolArgSummary(event.args), resultFacts(event.result)].filter(Boolean).join(' · ');
   } else if (
     event.kind === 'llm' &&

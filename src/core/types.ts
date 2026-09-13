@@ -29,6 +29,8 @@ export interface Task {
    * class the 2026-08-14 review measured as a primary source of drift.
    */
   readonly proofObligations?: readonly ProofObligation[];
+  /** Profile-owned delivery obligations, frozen before routing; never inherited as phase obligations. */
+  readonly proofFloor?: import('../contracts/depthRouting.js').ProofFloor;
 }
 
 export interface ToolCall {
@@ -477,6 +479,10 @@ export interface BranchEventInfo {
 }
 
 export interface RunContext {
+  /** Present only for the opt-in depth experiment. Forward unchanged across forks. */
+  readonly attempt?: number;
+  readonly beforeFallback?: (parent: { readonly name: string; readonly tier: Tier }) => void;
+  readonly recordPhaseCoverage?: (record: import('../contracts/depthRouting.js').PhaseCoverageRecord) => void;
   readonly logger: Logger;
   /**
    * Run-scoped memo of deterministic-dispatch outputs: skill id → the
@@ -496,7 +502,8 @@ export interface RunContext {
    * validator takes over); `acceptL3RootPlan` keys
    * `l3-parallel-declared-outputs` for a colliding parallel root plan
    * (no parent validator; a repeat is honoured). Lazily initialised;
-   * forks share the reference (`forkBranch`).
+   * forks share the reference (`forkBranch`). The depth pilot creates a
+   * fresh memo for each attempt, alongside its fresh workspace.
    */
   mechanicalPlanRejections?: Set<string>;
   /**
@@ -505,7 +512,8 @@ export interface RunContext {
    * memo above: the first offense earns one coached mechanical rejection,
    * and a byte-identical repeat is handed to the LLM validator with the
    * facts attached instead of tripping the repeat-rejection tracker.
-   * Shared across forks by `forkBranch` (replans build fresh instances).
+   * Shared across forks by `forkBranch` (replans build fresh instances),
+   * but reset between depth-pilot attempts like the plan memo.
    */
   mechanicalResultRejections?: Set<string>;
   readonly signal: AbortSignal;

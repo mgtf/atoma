@@ -414,6 +414,7 @@ export async function superviseLoop<C extends Atom>(
         continue outer;
       }
 
+      ctx.beforeFallback?.(parent);
       parent.injectContext({
         source: 'fallback-trace',
         text: renderTraceForContext(trace, current.name),

@@ -2085,6 +2085,13 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       ctx,
       obligations: task.proofObligations ?? [],
     });
+    ctx.recordPhaseCoverage?.({
+      attempt: ctx.attempt ?? 1,
+      ...(ctx.currentBranchId ? { branchId: ctx.currentBranchId } : {}),
+      acceptor: { name: this.name, tier: this.tier },
+      executor: { name: child.name, tier: child.tier },
+      obligations: coverage.map((item) => ({ ...item, eventIds: [...item.eventIds] })),
+    });
     const proofUncovered = anyUncovered(coverage);
     const coverageBlock = renderProofCoverage(coverage);
     if (proofUncovered) {

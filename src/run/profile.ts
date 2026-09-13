@@ -46,6 +46,11 @@ export interface TaskProfileGuidance {
 }
 
 export interface TaskProfile {
+  /** Operator-selected depth pilot. The floor is fixed before either planner runs. */
+  readonly depthExperiment?: {
+    readonly floor: import('../contracts/depthRouting.js').ProofFloor;
+    entryCell(ctx: ProfileSeedContext): AtomType;
+  };
   /** Stable id, used in logs and (later) to select a profile. */
   readonly id: string;
   /**

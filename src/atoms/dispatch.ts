@@ -24,7 +24,6 @@ export async function dispatchWithAggregation(
   ctx: RunContext,
   runOne: (subtask: Subtask, idx: number) => Promise<Result>
 ): Promise<Result[]> {
-  void ctx;
   if (plan.aggregation.mode === 'sequential') {
     const out: Result[] = [];
     let previousSummary: string | undefined;
@@ -56,5 +55,15 @@ export async function dispatchWithAggregation(
     }
     return out;
   }
-  return Promise.all(subtasks.map((subtask, idx) => runOne(subtask, idx)));
+  const pending = subtasks.map((subtask, idx) => runOne(subtask, idx));
+  if (ctx.attempt === undefined) return Promise.all(pending);
+  // A depth transition archives the workspace. Every sibling must have
+  // settled before that can happen, including branches cancelled by it.
+  const settled = await Promise.allSettled(pending);
+  const failed = settled.find((item) => item.status === 'rejected');
+  if (failed?.status === 'rejected') throw failed.reason;
+  return settled.map((item) => {
+    if (item.status === 'rejected') throw item.reason;
+    return item.value;
+  });
 }

@@ -155,6 +155,7 @@ export function parseRunLog(log: string): RunStats {
     otherCalls:
       llmCalls === null ? 0 : Math.max(0, llmCalls - opusCalls - sonnetCalls - haikuCalls),
     deterministicPhases: (log.match(/ran via deterministic dispatch/g) ?? []).length,
+    deepenings: 0,
     // Prose fallback only: count the runner-owned escalation marker, never
     // arbitrary model prose or routine prefilter decisions containing the
     // same word.

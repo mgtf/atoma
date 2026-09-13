@@ -27,6 +27,8 @@ export const EVENT_KIND_COLOR: Record<string, number> = {
   context: 0xfb7185,
   registry: 0xa78bfa,
   branch: 0x94a3b8,
+  topology: 0xf97316,
+  acceptance: 0xa3e635,
 };
 
 /**

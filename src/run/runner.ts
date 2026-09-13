@@ -6,6 +6,7 @@ import { setMaxListeners } from 'node:events';
 import { RunnerConfigError } from '../core/errors.js';
 import { containerImageDigestSchema } from '../contracts/containerImage.js';
 import { applyTierPins } from '../core/models.js';
+import { createAttestationLog } from '../core/attestation.js';
 import {
   ModelSelectorError,
   selectorSpendsSubscription,
@@ -24,6 +25,9 @@ import { DEFAULT_LIMITS } from '../core/limits.js';
 import { openDb } from '../registry/db.js';
 import { skillsDirPath } from '../core/stores.js';
 import { L3Atom } from '../atoms/L3Atom.js';
+import { L2Atom } from '../atoms/L2Atom.js';
+import { depthModeSchema, type DepthMode } from '../contracts/depthRouting.js';
+import { runDepthTask } from './depth.js';
 import { SkillRegistry } from '../skills/registry.js';
 import { isTraceRunId, TraceRecorder, runLabelFromGoal } from '../viz/trace.js';
 import { formatDecompositionReport, formatTimeoutPostMortem } from '../viz/report.js';
@@ -81,6 +85,7 @@ export function persistDeclaredArtifactManifest(path: string, runId: string, pla
 }
 
 export interface RunnerArgs {
+  depth?: DepthMode;
   goal?: string;
   noLearnSkills: boolean;
   noPromoteSkills: boolean;
@@ -164,6 +169,7 @@ function machineRunStats(
     demotions: signals.demotion,
     dispatchFallbacks: signals['dispatch-fallback'],
     uncoveredObligations: signals['uncovered-obligation'],
+    deepenings: signals.deepening,
   };
 }
 
@@ -205,6 +211,7 @@ export function formatUsage(profile: TaskProfile): string {
     ...RUNNER_BOOLEAN_FLAGS,
     ...RUNNER_NEGATABLE_FLAGS.flatMap((flag) => [flag, `--no-${stripDashes(flag)}`]),
     '--seed <dir>',
+    '--depth <deep|short> (depth pilot, common final acceptance; local backend)',
     '--worker-image <sha256:digest> (requires container mode)',
   ];
   return [
@@ -236,7 +243,7 @@ export function parseRunnerArgs(argv: readonly string[]): RunnerArgs {
     negatableFlags: RUNNER_NEGATABLE_FLAGS.map(stripDashes),
     // `--seed` consumes the next token UNCONDITIONALLY (historical contract);
     // a trailing `--seed` records '' and deliberately clobbers ATOMA_SEED.
-    valueFlags: ['seed', 'worker-image'],
+    valueFlags: ['seed', 'worker-image', 'depth'],
     undeclared: 'discard',
   });
   for (const token of undeclaredFlags) console.warn(`unknown flag: ${token}`);
@@ -247,11 +254,16 @@ export function parseRunnerArgs(argv: readonly string[]): RunnerArgs {
       ? flags['baseline'] === 'true'
       : process.env['ATOMA_BASELINE'] === '1';
   const workerImage = flags['worker-image'];
+  const depth = flags['depth'] === undefined ? undefined : depthModeSchema.safeParse(flags['depth']);
+  if (depth && (!depth.success || baseline || seed)) {
+    throw new RunnerConfigError('--depth must be deep or short and cannot be combined with baseline or a seed');
+  }
   if (workerImage !== undefined &&
       (!backendMode.container || !containerImageDigestSchema.safeParse(workerImage).success)) {
     throw new RunnerConfigError('--worker-image requires container mode and a sha256 image digest');
   }
   return {
+    ...(depth?.success ? { depth: depth.data } : {}),
     goal: command ?? undefined,
     noLearnSkills: flags['no-learn-skills'] === 'true',
     noPromoteSkills: flags['no-promote-skills'] === 'true',
@@ -475,6 +487,8 @@ export async function startTask(
   const useClaudeCli = referencedTransports(selectors).includes('claude-cli');
 
   const args = parseRunnerArgs(argv);
+  if (args.depth && !profile.depthExperiment) throw new RunnerConfigError('This profile has no depth experiment contract');
+  if (args.depth && args.container) throw new RunnerConfigError('The depth pilot currently requires the local backend with confirmed process teardown');
   const goal = args.goal ?? profile.defaultGoal;
   // AMBIENT BY DESIGN, unlike the lifecycle toggles and tier pins: the
   // project coordinator sets these on a per-run CHILD PROCESS env, so two
@@ -681,6 +695,7 @@ export async function startTask(
     demotion: 0,
     'dispatch-fallback': 0,
     'uncovered-obligation': 0,
+    deepening: 0,
   };
   // ONE construction switch per transport, shared with curriculum and the viz
   // server (review §3.9): only the transports the three selectors reach are
@@ -717,7 +732,8 @@ export async function startTask(
   // with only the workspace mounted and no route out. The swap is possible
   // at ONE point because `ToolExecutor` is two methods and nothing in the
   // control plane reads the workspace except through it.
-  const selectedBackend = args.container
+  const makeBackend = async () => {
+    const selectedBackend = args.container
     ? await containerToolBackend({
         workspaceRoot,
         ...(args.workerImage ? { image: args.workerImage } : {}),
@@ -726,9 +742,11 @@ export async function startTask(
         runId: `${profile.id}-${process.pid}`,
       })
     : localToolBackend({ workspaceRoot, logger: consoleLogger });
-  const backend = retrievalBinding
+    return retrievalBinding
     ? await withProjectRetrievalBackend(selectedBackend, retrievalBinding, { signal, deadlineAt })
     : selectedBackend;
+  };
+  let backend = await makeBackend();
   const toolDecls = backend.toolDecls;
 
   console.log(`workspace: ${backend.rootLabel}`);
@@ -752,7 +770,7 @@ export async function startTask(
     handle = (t, c) => runFrontierBaseline(t, c, toolDecls);
   } else {
     const seedCtx = { registry, toolDecls, log: (line: string) => console.log(line) };
-    const l3Type = profile.seedL3(seedCtx);
+    const initialL3Type = args.depth ? undefined : profile.seedL3(seedCtx);
     profile.seedCatalog(seedCtx);
 
     // Skill store — shared by every atom in the run. Skills are
@@ -764,12 +782,51 @@ export async function startTask(
     const skillRegistry = new SkillRegistry(skillsDirPath());
     console.log(`skills root: ${skillRegistry.rootDir}`);
 
-    const l3 = L3Atom.fromType(l3Type, registry, skillRegistry);
-    console.log(`L3 ${l3.name} using model ${l3.model}`);
-    handle = (t, c) => l3.handle(t, c);
+    if (args.depth) {
+      const experiment = profile.depthExperiment!;
+      handle = (t, c) => runDepthTask({
+        mode: args.depth!, task: t, ctx: c, floor: t.proofFloor!,
+        createExecutor: (mode) => {
+          const currentSeed = { ...seedCtx, toolDecls: backend.toolDecls };
+          if (mode === 'short') {
+            const entry = experiment.entryCell(currentSeed);
+            const peers = registry.listByTier(2).filter((type) => type.name !== entry.name)
+              .map((type) => L2Atom.fromType(type, registry, [], skillRegistry));
+            const cell = L2Atom.fromType(entry, registry, peers, skillRegistry);
+            return { actor: cell, handle: async (task, context) => {
+              const plan = await cell.plan(task, context);
+              context.recordRootPlan?.(plan);
+              return cell.execute(task, plan, context);
+            } };
+          }
+          const tissue = L3Atom.fromType(profile.seedL3(currentSeed), registry, skillRegistry);
+          return { actor: tissue, handle: (task, context) => tissue.handle(task, context) };
+        },
+        restart: async () => {
+          if (!backend.drain) throw new Error('Depth pilot backend cannot confirm process exit');
+          await backend.drain();
+          signal.throwIfAborted();
+          profile.prepareWorkspace(workspaceRoot, true);
+          const replacement = await makeBackend();
+          if (signal.aborted) {
+            await replacement.cleanup();
+            signal.throwIfAborted();
+          }
+          backend = replacement;
+          return backend.executor;
+        },
+        onTopology: (info) => recorder.recordTopology(info),
+        onAcceptance: (info) => recorder.recordAcceptance(info),
+      });
+    } else {
+      const l3 = L3Atom.fromType(initialL3Type!, registry, skillRegistry);
+      console.log(`L3 ${l3.name} using model ${l3.model}`);
+      handle = (t, c) => l3.handle(t, c);
+    }
   }
 
   const ctx: RunContext = {
+    ...(args.depth ? { attestations: createAttestationLog((record) => recorder.recordAttestation(record)) } : {}),
     logger: consoleLogger,
     signal,
     deadlineAt,
@@ -809,7 +866,11 @@ export async function startTask(
       : {}),
   };
 
-  const task = profile.buildTask(goal);
+  const builtTask = profile.buildTask(goal);
+  const task = args.depth ? {
+    ...builtTask,
+    proofFloor: profile.depthExperiment!.floor.map((item) => ({ ...item })),
+  } : builtTask;
 
   console.log(`\ntask: ${task.description}\n`);
 

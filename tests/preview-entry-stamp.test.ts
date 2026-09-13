@@ -10,7 +10,7 @@ import {
   fetchUrlTool,
   startNodeServerTool,
   type BuiltinTool,
-  type NodeServerEntries,
+  type ServedOrigins,
 } from '../src/tools/builtin.js';
 import {
   PROBE_MANIFEST_FILENAME,
@@ -23,7 +23,7 @@ import {
  *
  * `start_node_server` knows WHICH FILE it spawned and never writes the
  * manifest; `fetch_url record:true` writes the http entry and only ever sees a
- * URL. The shared `nodeServers` map is the only thing that lets the recorded
+ * URL. The shared `servedOrigins` registry is the only thing that lets the recorded
  * evidence say which file was the server — which is exactly what a later
  * reader (a replayer, a preview boot) needs in order to start it again.
  *
@@ -91,16 +91,17 @@ describe('start_node_server records the entry file against the bound port', () =
     rmSync(root, { recursive: true, force: true });
   });
 
-  it('returns the entry and publishes it into the shared nodeServers map', async () => {
+  it('returns the entry and publishes it into the shared servedOrigins registry', async () => {
     writeFileSync(join(root, 'server.js'), ENTRY_SOURCE, 'utf8');
-    const nodeServers: NodeServerEntries = new Map();
-    const start = startNodeServerTool({ sandbox, nodeServers });
+    const servedOrigins: ServedOrigins = new Map();
+    const start = startNodeServerTool({ sandbox, servedOrigins });
 
     const res = (await start.execute({ entry: 'server.js' })) as {
       ok: boolean;
       url: string;
       port: number;
       entry: string;
+      pid: number;
     };
 
     expect(res.ok).toBe(true);
@@ -110,15 +111,15 @@ describe('start_node_server records the entry file against the bound port', () =
     expect(res.entry).toBe('server.js');
     // ...and the same observation is published on the cross-tool channel,
     // keyed by the port the child actually bound.
-    expect(nodeServers.get(res.port)).toBe('server.js');
-    expect(nodeServers.size).toBe(1);
+    expect(servedOrigins.get(res.port)).toEqual({ kind: 'node', pid: res.pid, entry: 'server.js' });
+    expect(servedOrigins.size).toBe(1);
   });
 
   it('stamps the started entry onto the http evidence fetch_url records', async () => {
     writeFileSync(join(root, 'server.js'), ENTRY_SOURCE, 'utf8');
-    const nodeServers: NodeServerEntries = new Map();
-    const start = startNodeServerTool({ sandbox, nodeServers });
-    const fetchUrl = fetchUrlTool({ sandbox, nodeServers });
+    const servedOrigins: ServedOrigins = new Map();
+    const start = startNodeServerTool({ sandbox, servedOrigins });
+    const fetchUrl = fetchUrlTool({ sandbox, servedOrigins });
 
     const started = (await start.execute({ entry: 'server.js' })) as { port: number };
     // The tool returns a `localhost` URL but the entry binds 127.0.0.1;
@@ -151,7 +152,7 @@ describe('start_node_server records the entry file against the bound port', () =
 
   it('shares ONE channel through defaultBuiltinTools, end to end', async () => {
     writeFileSync(join(root, 'server.js'), ENTRY_SOURCE, 'utf8');
-    // Built ONCE, with no nodeServers supplied — defaultBuiltinTools has to
+    // Built ONCE, with no servedOrigins supplied — defaultBuiltinTools has to
     // create the map itself and hand the SAME one to both tools. If it ever
     // built two, or forwarded none, this stamp disappears while both tools
     // keep working in isolation.
@@ -211,8 +212,8 @@ describe('fetch_url stamps ONLY what this tool set actually started', () => {
     // Empty channel: a server this run did not spawn is a server this run
     // cannot name. Omission means "unknown", and the field must be ABSENT
     // rather than empty/null, because a replayer distinguishes the two.
-    const nodeServers: NodeServerEntries = new Map();
-    const fetchUrl = fetchUrlTool({ sandbox, nodeServers });
+    const servedOrigins: ServedOrigins = new Map();
+    const fetchUrl = fetchUrlTool({ sandbox, servedOrigins });
 
     const probe = (await fetchUrl.execute({
       url: `http://127.0.0.1:${port}/foreign`,
@@ -234,9 +235,9 @@ describe('fetch_url stamps ONLY what this tool set actually started', () => {
     // The lookup is exact and the bound port is OS-assigned: a map holding
     // 443 (the external-API port an L1 might also have fetched) must not
     // bleed onto an unrelated loopback request.
-    const nodeServers: NodeServerEntries = new Map([[443, 'server.js']]);
-    expect(nodeServers.has(port)).toBe(false);
-    const fetchUrl = fetchUrlTool({ sandbox, nodeServers });
+    const servedOrigins: ServedOrigins = new Map([[443, { kind: 'node', pid: process.pid, entry: 'server.js' }]]);
+    expect(servedOrigins.has(port)).toBe(false);
+    const fetchUrl = fetchUrlTool({ sandbox, servedOrigins });
 
     await fetchUrl.execute({ url: `http://127.0.0.1:${port}/other`, record: true });
 
@@ -255,8 +256,8 @@ describe('fetch_url stamps ONLY what this tool set actually started', () => {
   it.skipIf(externalIp === undefined)(
     'does not stamp a non-loopback host on a port it did start',
     async () => {
-      const nodeServers: NodeServerEntries = new Map([[port, 'server.js']]);
-      const fetchUrl = fetchUrlTool({ sandbox, nodeServers });
+      const servedOrigins: ServedOrigins = new Map([[port, { kind: 'node', pid: process.pid, entry: 'server.js' }]]);
+      const fetchUrl = fetchUrlTool({ sandbox, servedOrigins });
 
       // Control: loopback spelling of the very same port IS stamped.
       const loopback = (await fetchUrl.execute({
@@ -279,8 +280,8 @@ describe('fetch_url stamps ONLY what this tool set actually started', () => {
   );
 
   it('leaves no manifest at all when record is not requested', async () => {
-    const nodeServers: NodeServerEntries = new Map([[port, 'server.js']]);
-    const fetchUrl = fetchUrlTool({ sandbox, nodeServers });
+    const servedOrigins: ServedOrigins = new Map([[port, { kind: 'node', pid: process.pid, entry: 'server.js' }]]);
+    const fetchUrl = fetchUrlTool({ sandbox, servedOrigins });
     const res = (await fetchUrl.execute({ url: `http://127.0.0.1:${port}/quiet` })) as {
       ok: boolean;
       recorded?: boolean;

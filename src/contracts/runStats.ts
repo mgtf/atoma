@@ -61,6 +61,7 @@ export const runStatsSchema = z.object({
   // archived epilogue into a parse failure — the exact class of breakage the
   // 'cancelled' outcome note above records.
   uncoveredObligations: countSchema.default(0),
+  deepenings: countSchema.default(0),
 });
 
 export type RunStats = z.infer<typeof runStatsSchema>;
@@ -75,7 +76,8 @@ export type RunStatSignal =
   | 'compile-error'
   | 'demotion'
   | 'dispatch-fallback'
-  | 'uncovered-obligation';
+  | 'uncovered-obligation'
+  | 'deepening';
 
 export function formatRunStatsEpilogue(stats: RunStats): string {
   return RUN_STATS_PREFIX + JSON.stringify(runStatsSchema.parse(stats));

@@ -29,6 +29,7 @@ const DELIVERED_STATS: RunStats = {
   haikuCalls: 0,
   otherCalls: 0,
   deterministicPhases: 0,
+  deepenings: 0,
   escalations: 0,
   learnedSkills: 0,
   learnedEventSkills: 0,

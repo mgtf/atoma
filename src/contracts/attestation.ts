@@ -95,6 +95,7 @@ export type ToolObservation = BrowserObservation;
  */
 export interface AttestationRecord {
   readonly eventId: string;
+  readonly attempt?: number;
   readonly branchId?: string;
   readonly tool: string;
   readonly observation: ToolObservation;
@@ -110,6 +111,8 @@ export interface AttestationLog {
   append(record: AttestationRecord): void;
   /** Records observed under one branch, in append order. */
   forBranch(branchId: string | undefined): readonly AttestationRecord[];
+  /** Missing historical tags belong to the first attempt. */
+  forAttempt(attempt: number): readonly AttestationRecord[];
   readonly size: number;
 }
 

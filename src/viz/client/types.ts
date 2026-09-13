@@ -1,4 +1,5 @@
 import type { AccountSubscriptionsResponse } from '../../contracts/accountSubscriptions.js';
+import type { AcceptanceInfo, TopologyInfo } from '../../contracts/depthRouting.js';
 
 export interface RunIndexEntry {
   id: string;
@@ -19,7 +20,7 @@ export interface RunIndexEntry {
   projectSlug?: string;
 }
 
-export interface VizEvent {
+export interface VizEvent extends Partial<AcceptanceInfo>, Partial<TopologyInfo> {
   id: string;
   ts: number;
   kind: string;
