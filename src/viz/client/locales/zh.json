@@ -1120,5 +1120,12 @@
   "projects.sourceRepository": "源 GitHub 仓库",
   "projects.pullRequest": "拉取请求",
   "projects.sourceHint.fork": "首次 run 会创建你的复刻仓库。每次 run 都会直接将更改发布到该仓库。",
-  "projects.sourceHint.pullRequest": "每次 run 都会发起一个拉取请求。请先合并，再开始依赖它的工作。"
+  "projects.sourceHint.pullRequest": "每次 run 都会发起一个拉取请求。请先合并，再开始依赖它的工作。",
+  "depth.topology": "监督深度",
+  "depth.acceptance": "最终验收",
+  "depth.attempt": "第{{attempt}}次尝试",
+  "depth.entry.deep": "从一个监督细胞和分子的组织开始。",
+  "depth.entry.short": "从一个监督分子的细胞开始。",
+  "depth.deepening": "入口细胞已用尽重试次数。改由组织监督重新开始。",
+  "depth.coverage": "{{total}}项交付义务中已覆盖{{covered}}项"
 }

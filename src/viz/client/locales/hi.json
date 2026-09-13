@@ -1120,5 +1120,12 @@
   "projects.sourceRepository": "स्रोत GitHub रिपॉज़िटरी",
   "projects.pullRequest": "पुल अनुरोध",
   "projects.sourceHint.fork": "पहला run आपका फ़ोर्क बनाता है। प्रत्येक run बदलावों को सीधे वहीं प्रकाशित करता है।",
-  "projects.sourceHint.pullRequest": "प्रत्येक run एक पुल अनुरोध खोलता है। निर्भर कार्य शुरू करने से पहले उसे मर्ज करें।"
+  "projects.sourceHint.pullRequest": "प्रत्येक run एक पुल अनुरोध खोलता है। निर्भर कार्य शुरू करने से पहले उसे मर्ज करें।",
+  "depth.topology": "पर्यवेक्षण की गहराई",
+  "depth.acceptance": "अंतिम स्वीकृति",
+  "depth.attempt": "प्रयास {{attempt}}",
+  "depth.entry.deep": "कोशिकाओं और अणुओं का पर्यवेक्षण करने वाले ऊतक से शुरू करें।",
+  "depth.entry.short": "अणुओं का पर्यवेक्षण करने वाली कोशिका से शुरू करें।",
+  "depth.deepening": "प्रवेश कोशिका के पुनः प्रयास समाप्त हो गए। ऊतक पर्यवेक्षण के साथ फिर से शुरू करें।",
+  "depth.coverage": "{{total}} में से {{covered}} डिलीवरी दायित्व पूरे किए गए"
 }

@@ -1120,5 +1120,12 @@
   "projects.sourceRepository": "Repositori GitHub sumber",
   "projects.pullRequest": "Permintaan pull",
   "projects.sourceHint.fork": "run pertama membuat fork Anda. Setiap run menerbitkan perubahan langsung di sana.",
-  "projects.sourceHint.pullRequest": "Setiap run membuka permintaan pull. Gabungkan sebelum memulai pekerjaan yang bergantung padanya."
+  "projects.sourceHint.pullRequest": "Setiap run membuka permintaan pull. Gabungkan sebelum memulai pekerjaan yang bergantung padanya.",
+  "depth.topology": "Kedalaman supervisi",
+  "depth.acceptance": "Penerimaan akhir",
+  "depth.attempt": "Percobaan {{attempt}}",
+  "depth.entry.deep": "Mulai dengan jaringan yang menyupervisi sel dan molekul.",
+  "depth.entry.short": "Mulai dengan sel yang menyupervisi molekul.",
+  "depth.deepening": "Sel awal telah menghabiskan semua percobaan ulangnya. Mulai ulang dengan supervisi jaringan.",
+  "depth.coverage": "{{covered}} dari {{total}} kewajiban pengiriman tercakup"
 }

@@ -1120,5 +1120,12 @@
   "projects.sourceRepository": "ماخذ GitHub ریپوزٹری",
   "projects.pullRequest": "پُل ریکویسٹ",
   "projects.sourceHint.fork": "پہلا run آپ کا فورک بناتا ہے۔ ہر run تبدیلیاں براہِ راست وہیں شائع کرتا ہے۔",
-  "projects.sourceHint.pullRequest": "ہر run ایک پُل ریکویسٹ کھولتا ہے۔ اس پر منحصر کام شروع کرنے سے پہلے اسے ضم کریں۔"
+  "projects.sourceHint.pullRequest": "ہر run ایک پُل ریکویسٹ کھولتا ہے۔ اس پر منحصر کام شروع کرنے سے پہلے اسے ضم کریں۔",
+  "depth.topology": "نگرانی کی گہرائی",
+  "depth.acceptance": "حتمی قبولیت",
+  "depth.attempt": "کوشش {{attempt}}",
+  "depth.entry.deep": "ایسی بافت سے آغاز کریں جو خلیات اور سالمات کی نگرانی کرے۔",
+  "depth.entry.short": "ایسے خلیے سے آغاز کریں جو سالمات کی نگرانی کرے۔",
+  "depth.deepening": "ابتدائی خلیے کی دوبارہ کوششیں ختم ہو گئیں۔ بافت کی نگرانی کے ساتھ دوبارہ آغاز کریں۔",
+  "depth.coverage": "{{total}} میں سے {{covered}} ترسیلی ذمہ داریوں کا احاطہ کیا گیا"
 }

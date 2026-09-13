@@ -1120,5 +1120,12 @@
   "projects.sourceRepository": "ソースGitHubリポジトリ",
   "projects.pullRequest": "プルリクエスト",
   "projects.sourceHint.fork": "最初のrunでフォークが作成されます。各runの変更はそこに直接反映されます。",
-  "projects.sourceHint.pullRequest": "各runでプルリクエストが作成されます。依存する作業を開始する前にマージしてください。"
+  "projects.sourceHint.pullRequest": "各runでプルリクエストが作成されます。依存する作業を開始する前にマージしてください。",
+  "depth.topology": "監督の深度",
+  "depth.acceptance": "最終承認",
+  "depth.attempt": "試行{{attempt}}",
+  "depth.entry.deep": "細胞と分子を監督する組織から開始します。",
+  "depth.entry.short": "分子を監督する細胞から開始します。",
+  "depth.deepening": "開始細胞が再試行回数を使い切りました。組織による監督で再開します。",
+  "depth.coverage": "デリバリー義務{{total}}件中{{covered}}件をカバー"
 }

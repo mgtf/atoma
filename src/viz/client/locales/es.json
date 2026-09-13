@@ -1120,5 +1120,12 @@
   "projects.sourceRepository": "Repositorio de GitHub de origen",
   "projects.pullRequest": "Solicitud de incorporación de cambios",
   "projects.sourceHint.fork": "El primer run crea tu bifurcación. Cada run publica los cambios directamente allí.",
-  "projects.sourceHint.pullRequest": "Cada run abre una solicitud de incorporación de cambios. Fusiónala antes de iniciar un trabajo que dependa de ella."
+  "projects.sourceHint.pullRequest": "Cada run abre una solicitud de incorporación de cambios. Fusiónala antes de iniciar un trabajo que dependa de ella.",
+  "depth.topology": "Profundidad de supervisión",
+  "depth.acceptance": "Aceptación final",
+  "depth.attempt": "Intento {{attempt}}",
+  "depth.entry.deep": "Comienza con un tejido que supervise células y moléculas.",
+  "depth.entry.short": "Comienza con una célula que supervise moléculas.",
+  "depth.deepening": "La célula de entrada agotó sus reintentos. Reinicia con supervisión de tejido.",
+  "depth.coverage": "{{covered}} de {{total}} obligaciones de entrega cubiertas"
 }

@@ -1120,5 +1120,12 @@
   "projects.sourceRepository": "مستودع GitHub المصدر",
   "projects.pullRequest": "طلب سحب",
   "projects.sourceHint.fork": "ينشئ أول run نسختك المتفرعة. وينشر كل run التغييرات فيها مباشرةً.",
-  "projects.sourceHint.pullRequest": "يفتح كل run طلب سحب. ادمجه قبل بدء العمل المعتمد عليه."
+  "projects.sourceHint.pullRequest": "يفتح كل run طلب سحب. ادمجه قبل بدء العمل المعتمد عليه.",
+  "depth.topology": "عمق الإشراف",
+  "depth.acceptance": "القبول النهائي",
+  "depth.attempt": "المحاولة {{attempt}}",
+  "depth.entry.deep": "ابدأ بنسيج يشرف على الخلايا والجزيئات.",
+  "depth.entry.short": "ابدأ بخلية تشرف على الجزيئات.",
+  "depth.deepening": "استنفدت خلية الدخول محاولات إعادة المحاولة. أعد البدء بإشراف النسيج.",
+  "depth.coverage": "تمت تغطية {{covered}} من أصل {{total}} من التزامات التسليم"
 }

@@ -1120,5 +1120,12 @@
   "projects.sourceRepository": "Repositório GitHub de origem",
   "projects.pullRequest": "Pull request",
   "projects.sourceHint.fork": "O primeiro run cria o seu fork. Cada run publica as alterações diretamente nele.",
-  "projects.sourceHint.pullRequest": "Cada run abre um pull request. Faça merge antes de iniciar trabalho dependente."
+  "projects.sourceHint.pullRequest": "Cada run abre um pull request. Faça merge antes de iniciar trabalho dependente.",
+  "depth.topology": "Profundidade da supervisão",
+  "depth.acceptance": "Aceitação final",
+  "depth.attempt": "Tentativa {{attempt}}",
+  "depth.entry.deep": "Comece com um tecido a supervisionar células e moléculas.",
+  "depth.entry.short": "Comece com uma célula a supervisionar moléculas.",
+  "depth.deepening": "A célula de entrada esgotou as novas tentativas. Reinicie com supervisão por tecido.",
+  "depth.coverage": "{{covered}} de {{total}} obrigações de entrega cobertas"
 }

@@ -1120,5 +1120,12 @@
   "projects.sourceRepository": "Исходный репозиторий GitHub",
   "projects.pullRequest": "Пул-реквест",
   "projects.sourceHint.fork": "Первый run создаёт ваш форк. Каждый run публикует изменения прямо в нём.",
-  "projects.sourceHint.pullRequest": "Каждый run создаёт пул-реквест. Объедините его перед началом зависимых работ."
+  "projects.sourceHint.pullRequest": "Каждый run создаёт пул-реквест. Объедините его перед началом зависимых работ.",
+  "depth.topology": "Глубина надзора",
+  "depth.acceptance": "Окончательная приёмка",
+  "depth.attempt": "Попытка {{attempt}}",
+  "depth.entry.deep": "Начните с ткани, контролирующей клетки и молекулы.",
+  "depth.entry.short": "Начните с клетки, контролирующей молекулы.",
+  "depth.deepening": "Начальная клетка исчерпала все повторные попытки. Перезапустите с контролем на уровне ткани.",
+  "depth.coverage": "Выполнено обязательств по поставке: {{covered}} из {{total}}"
 }

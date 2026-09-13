@@ -1120,5 +1120,12 @@
   "projects.sourceRepository": "GitHub-Quell-Repository",
   "projects.pullRequest": "Pull-Request",
   "projects.sourceHint.fork": "Der erste run erstellt Ihren Fork. Jeder run veröffentlicht Änderungen direkt dort.",
-  "projects.sourceHint.pullRequest": "Jeder run öffnet einen Pull-Request. Mergen Sie ihn, bevor Sie mit davon abhängigen Arbeiten beginnen."
+  "projects.sourceHint.pullRequest": "Jeder run öffnet einen Pull-Request. Mergen Sie ihn, bevor Sie mit davon abhängigen Arbeiten beginnen.",
+  "depth.topology": "Überwachungstiefe",
+  "depth.acceptance": "Endgültige Abnahme",
+  "depth.attempt": "Versuch {{attempt}}",
+  "depth.entry.deep": "Mit einem Gewebe beginnen, das Zellen und Moleküle überwacht.",
+  "depth.entry.short": "Mit einer Zelle beginnen, die Moleküle überwacht.",
+  "depth.deepening": "Die Einstiegszelle hat ihre Wiederholungsversuche ausgeschöpft. Mit Gewebeüberwachung neu starten.",
+  "depth.coverage": "{{covered}} von {{total}} Lieferverpflichtungen abgedeckt"
 }

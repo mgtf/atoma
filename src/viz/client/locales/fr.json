@@ -1120,5 +1120,12 @@
   "projects.sourceRepository": "Dépôt GitHub source",
   "projects.pullRequest": "Pull request",
   "projects.sourceHint.fork": "Le premier run crée ton fork. Chaque run y publie directement les modifications.",
-  "projects.sourceHint.pullRequest": "Chaque run ouvre une pull request. Fusionne-la avant de commencer un travail qui en dépend."
+  "projects.sourceHint.pullRequest": "Chaque run ouvre une pull request. Fusionne-la avant de commencer un travail qui en dépend.",
+  "depth.topology": "Profondeur de supervision",
+  "depth.acceptance": "Acceptation finale",
+  "depth.attempt": "Tentative {{attempt}}",
+  "depth.entry.deep": "Commence par un tissu supervisant des cellules et des molécules.",
+  "depth.entry.short": "Commence par une cellule supervisant des molécules.",
+  "depth.deepening": "La cellule d’entrée a épuisé ses nouvelles tentatives. Recommence avec une supervision par un tissu.",
+  "depth.coverage": "{{covered}} obligations de livraison couvertes sur {{total}}"
 }
