@@ -1,3 +1,5 @@
+import { createServer } from 'node:http';
+import { once } from 'node:events';
 import { describe, it, expect } from 'vitest';
 import {
   VALIDATION_SYSTEM_PROMPT,
@@ -116,6 +118,23 @@ describe('extractResultUrl', () => {
     ).toBe('http://localhost:8000/a.html');
   });
 
+  it.each([':', ';', '.', ','])('drops trailing prose punctuation %s from inferred URLs', (suffix) => {
+    expect(extractResultUrl({ summary: `Verified http://localhost:36959/${suffix} checks passed.` }))
+      .toBe('http://localhost:36959/');
+    expect(extractResultUrl({ output: `http://localhost:36959/${suffix} checks passed.` }))
+      .toBe('http://localhost:36959/');
+  });
+
+  it('treats Markdown code fences as boundaries and preserves explicit URL bytes', () => {
+    expect(extractResultUrl({ summary: 'Verified `http://localhost:36959/`; checks passed.' }))
+      .toBe('http://localhost:36959/');
+    for (const url of ['http://localhost:8000/path;', 'http://localhost:8000/?q=:', 'http://[::1]:8000/']) {
+      expect(extractResultUrl({ output: { url } })).toBe(url);
+      expect(extractResultUrl({ url })).toBe(url);
+      expect(extractResultUrl(url)).toBe(url);
+    }
+  });
+
   it('ignores non-http(s) strings', () => {
     expect(extractResultUrl({ output: { url: 'file:///tmp/x.html' } })).toBeNull();
     expect(extractResultUrl({ output: { url: '/relative/path' } })).toBeNull();
@@ -132,6 +151,43 @@ describe('extractResultUrl', () => {
 });
 
 describe('llmVerdict — ground-truth re-validation', () => {
+  it.each([':', ';'])('requests the actual HTTP page when result prose ends its URL with %s', async (suffix) => {
+    const requests: string[] = [];
+    const server = createServer((req, res) => {
+      requests.push(req.url ?? '');
+      res.writeHead(req.url === '/' ? 200 : 404);
+      res.end(req.url === '/' ? '<html>Network Postcard</html>' : 'Not found');
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Expected TCP address');
+    const url = `http://127.0.0.1:${address.port}/`;
+    const ctx = makeCtx();
+    const tools: ToolExecutor = {
+      has: (name) => name === 'validate_html',
+      async execute(_name, args) {
+        const response = await fetch(String(args['url']));
+        await response.text();
+        return { ok: response.ok, errors: response.ok ? [] : ['HTTP 404'], failedRequests: [] };
+      },
+    };
+    try {
+      for (const payload of [{ summary: `Verified ${url}${suffix} checks passed.` }, { output: { url: `${url}missing` } }]) {
+        ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'test verdict' }));
+        await llmVerdict({ ctx: { ...ctx, tools }, model: 'test', supervisorName: 'Neuron',
+          supervisorTier: 2, subject: 'RESULT', child: makeChild(), task: { description: 'verify the page' }, payload });
+      }
+      expect(requests).toEqual(['/', '/missing']);
+      expect(ctx.llm.calls[0]!.userContent).toContain('consoleErrors: 0');
+      // An actual missing resource must still reach the validator as a failure.
+      expect(ctx.llm.calls[1]!.userContent).toContain('HTTP 404');
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve()));
+    }
+  });
+
   it('re-runs validate_html for RESULT payloads that contain a URL', async () => {
     const tools = new MockToolExecutor();
     const ctx = makeCtx();

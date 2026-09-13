@@ -967,9 +967,9 @@ function summarizeValidateHtml(raw: unknown): string {
  */
 export function extractResultUrl(payload: unknown): string | null {
   const urlRe = /^https?:\/\//i;
-  if (typeof payload === 'string' && urlRe.test(payload)) return payload;
-  if (!payload || typeof payload !== 'object') return null;
-  const obj = payload as Record<string, unknown>;
+  if (!payload || (typeof payload !== 'object' && typeof payload !== 'string')) return null;
+  const obj: Record<string, unknown> =
+    typeof payload === 'string' ? { output: payload } : payload as Record<string, unknown>;
 
   const output = obj['output'];
   if (output && typeof output === 'object') {
@@ -980,19 +980,21 @@ export function extractResultUrl(payload: unknown): string | null {
   const topLevel = obj['url'];
   if (typeof topLevel === 'string' && urlRe.test(topLevel)) return topLevel;
 
-  if (typeof output === 'string' && urlRe.test(output)) return output;
+  if (typeof output === 'string' && urlRe.test(output) && !/\s/.test(output)) return output;
 
   // Free-text fallback: scan `output` (if string) and `summary` for the
-  // first http(s) URL. Stops at whitespace, quotes, or angle brackets —
-  // conservative enough not to grab trailing punctuation.
-  const freeTextRe = /https?:\/\/[^\s"'<>)]+/i;
+  // first http(s) URL. Prose punctuation is not part of an inferred URL:
+  // the live traces contained `http://localhost:<port>/:` and `/;`, which
+  // made the independent probe request a missing path. Explicit URL fields
+  // and bare URL outputs above remain byte-honest, including legal punctuation.
+  const freeTextRe = /https?:\/\/[^\s"'`<>)]+/i;
   const candidates: string[] = [];
   if (typeof output === 'string') candidates.push(output);
   const summary = obj['summary'];
   if (typeof summary === 'string') candidates.push(summary);
   for (const s of candidates) {
     const m = s.match(freeTextRe);
-    if (m && m[0]) return m[0];
+    if (m && m[0]) return m[0].replace(/[.,;:]+$/, '');
   }
   return null;
 }
