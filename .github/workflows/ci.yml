@@ -94,17 +94,18 @@ jobs:
     # pre-commit hook that blanks stale target values when en.json changes).
     # A STEP of this CI run, not a second workflow: one runner, one queue, one
     # place to read the pipeline's health. `translate` isolates locales, and
-    # the commit step below runs ALWAYS: surviving blanks are reported in the
-    # summary, never dropped with the runner, and a later push retries them.
+    # the commit step below runs ALWAYS: partial work is never dropped with
+    # the runner. A hard failure or surviving blank makes the job RED.
     #
     # `check` failing turns the job RED but does NOT hold the commit back —
     # both steps are `always()`, deliberately, because a runner that dies with
     # paid translations on its disk is the incident this pipeline exists to
     # avoid. The comment here used to claim the opposite (2026-08-27, 2.6);
-    # what keeps the pair honest is that translate and check now share ONE
+    # translate and check share ONE
     # blank predicate (`scripts/i18n-predicates.mjs`), so translate cannot write a
-    # value check refuses — the shape that made this job red FOREVER, since no
-    # later pass could see it to repair it.
+    # malformed value check refuses — the shape that made this job red FOREVER,
+    # since no later pass could see it to repair it. Completeness is required
+    # here too: valid partial catalogs do not mean translation succeeded.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -179,19 +180,17 @@ jobs:
           ATOMA_I18N_CODEX_MODEL: gpt-5.6-sol
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: node scripts/i18n.mjs translate
-        # A hard locale failure still exits 1 here — but that MUST NOT skip
-        # the steps below: they land every catalog the run earned on disk.
-        # Dying before them repeats the 2026-08-27 loss exactly (712 paid ar
-        # translations written to disk, then dropped with the runner).
-        continue-on-error: true
+        # Keep the failure: continue-on-error hid exhausted API credits and
+        # left 84 values untranslated in a green job (2026-09-14).
+        # The always() guards below alone preserve every catalog earned.
 
       - name: Verify locale health
         if: always()
-        run: node scripts/i18n.mjs check
+        run: node scripts/i18n.mjs check --require-complete
 
       - name: Commit translated locale files
-        # The commit step defines the job's verdict: `check` passing means
-        # placeholder integrity holds, so what translate earned gets committed.
+        # Save partial progress even when translation or verification failed.
+        # A successful commit must not erase either earlier step's failure.
         if: always()
         run: |
           git config user.name "atoma-i18n-bot"

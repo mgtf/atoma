@@ -123,9 +123,9 @@ function runTranslate(env: Record<string, string>) {
   }
 }
 
-function runI18nCheck() {
+function runI18nCheck(flags: string[] = []) {
   try {
-    const stdout = execFileSync('node', ['scripts/i18n.mjs', 'check'], {
+    const stdout = execFileSync('node', ['scripts/i18n.mjs', 'check', ...flags], {
       cwd: workdir,
       encoding: 'utf8',
       env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` },
@@ -177,6 +177,10 @@ describe('translate isolates locale failures', () => {
       greetings_other: '[es] {{count}} greetings',
       farewell: '[es] goodbye',
     });
+    expect(runI18nCheck().status).toBe(0);
+    const strict = runI18nCheck(['--require-complete']);
+    expect(strict.status).toBe(1);
+    expect(strict.stdout).toContain('3 awaiting translation');
   });
 
   it('exits 0 and writes every locale when all succeed', () => {
@@ -191,6 +195,7 @@ describe('translate isolates locale failures', () => {
         farewell: `[${locale}] goodbye`,
       });
     }
+    expect(runI18nCheck(['--require-complete']).status).toBe(0);
   });
 
   it('rejects drifting keys, retries them alone, and still exits 0', () => {
@@ -244,6 +249,26 @@ describe('translate isolates locale failures', () => {
     const check = runI18nCheck();
     expect(check.status).toBe(0);
     expect(check.stdout).toContain('awaiting translation');
+    // A valid partial catalog is acceptable while editing, but the CI job
+    // cannot call an untranslated release complete, even without a hard error.
+    const strict = runI18nCheck(['--require-complete']);
+    expect(strict.status).toBe(1);
+    expect(strict.stdout).toContain('1 awaiting translation');
+  });
+});
+
+describe('CI requires complete target catalogs', () => {
+  it('reports missing keys as untranslated and checks every selected locale', () => {
+    writeFixtureCatalogs();
+    expect(runTranslate({}).status).toBe(0);
+    const catalog = readCatalog('ar');
+    delete catalog.farewell;
+    writeFileSync(join(workdir, LOCALE_DIR, 'ar.json'), JSON.stringify(catalog));
+    expect(runI18nCheck().status).toBe(0);
+    expect(runI18nCheck(['--require-complete', '--locale=de']).status).toBe(0);
+    const strict = runI18nCheck(['--require-complete']);
+    expect(strict.status).toBe(1);
+    expect(strict.stdout).toContain('1 awaiting translation');
   });
 });
 
@@ -366,24 +391,24 @@ describe('semantic drift is invalidated by a push, not only by a commit', () => 
 
 describe('the translation job is one step of CI', () => {
   const workflow = readFileSync(join(REPO_ROOT, '.github', 'workflows', 'ci.yml'), 'utf8');
+  // Stop at the next job, not at worker: the intervening manual smoke jobs
+  // intentionally absorb errors and used to make this assertion pass falsely.
+  const i18nJob = workflow.split(/^ {2}i18n:\s*$/m)[1]!.split(/^ {2}[\w-]+:\s*$/m)[0]!;
 
   it('lives in ci.yml, gated to main pushes, with job-scoped write permission', () => {
     expect(workflow).toContain('  i18n:');
     expect(workflow).toMatch(/if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/);
     // contents: write belongs to the i18n job only; the workflow stays read-only.
-    const i18nJob = workflow.slice(workflow.indexOf('  i18n:'), workflow.indexOf('  worker:'));
     expect(i18nJob).toContain('contents: write');
     expect(workflow).toMatch(/^permissions:\n {2}contents: read$/m);
     // The bot's commit must never re-trigger CI.
     expect(workflow).toContain('[skip ci]');
   });
 
-  it('translate failing never skips check or the commit step', () => {
-    const i18nJob = workflow.slice(workflow.indexOf('  i18n:'), workflow.indexOf('  worker:'));
-    // The translate step absorbs its own hard failures…
-    expect(i18nJob).toMatch(/continue-on-error: true/);
-    // …and both remaining steps run regardless, so nothing earned is dropped:
-    expect(i18nJob).toMatch(/if: always\(\)\n {8}run: node scripts\/i18n\.mjs check/);
+  it('translate failing makes the job red without skipping verification or the commit', () => {
+    // The actual job must propagate failure; always() alone preserves work.
+    expect(i18nJob).not.toMatch(/^\s*continue-on-error: true\s*$/m);
+    expect(i18nJob).toMatch(/if: always\(\)\n {8}run: node scripts\/i18n\.mjs check --require-complete/);
     const commitStep = i18nJob.slice(i18nJob.indexOf('Commit translated locale files'));
     // The comment sits between the name and the `if`; the guard must follow
     // within the step header, before its run block.
@@ -401,7 +426,6 @@ describe('the translation job is one step of CI', () => {
     // 2026-08-27, 2.7. The hook is skipped under CI=true, bypassed by
     // --no-verify, and absent from the web editor; nothing else in the pipeline
     // can see a rewording that keeps its placeholders.
-    const i18nJob = workflow.slice(workflow.indexOf('  i18n:'), workflow.indexOf('  worker:'));
     expect(i18nJob).toContain('node scripts/i18n.mjs invalidate-range');
     // It must run BEFORE translate, or the run pays to translate values it is
     // about to blank.
@@ -413,7 +437,6 @@ describe('the translation job is one step of CI', () => {
   });
 
   it('translates the branch tip and queues concurrent runs instead of cancelling', () => {
-    const i18nJob = workflow.slice(workflow.indexOf('  i18n:'), workflow.indexOf('  worker:'));
     // 2026-08-28, run 33130929613: checked out at the trigger sha, the job
     // could not see the translation commit a re-run had landed 31 seconds
     // earlier, re-translated six already-filled catalogs (paid twice), and

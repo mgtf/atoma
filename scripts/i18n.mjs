@@ -14,8 +14,9 @@
  *                      placeholder signatures, and no TARGET key absent from
  *                      en.json. An EN key a target lacks is NOT a problem — it
  *                      is a blank awaiting translation, and it is counted as
- *                      one. Exit 1 with a report on any violation. Runs in CI
- *                      after translate; deliberately NOT part of `npm run
+ *                      one. --require-complete also fails on any missing or
+ *                      blank target value; CI uses this after translate.
+ *                      Exit 1 with a report on any violation. NOT part of `npm run
  *                      check`, because a blank fr value awaiting CI
  *                      translation is a normal state on a developer machine.
  *   fix-drift [--apply]
@@ -33,15 +34,15 @@
  *                      A key the model returns with placeholder drift gets
  *                      ONE isolated retry — including when the whole batch
  *                      drifted — then a named summary. Blank is one predicate
- *                      shared with `check` (`i18n-predicates.mjs`), so nothing this
- *                      writes can fail the gate that runs after it. Exit 1 only
+ *                      shared with `check` (`i18n-predicates.mjs`), so accepted
+ *                      values pass its integrity checks. Exit 1 only
  *                      on HARD locale failures (provider down, unreadable
  *                      batch); surviving rejects stay blank on disk — they
  *                      commit with everything else and retry next run, so
  *                      paid work is never dropped because one key refused.
- *                      CI's translate step is `continue-on-error` and the
- *                      check/commit steps run `always()`: the catalog write
- *                      path cannot be skipped by an exit code again.
+ *                      CI propagates hard failures and requires completeness;
+ *                      check/commit run `always()` to preserve partial work
+ *                      without misreporting an incomplete job as successful.
  *   invalidate-range [--since=<ref>]
  *                      the SAME invalidation as `invalidate-staged`, keyed on a
  *                      push range instead of the index, for CI. Semantic drift
@@ -91,6 +92,7 @@ function languageName(locale) {
 const [, , command, ...flags] = process.argv;
 const APPLY = flags.includes('--apply');
 const DRY = flags.includes('--dry');
+const REQUIRE_COMPLETE = flags.includes('--require-complete');
 const requestedLocale = flags.find((flag) => flag.startsWith('--locale='))?.slice('--locale='.length);
 if (requestedLocale && !TARGET_LOCALES.includes(requestedLocale)) {
   process.stderr.write(`ERROR: unsupported target locale ${JSON.stringify(requestedLocale)}\n`);
@@ -109,7 +111,7 @@ function rulesPath(locale) {
 function usage() {
   process.stderr.write(
     'Usage:\n' +
-      '  node scripts/i18n.mjs check [--locale=<code>]\n' +
+      '  node scripts/i18n.mjs check [--require-complete] [--locale=<code>]\n' +
       '  node scripts/i18n.mjs fix-drift [--apply] [--locale=<code>]\n' +
       '  node scripts/i18n.mjs translate [--dry] [--locale=<code>]\n' +
       '  node scripts/i18n.mjs invalidate-staged\n' +
@@ -192,7 +194,10 @@ function runCheck() {
 
   for (const problem of problems) process.stdout.write(`  ✗ ${problem}\n`);
   process.stdout.write(`check: ${Object.keys(en).length} EN keys, ${selectedTargets.length} target locale(s), ${blanks} awaiting translation, ${problems.length} problem(s)\n`);
-  if (problems.length > 0) process.exit(1);
+  if (REQUIRE_COMPLETE && blanks > 0) {
+    process.stderr.write(`ERROR: translation incomplete — ${blanks} target value(s) still missing or blank.\n`);
+  }
+  if (problems.length > 0 || (REQUIRE_COMPLETE && blanks > 0)) process.exit(1);
 }
 
 // ---------- fix-drift --------------------------------------------------------
@@ -608,10 +613,9 @@ async function runTranslate() {
     }
     // Write what this locale earned even when it failed: successes are never
     // held hostage to a sibling locale's error. A pure-reject locale (every
-    // batch PARSED, some keys refused) is NOT a failure: the catalog on disk
-    // is better than before, and the commit below lands it; only hard errors
-    // — provider down, unreadable JSON — keep the run red, because there the
-    // next run has real work to redo.
+    // batch PARSED, some keys refused) is not a translate command failure:
+    // the catalog on disk is better than before and the commit lands it.
+    // CI's separate check --require-complete still fails on those blanks.
     const next = { ...target.catalog, ...translated };
     writeCatalog(targetPath(target.locale), next);
     process.stdout.write(`  wrote ${Object.keys(translated).length}/${target.missing.length} to ${targetPath(target.locale)} (model ${servedModel}, tokens ${inTok} in / ${outTok} out)\n`);
