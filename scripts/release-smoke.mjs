@@ -6,6 +6,9 @@ import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// The root-owned deployment helper must ship with every release; importing
+// its module verifies packaging without running any retention operation.
+import './prune-deploy-releases.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const vizEntry = resolve(root, 'dist/viz/server.js');

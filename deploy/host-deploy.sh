@@ -280,6 +280,14 @@ done
 ACTIVATION_STARTED=0
 echo "deployed ${REVISION} to ${SERVICE_NAME}"
 
+# Health has passed; keep the previous generation and five recent releases.
+# The deployment lock and drain lease remain held until EXIT. The helper is
+# installed root-owned beside this script, never executed from a writable release.
+if ! node "$(dirname "${BASH_SOURCE[0]}")/atoma-prune-releases.mjs" \
+    "${DEPLOY_ROOT}" "${OLD_RELEASE:-}" --apply; then
+  echo "WARNING: release retention failed; application remains deployed. Inspect disk usage." >&2
+fi
+
 # ── The mender follows the deployed revision ────────────────────────────────
 # Until 2026-09-07 nothing moved the mender's clone: it stayed on whatever
 # revision install-mender.sh last pinned, while mender.env could already

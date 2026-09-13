@@ -67,6 +67,7 @@ sudo install -d -o root -g root -m 0711 /home/atoma/docker
 sudo usermod -aG docker atoma
 
 sudo install -o root -g root -m 0755 deploy/host-deploy.sh /usr/local/sbin/atoma-deploy
+sudo install -o root -g root -m 0644 scripts/prune-deploy-releases.mjs /usr/local/sbin/atoma-prune-releases.mjs
 sudo install -o root -g root -m 0755 deploy/ssh-command.sh /usr/local/sbin/atoma-deploy-ssh
 sudo install -o root -g root -m 0644 deploy/atoma.service /etc/systemd/system/atoma.service
 sudo install -o root -g root -m 0600 deploy/deploy.env.example /etc/atoma/deploy.env
@@ -305,8 +306,17 @@ previous application generation. A host without a mender (no clone at
 `ATOMA_DEPLOY_MENDER_CHECKOUT`, no `ATOMA_DEPLOY_MENDER_ENV`) skips the phase.
 `install-mender.sh` remains the first installation and the manual recovery.
 The activator itself is root-owned and installed by hand: after changing
-`deploy/host-deploy.sh`, reinstall it from the deployed release
-(`sudo install -m 0755 /home/atoma/current/deploy/host-deploy.sh /usr/local/sbin/atoma-deploy`).
+`deploy/host-deploy.sh` or `scripts/prune-deploy-releases.mjs`, reinstall both
+root-owned files from the verified release using the installation commands above.
+
+After application health verification, while the deployment lock and drain lease
+are still held, release retention keeps the five most recent release directories,
+the active and previous generations, and any release referenced by a process,
+top-level deployment symlink, or nested mount. Only obsolete directories with a
+matching `REVISION` receipt are removed. Runtime state and Docker images are not
+part of this cleanup. An unreadable process inventory or invalid receipt skips
+cleanup with a warning; it does not roll back a healthy application. Watch these
+warnings and disk usage: retention bounds old code, not growing runtime data.
 
 Follow [the production supervisor guide](supervisor-codex-production.md) for
 installation, GitHub configuration cleanup, and end-to-end verification.
