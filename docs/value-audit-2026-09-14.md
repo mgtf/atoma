@@ -141,6 +141,14 @@ défaut fonctionnel final. Leur coût isolé n'est pas mesuré. Le contrat
 d'acceptation établira la conformité finale ; les événements d'outils restent
 nécessaires pour mesurer le travail perdu avant cette conformité.
 
+Le [dossier de reproduction du premier `write_file`](incidents/worker-first-write-2026-09-14.md)
+retrouve une correction déjà commitée le 2 septembre (`5d697fd`) : création
+du dossier de montage côté hôte avant Docker. Son message mentionne un `chown`
+opérateur pendant le run historique ; la livraison ne prouve donc pas une
+récupération autonome. Sur l'image actuelle, première écriture et redirection
+shell réussissent dans quatre cas (absent/vide, disque Linux/montage Windows),
+sans changement de permissions. Aucun nouveau garde-fou n'est introduit.
+
 Empreintes SHA-256 des `run.log` relus :
 
 | Run | SHA-256 du log |
