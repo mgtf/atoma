@@ -219,10 +219,14 @@ mesure des défauts du livrable demande une preuve fonctionnelle indépendante.
 
    Sur l'hôte, `npm run backup -- --dest <off-machine mount>` utilise déjà
    l'API de backup SQLite, puis archive skills, runs opérateur et archives.
-   Toutefois [son implémentation](../src/cli/backup.ts) ne collecte automatiquement
-   **ni `ATOMA_PROJECTS_ROOT` ni `ATOMA_SUPERVISOR_DIR`**. Compléter l'export avec
-   ces corpus, un inventaire et des empreintes ; ne pas qualifier le backup
-   standard de snapshot complet des projets. L'API SQLite assure sa cohérence
+   Toutefois, au moment de l'audit, [son implémentation](../src/cli/backup.ts)
+   ne collectait automatiquement **ni `ATOMA_PROJECTS_ROOT` ni
+   `ATOMA_SUPERVISOR_DIR`**. Complété le même jour, après l'audit : l'export
+   capture désormais le corpus projet (`orgs/` de la racine projets, sans
+   `node_modules`, exclusion enregistrée) et les enregistrements du superviseur,
+   et le manifeste porte empreintes SHA-256, comptes de fichiers et listes
+   `captured`/`skipped`. Il n'en devient pas pour autant un snapshot complet ni
+   atomique des projets. L'API SQLite assure sa cohérence
    interne, pas l'atomicité avec les tar de répertoires. L'opérateur doit borner
    la collecte aux runs terminés et empêcher les mutations concurrentes pendant
    la capture (runs, publication, analyste, nettoyage), sans modifier le lease

@@ -277,9 +277,11 @@ A local release keeps its learned state beside the checkout: `atoma.db`,
 the MCP run lease is `~/.atoma/mcp-run-lock.db`. Back up the database and
 skills directory together: `npm run backup -- --dest <off-machine mount>`
 snapshots the store (SQLite online backup, WAL-safe), the skill tree, the run
-traces and the local archives into one dated directory and prunes old
-snapshots (`--keep`, default 14). None of that state is regenerable from the
-repository. Docker is optional for the core runner: `npm run build:worker` enables
+traces, the local archives, the org-scoped project corpus (the `orgs/` child
+of `ATOMA_PROJECTS_ROOT`, without `node_modules`) and the supervisor records
+into one dated directory with an inventory manifest (per-tier SHA-256 and
+file counts, `captured`/`skipped` lists) and prunes old snapshots (`--keep`,
+default 14). None of that state is regenerable from the repository. Docker is optional for the core runner: `npm run build:worker` enables
 the isolated backend and proxied egress paths from compiled `dist/`. Proxied
 egress requires Docker Engine 28+ so its private bridge can remove both host
 gateway addresses; plain container isolation (`--network none`) works on older

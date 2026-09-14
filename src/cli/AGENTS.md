@@ -71,6 +71,27 @@ can only report that it cannot be.
   activator death cannot leave every write on 503. Existing work always blocks
   an activation; deployment never reaps it.
 
+## Backup
+
+- `npm run backup` snapshots six tiers into one dated directory: the store
+  (SQLite online backup, never a raw copy), skills, operator runs, the
+  `~/.atoma/archive` tier, the org-scoped project corpus and the supervisor
+  records. The projects tier is the `orgs/` child of `ATOMA_PROJECTS_ROOT`,
+  not the root — the default root is `~/.atoma`, which also holds the build
+  workspace and the MCP lease — and it excludes `node_modules`, recorded in
+  the manifest under `excluded`. The supervisor tier follows
+  `supervisorDirPath`. Both were missing until 2026-09-14, when the
+  [value audit](../../docs/value-audit-2026-09-14.md) found the corpus it had
+  to reconcile outside every captured tier.
+- The manifest is an inventory, not a completeness claim: per-tier source,
+  SHA-256, top-level entries and recursive file count, plus the `captured`
+  and `skipped` lists. Read them before calling a snapshot complete. Each
+  artefact is consistent with itself; nothing makes the set atomic across
+  roots, so the operator captures while no run, publication or analyst pass
+  mutates them — without touching the run lease to make room.
+- The destination is required and refused inside the repository. A missing
+  tier is a loud skip that names the resolved path, never a silent success.
+
 ## Burn-in and friction
 
 - Burn-in CSVs belong to exactly one writer/schema. Refuse foreign headers

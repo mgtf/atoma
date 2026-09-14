@@ -9,23 +9,40 @@
  * measured the class already firing once (round 2's 19 traces destroyed by
  * an archive-ordering mistake). One disk failure loses months of burn-in.
  *
- * This CLI snapshots the four state roots into ONE dated directory under a
+ * This CLI snapshots the state roots into ONE dated directory under a
  * destination the operator points at an off-machine mount (NAS, synced
  * folder, external disk) and prunes old snapshots:
  *
  *   <dest>/atoma-state-<stamp>/
- *     store.db        — SQLite ONLINE BACKUP (WAL-safe; never a raw file copy)
- *     skills.tar.gz   — the learned recipe tree
- *     runs.tar.gz     — every persisted trace
- *     archive.tar.gz  — ~/.atoma/archive (pre/post-benchmark store archives)
- *     manifest.json   — what was captured, from where, and how big
+ *     store.db           — SQLite ONLINE BACKUP (WAL-safe; never a raw file copy)
+ *     skills.tar.gz      — the learned recipe tree
+ *     runs.tar.gz        — every persisted operator trace
+ *     archive.tar.gz     — ~/.atoma/archive (pre/post-benchmark store archives)
+ *     projects.tar.gz    — `<projects root>/orgs`: every org-scoped project run
+ *                          (traces, run.log, declared artifacts, workspace with
+ *                          its git base; `node_modules` excluded)
+ *     supervisor.tar.gz  — analyst verdicts and mend records
+ *     manifest.json      — what was captured, from where, how big, its SHA-256,
+ *                          and what was skipped
+ *
+ * The two gated corpora (projects, supervisor) were missing until 2026-09-14:
+ * the value audit of that day found `npm run backup` described as a state
+ * snapshot while the org-scoped runs it needed to reconcile lived outside
+ * every tier it captured. Their inclusion makes the manifest an INVENTORY,
+ * not a completeness claim: the SQLite online backup is consistent with
+ * itself, the tars are each consistent with themselves, and nothing makes the
+ * set atomic across roots. Run it while no run, publication or analyst pass
+ * mutates the roots, and read `captured`/`skipped` before calling a snapshot
+ * complete.
  *
  * The destination is REQUIRED (no default): a default would inevitably be a
  * same-disk path that looks like a backup and protects nothing. A dest
  * inside the repository is refused for the same reason.
  */
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
+  createReadStream,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -37,9 +54,21 @@ import { hostname, homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { skillsDirPath, storeDbPath } from '../core/stores.js';
 import { snapshotSqliteStore } from '../core/sqliteBackup.js';
+import { DEFAULT_PROJECTS_ROOT } from '../projects/coordinator.js';
+import { supervisorDirPath } from '../supervisor/paths.js';
 
 export const SNAPSHOT_PREFIX = 'atoma-state-';
 const DEFAULT_KEEP = 14;
+
+/**
+ * Directory names left out of the projects tar. A project run's workspace is
+ * a delivered application, and its dependency tree is regenerable from the
+ * lockfile it sits beside — at hundreds of megabytes per run it would dwarf
+ * the evidence (traces, logs, git base) the tier exists to preserve. The
+ * exclusion is recorded in the manifest so a reader never mistakes the tar
+ * for the workspace itself.
+ */
+export const PROJECTS_TAR_EXCLUDES: readonly string[] = ['node_modules'];
 
 export interface BackupOptions {
   readonly dest: string;
@@ -49,6 +78,9 @@ export interface BackupOptions {
   readonly skillsDir?: string;
   readonly runsDir?: string;
   readonly archiveDir?: string;
+  /** The projects ROOT (the `orgs/` child is what gets captured). */
+  readonly projectsRoot?: string;
+  readonly supervisorDir?: string;
   /** Refused-destination guard root (the repository). */
   readonly repoRoot?: string;
   readonly log?: (line: string) => void;
@@ -61,16 +93,31 @@ export interface BackupResult {
   readonly pruned: string[];
 }
 
+/** One directory tier as the manifest records it. */
+export interface DirectoryTierManifest {
+  readonly source: string;
+  /** Top-level entries of the source — the historical field, kept. */
+  readonly entries: number;
+  /** Non-directory entries captured, recursively, after exclusions. */
+  readonly files: number;
+  readonly bytes: number;
+  readonly sha256: string;
+  readonly excluded?: readonly string[];
+}
+
 function insideRoot(root: string, candidate: string): boolean {
   const rel = relative(resolve(root), resolve(candidate));
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }
 
 /** tar the DIRECTORY as one entry-rooted archive; throws on failure. */
-function tarDirectory(sourceDir: string, outFile: string): void {
+function tarDirectory(sourceDir: string, outFile: string, excludes: readonly string[]): void {
   const parent = dirname(resolve(sourceDir));
   const name = basename(resolve(sourceDir));
-  const res = spawnSync('tar', ['-czf', outFile, '-C', parent, name], {
+  const args = ['-czf', outFile];
+  for (const pattern of excludes) args.push(`--exclude=${pattern}`);
+  args.push('-C', parent, name);
+  const res = spawnSync('tar', args, {
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: 10 * 60 * 1000,
   });
@@ -79,6 +126,31 @@ function tarDirectory(sourceDir: string, outFile: string): void {
       `tar failed for ${sourceDir}: ${res.stderr?.toString().slice(0, 400) || `exit ${res.status}`}`
     );
   }
+}
+
+/** Non-directory entries under `dir`, recursively, skipping excluded directory names. */
+function countFiles(dir: string, excludes: readonly string[]): number {
+  let n = 0;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      if (excludes.includes(entry.name)) continue;
+      n += countFiles(join(dir, entry.name), excludes);
+    } else {
+      n += 1;
+    }
+  }
+  return n;
+}
+
+/** Streamed SHA-256 — the tars can be large, a whole-file read is not the tool. */
+export function sha256File(file: string): Promise<string> {
+  return new Promise((resolveHash, reject) => {
+    const hash = createHash('sha256');
+    createReadStream(file)
+      .on('error', reject)
+      .on('data', (chunk) => hash.update(chunk))
+      .on('end', () => resolveHash(hash.digest('hex')));
+  });
 }
 
 export async function runBackup(opts: BackupOptions): Promise<BackupResult> {
@@ -113,7 +185,11 @@ export async function runBackup(opts: BackupOptions): Promise<BackupResult> {
   if (existsSync(storeDb)) {
     const out = join(snapshotDir, 'store.db');
     await snapshotSqliteStore(storeDb, out);
-    manifest['store'] = { source: resolve(storeDb), bytes: statSync(out).size };
+    manifest['store'] = {
+      source: resolve(storeDb),
+      bytes: statSync(out).size,
+      sha256: await sha256File(out),
+    };
     captured.push('store.db');
     log(`✓ store: ${storeDb} → store.db (${statSync(out).size} bytes)`);
   } else {
@@ -121,10 +197,14 @@ export async function runBackup(opts: BackupOptions): Promise<BackupResult> {
     log(`⚠ store missing at ${storeDb} — skipped`);
   }
 
-  // 2..4. The three directory roots.
-  const dirs: Array<[label: string, source: string | undefined, out: string]> = [
-    ['skills', opts.skillsDir ?? skillsDirPath(), 'skills.tar.gz'],
-    ['runs', opts.runsDir ?? process.env['ATOMA_RUNS_DIR'] ?? './runs', 'runs.tar.gz'],
+  // 2..6. The directory roots.
+  const projectsRoot =
+    opts.projectsRoot ?? process.env['ATOMA_PROJECTS_ROOT'] ?? DEFAULT_PROJECTS_ROOT;
+  const dirs: Array<
+    [label: string, source: string | undefined, out: string, excludes: readonly string[]]
+  > = [
+    ['skills', opts.skillsDir ?? skillsDirPath(), 'skills.tar.gz', []],
+    ['runs', opts.runsDir ?? process.env['ATOMA_RUNS_DIR'] ?? './runs', 'runs.tar.gz', []],
     [
       'archive',
       // `homedir()`, like every other `~/.atoma` site (the MCP lease, the
@@ -134,25 +214,39 @@ export async function runBackup(opts: BackupOptions): Promise<BackupResult> {
       // silently skipped under a line reading "backup complete".
       opts.archiveDir ?? join(homedir(), '.atoma', 'archive'),
       'archive.tar.gz',
+      [],
     ],
+    // The `orgs/` child, not the root: the default root is `~/.atoma`, which
+    // also holds the build workspace, the MCP lease and the archive tier.
+    // `projectRunHostLayout` puts every org-scoped run under `orgs/`.
+    ['projects', join(resolve(projectsRoot), 'orgs'), 'projects.tar.gz', PROJECTS_TAR_EXCLUDES],
+    ['supervisor', opts.supervisorDir ?? supervisorDirPath(), 'supervisor.tar.gz', []],
   ];
-  for (const [label, source, outName] of dirs) {
+  for (const [label, source, outName, excludes] of dirs) {
     if (!source || !existsSync(source) || !statSync(source).isDirectory()) {
       skipped.push(`${label} (${source ?? 'unset'} missing)`);
       log(`⚠ ${label} missing at ${source ?? '(unset)'} — skipped`);
       continue;
     }
     const out = join(snapshotDir, outName);
-    tarDirectory(source, out);
-    manifest[label] = {
+    tarDirectory(source, out, excludes);
+    const tier: DirectoryTierManifest = {
       source: resolve(source),
       entries: readdirSync(source).length,
+      files: countFiles(source, excludes),
       bytes: statSync(out).size,
+      sha256: await sha256File(out),
+      ...(excludes.length > 0 ? { excluded: [...excludes] } : {}),
     };
+    manifest[label] = tier;
     captured.push(outName);
-    log(`✓ ${label}: ${source} → ${outName} (${statSync(out).size} bytes)`);
+    log(`✓ ${label}: ${source} → ${outName} (${tier.files} files, ${tier.bytes} bytes)`);
   }
 
+  // The manifest names what is and is not in the snapshot, so a reader who
+  // only has the destination can tell a partial capture from a complete one.
+  manifest['captured'] = [...captured];
+  manifest['skipped'] = [...skipped];
   writeFileSync(join(snapshotDir, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf8');
 
   // Prune: keep the newest N snapshots. Name-sorted equals time-sorted
@@ -175,6 +269,11 @@ export async function runBackup(opts: BackupOptions): Promise<BackupResult> {
   return { snapshotDir, captured, skipped, pruned };
 }
 
+const USAGE =
+  'usage: npm run backup -- --dest <dir> [--keep N]\n' +
+  'Roots follow the running product: ATOMA_DB_PATH, ATOMA_SKILLS_DIR, ATOMA_RUNS_DIR,\n' +
+  'ATOMA_PROJECTS_ROOT (its orgs/ child) and ATOMA_SUPERVISOR_DIR, with the same defaults.';
+
 function main(): void {
   const argv = process.argv.slice(2);
   let dest = process.env['ATOMA_BACKUP_DIR'];
@@ -183,8 +282,11 @@ function main(): void {
     const a = argv[i]!;
     if (a === '--dest') dest = argv[++i];
     else if (a === '--keep') keep = Number(argv[++i]);
-    else {
-      console.error(`unknown argument: ${a}\nusage: npm run backup -- --dest <dir> [--keep N]`);
+    else if (a === '--help' || a === '-h') {
+      console.log(USAGE);
+      process.exit(0);
+    } else {
+      console.error(`unknown argument: ${a}\n${USAGE}`);
       process.exit(2);
     }
   }
