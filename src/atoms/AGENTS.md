@@ -39,9 +39,9 @@ Neighbours:
 - Run-scoped integrity flags and memos must retain the same reference across
   every `forkBranch`; add fork-propagation coverage for new optional fields.
 
-## Root delivery acceptance in the depth pilot
+## Root delivery acceptance in depth routing
 
-- The opt-in depth pilot's `rootAcceptance.ts` owns delivery acceptance:
+- The depth runner's `rootAcceptance.ts` owns delivery acceptance:
   delegated result gates retain their dispositions, `probe.requiresReview`
   forces review, and the profile floor requires an executed DOM interaction
   bound to the named, still-unchanged file in the accepted attempt. Any review

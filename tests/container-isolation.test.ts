@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ContainerToolExecutor, workerRunArgs } from '../src/tools/containerExecutor.js';
@@ -40,6 +40,35 @@ if (process.env['CI_REQUIRE_DOCKER'] === '1' && !HAVE_DOCKER) {
   throw new Error('CI worker job requires Docker and a freshly built atoma-worker:latest image');
 }
 const describeDocker = HAVE_DOCKER ? describe : describe.skip;
+
+describeDocker('container depth transition', () => {
+  it('removes a SIGTERM-resistant worker before archiving and replacing its workspace', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'atoma-container-depth-'));
+    const workspace = join(root, 'workspace');
+    const archive = join(root, 'abandoned');
+    const backend = await containerToolBackend({ workspaceRoot: workspace });
+    let replacement: Awaited<ReturnType<typeof containerToolBackend>> | undefined;
+    try {
+      await backend.executor.execute('write_file', { path: 'server.cjs', content:
+        "const fs=require('node:fs');const http=require('node:http');process.on('SIGTERM',()=>{});" +
+        "fs.writeFileSync('heartbeat','ready');setInterval(()=>fs.appendFileSync('heartbeat','.'),10);" +
+        "const s=http.createServer((q,r)=>r.end('old'));s.listen(0,'127.0.0.1',()=>console.log('LISTENING_ON_PORT='+s.address().port));" });
+      await backend.executor.execute('start_node_server', { entry: 'server.cjs' });
+      await backend.drain!();
+      renameSync(workspace, archive);
+      const stoppedHeartbeat = readFileSync(join(archive, 'heartbeat'), 'utf8');
+      replacement = await containerToolBackend({ workspaceRoot: workspace });
+      await replacement.executor.execute('write_file', { path: 'fresh.txt', content: 'second attempt' });
+      expect(readFileSync(join(workspace, 'fresh.txt'), 'utf8')).toBe('second attempt');
+      expect(readFileSync(join(archive, 'heartbeat'), 'utf8')).toBe(stoppedHeartbeat);
+      await expect(backend.executor.execute('write_file', { path: 'stale.txt', content: 'old' })).rejects.toThrow('drained');
+    } finally {
+      await replacement?.drain?.();
+      await backend.drain?.();
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+});
 
 describe('workerRunArgs — the isolation is in the flags, so assert them', () => {
   const args = workerRunArgs({ image: 'img', workspaceHostPath: '/host/ws' });

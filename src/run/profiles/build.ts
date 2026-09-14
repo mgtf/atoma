@@ -91,10 +91,11 @@ export const BUILD_TASK_CONSTRAINTS: readonly string[] = [
  */
 export const buildProfile: TaskProfile = {
   depthExperiment: {
+    defaultMode: 'short',
     floor: [{ obligation: 'dom-interaction', deliverable: 'index.html' }],
     entryCell({ registry, toolDecls }) {
       const cell = ensureCanonicalFullStack(registry, toolDecls, 2);
-      if (!cell) throw new Error('The depth pilot requires the full-stack tool set');
+      if (!cell) throw new Error('Depth routing requires the full-stack tool set');
       return cell;
     },
   },

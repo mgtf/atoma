@@ -24,7 +24,7 @@ export interface ToolBackend {
   readonly rootLabel: string;
   /** Release children/containers. Must be safe to call twice. */
   cleanup(): Promise<void>;
-  /** Strict quiescence before an experiment replaces this backend's workspace. */
+  /** Strict quiescence before a depth transition replaces this backend's workspace. */
   drain?(): Promise<void>;
 }
 
@@ -131,6 +131,10 @@ export async function containerToolBackend(opts: {
       // The sidecar outlives the worker container by design — the worker is
       // `--rm`, the network is not — so it must be torn down explicitly or
       // every run leaks a network and a proxy.
+      await sidecar?.stop();
+    },
+    drain: async () => {
+      await exec.drain();
       await sidecar?.stop();
     },
   };

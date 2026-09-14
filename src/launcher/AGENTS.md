@@ -88,6 +88,11 @@ behaviourally, so it is out of scope here and must not be smuggled in as a
 refactor. `workerRunArgs` remains the isolation contract for that path and is
 asserted by test, not by comment.
 
+The attached transport obtains a unique worker name and a confirmed-removal
+operation from `attachedWorkerLifecycle`. Only this launcher helper issues
+the removal and absence query. A failed engine query is never proof of exit,
+even if the worker CLI already exited or auto-removal was requested.
+
 ## The flags are the isolation
 
 Every flag in a profile was verified against a real container before it was

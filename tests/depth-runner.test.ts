@@ -22,11 +22,13 @@ vi.mock('../src/run/providers.js', async (original) => ({
 }));
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); resetHostLifecycleSnapshotForTests(); });
 
-describe('runner depth experiment, concrete L3/L2/L1 and real backend', () => {
+describe('runner supervision depth, concrete L3/L2/L1 and real backend', () => {
   it.each([
-    { mode: 'short', matched: false }, { mode: 'deep', matched: false },
-    { mode: 'short', matched: true }, { mode: 'deep', matched: true },
-  ])('keeps non-browser phase trust and skill learning/credit when the $mode root rejects (matched=$matched)', async ({ mode, matched }) => {
+    { mode: 'default', matched: false, rootApproved: false }, { mode: 'default', matched: true, rootApproved: false },
+    { mode: 'default', matched: false, rootApproved: true },
+    { mode: 'short', matched: false, rootApproved: false }, { mode: 'deep', matched: false, rootApproved: false },
+    { mode: 'short', matched: true, rootApproved: false }, { mode: 'deep', matched: true, rootApproved: false },
+  ])('keeps phase trust and learning/credit with $mode supervision (matched=$matched, rootApproved=$rootApproved)', async ({ mode, matched, rootApproved }) => {
     const root = mkdtempSync(join(tmpdir(), 'atoma-depth-credit-'));
     const runs = join(root, 'runs');
     const skillRoot = join(root, 'skills');
@@ -64,7 +66,7 @@ describe('runner depth experiment, concrete L3/L2/L1 and real backend', () => {
           expect(registry.getByName(leafName)!.successes).toBe(1);
           expect(skills.loadFor(leafId)).toHaveLength(1);
           if (matched) expect(skills.loadFor(leafId)[0]!.successes).toBe(1);
-          reply = { approved: false, reasoning: 'Root DOM proof is missing' };
+          reply = { approved: rootApproved, reasoning: rootApproved ? 'Reviewed delivery accepted' : 'Root DOM proof is missing' };
         } else reply = { approved: true, reasoning: 'Server phase approved', activeSkillFollowed: true };
       } else if (req.role === 'plan' && req.actor?.tier !== 1) reply = [
         { strategy: 'reuse', target: cellName, reasoning: 'One server phase' },
@@ -90,12 +92,16 @@ describe('runner depth experiment, concrete L3/L2/L1 and real backend', () => {
         leafName = leaf.name; leafId = leaf.atomId;
         cellName = ensureCanonicalFullStack(seed.registry, seed.toolDecls, 2)!.name;
         if (matched) skills.save(leafId, recipe);
-      } }, ['--depth', mode, '--clean-workspace', 'Build a page backed by server.js']);
-      expect(await handle.settled).toEqual({ outcome: 'failed' });
+      } }, [...(mode === 'default' ? [] : ['--depth', mode]), '--clean-workspace', 'Build a page backed by server.js']);
+      expect(await handle.settled).toEqual({ outcome: rootApproved ? 'delivered' : 'failed' });
       const path = readdirSync(runs).find((name) => name.endsWith('.json') && name !== 'index.json')!;
       const trace = JSON.parse(readFileSync(join(runs, path), 'utf8')) as VizRun;
+      expect(trace.events.filter((event) => event.kind === 'topology')).toMatchObject([
+        { mode: mode === 'default' ? 'short' : mode, attempt: 1 },
+      ]);
+      if (mode !== 'deep') expect(calls.some((req) => req.actor?.tier === 3 && req.actor.name !== 'run-root')).toBe(false);
       expect(trace.events.filter((event) => event.kind === 'acceptance'), trace.error).toMatchObject([
-        { approved: false, floorCoverage: [{ status: 'uncovered' }], phaseCoverage: [{ obligations: [] }] },
+        { approved: rootApproved, floorCoverage: [{ status: 'uncovered' }], phaseCoverage: [{ obligations: [] }] },
       ]);
       expect(calls.filter((req) => req.actor?.name === 'run-root')).toHaveLength(1);
       expect(calls.some((req) => req.role === 'skill')).toBe(!matched);
@@ -171,7 +177,7 @@ describe('runner depth experiment, concrete L3/L2/L1 and real backend', () => {
     } } });
     let handle: Awaited<ReturnType<typeof startTask>> | undefined;
     try {
-      handle = await startTask(buildProfile, ['--depth', 'short', '--clean-workspace', '--no-learn-skills', '--no-direct-skills', 'Build index.html']);
+      handle = await startTask(buildProfile, ['--clean-workspace', '--no-learn-skills', '--no-direct-skills', 'Build index.html']);
       expect(await handle.settled).toEqual({ outcome: 'failed' });
       const files = readdirSync(runs).filter((name) => name.endsWith('.json') && name !== 'index.json');
       expect(files).toHaveLength(1);

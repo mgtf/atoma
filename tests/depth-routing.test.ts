@@ -163,6 +163,23 @@ describe('one common root acceptance, independent of phase credit', () => {
 });
 
 describe('depth transition through the production supervision loop', () => {
+  it('does not start L3 or accept a result when backend teardown cannot be confirmed', async () => {
+    const ctx = context();
+    const actor = new Actor(2, true);
+    const createExecutor = vi.fn(() => ({ actor, handle: (t: Task, c: RunContext) =>
+      superviseLoop(actor, new Actor(1), t, c, {
+        applyByScope: async (same) => same, branchOnEscalation: async () => {},
+      }) }));
+    const onAcceptance = vi.fn();
+    const onTopology = vi.fn();
+    await expect(runDepthTask({ mode: 'short', task, floor: [],
+      ctx: { ...ctx, limits: { ...ctx.limits, maxPlanIterations: 1 } }, createExecutor,
+      restart: async () => { throw new Error('Worker is still running'); }, onTopology, onAcceptance,
+    })).rejects.toThrow('Worker is still running');
+    expect(createExecutor).toHaveBeenCalledTimes(1);
+    expect(onTopology).toHaveBeenCalledTimes(1);
+    expect(onAcceptance).not.toHaveBeenCalled();
+  });
   it('rearms mechanical one-shots in a fresh attempt while sharing them across its branches', async () => {
     const ctx = context();
     const checkedAttempts: number[] = [];

@@ -107,15 +107,15 @@ describe('trusted retrieval injection through startTask', () => {
     vi.mocked(buildTierClients).mockReturnValue({ ollama: new MockLlmClient() });
     vi.mocked(containerToolBackend).mockImplementation(async opts => localToolBackend({ workspaceRoot: opts.workspaceRoot, logger: silentLogger() }));
     let captured: AtomRegistry | undefined;
-    const seedL3 = vi.fn((ctx: Parameters<typeof buildProfile.seedL3>[0]) => {
+    const seedCatalog = vi.fn((ctx: Parameters<typeof buildProfile.seedCatalog>[0]) => {
       captured = ctx.registry;
       expect(ctx.registry.listByTier(1)).toEqual([]);
       ctx.registry.create(1, { description: 'Project price 731', systemPrompt: 'Project price 731', tools: [], params: {}, createdBy: 'project' });
-      return buildProfile.seedL3(ctx);
+      return buildProfile.seedCatalog(ctx);
     });
     vi.spyOn(L3Atom.prototype, 'handle').mockResolvedValue({ output: 'done', summary: 'done', trace: [],
       producedBy: { tier: 3, name: 'Meristem', viaFallback: false } });
-    const handle = await startTask({ ...buildProfile, seedL3 }, ['--container', '--no-promote-skills', '--no-direct-skills', 'Read workspace.']);
+    const handle = await startTask({ ...buildProfile, seedCatalog }, ['--container', '--no-promote-skills', '--no-direct-skills', 'Read workspace.']);
     await handle.settled;
     const owner = resolveProjectRegistryOwner({ dbPath: f.dbPath, runId: current.run.projectRunId,
       workspacePath: current.layout.workspacePath, skillsPath: current.layout.skillsPath, runsPath: current.layout.runsPath });

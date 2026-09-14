@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
 import { mkdirSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -105,6 +105,25 @@ export function launcherObjectId(ownerId: string): string {
 }
 
 export type AsyncDockerRunner = (args: string[]) => Promise<string>;
+/** Ownership for the attached worker transport; callers never supply an engine target. */
+export function attachedWorkerLifecycle(options: {
+  docker?: string;
+  runDocker?: AsyncDockerRunner;
+} = {}): { name: string; drain: () => Promise<void> } {
+  const name = `atoma-worker-${randomUUID()}`;
+  const runDocker = options.runDocker ?? (async (args: string[]) => {
+    const result = await run(options.docker ?? 'docker', args, { timeout: DOCKER_COMMAND_TIMEOUT_MS });
+    return result.stdout;
+  });
+  return { name, drain: async () => {
+    // Auto-removal may have won the race. Only a successful engine query
+    // proving absence can turn a failed removal into confirmed teardown.
+    await quiet(runDocker, ['rm', '-f', name]);
+    const remaining = await runDocker(['ps', '-a', '--filter', `name=^/${name}$`, '--format', '{{.ID}}']);
+    if (remaining.trim()) throw new Error(`Worker ${name} still exists; refusing workspace replacement`);
+  } };
+}
+
 export type SyncDockerRunner = (args: string[]) => string;
 export type SyncSleeper = (delayMs: number) => void;
 

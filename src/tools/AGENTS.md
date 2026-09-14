@@ -51,6 +51,10 @@ Neighbours:
 - `ToolSandbox.drain()` is the stronger local contract before workspace
   replacement: await cleanup, kill surviving owned children/groups and confirm
   their exit; a surviving process prevents replacement.
+- `ContainerToolExecutor.drain()` permanently closes its transport, removes
+  every worker it started through the launcher-issued ownership handle and
+  requires a successful engine query proving absence. CLI exit alone is not
+  worker exit. The backend drains workers before stopping its egress sidecar.
 - Docker image packaging is verified statically against the worker import graph
   and dynamically by booting the real image.
 - `start_static_server` and `start_node_server` use OS-selected ports and explicit

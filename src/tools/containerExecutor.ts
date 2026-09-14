@@ -20,7 +20,7 @@ export type ContainerSpawn = typeof spawn;
  * container concerns. Re-exported here under the name this subsystem's
  * callers and tests already use.
  */
-import { hostContainerUser } from '../launcher/docker.js';
+import { attachedWorkerLifecycle, hostContainerUser } from '../launcher/docker.js';
 export { hostContainerUser };
 
 /**
@@ -127,6 +127,8 @@ export function workerRunArgs(opts: {
  * decision that needs the burn-in curve, not one measurement.
  */
 export class ContainerToolExecutor implements ToolExecutor {
+  private readonly workers: ReturnType<typeof attachedWorkerLifecycle>[] = [];
+  private draining = false;
   private child: ChildProcess | null = null;
   private buffer = '';
   private nextId = 1;
@@ -158,6 +160,7 @@ export class ContainerToolExecutor implements ToolExecutor {
 
   /** Boot the container and wait for its hello. Idempotent. */
   start(): Promise<void> {
+    if (this.draining) return Promise.reject(new Error('worker backend has been drained'));
     if (this.readyPromise) return this.readyPromise;
     this.readyPromise = new Promise<void>((resolve, reject) => {
       const user = this.opts.containerUser ?? hostContainerUser();
@@ -197,6 +200,9 @@ export class ContainerToolExecutor implements ToolExecutor {
         ...(user ? { user } : {}),
         ...(this.opts.egress ? { egress: this.opts.egress } : {}),
       });
+      const worker = attachedWorkerLifecycle({ ...(this.opts.docker ? { docker: this.opts.docker } : {}) });
+      this.workers.push(worker);
+      args.splice(1, 0, '--name', worker.name);
       const child = (this.opts.spawnFn ?? spawn)(this.opts.docker ?? 'docker', args, {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
@@ -327,5 +333,14 @@ export class ContainerToolExecutor implements ToolExecutor {
     } catch {
       /* already gone */
     }
+  }
+
+  /** Confirm removal in the engine, even if its attached CLI has already exited. */
+  async drain(): Promise<void> {
+    this.draining = true;
+    this.stop();
+    // Include earlier workers whose attached transport exited unexpectedly.
+    // No later call may restart this backend against an archived workspace.
+    for (const worker of this.workers) await worker.drain();
   }
 }

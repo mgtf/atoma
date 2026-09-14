@@ -48,6 +48,13 @@ command-running. This is structural, not a guideline — only molecules receive 
 supervised path. Validation uses the cheap route by default; explicit tier pins determine the
 models actually served.
 
+New build runs start at L2, which plans and supervises the L1 work. If that
+supervision exhausts its retries, the runner stops the first attempt, archives
+its workspace and restarts once through L3 under the same run budget. Both
+paths receive an independent final acceptance. Use `--depth deep` to start
+with the full L3 → L2 → L1 topology. Baseline and seeded comparison runs keep
+their existing protocol. See the [depth-routing contract](docs/depth-routing-experiment-2026-09-13.md#17-product-integration-2026-09-14).
+
 **2. Components earn trust, and can lose it.**
 Every reusable component carries a success/failure record. Once one has a clean track record the
 system stops paying a model to review its output — but it still runs a zero-token ground-truth

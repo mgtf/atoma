@@ -23,9 +23,18 @@ The curated identity pools mirror expected population: 118 molecule names for th
 numerous L1 workers, 40 cell names for L2, and 20 botanical tissue names for the small
 L3 layer. Numeric tiers remain the stable storage and routing contract.
 
+Since 2026-09-14, ordinary build runs enter at L2 by default. L2 supervises
+L1 work without an initial L3 planning layer. If the entry cell exhausts its
+supervision retries, the runner stops and archives that attempt and starts
+once through L3, sharing the original deadline and accounting. Both paths
+receive independent root acceptance. `--depth deep` starts directly at L3;
+baseline and seeded comparisons retain their existing protocol.
+
 ```mermaid
 graph TB
-    APP([Your goal]) --> L3
+    APP([Your goal]) --> L2A
+    APP -. explicit deep .-> L3
+    L2A -. deepen after exhausted supervision .-> L3
     L3["<b>L3 — Tissues</b><br/>frontier model<br/><i>breaks the goal into phases</i>"] --> L2A
     L3 --> L2B
     L2A["<b>L2 — Cells</b><br/>mid-tier model<br/><i>routes a phase to a worker,<br/>then judges the result</i>"] --> L1A
@@ -219,6 +228,10 @@ development step.
 ---
 
 ## 3. Flow — a task, end to end
+
+The sequence below shows the full topology selected by `--depth deep` or
+reached after deepening. The default short path enters at L2 and returns its
+result directly to the runner's final acceptance.
 
 ```mermaid
 sequenceDiagram

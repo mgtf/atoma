@@ -211,7 +211,7 @@ export function formatUsage(profile: TaskProfile): string {
     ...RUNNER_BOOLEAN_FLAGS,
     ...RUNNER_NEGATABLE_FLAGS.flatMap((flag) => [flag, `--no-${stripDashes(flag)}`]),
     '--seed <dir>',
-    '--depth <deep|short> (depth pilot, common final acceptance; local backend)',
+    '--depth <deep|short> (supervision depth, common final acceptance)',
     '--worker-image <sha256:digest> (requires container mode)',
   ];
   return [
@@ -224,6 +224,10 @@ export function formatUsage(profile: TaskProfile): string {
     `  --help, -h`,
     ``,
     `Without a goal the run uses this family's default goal.`,
+    ...(profile.depthExperiment?.defaultMode ? [
+      `New runs default to ${profile.depthExperiment.defaultMode} supervision; --depth overrides it.`,
+      `Short supervision enters at L2 and may restart once through L3.`,
+    ] : []),
     `Every run needs ATOMA_MODEL_L1, ATOMA_MODEL_L2 and ATOMA_MODEL_L3 set to a`,
     `<api|sub|own>:<vendor>:<model> selector.`,
     ``,
@@ -487,8 +491,12 @@ export async function startTask(
   const useClaudeCli = referencedTransports(selectors).includes('claude-cli');
 
   const args = parseRunnerArgs(argv);
-  if (args.depth && !profile.depthExperiment) throw new RunnerConfigError('This profile has no depth experiment contract');
-  if (args.depth && args.container) throw new RunnerConfigError('The depth pilot currently requires the local backend with confirmed process teardown');
+  // Baselines and seeded comparison runs keep their explicit protocol. New
+  // ordinary runs use the family's depth policy unless the caller overrides it.
+  if (!args.depth && !args.baseline && !args.seed && profile.depthExperiment?.defaultMode) {
+    args.depth = profile.depthExperiment.defaultMode;
+  }
+  if (args.depth && !profile.depthExperiment) throw new RunnerConfigError('This profile has no supervision depth contract');
   const goal = args.goal ?? profile.defaultGoal;
   // AMBIENT BY DESIGN, unlike the lifecycle toggles and tier pins: the
   // project coordinator sets these on a per-run CHILD PROCESS env, so two
@@ -803,7 +811,7 @@ export async function startTask(
           return { actor: tissue, handle: (task, context) => tissue.handle(task, context) };
         },
         restart: async () => {
-          if (!backend.drain) throw new Error('Depth pilot backend cannot confirm process exit');
+          if (!backend.drain) throw new Error('Depth routing backend cannot confirm process exit');
           await backend.drain();
           signal.throwIfAborted();
           profile.prepareWorkspace(workspaceRoot, true);
