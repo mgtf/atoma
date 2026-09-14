@@ -45,6 +45,11 @@ Neighbours:
   log read as proof that clicking worked.
 - The obligation vocabulary is CLOSED and has one member. Adding a second is a
   design review with its own evidence, not a schema edit.
+- A `validate_html` PRE-FLIGHT refusal is a statement about the request, not
+  an observation of the artefact: no page opened, no document bound. Its
+  error strings carry ONE prefix, `SMOKE_PREFLIGHT_REFUSAL_PREFIX`, and
+  `isPreflightRefusal` is the one predicate over it — the tool writes it, the
+  L1 validation ledger and the sentinel read it. Never grep the literal.
 - `Witness` declares its OBSERVER. Never relabel a model-declared witness as
   transport-observed, and never fold transport witnesses into the
   recorded-probe rendering — they are references, and they carry no `cmd`.

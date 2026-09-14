@@ -437,6 +437,7 @@ The frozen record contains the full dated reasoning behind these rules:
 - [the sentinel's blind spot, measured on a real run 2026-08-23](docs/incidents/sentinel-blind-spot-2026-08-23.md)
 - [GPU frame cost on an integrated GPU, measured 2026-09-06](docs/incidents/gpu-frame-cost-2026-09-06.md)
 - [a browser-verification phase on a Node server, twice — 2026-09-07](docs/incidents/notes-app-browser-phase-2026-09-07.md)
+- [verification replays on standing proof, the seeded counter — 2026-09-15](docs/incidents/verification-replay-2026-09-15.md)
 - [external code review](docs/code-review-2026-08-14.md)
 - [code review 2026-08-18](docs/code-review-2026-08-18.md)
 - [supervisor-held proof attestation (A1) design review 2026-08-22](docs/supervisor-attestation-a1-review-2026-08-22.md)

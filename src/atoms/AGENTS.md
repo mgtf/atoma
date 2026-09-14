@@ -127,6 +127,20 @@ load-bearing.
   and headers, and treat truncated excerpts as silent rather than refuting.
 - Already-satisfied idempotent work is compliant when current ground truth proves
   the requested end state; do not demand meaningless rewrites.
+- The L1's own browser proof is a LEDGER, not a last-call bit
+  (`src/atoms/validationLedger.ts`, 2026-09-15). Evidence is bound to the
+  document `validate_html` observed, under the same asymmetric doctrine as
+  proof coverage: a pre-flight refusal observed nothing and never retires a
+  standing observation (nor establishes one alone); the last EXECUTED
+  observation decides, so `ok:false` after `ok:true` still fails; a
+  successful write to the OBSERVED document after its last ok observation
+  retires it (`stale`), a write elsewhere does not; an unbound observation
+  cannot be shown stale. The `[INTERNAL VALIDATION FAILED` banner fires on
+  `failed`, `refused-only` and `stale`, never on `standing`. Measured
+  2026-09-14: the last-call bit fired on a refusal over three standing
+  observations of an unchanged document and the run replayed its entire
+  verification twice before the deadline
+  ([incident](../../docs/incidents/verification-replay-2026-09-15.md)).
 - Keep `VALIDATION_SYSTEM_PROMPT` explicit that L1 plans should contain concrete
   tool-oriented proposed actions while L2/L3 must delegate.
 

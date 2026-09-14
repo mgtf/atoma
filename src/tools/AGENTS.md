@@ -169,7 +169,11 @@ Neighbours:
   because a refusal reporting none of them is indistinguishable from a call
   that sent no interactions at all — the exact confusion that field pair
   exists to prevent. It carries NO `document` since 2026-09-13: no page was
-  loaded, and a binding is established on the loaded response.
+  loaded, and a binding is established on the loaded response. Its error
+  strings start with the contract's `SMOKE_PREFLIGHT_REFUSAL_PREFIX`
+  ([src/contracts](../contracts/AGENTS.md)), which is how the L1 validation
+  ledger tells a refusal from a failed observation of the page; keep the
+  wording behind the prefix free to change, never the prefix.
 - Moving smoke guidance closer to the call site is NOT the untried variable.
   The erased-intermediate-state rule already sits in the `smoke` PARAMETER
   description and the model still violated it six times across two batches.

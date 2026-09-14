@@ -336,6 +336,143 @@ All gameplay controls wired up. No console errors.`;
     expect(result.summary).toBe('clean');
   });
 
+  /**
+   * The seeded counter, 2026-09-14 (trace `6f81b406`, kept under
+   * docs/incidents/recovery-live-2026-09-14/). The L1 observed index.html OK
+   * twice — a self-driving smoke proving 0→3→0→1, then three real clicks —
+   * and the document digest never moved. It then sent the same impossible
+   * interaction shape again and was refused PRE-FLIGHT: no browser ran. The
+   * old "last call" bit fired the banner, L2 rejected mechanically, and the
+   * phase replayed read → serve → validate from scratch, twice, until the
+   * 300 s deadline. This drives the real L1 execute path with that sequence
+   * and asserts the banner does NOT fire: the proof stood.
+   */
+  const validateHtmlAtom = () =>
+    new L1Atom({
+      ...base,
+      tools: [
+        { name: 'validate_html', description: 'validate', inputSchema: { type: 'object', properties: {} } },
+        { name: 'edit_file', description: 'edit', inputSchema: { type: 'object', properties: {} } },
+      ],
+    });
+  const seededDocument = {
+    path: 'index.html',
+    sha256: '9fd27f6482ce10f3cc3fc91c53e20ea75625c3fc18253bf5dd8f950f13a2ad7b',
+  };
+  const seededEvents = (): Array<Parameters<NonNullable<import('../src/core/types.js').LlmCompletionRequest['onToolInvocation']>>[0]> => [
+    {
+      name: 'validate_html',
+      args: { url: 'http://localhost:41849/index.html', interactions: [] },
+      result: {
+        ok: true,
+        errors: [],
+        failedRequests: [],
+        interactionLog: [],
+        requestedInteractions: 0,
+        ignoredInteractions: 0,
+        document: seededDocument,
+        smokeResult: { ok: true, afterReset: { value: '0', count: 0 }, final: { value: '1', count: 1 } },
+      },
+      durationMs: 10,
+      startedAt: Date.now(),
+    },
+    {
+      name: 'validate_html',
+      args: { url: 'http://localhost:41849/index.html', interactions: [{ type: 'click', selector: '#increment' }] },
+      result: {
+        ok: true,
+        errors: [],
+        failedRequests: [],
+        interactionLog: ['click at (340.1, 380.4) on #increment'],
+        requestedInteractions: 3,
+        ignoredInteractions: 0,
+        document: seededDocument,
+        smokeResult: { ok: true, value: '3' },
+      },
+      durationMs: 10,
+      startedAt: Date.now(),
+    },
+    {
+      name: 'validate_html',
+      args: {
+        url: 'http://localhost:41849/index.html',
+        interactions: [
+          { type: 'click', selector: '#increment' },
+          { type: 'click', selector: '#reset' },
+        ],
+      },
+      result: {
+        ok: false,
+        errors: [
+          'smoke rejected pre-flight: interactions repeat a state-changing control and then reset BEFORE smoke runs, so the intermediate state has been erased.',
+        ],
+        failedRequests: [],
+        interactionLog: [],
+        requestedInteractions: 4,
+        ignoredInteractions: 0,
+        smokeResult: { error: 'interactions repeat a state-changing control and then reset BEFORE smoke runs' },
+      },
+      durationMs: 10,
+      startedAt: Date.now(),
+    },
+  ];
+  const stubFiring = (events: ReturnType<typeof seededEvents>, summary: string) =>
+    class StubInner {
+      async complete(req: import('../src/core/types.js').LlmCompletionRequest): Promise<import('../src/core/types.js').LlmCompletionResponse> {
+        for (const event of events) req.onToolInvocation?.(event);
+        return {
+          text: JSON.stringify({ output: { url: 'http://localhost:41849/index.html' }, summary }),
+          stopReason: 'end_turn',
+          usage: { inputTokens: 1, outputTokens: 1 },
+        };
+      }
+    };
+
+  it('keeps a standing observation of the UNCHANGED document through a later pre-flight refusal — the seeded counter regression', async () => {
+    const ctx = makeCtx();
+    ctx.llm = new (stubFiring(seededEvents(), 'Counter verified: 0→3→0→1 and three real clicks'))() as unknown as typeof ctx.llm;
+    const result = await validateHtmlAtom().execute(
+      { description: 'serve index.html and prove increment and reset through browser clicks' },
+      makePlan({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }),
+      ctx
+    );
+    expect(result.summary).not.toMatch(/INTERNAL VALIDATION FAILED/);
+    expect(result.summary).toBe('Counter verified: 0→3→0→1 and three real clicks');
+  });
+
+  it('still fails the result when EVERY validate_html call was refused pre-flight', async () => {
+    const [, , refusal] = seededEvents();
+    const ctx = makeCtx();
+    ctx.llm = new (stubFiring([refusal!, refusal!], 'Counter verified'))() as unknown as typeof ctx.llm;
+    const result = await validateHtmlAtom().execute(
+      { description: 'x' },
+      makePlan({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }),
+      ctx
+    );
+    expect(result.summary).toMatch(/\[INTERNAL VALIDATION FAILED — validate_html never executed: 2 call\(s\) refused pre-flight/);
+  });
+
+  it('retires the standing observation when the observed document is edited afterwards (stale)', async () => {
+    const [ok] = seededEvents();
+    const edit = {
+      name: 'edit_file',
+      args: { path: './index.html', old_string: 'a', new_string: 'b' },
+      result: { ok: true, path: 'index.html', replacements: 1, bytes: 2900 },
+      durationMs: 3,
+      startedAt: Date.now(),
+    };
+    const ctx = makeCtx();
+    ctx.llm = new (stubFiring([ok!, edit], 'Counter verified'))() as unknown as typeof ctx.llm;
+    const result = await validateHtmlAtom().execute(
+      { description: 'x' },
+      makePlan({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }),
+      ctx
+    );
+    expect(result.summary).toMatch(
+      /\[INTERNAL VALIDATION FAILED — index\.html was modified after its last successful validate_html and not re-validated\]/
+    );
+  });
+
   it('does NOT prefix when L1 never called validate_html (e.g. a pure-computation task)', async () => {
     const ctx = makeCtx();
     ctx.llm.enqueueText(jsonText({ output: 'result', summary: 'no validation needed' }));

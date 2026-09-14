@@ -26,6 +26,7 @@ import {
 // them from this module keep working.
 export { appendHttpProbe, mergeProbeManifestWrite, mergeShellProbe, probeManifestWriteRefusal };
 import { elementForTool } from '../contracts/toolTaxonomy.js';
+import { SMOKE_PREFLIGHT_REFUSAL_PREFIX } from '../contracts/attestation.js';
 import puppeteer, { type Browser } from 'puppeteer';
 import { processHoldsListeningPort } from './listeningPorts.js';
 
@@ -1615,7 +1616,7 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
           return {
             ok: false,
             url,
-            errors: refusals.map((r) => `smoke rejected pre-flight: ${r.message}`),
+            errors: refusals.map((r) => `${SMOKE_PREFLIGHT_REFUSAL_PREFIX}${r.message}`),
             warnings: discardWarning,
             failedRequests: [],
             interactionLog: [],
