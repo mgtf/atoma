@@ -27,6 +27,8 @@ SQLite and directory writers; the exercise cannot make a torn capture atomic.
    root. Links, devices, absolute paths and parent traversal are refused.
    A snapshot with legitimate links therefore needs an explicit recovery
    decision; this tool does not silently dereference or discard them.
+   Windows drive/alternate-stream spellings and trailing-dot/space aliases
+   are refused on every platform, before allocating the destination.
 4. Inputs are copied into `verified-input` and checked again before extraction,
    preventing a later change to the original snapshot from being trusted.
 5. The copied SQLite store opens with `mode=ro` and `query_only`; integrity

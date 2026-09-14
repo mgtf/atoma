@@ -206,6 +206,11 @@ mesure des défauts du livrable demande une preuve fonctionnelle indépendante.
 
 ## 5. Décisions et suite bornée
 
+Complément après reconnexion OAuth : le [rapprochement MCP de production](incidents/production-audit-2026-09-14.md)
+mesure 15 demandes projet, dont 13 avec traces accessibles, et conserve les
+désaccords entre verdict et issue finale. Cet export de lectures bornées ne
+remplace pas le snapshot primaire demandé ci-dessous.
+
 1. Collecter le corpus récent via l'accès administrateur de l'opérateur,
    puis rapprocher le snapshot SQLite, les traces, logs, verdicts et bases Git
    capturées. Les [chemins de déploiement](automatic-deployment.md) sont explicites :

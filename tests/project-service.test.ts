@@ -240,6 +240,38 @@ describe('ProjectService — roles, IDOR and slug identity', () => {
     ]);
   });
 
+  it.each([
+    ['delivered', '2026-09-12T10:35:14.096Z', '2026-09-12T11:00:43.190Z', 1529.094],
+    ['failed', '2026-09-12T09:36:42.766Z', '2026-09-12T10:05:17.691Z', 1714.925],
+    ['cancelled', '2026-09-12T10:00:00.000Z', '2026-09-12T10:00:00.000Z', 0],
+    ['failed', null, '2026-09-12T10:00:00.000Z', null],
+    ['queued', null, null, null],
+    ['running', '2026-09-12T10:00:00.000Z', null, null],
+    ['failed', '2026-09-12T10:00:01.000Z', '2026-09-12T10:00:00.000Z', null],
+  ])('reports persisted elapsed time for %s runs (%s → %s)', async (status, startedAt, endedAt, durationS) => {
+    linkInstallation(alice, '501', 'alice-org');
+    const { svc } = service();
+    const created = await svc.createProject(jsonReq(payload('501')), alice) as { projectId: string };
+    const runId = randomUUID();
+    projects.createProjectRun({
+      orgId: alice.orgId,
+      projectId: created.projectId,
+      principalId: alice.principalId,
+      projectRunId: runId,
+      request: { idempotencyKey: 'duration', goal: 'Read persisted duration' },
+      hostPaths: { workspacePath: '/absent/workspace', runsPath: '/absent/traces', logPath: '/absent/run.log' },
+    });
+    // Historical rows, including failures before launch, must work without traces.
+    db.prepare('UPDATE project_runs SET status = ?, started_at = ?, ended_at = ? WHERE project_run_id = ?')
+      .run(status, startedAt, endedAt, runId);
+    expect(svc.listProjectRuns(alice, created.projectId)).toEqual([
+      expect.objectContaining({ projectRunId: runId, status, durationS }),
+    ]);
+    expect(svc.projectRunStatus(alice, created.projectId, runId)).toMatchObject({
+      projectRunId: runId, status, durationS,
+    });
+  });
+
   it('exposes the project-run id as traceId once the trace file exists', async () => {
     const root = mkdtempSync(join(tmpdir(), 'atoma-project-service-trace-'));
     try {

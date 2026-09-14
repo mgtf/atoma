@@ -76,6 +76,11 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
 
 function publicRun(run: ProjectRun, publication: import('../contracts/projects.js').Publication | null) {
   const base = projectRunPublicSchema.parse(run);
+  // Persisted project lifecycle time, including host finalization, not the
+  // narrower trace duration. Missing launch/end times remain unknown.
+  const elapsedMs = run.startedAt && run.endedAt
+    ? Date.parse(run.endedAt) - Date.parse(run.startedAt)
+    : NaN;
   const traceFile = resolveProjectRunTraceFile({
     projectRunId: run.projectRunId,
     runsPath: run.hostPaths.runsPath,
@@ -85,7 +90,7 @@ function publicRun(run: ProjectRun, publication: import('../contracts/projects.j
     ...base,
     traceId: run.traceId ?? (traceFile ? run.projectRunId : null),
     costUsd: run.stats?.costUsd ?? null,
-    durationS: null,
+    durationS: Number.isFinite(elapsedMs) && elapsedMs >= 0 ? elapsedMs / 1000 : null,
     publication: publication
       ? {
           status: publication.status,

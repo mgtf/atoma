@@ -27,6 +27,7 @@ def archive_members(archive, expected_root):
     for member in archive:
         path = PurePosixPath(member.name)
         if (path.is_absolute() or ".." in path.parts or "\\" in member.name
+                or any(":" in part or part.rstrip(" .") != part for part in path.parts)
                 or not path.parts or path.parts[0] != expected_root
                 or not (member.isdir() or member.isfile())):
             raise ValueError(f"Unsupported or unsafe archive entry: {member.name!r}")

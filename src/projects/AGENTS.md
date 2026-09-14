@@ -122,6 +122,9 @@ list. These values come from the host snapshot, never a tenant prompt.
 
 ## Readers outside this subsystem
 
+- Public run `durationS` is persisted project elapsed time (`endedAt` minus
+  `startedAt`), including host finalization, not the narrower trace duration.
+  A missing endpoint or reversed interval remains unknown (`null`).
 - `listLiveRunTraces()` is the ONE read that exposes which project runs are
   executing, and it exists for the sentinel
   ([src/sentinel](../sentinel/AGENTS.md)). It has to: each project run writes

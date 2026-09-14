@@ -101,6 +101,15 @@ describe.skipIf(!hasPython)('offline recovery through real backup archives and a
     expect(existsSync(join(root, 'recovered'))).toBe(false);
   });
 
+  it.each(['orgs/D:escape', 'orgs/file:stream', 'orgs/.. /escape'])('refuses Windows path aliases before extraction: %s', async (member) => {
+    const snapshot = await backup();
+    const patch = spawnSync(python, ['-c',
+      "import tarfile,json,hashlib,pathlib,sys,io;p=pathlib.Path(sys.argv[1]);a=p/'projects.tar.gz';t=tarfile.open(a,'w:gz');i=tarfile.TarInfo(sys.argv[2]);i.size=1;t.addfile(i,io.BytesIO(b'x'));t.close();m=json.loads((p/'manifest.json').read_text());m['projects']['bytes']=a.stat().st_size;m['projects']['sha256']=hashlib.sha256(a.read_bytes()).hexdigest();(p/'manifest.json').write_text(json.dumps(m))", snapshot.snapshotDir, member], { encoding: 'utf8' });
+    expect(patch.status, patch.stderr).toBe(0);
+    expect(restore(snapshot.snapshotDir).status).toBe(1);
+    expect(existsSync(join(root, 'recovered'))).toBe(false);
+  });
+
   it('keeps a missing supervisor tier visible as incomplete recovery', async () => {
     rmSync(join(root, 'supervisor'), { recursive: true });
     const snapshot = await backup();
