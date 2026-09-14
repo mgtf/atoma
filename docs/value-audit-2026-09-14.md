@@ -219,6 +219,10 @@ mesure des défauts du livrable demande une preuve fonctionnelle indépendante.
 
    Sur l'hôte, `npm run backup -- --dest <off-machine mount>` utilise déjà
    l'API de backup SQLite, puis archive skills, runs opérateur et archives.
+   Jusqu'au 2026-09-14 ce script était un chemin source (`tsx`), absent d'une
+   release installée avec `npm ci --omit=dev` : la commande est désormais
+   compilée (`node dist/cli/backup.js`), avec `backup:dev` pour la source, et
+   se lance depuis `/home/atoma/current` avec l'environnement du service.
    Toutefois, au moment de l'audit, [son implémentation](../src/cli/backup.ts)
    ne collectait automatiquement **ni `ATOMA_PROJECTS_ROOT` ni
    `ATOMA_SUPERVISOR_DIR`**. Complété le même jour, après l'audit : l'export

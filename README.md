@@ -276,7 +276,7 @@ A local release keeps its learned state beside the checkout: `atoma.db`,
 `skills/` and `runs/`. Build artefacts live under `~/.atoma/workspaces/build`;
 the MCP run lease is `~/.atoma/mcp-run-lock.db`. Back up the database and
 skills directory together: `npm run backup -- --dest <off-machine mount>`
-snapshots the store (SQLite online backup, WAL-safe), the skill tree, the run
+(compiled; `backup:dev` from source) snapshots the store (SQLite online backup, WAL-safe), the skill tree, the run
 traces, the local archives, the org-scoped project corpus (the `orgs/` child
 of `ATOMA_PROJECTS_ROOT`, without `node_modules`) and the supervisor records
 into one dated directory with an inventory manifest (per-tier SHA-256 and
@@ -299,8 +299,8 @@ command. The compiled archive attached to each GitHub Release includes MCP,
 its build-run path, doctor, the identity/invitation CLI (`npm run auth`), and
 the compiled visualizer (`npm run viz:serve`), including authenticated
 organisation-scoped project creation and launch when the optional gate is
-configured. The compiled project, sentinel, analyst, mender and deployment-preflight CLIs are
-also included. Benchmark and registry/skill mutation-oriented operator CLIs remain source-only.
+configured. The compiled project, sentinel, analyst, mender, deployment-preflight and
+state-backup CLIs are also included. Benchmark and registry/skill mutation-oriented operator CLIs remain source-only.
 See [`CHANGELOG.md`](CHANGELOG.md) and the
 [`v0.1.0 release soak`](docs/release-soak-v0.1.0.md), followed by the
 [`v0.1.1 container/egress acceptance matrix`](docs/release-acceptance-v0.1.1.md)

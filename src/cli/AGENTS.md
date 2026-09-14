@@ -73,7 +73,12 @@ can only report that it cannot be.
 
 ## Backup
 
-- `npm run backup` snapshots six tiers into one dated directory: the store
+- `npm run backup` is the COMPILED command (`node dist/cli/backup.js`), like
+  `auth` and `projects`: the production host installs with `npm ci --omit=dev`
+  and has no tsx, so a source-path default silently made the documented
+  collection impossible there until 2026-09-14. `backup:dev` is the source
+  path; `release:check` runs the compiled `--help` smoke.
+- It snapshots six tiers into one dated directory: the store
   (SQLite online backup, never a raw copy), skills, operator runs, the
   `~/.atoma/archive` tier, the org-scoped project corpus and the supervisor
   records. The projects tier is the `orgs/` child of `ATOMA_PROJECTS_ROOT`,

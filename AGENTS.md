@@ -165,7 +165,8 @@ npm run curriculum -- --dry-run
 npm run curriculum
 npm run burnin
 npm run friction
-npm run backup -- --dest <off-machine mount>   # store+skills+runs+archives, dated, pruned
+npm run backup -- --dest <off-machine mount>   # compiled: store+skills+runs+archives+projects+supervisor, dated, pruned
+npm run backup:dev -- --dest <off-machine mount>
 npm run benchmark -- --dry-run
 npm run benchmark -- --out benchmark/results-round<N>.csv --result benchmark/ROUND<N>.md
 ```
@@ -204,7 +205,9 @@ separately billed `OPENAI_API_KEY`. The full contract is in
 - `release:check` is the release-readiness definition: full check, audit,
   build, the compiled MCP smoke, the compiled auth end-to-end smoke
   (`auth-release-smoke.mjs`: founder login, CLI invite, member admission),
-  and the auth/doctor help smokes.
+  and the auth/doctor/analyst/mender/backup help smokes. `npm run backup` is
+  compiled (`node dist/cli/backup.js`) because the host installs with
+  `npm ci --omit=dev` and has no tsx; `backup:dev` is the source path.
 - The BROWSER smoke (`viz:smoke`) is NOT in it, since 2026-08-24. It is the one
   check here that drives a real Chrome, and on CI's CPU rasteriser (2023–3433ms
   per frame, against ~17ms on a developer machine) it both dominated the step
