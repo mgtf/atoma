@@ -445,6 +445,8 @@ The frozen record contains the full dated reasoning behind these rules:
 - [previewing a run in flight — decision and contract 2026-09-02](docs/in-flight-preview-2026-09-02.md)
 - [public release — licence, protections and remaining steps 2026-09-06](docs/public-release-2026-09-06.md)
 - [trajectory predictability as a trust regulariser — design proposal 2026-09-09](docs/trajectory-predictability-design-2026-09-09.md)
+- [value audit and local evidence coverage 2026-09-14](docs/value-audit-2026-09-14.md)
+- [user acceptance contract proposal 2026-09-14](docs/acceptance-contract-2026-09-14.md)
 - [release soak v0.1.0](docs/release-soak-v0.1.0.md)
 - [release acceptance v0.1.1](docs/release-acceptance-v0.1.1.md)
 - [release acceptance v0.1.3](docs/release-acceptance-v0.1.3.md)

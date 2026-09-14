@@ -298,8 +298,8 @@ list. These values come from the host snapshot, never a tenant prompt.
 
 - ONE place decides how long a project run may take: `projectRunTimeoutMs`,
   which reads an explicit argument, then `ATOMA_PROJECT_TIMEOUT_MS`, then the
-  15-minute default, and REFUSES anything malformed or outside 60s..7200s
-  rather than falling back — a run that quietly gets 15 minutes when the
+  30-minute default, and REFUSES anything malformed or outside 60s..7200s
+  rather than falling back — a run that quietly gets 30 minutes when the
   operator asked for 40 is the same defect wearing a different hat.
 - `ATOMA_BUILD_TIMEOUT_MS` is the CHILD's variable and is inert on the host:
   `spawnRun` writes it from this value AFTER spreading the caller's

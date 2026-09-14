@@ -130,9 +130,10 @@ Ces observations placent l'épuisement du budget et les boucles de réparation
 avant toute conclusion sur la nécessité de checkpoints. Elles ne prouvent ni
 qu'un budget plus long aurait réussi, ni quelle dépense aurait été récupérable.
 Le code actuel fixe le défaut projet à **1 800 s**, avec un override hôte
-`ATOMA_PROJECT_TIMEOUT_MS`. Le contrat projets conserve une ancienne mention
-de 15 minutes à côté du défaut de 30 minutes : la constante
-`DEFAULT_PROJECT_RUN_TIMEOUT_MS` du coordinateur tranche. Cette évolution et
+`ATOMA_PROJECT_TIMEOUT_MS`. À la révision de code examinée, le contrat projets
+conservait une ancienne mention de 15 minutes à côté du défaut de 30 minutes :
+la constante `DEFAULT_PROJECT_RUN_TIMEOUT_MS` du coordinateur tranche.
+La mention normative est corrigée avec cette revue documentaire. Cette évolution et
 l'ancien problème de propagation du timeout sont des confondants de version.
 
 Les 8 erreurs d'outils du run livré établissent une friction récupérée, pas un

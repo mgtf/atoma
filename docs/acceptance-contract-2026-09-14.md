@@ -170,6 +170,16 @@ dispositions. It introduces no new run status. Existing runner and project
 finalization semantics remain: project finalization may already differ from
 the runner epilogue, and acceptance must not collapse those two facts.
 
+This record is evidence about one run's artifact, not atom/skill trust,
+platform-body approval, execution rights or permission to reuse a recipe.
+It cannot increment trust or admit a body to the commons. The
+[SaaS storage decision gate](saas-architecture.md#the-next-code-decision)
+still applies: “primary product store” names the logical owner, not permission
+to add a temporary SQLite table before the hardened-SQLite/PostgreSQL decision.
+This proposal authorizes no DDL or migration. The storage implementation must
+be reviewed against that decision before coding; calling evidence “acceptance”
+is not an exemption from the gate.
+
 The aggregate is passed only for a nonempty activated set whose criteria all
 pass; any failed criterion makes it failed, otherwise incomplete evidence is
 unverified. A legacy run with no specification has no acceptance record or
