@@ -96,6 +96,11 @@ can only report that it cannot be.
   mutates them — without touching the run lease to make room.
 - The destination is required and refused inside the repository. A missing
   tier is a loud skip that names the resolved path, never a silent success.
+- The offline recovery exercise is `python3 scripts/restore-drill.py <snapshot>
+  --dest <new-directory>`, not a service start or a compiled product command.
+  It verifies hashes, extracts regular files into an isolated destination and
+  checks SQLite plus project-file correspondence without migrations or writes
+  to the source. Scope and exit dispositions: [recovery exercise](../../docs/recovery-drill-2026-09-14.md).
 
 ## Burn-in and friction
 

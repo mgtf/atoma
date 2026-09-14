@@ -1,0 +1,232 @@
+{
+  "schema": "atoma.local-recovery-evidence/v1",
+  "scope": "Two local operator runs; no production project corpus; not a controlled benchmark",
+  "sourceRevision": "4198d0d",
+  "workerImage": "sha256:9fc3d7899a6e8eeac8eff6dd14109158d6d0dd6f40d7d1933ea5100f2d7c5715",
+  "budgetPerRunSeconds": 300,
+  "runs": [
+    {
+      "case": "fresh",
+      "traceFile": "fresh.trace.json.gz",
+      "traceSha256": "3defa19b4955c3b40e391045d28dbb2a4e45590bd43c95fd01b00480d058a80c",
+      "startedAt": "2026-09-14T13:34:21.195Z",
+      "endedAt": "2026-09-14T13:35:29.807Z",
+      "durationMs": 68612,
+      "outcome": "delivered",
+      "totals": {
+        "calls": 6,
+        "inputTokens": 1703,
+        "outputTokens": 4440,
+        "cacheReadInputTokens": 142227,
+        "cacheCreationInputTokens": 62898,
+        "costUsd": 0.1397622,
+        "perModel": [
+          {
+            "model": "sub:anthropic:haiku",
+            "calls": 5,
+            "inputTokens": 1701,
+            "outputTokens": 3007,
+            "costUsd": 0.10524120000000001
+          },
+          {
+            "model": "sub:anthropic:sonnet",
+            "calls": 1,
+            "inputTokens": 2,
+            "outputTokens": 1433,
+            "costUsd": 0.034521
+          }
+        ]
+      },
+      "browserProbes": 1,
+      "preflightRefusals": 0,
+      "artifactSha256": "4aa7331bd0f15df9ab3107a90588e1f2f203097346e4b5288b1fdd8ca5b33d23",
+      "artifactFile": "fresh.html.gz"
+    },
+    {
+      "case": "seeded",
+      "traceFile": "seeded.trace.json.gz",
+      "traceSha256": "9896bf52dedba38b3883b5ccb966cc46df75545c1cdb7b5a863866a07c51debd",
+      "startedAt": "2026-09-14T13:37:04.998Z",
+      "endedAt": "2026-09-14T13:42:04.998Z",
+      "durationMs": 300000,
+      "outcome": "failed",
+      "totals": {
+        "calls": 30,
+        "inputTokens": 9597,
+        "outputTokens": 15554,
+        "cacheReadInputTokens": 561249,
+        "cacheCreationInputTokens": 164468,
+        "costUsd": 0.4228553999999999,
+        "perModel": [
+          {
+            "model": "sub:anthropic:haiku",
+            "calls": 27,
+            "inputTokens": 9591,
+            "outputTokens": 13848,
+            "costUsd": 0.32607089999999994
+          },
+          {
+            "model": "sub:anthropic:opus",
+            "calls": 1,
+            "inputTokens": 2,
+            "outputTokens": 852,
+            "costUsd": 0.06941625
+          },
+          {
+            "model": "sub:anthropic:sonnet",
+            "calls": 2,
+            "inputTokens": 4,
+            "outputTokens": 854,
+            "costUsd": 0.02736825
+          }
+        ]
+      },
+      "browserProbes": 7,
+      "preflightRefusals": 4,
+      "artifactSha256": "9fd27f6482ce10f3cc3fc91c53e20ea75625c3fc18253bf5dd8f950f13a2ad7b",
+      "artifactFile": "seeded.html.gz"
+    }
+  ],
+  "independentProbes": [
+    {
+      "name": "fresh",
+      "proof": {
+        "ok": true,
+        "url": "http://localhost:41915/",
+        "title": "Counter",
+        "errors": [],
+        "warnings": [],
+        "failedRequests": [],
+        "interactionLog": [],
+        "requestedInteractions": 0,
+        "ignoredInteractions": 0,
+        "document": {
+          "path": "index.html",
+          "sha256": "4aa7331bd0f15df9ab3107a90588e1f2f203097346e4b5288b1fdd8ca5b33d23"
+        },
+        "smokeResult": {
+          "ok": true,
+          "initial": "0",
+          "before": "3"
+        }
+      }
+    },
+    {
+      "name": "seeded",
+      "proof": {
+        "ok": true,
+        "url": "http://localhost:34871/",
+        "title": "Counter",
+        "errors": [],
+        "warnings": [],
+        "failedRequests": [],
+        "interactionLog": [],
+        "requestedInteractions": 0,
+        "ignoredInteractions": 0,
+        "document": {
+          "path": "index.html",
+          "sha256": "9fd27f6482ce10f3cc3fc91c53e20ea75625c3fc18253bf5dd8f950f13a2ad7b"
+        },
+        "smokeResult": {
+          "ok": true,
+          "initial": "0",
+          "before": "3",
+          "after": "0"
+        }
+      }
+    }
+  ],
+  "harnessCorrection": {
+    "initialResult": {
+      "verified": true
+    },
+    "requiredCorrection": "Return ok:true as well; original fresh run was reused, not rerun"
+  },
+  "restore": {
+    "schema": "atoma.restore-drill/v1",
+    "manifestSha256": "065bde22753f12704c2b85d6b8c819c08a717b93d54e07671d09c585f73a611a",
+    "verified": {
+      "store": {
+        "filename": "store.db",
+        "root": "store.db",
+        "sha256": "657d751a77e4e252fce1a6b373539e4693c2e85f96c913ac3a3e5adec2c6e1f2"
+      },
+      "skills": {
+        "filename": "skills.tar.gz",
+        "root": "skills",
+        "sha256": "096f0a2f004f105a7e7307d349054244338483f616a0138e3c22a714c4cf0256"
+      },
+      "runs": {
+        "filename": "runs.tar.gz",
+        "root": "runs",
+        "sha256": "f0b0715666ab33edcb8a6379cb6d2e2355605e90300fa22b7098a9846608e9ed"
+      },
+      "archive": {
+        "filename": "archive.tar.gz",
+        "root": "archive",
+        "sha256": "e253bf6a9fe4e24af955fa7d34b01be593b6257b77b97d6a1e387245fbe82511"
+      },
+      "projects": {
+        "filename": "projects.tar.gz",
+        "root": "orgs",
+        "sha256": "6854838262cc3741721576e28b0894cb7f2162ff8670edf35599502a38981057"
+      },
+      "supervisor": {
+        "filename": "supervisor.tar.gz",
+        "root": "supervisor",
+        "sha256": "8adcf2539c872ba4b2fd44df7f2fb5b9a4d3fe1afbf6a571bbc4033b398689b3"
+      }
+    },
+    "skipped": [],
+    "excluded": {
+      "store": [],
+      "skills": [],
+      "runs": [],
+      "archive": [],
+      "projects": [
+        "node_modules"
+      ],
+      "supervisor": []
+    },
+    "servicesStarted": false,
+    "store": {
+      "integrity": "ok",
+      "projectTable": "absent",
+      "projectRuns": [],
+      "issues": []
+    },
+    "elapsedSeconds": 0.03,
+    "completeInventory": true,
+    "status": "verified"
+  },
+  "pointerChecks": [
+    {
+      "origin": "original",
+      "name": "fresh",
+      "ok": true,
+      "method": "puppeteer-page-click",
+      "final": "3"
+    },
+    {
+      "origin": "original",
+      "name": "seeded",
+      "ok": true,
+      "method": "puppeteer-page-click",
+      "final": "1"
+    },
+    {
+      "origin": "restored",
+      "name": "fresh",
+      "ok": true,
+      "method": "puppeteer-page-click",
+      "final": "3"
+    },
+    {
+      "origin": "restored",
+      "name": "seeded",
+      "ok": true,
+      "method": "puppeteer-page-click",
+      "final": "1"
+    }
+  ]
+}
