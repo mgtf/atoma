@@ -15,6 +15,7 @@ npm run viz:shot -- --auth --repository-mode fork   # existing-repository creati
 npm run viz:shot -- --auth --select-first           # first project selected: run list + run form
 npm run viz:shot -- --auth --view Runs              # any nav tab by its label
 npm run viz:shot -- --auth --view Skills --select-first # member reads a shared recipe
+npm run viz:shot -- --auth --view Registry --select-first # member reads a shared agent type
 npm run viz:shot -- --auth --view Settings          # account menu, not a rail tab
 npm run viz:shot -- --auth --view Settings --scroll-end  # org directory at the foot of the form
 npm run viz:shot -- --auth --camera overview        # neutral, undeformed whole-scene pose

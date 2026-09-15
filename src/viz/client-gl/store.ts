@@ -55,8 +55,9 @@ export const ADMIN_VIEWS: readonly ViewName[] = [
  * - Gate off (`auth` null): the classic operator developer path — every
  *   instance surface, no admin plane (there are no organisations to manage).
  * - Gated platform admin: everything, plus the admin plane.
- * - Gated member: org-scoped work plus the shared Skills catalog. Registry
- *   and burn-in remain private operator state.
+ * - Gated member: org-scoped work plus the two platform commons — the Registry
+ *   (operator-owned agent types every organisation's runs start from) and the
+ *   Skills catalog. Burn-in remains private operator state.
  *
  * There is no `launch` tab: a tab that could only DESCRIBE how to phrase a
  * goal, beside a Projects tab that actually starts runs, split one job over
@@ -69,7 +70,7 @@ export function visibleViews(auth: { viewer: { platformAdmin: boolean } } | null
   if (auth.viewer.platformAdmin) {
     return ['projects', 'runs', 'registry', 'skills', 'burnin', 'docs', ...ADMIN_VIEWS];
   }
-  return ['projects', 'runs', 'skills', 'docs'];
+  return ['projects', 'runs', 'registry', 'skills', 'docs'];
 }
 
 /**

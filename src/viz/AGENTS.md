@@ -502,18 +502,18 @@ npm run viz:mark-turn:analyze
 - Operator source launchers (`npm run viz`, `doctor:dev`, `auth:dev`) fill
   unset keys from checkout `.env`. Do not load `.env` inside `src/viz/server.ts`:
   process-level tests spawn it from the repository cwd with a cleaned env.
-- Behind the gate the instance-global operator surfaces (`/api/registries`,
-  `/api/registry/:id`, `/api/burnin`) answer ONLY the platform
-  admin (403 otherwise) — an invitation must not read operator-level state (review 2026-08-20 §2.2). The admin also
-  reads every organisation's projects and run traces, and manages organisations
-  through `/api/admin/organisations` and `/api/admin/invitations` (same-origin
-  POST). Writes (create project, start/cancel runs) stay bound to the viewer's
-  ACTIVE organisation for admins too. `visibleViews` is the one nav definition:
-  gated members get org surfaces only; the ungated developer path is unchanged.
-  Registry ownership is enforced in storage ([src/registry](../registry/AGENTS.md));
-  these operator readers show only operator-owned rows and history.
-- Skills is a WORKSPACE destination for every authenticated role. `/api/skills` and namespace/detail readers
-  serve the global catalog using public namespace metadata. Trust stays project/hash scoped ([src/skills](../skills/AGENTS.md)).
+- Behind the gate `/api/burnin` answers ONLY the platform admin (403 otherwise): an invitation
+  must not read operator-level state (review 2026-08-20 §2.2). The admin also reads every
+  organisation's projects and run traces, and manages organisations through
+  `/api/admin/organisations` and `/api/admin/invitations` (same-origin POST); writes (create
+  project, start/cancel runs) stay bound to the viewer's ACTIVE organisation for admins too.
+  `visibleViews` is the one nav definition; the ungated developer path is unchanged.
+- Registry and Skills are WORKSPACE destinations for every authenticated role (Registry since
+  2026-09-15): the commons every organisation's runs start from. `/api/registries` and
+  `/api/registry/:id` show operator-owned rows and history only (ownership is enforced in
+  storage, [src/registry](../registry/AGENTS.md)) and redact the store's host path to its
+  basename for non-admins. `/api/skills` and its readers serve the global catalog from public
+  namespace metadata; trust stays project/hash scoped ([src/skills](../skills/AGENTS.md)).
 - `/mcp` is the ONE MCP (contract in [src/mcp](../mcp/AGENTS.md)): OAuth or
   API bearer token behind the gate, the operator on the ungated loopback, Host
   pinned either way. `/api/tokens` mints (POST, same-origin, journaled

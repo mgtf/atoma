@@ -165,10 +165,10 @@ function GpuAppContent({
     state.view === 'runs' && apiReady,
     runsQuery.data?.find((entry) => entry.id === state.selectedRunId)
   );
-  const registriesQuery = useRegistries(state.view === 'registry' && operatorSurfaces);
+  const registriesQuery = useRegistries(state.view === 'registry' && apiReady);
   const registryQuery = useRegistry(
     state.selectedRegistryId,
-    state.view === 'registry' && operatorSurfaces
+    state.view === 'registry' && apiReady
   );
   const namespacesQuery = useSkillNamespaces(state.view === 'skills' && apiReady);
   const namespaceNames = useMemo(

@@ -1187,7 +1187,7 @@ describe('the nav rail', () => {
     expect(groups).toHaveLength(1);
     expect(groups[0]).toMatchObject({ group: 'workspace' });
     expect(rows.filter((row) => row.kind === 'item').map((row) => row.view)).toEqual([
-      'projects', 'runs', 'skills', 'docs',
+      'projects', 'runs', 'registry', 'skills', 'docs',
     ]);
   });
 
@@ -1211,7 +1211,7 @@ describe('the nav rail', () => {
     expect(ctx.root.children.some((child) => child.label === 'sidebar-band')).toBe(true);
     const nav = ctx.buttons.filter((button) => button.id.startsWith('nav.'));
     expect(nav.map((button) => button.id)).toEqual([
-      'nav.projects', 'nav.runs', 'nav.skills', 'nav.docs', 'nav.registry', 'nav.burnin',
+      'nav.projects', 'nav.runs', 'nav.registry', 'nav.skills', 'nav.docs', 'nav.burnin',
     ]);
     expect(nav.filter((button) => button.active).map((button) => button.id)).toEqual([
       'nav.skills',
@@ -1248,11 +1248,11 @@ describe('the nav rail', () => {
     expect(ctx.root.children.some((child) => child.label === 'sidebar-band')).toBe(false);
     const nav = ctx.buttons.filter((button) => button.id.startsWith('nav.'));
     expect(nav.map((button) => button.id)).toEqual([
-      'nav.projects', 'nav.runs', 'nav.skills', 'nav.docs', 'nav.registry', 'nav.burnin',
+      'nav.projects', 'nav.runs', 'nav.registry', 'nav.skills', 'nav.docs', 'nav.burnin',
     ]);
     expect(ctx.texts.some((text) => ['WORKSPACE', 'OPERATE'].includes(text.value))).toBe(false);
     expect(ctx.tooltips.map((tooltip) => tooltip.text)).toEqual([
-      'Projects', 'Runs', 'Skills', 'Docs', 'Registry', 'Burn-in',
+      'Projects', 'Runs', 'Registry', 'Skills', 'Docs', 'Burn-in',
     ]);
     for (const button of nav) {
       expect(button.x).toBe(GPU_LAYOUT.sidebarWidth - FOCUS_SIDEBAR_BUTTON_WIDTH);
@@ -1388,11 +1388,11 @@ describe('the nav rail', () => {
     expect(ctx.root.children.some((child) => child.label === 'sidebar-band')).toBe(true);
     const nav = ctx.buttons.filter((button) => button.id.startsWith('nav.'));
     expect(nav.map((button) => button.id)).toEqual([
-      'nav.projects', 'nav.runs', 'nav.skills', 'nav.docs', 'nav.registry', 'nav.burnin',
+      'nav.projects', 'nav.runs', 'nav.registry', 'nav.skills', 'nav.docs', 'nav.burnin',
     ]);
     expect(ctx.texts.some((text) => ['WORKSPACE', 'OPERATE'].includes(text.value))).toBe(false);
     expect(ctx.tooltips.map((tooltip) => tooltip.text)).toEqual([
-      'Projects', 'Runs', 'Skills', 'Docs', 'Registry', 'Burn-in',
+      'Projects', 'Runs', 'Registry', 'Skills', 'Docs', 'Burn-in',
     ]);
     for (const button of nav) {
       // Centred in the strip and fully inside it: the compact overview rail
@@ -1713,10 +1713,11 @@ describe('visibleViews', () => {
     // No `launch` tab anywhere: describing how to phrase a goal is not a view
     // of its own, it is part of the form that starts the run.
     expect(visibleViews(null)).not.toContain('launch');
-    // Gated member: no instance-global operator surfaces — the server 403s
-    // them, so the tabs must not exist to poison the global data error.
-    // Docs stays: it is static prose, not a fetch of gated data.
-    expect(visibleViews({ ...base, viewer })).toEqual(['projects', 'runs', 'skills', 'docs']);
+    // Gated member: the org surfaces plus the two platform commons, Registry
+    // and Skills. Burn-in stays out — the server 403s it, so its tab must not
+    // exist to poison the global data error. Docs stays: it is static prose,
+    // not a fetch of gated data.
+    expect(visibleViews({ ...base, viewer })).toEqual(['projects', 'runs', 'registry', 'skills', 'docs']);
     // The admin plane is FIVE destinations, one per job, not one tab holding
     // organisations, the journal, the ledger and the sentinel at once — and
     // the composer that used to ride at the foot of the organisation list is

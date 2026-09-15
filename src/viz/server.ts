@@ -1757,6 +1757,17 @@ function listRegistries(): RegistrySummary[] {
   }));
 }
 
+/**
+ * Shape a registry summary for its REQUESTER. The store's host path is
+ * operator information: the ungated developer and the platform admin read it
+ * whole; an organisation member gets the basename only — enough to label the
+ * store, nothing about the host's filesystem layout.
+ */
+function registrySummaryFor(registry: RegistrySummary, viewer: Viewer | null): RegistrySummary {
+  if (!AUTH || viewer?.platformAdmin) return registry;
+  return { ...registry, path: basename(registry.path) };
+}
+
 function dumpRegistry(id: string): { registry: RegistrySummary; types: RegistryType[] } | null {
   const entry = DBS.find((d) => d.id === id);
   if (!entry) return null;
@@ -2655,15 +2666,16 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       return;
     }
 
-    // OPERATOR SURFACES. The registry, skill store and burn-in APIs are
-    // instance-global: org runs mutate the shared registry and these routes
-    // read it in full (atom names, system prompts, skill bodies). Behind the
-    // org gate they belong to the PLATFORM ADMIN alone — an invitation must
-    // not grant read access to operator-level state (review 2026-08-20 §2.2).
-    const operatorApi =
-      pathname === '/api/registries' ||
-      pathname.startsWith('/api/registry/') ||
-      pathname === '/api/burnin';
+    // OPERATOR SURFACES. Burn-in is instance-global operator state; behind the
+    // org gate it belongs to the PLATFORM ADMIN alone — an invitation must not
+    // grant read access to operator-level state (review 2026-08-20 §2.2).
+    // The registry readers left this list on 2026-09-15, as the skill readers
+    // did: the operator-owned catalogue (names, prompts, trust, history) is
+    // the commons every organisation's runs start from. Storage keeps them
+    // operator-filtered (`operatorRegistryPredicate`), so a project's private
+    // branches never ride along, and `registrySummaryFor` redacts the store's
+    // host path for non-admins.
+    const operatorApi = pathname === '/api/burnin';
     if (operatorApi && !viewer.platformAdmin) {
       sendJson(res, 403, { error: 'platform admin required' });
       return;
@@ -4054,7 +4066,8 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
   }
 
   if (pathname === '/api/registries') {
-    sendJson(res, 200, listRegistries());
+    const viewer = AUTH?.resolve(req) ?? null;
+    sendJson(res, 200, listRegistries().map((registry) => registrySummaryFor(registry, viewer)));
     return;
   }
 
@@ -4119,7 +4132,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         sendJson(res, 404, { error: 'unknown registry id', id });
         return;
       }
-      sendJson(res, 200, dump);
+      sendJson(res, 200, { ...dump, registry: registrySummaryFor(dump.registry, AUTH?.resolve(req) ?? null) });
     } catch (err) {
       sendJson(res, 500, { error: (err as Error).message });
     }

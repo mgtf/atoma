@@ -175,8 +175,8 @@ export function focusRailChromeLayout(
 }
 
 export const SIDEBAR_GROUPS: readonly { key: string; views: readonly ViewName[] }[] = [
-  { key: 'workspace', views: ['projects', 'runs', 'skills', 'docs'] },
-  { key: 'operate', views: ['registry', 'burnin'] },
+  { key: 'workspace', views: ['projects', 'runs', 'registry', 'skills', 'docs'] },
+  { key: 'operate', views: ['burnin'] },
   { key: 'admin', views: ADMIN_VIEWS },
 ];
 

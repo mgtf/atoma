@@ -6,7 +6,10 @@
 > project and exact body hash. Shared guidance no longer requires a project
 > offer. Deterministic execution and promotion remain restricted in project
 > runs. This implements the user's global-knowledge requirement; it does not
-> claim the remaining storage-concurrency roadmap below is complete. The
+> claim the remaining storage-concurrency roadmap below is complete. Since the
+> same day, the operator-owned registry — the agent types every organisation's
+> runs start from — is browsable read-only by every authenticated user as well,
+> private project branches excluded and the store's host path redacted. The
 > dated review below describes the earlier partitioned implementation.
 
 > **CURRENT REVIEW: 2026-09-08.**

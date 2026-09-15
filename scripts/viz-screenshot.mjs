@@ -106,6 +106,16 @@ async function freePorts(count) {
 function gatedStubs() {
   const principalId = '11111111-2222-3333-4444-555555555555';
   const projectId = 'aaaaaaaa-1111-4222-8333-bbbbbbbbbbbb';
+  // Registry is a member destination: the operator-owned store, named by its
+  // basename only (the server redacts the host path for non-admins).
+  const registry = { id: 'atoma', label: 'atoma', path: 'atoma.db', exists: true, counts: { 1: 1, 2: 0, 3: 0, total: 1 } };
+  const sharedMolecule = {
+    tier: 1, rank: 'molecule', ordinal: 1, name: 'Water',
+    description: 'Verify browser behaviour from an observed interaction.',
+    systemPrompt: 'You are a Molecule. Establish the initial state, activate one control, inspect the resulting state and report the observed evidence.',
+    tools: ['read_file'], elements: [{ tool: 'read_file', number: 3, name: 'Lithium', symbol: 'Li' }], params: {},
+    createdBy: 'bootstrap', createdAt: '2026-09-15T00:00:00.000Z', version: 1, successes: 3, failures: 0, history: [],
+  };
   const runs = [
     ['delivered', 0.63, null, { status: 'published', commitSha: 'c28afe4f8e3d2b1a0c9e', repositoryUrl: 'https://github.com/example/stopwatch' }],
     ['failed', null, 'control-plane JSON is not a bounded regular file: /tmp/example/trace.json', null],
@@ -313,6 +323,8 @@ function gatedStubs() {
       updatedAt: '2026-08-20T00:00:00.000Z',
     }],
     [`/api/projects/${projectId}/runs`]: runs,
+    '/api/registries': [registry],
+    '/api/registry/atoma': { registry, types: [sharedMolecule] },
     '/api/skills': [{ l1Name: 'shared-molecule', l1Label: 'Water', count: 1 }],
     '/api/skills/shared-molecule': [{ id: 'verify-browser-behaviour', description: 'Verify browser behaviour with an observed interaction.', whenToUse: 'When a browser interaction needs verification.', kind: 'llm', successes: 0, failures: 0, updatedAt: '2026-09-15T00:00:00.000Z' }],
     '/api/skills/shared-molecule/verify-browser-behaviour': { id: 'verify-browser-behaviour', description: 'Verify browser behaviour with an observed interaction.', whenToUse: 'When a browser interaction needs verification.', kind: 'llm', successes: 0, failures: 0, updatedAt: '2026-09-15T00:00:00.000Z', body: 'Establish the initial state. Activate the relevant control. Inspect the resulting state and report the observed evidence.' },
@@ -658,7 +670,7 @@ try {
     }
 
     if (selectFirst) {
-      const prefix = view === 'Skills' ? 'skill.select.' : 'project.select.';
+      const prefix = view === 'Skills' ? 'skill.select.' : view === 'Registry' ? 'registry.atom.' : 'project.select.';
       await page.waitForFunction((key) => globalThis.__ATOMA_GPU__?.hitTargets().some(entry => entry.id.startsWith(key)), { timeout: READY_TIMEOUT_MS }, prefix);
       const spot = await page.evaluate((key) => {
         const handle = globalThis.__ATOMA_GPU__;
