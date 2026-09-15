@@ -9,12 +9,16 @@ check the result, and let you inspect the work along the way.
 
 **[Open atoma.run →](https://atoma.run)**
 
-[Use cases](#what-could-your-team-build) · [How it works](#how-it-works) · [Self-host](#install-and-evaluate-it-locally) · [Documentation](#documentation)
+[Demo](#watch-the-demo) · [Use cases](#what-could-your-team-build) · [How it works](#how-it-works) · [Self-host](#install-and-evaluate-it-locally) · [Documentation](#documentation)
 
 [![CI](https://github.com/mgtf/atoma/actions/workflows/ci.yml/badge.svg)](https://github.com/mgtf/atoma/actions/workflows/ci.yml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
 </div>
+
+## Watch the demo
+
+https://github.com/user-attachments/assets/481c59de-2f29-423e-a55c-80cc5b448b92
 
 ## From a business need to a tool you can use
 
