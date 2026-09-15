@@ -97,6 +97,10 @@ export function proofObligationLines(task: Task): string[] {
     `itself or drives state through window.* hooks does NOT count, and when the`,
     `smoke drives its own state the runtime discards the external interactions`,
     `too — keep the smoke to ASSERTIONS about the state the interactions produced.`,
+    `If replaying the sequence would repeat a control and then reset it, split the`,
+    `proof into TWO validate_html calls — the control up to the milestone with a`,
+    `read-only smoke, then one change plus the reset with a read-only smoke — never`,
+    `into a smoke that drives the steps itself.`,
   ];
 }
 

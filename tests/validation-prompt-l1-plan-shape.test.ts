@@ -42,6 +42,21 @@ describe('VALIDATION_SYSTEM_PROMPT — L1 plan shape clause (#10)', () => {
     expect(VALIDATION_SYSTEM_PROMPT).toMatch(/Placeholders/);
   });
 
+  it('does not read a declared tool as callable once — the two-call proof is the taught shape', () => {
+    // MEASURED 2026-09-15, seeded counter (docs/incidents/verification-replay-2026-09-15.md,
+    // second campaign, event 16): the L1 planned exactly the taught two-call
+    // verification and the L2 plan validator rejected it — "proposes TWO
+    // separate validate_html calls, but the child's only declared tools are
+    // … validate_html (singular)" — and coached merging both into ONE
+    // interaction list that repeats a control and then resets, the very
+    // shape the tool refuses pre-flight. The validator must hear what the L1
+    // and the tool already agree on.
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/called AS MANY TIMES as the plan/);
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/several validate_html calls/);
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/Never coach a\s+child to merge them/);
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/self-driving\s+smoke executes no real interaction/);
+  });
+
   it('preserves the original "L2/L3 must delegate" rule — the fix clarifies, does not retract', () => {
     // Regression guard: the #10 clarification lives ALONGSIDE the
     // existing L2/L3-must-delegate clause, not instead of it.

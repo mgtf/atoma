@@ -13,6 +13,7 @@ import {
   mergeProbeManifestWrite,
   probeManifestWriteRefusal,
   mergeShellProbe,
+  SMOKE_TWO_CALL_LINES,
   smokeOkClause,
   smokeOkIncludesStyling,
   smokeResultIncludesStyling,
@@ -1555,7 +1556,7 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
             // and was documented nowhere, while two calls plus one FALSE PASS
             // died on a 100-200ms settle inside a declared 300ms transition.
             description:
-              'JS EXPRESSION (wrap statements in an IIFE; a top-level `const`/`let`/`return` is refused pre-flight at no cost) evaluated in the page context AFTER interactions. It MAY be async — the tool awaits it, bounded to one repaint or transition. Structured results MUST return { ok: <aggregate>, ...details }: the explicit `ok` is the ONLY verdict, other fields are diagnostics that may legitimately be false. Any class/style/colour value you return must ALSO be asserted inside `ok`. Never compare a computed style to an `rgb(...)` literal: snapshot it, act, await the transition duration declared in your own CSS + 100ms, snapshot again, assert the two differ ONLY when change itself is the task requirement. For an explicit target colour or state, verify that target from the task contract, not merely a difference or a class name. Read source for selectors, not to redefine required outcomes. If your interactions would repeat or undo a control before smoke runs (increment then reset, toggle then toggle back, clear), the final DOM cannot prove the erased intermediate state: send `interactions: []` and drive/snapshot every step inside the IIFE instead.',
+              'JS EXPRESSION (wrap statements in an IIFE; a top-level `const`/`let`/`return` is refused pre-flight at no cost) evaluated in the page context AFTER interactions. It MAY be async — the tool awaits it, bounded to one repaint or transition. Structured results MUST return { ok: <aggregate>, ...details }: the explicit `ok` is the ONLY verdict, other fields are diagnostics that may legitimately be false. Any class/style/colour value you return must ALSO be asserted inside `ok`. Never compare a computed style to an `rgb(...)` literal: snapshot it, act, await the transition duration declared in your own CSS + 100ms, snapshot again, assert the two differ ONLY when change itself is the task requirement. For an explicit target colour or state, verify that target from the task contract, not merely a difference or a class name. Read source for selectors, not to redefine required outcomes. If your interactions would repeat or undo a control before smoke runs (increment then reset, toggle then toggle back, clear), the final DOM cannot prove the erased intermediate state: when real input must be proven, split into TWO calls (the control up to the milestone with a read-only smoke; then one change plus the reset with a read-only smoke) — otherwise send `interactions: []` and drive/snapshot every step inside the IIFE, which executes no real interaction.',
           },
         },
         required: ['url'],
@@ -2086,11 +2087,26 @@ export function detectResetErasedIntermediateEvidence(
   );
   if (!repeated) return null;
   if (smokeDrivesIntermediateState(smoke)) return null;
+  // The first sentence is byte-identical to the 2026-08 wording: the L1
+  // validation ledger summarises a refusal by its first 80 characters.
+  // What follows presents BOTH accepted shapes and says which one covers a
+  // declared dom-interaction obligation — measured 2026-09-15: handed the
+  // self-driving shape alone, the model adopted it within seconds, the phase
+  // was approved with credit withheld, and the L3 planned a second
+  // verification phase to earn the coverage the first could have earned.
   return (
     'interactions repeat a state-changing control and then reset BEFORE smoke runs, ' +
-    'so the intermediate state has been erased. Drive the exposed API inside one smoke IIFE, ' +
-    'capture a milestone/beforeReset snapshot, reset, capture the final snapshot, and include both in ok. ' +
-    `Accepted shape: ${SMOKE_SELF_DRIVEN_EXAMPLE}`
+    'so the intermediate state has been erased. Two shapes are accepted. ' +
+    '(1) TWO CALLS WITH REAL INTERACTIONS — the default whenever the task names clicks or ' +
+    'typing, or the phase declares a "dom-interaction" proof obligation: call 1 replays the ' +
+    'state-changing control up to the milestone and its smoke only READS the milestone; call 2 ' +
+    'changes state once, resets, and its smoke only READS the initial state. Each call executes ' +
+    `its interactions for real (non-empty interactionLog). ${SMOKE_TWO_CALL_LINES.join(' ')} ` +
+    '(2) ONE SELF-DRIVING CALL with interactions: [] — only when no real user input has to be ' +
+    'proven: drive the exposed API inside the smoke IIFE, capture a milestone/beforeReset ' +
+    'snapshot, reset, capture the final snapshot, and include both in ok. It executes NO real ' +
+    'interaction (interactionLog stays empty), so it does not cover a "dom-interaction" ' +
+    `obligation. Accepted shape: ${SMOKE_SELF_DRIVEN_EXAMPLE}`
   );
 }
 
@@ -2568,20 +2584,26 @@ export function isSmokeOk(result: unknown): boolean {
 }
 
 /**
- * Shared coaching hints, reused by the pre-flight and stuck-smoke
- * branches so the L1 narrow prompt and the tool error channel speak the
- * same language. Kept at module level so the strings are identical to
- * the examples in `buildNarrowL1Prompt`.
+ * Shared coaching hints, reused by the pre-flight and stuck-smoke branches so
+ * every refusal the tool emits speaks one language. Module-level constants;
+ * the prompt-side guidance (`src/atoms/prompts.ts`) states the same rules in
+ * its own words, and `tests/smoke-guidance.test.ts` feeds its examples to
+ * these guards so the two sides cannot drift apart.
  */
 /**
- * ONE worked smoke that drives its own state, quoted verbatim by the
- * erased-intermediate refusal.
+ * Shape (2) of the erased-intermediate refusal: ONE worked smoke that drives
+ * its own state, quoted verbatim.
  *
  * It lives here, on the ERROR path, and deliberately not in the `smoke`
  * argument description: prompt text is paid on every call, an error message
  * only by the caller who already got it wrong. The example is itself
  * accepted by every pre-flight detector — `tests/smoke-preflight.test.ts`
- * asserts that, so advice we hand out can never be advice we refuse.
+ * asserts that, so advice we hand out can never be advice we refuse. It
+ * EXECUTES NO INTERACTION: `interactions: []` leaves the transport log empty,
+ * so it never covers a declared `dom-interaction` obligation. The refusal
+ * therefore also hands out shape (1), `SMOKE_TWO_CALL_LINES`
+ * (`src/contracts/probeManifest.ts`), and says which one covers;
+ * `tests/smoke-two-call-coverage.test.ts` pins both halves of that statement.
  */
 export const SMOKE_SELF_DRIVEN_EXAMPLE =
   '(() => { const a = window.__app; a.increment(); a.increment(); ' +

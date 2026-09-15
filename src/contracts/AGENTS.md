@@ -33,6 +33,14 @@ Neighbours:
   (`REPORTED_WEB_PROBE_ALIASES`) are READER tolerance for recipes distilled
   before a rename; never teach one, and never widen the on-disk checker to
   accept one — a compiled script dispatches on that discriminator.
+- `probeManifest.ts` also hosts the taught two-call `validate_html` shape
+  (`SMOKE_TWO_CALL_SHAPE`, rendered as `SMOKE_TWO_CALL_LINES`) for the same
+  reason it hosts `EXAMPLE_WEB_ENTRY`: one constant, rendered by two layers
+  that may not import each other (the tool's refusal and the shared smoke
+  guidance). It is the executed-interactions counterpart of
+  `establishesDomInteraction`; its second call changes state once before the
+  reset because a reset on a fresh page proves nothing. Generic vocabulary
+  only — control, milestone, reset — never one widget's names.
 
 ## Proof attestation
 

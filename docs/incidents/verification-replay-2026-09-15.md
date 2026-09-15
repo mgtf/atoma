@@ -174,8 +174,13 @@ What the seeded trace shows, event by event:
   kept working exactly as specified; phase 2 covered the obligation with real
   clicks and was credited.
 - The L3 again planned a second, read-only verification phase over the file
-  phase 1 had just verified (event 36): 62 s and six calls of the sixteen. The
-  open planning-shape item above stands, now measured twice.
+  phase 1 had just verified (event 36, branch start 87.9 s → end 150.2 s):
+  62.3 s, seven of the sixteen LLM calls (two prefilters, plan, validate-plan,
+  execute, two validate-results) and 0.0758 USD of the 0.2372. Its purpose was
+  real, though: it is where the `dom-interaction` obligation phase 1 had left
+  uncovered was covered with executed clicks. The open planning-shape item
+  above stands, now measured twice; the cheaper remedy is for phase 1 to
+  cover the obligation itself.
 
 An independent Puppeteer check outside any run
 ([pointer-check.mjs.gz](verification-replay-2026-09-15/pointer-check.mjs.gz),
@@ -186,3 +191,192 @@ real pointer events, asserting after every click: the fresh counter read
 digests above. This is functional evidence about the two artefacts, not
 credit for the runs. The workers were confirmed removed after each run; the
 live state remains under `/tmp/atoma-ledger-campaign-20260915` on this machine.
+
+## Second correction, 2026-09-15: teach the shape that covers
+
+Owner-approved scope, same day: a GUIDANCE-ONLY correction, its regression,
+then a live campaign. No new gate, no acceptance-contract change, no
+refusal relaxed.
+
+**What the traces settle.** In both seeded runs the erased-intermediate-state
+refusal handed out exactly one accepted shape — a self-driving IIFE with
+`interactions: []` — and the model adopted it on its very next call, 3.5 to
+7.1 s later (14 September events 28→29 in 5.9 s and 61→62 in 7.1 s;
+15 September events 24→25 in 3.5 s). That shape
+passes every guard and executes no real interaction, so the phase's declared
+`dom-interaction` obligation stayed uncovered and credit was withheld (event
+30, 15 September); the L3 then planned the second verification phase measured
+above. The model later found, unaided and one phase late, the shape that
+satisfies both the guards and the obligation: real clicks up to the milestone
+under a read-only smoke (event 53), then the reset under a read-only smoke
+(event 54). The tool knew that shape was admissible and never said so.
+
+**The correction.** One constant, `SMOKE_TWO_CALL_SHAPE`, in
+[probeManifest.ts](../../src/contracts/probeManifest.ts) — the layering-clean
+home, since the tool's refusal and the shared smoke guidance both render it
+and `src/atoms` may not import `src/tools`. Call 1 replays the state-changing
+control up to the milestone under a read-only smoke; call 2 changes state
+ONCE and resets under a read-only smoke, because a reset on a fresh page
+proves nothing, and `[control, reset]` keeps the reset below the detector's
+threshold. The erased-state refusal
+([builtin.ts](../../src/tools/builtin.ts)) keeps its first sentence
+byte-identical (the validation ledger summarises a refusal by it) and now
+presents both shapes, the covering one first, stating that the self-driving
+one "executes NO real interaction (interactionLog stays empty), so it does not
+cover a dom-interaction obligation". The shared guidance
+([prompts.ts](../../src/atoms/prompts.ts)) renders the same lines from the
+same constant and says the same thing before its canonical self-driving
+shape; the `smoke` parameter description no longer names `interactions: []`
+as the only remedy; and the L1's obligation lines, which reach the FIRST call
+of a phase that declares `dom-interaction`, name the two-call split.
+
+**Regression.** [tests/smoke-two-call-coverage.test.ts](../../tests/smoke-two-call-coverage.test.ts)
+feeds both taught calls to the real guards with their own interactions kept,
+proves the collapsed list and the traces' own shape are still refused, checks
+the refusal and the guidance render the constant verbatim with the covering
+shape first, then drives both calls through the production seam — a
+browserless executor built from the tool's own exported predicates,
+`forkBranch` → `attestingExecutor` → `checkProofCoverage` — and proves
+`dom-interaction` COVERED by two executed observations bound to the unchanged
+document; that the same non-empty logs stop covering once the document moves
+(necessary, not sufficient); that the self-driving shape never covers, as
+taught and as the traces sent it beside real clicks (discarded, not refused);
+and that the real tool hands the shape out on a refused call without opening
+a browser. The pre-flight and guidance suites pin the new halves beside the
+existing example. The constant did not exist before this change, so the
+regression cannot compile against the previous source.
+
+**Known limit, recorded and not gated.** The detector labels ANY interaction
+whose selector or key contains `reset` or `clear` as the reset, so a
+state-changing control whose own id carries those letters (`#presetPicker`,
+`#clearLine`) clicked three times under a read-only smoke is refused as
+call 1 even though the taught shape says both calls are accepted. The review
+of this change reproduced it against the real guard. It is a false positive
+of the token match, not of the teaching, and the detector is not relaxed
+here (cooling-off); it joins the erased-state items in
+[decided, not built](../decided-not-built-2026-08-23.md) for the next
+contract designed against the full corpus.
+
+**Campaign 2, invalid for the tool half — and what it taught anyway.** Same
+goals, budgets and protocol as above, source `332380f` plus this change,
+worker image `sha256:9fc3d789…5715` (the 14 September image). The fresh
+counter delivered in 6 calls, 0.1505 USD, obligation covered
+([trace](verification-replay-2026-09-15/guidance-fresh.trace.json.gz),
+`64391083`). The seeded run FAILED at the 300 s budget: 28 calls, 0.3924 USD,
+phase 1 alone 275 s
+([trace](verification-replay-2026-09-15/guidance-seeded.trace.json.gz),
+`6ae34c04`; SHA-256 of the uncompressed traces `11612490…b6e` and
+`320e15c8…7ecc`). Both delivered files pass the independent pointer check,
+0→1→2→3 and 0→1→2→3→0→1
+([result](verification-replay-2026-09-15/guidance-pointer-check.json)):
+once more a verification-workflow failure, not broken code.
+
+Reading the seeded trace settled three facts:
+
+1. **The tool half of the change never ran.** `validate_html` executes inside
+   the worker container, whose image carries its own compiled `dist/tools`.
+   The image predates the change; inside it `grep -c "Two shapes are
+   accepted" /app/dist/tools/builtin.js` returns 0 and the old sentence
+   returns 1. Every refusal the model received (events 34, 51, 62) was the
+   OLD text, teaching the self-driving shape alone. The host half did run:
+   the two-call lines and "executes NO real interaction" are present in the
+   L1's system prompt on every plan and execute call of both runs. A
+   campaign of a tool-side text needs the image rebuilt from the patched
+   `dist/`; campaign 3 below does that.
+2. **The L1 planned the taught shape first, and the L2 plan validator
+   rejected it.** Event 16, verbatim: "proposes TWO separate validate_html
+   calls, but the child's only declared tools are … validate_html (singular)
+   … Restructure to one coherent validate_html call with all interactions
+   (increment, reset verification) in a single smoke payload", with the
+   coaching "Combine the initial smoke and interaction smoke into ONE
+   validate_html invocation … click #increment multiple times, then #reset".
+   The validator coached exactly the list the tool refuses. The shared
+   validation prompt's TOOLSET SCOPE rule now states that a declared tool may
+   be called as many times as the plan needs, that the two-call verification
+   is the taught shape, and that merging it must never be coached
+   ([verdict.ts](../../src/atoms/verdict.ts), pinned in
+   `tests/validation-prompt-l1-plan-shape.test.ts`). Text again, no gate.
+3. **The rest of the budget went to a different class.** Two results were
+   rejected by the `non-json-envelope` gate (the L1 narrated instead of
+   emitting the final JSON), one plan was rejected for its `subtasks` shape,
+   and the L1 ended one execution on a refusal, which fired the banner
+   (`refused-only`, the ledger working as specified). Phase 2 started at
+   274.7 s and the deadline fell 25 s later.
+
+This phase also declared no `dom-interaction` obligation on its subtasks (the
+L3 plan carried none), so the L1 obligation lines never rendered; the fresh
+run's root floor did.
+
+**Campaign 3 — the text under test, in the worker.** Same goals, budgets and
+protocol, source `332380f` plus this change including the validator text of
+fact 2, worker image REBUILT from the patched `dist/`
+(`sha256:2fe27823…380b`, created 08:24:08 UTC; inside it the new sentence
+returns 1 and `SMOKE_TWO_CALL_LINES` is present in `dist/contracts`), fresh
+isolated state, one run at a time
+([campaign3.sh.gz](verification-replay-2026-09-15/campaign3.sh.gz)).
+
+| Case | Outcome | Duration | LLM calls | Estimated USD | `validate_html` | refused (new text) | ok with executed clicks | Phase 1 obligation |
+|---|---|---:|---:|---:|---:|---:|---:|---|
+| Fresh ([trace](verification-replay-2026-09-15/guidance2-fresh.trace.json.gz), `79a14135`) | delivered | 66.5 s | 6 | 0.1252 | 1 | 0 | 1 | covered (root floor) |
+| Seeded ([trace](verification-replay-2026-09-15/guidance2-seeded.trace.json.gz), `d167815f`) | delivered | 279.7 s | 29 | 0.4254 | 6 | 2 (2) | 4 | COVERED, credited |
+
+Uncompressed SHA-256: fresh trace `3c7696bf…4e1b`, seeded trace
+`98c80911…2c2`; fresh `index.html` `d59f5ae1…5c3d`, seeded `9e5c29b3…7235`.
+Both pass the independent pointer check, 0→1→2→3 and 0→1→2→3→0→1, zero page
+errors ([result](verification-replay-2026-09-15/guidance2-pointer-check.json)).
+
+What the seeded trace shows, event by event:
+
+- **The teaching works at the tool.** The model's first probe was again the
+  collapsed list `[#increment ×3, #reset]` (event 30); the refusal it
+  received was the new text. Its very next call, 2.9 s later (event 31), was
+  call 1 of the taught shape: three real `#increment` clicks under a
+  read-only smoke asserting `'3'`, `interactionLog` of three, document bound.
+- **The validator speaks the same shape.** The L1 returned after call 1
+  alone; the L2 result validator rejected on the merits — reset unverified —
+  and its coaching (event 34) is the two-call shape verbatim: "(1) click
+  #increment N times, read #value === milestone; (2) click #increment once,
+  click #reset, read #value === '0'". It cited the refusal it had read in the
+  transport record. On 14 September the same validator, reading the old
+  refusal, had coached merging.
+- **The retry is the taught shape, and it covers.** Events 43 and 44: call 1
+  (`[#increment ×3]` → `'3'`) and call 2 (`[#increment, #reset]` → `'0'`),
+  both executed, both bound to `9e5c29b3…7235`, manifest written. The
+  supervisor-held coverage block reads COVERED with executed interactions;
+  phase 1 was approved at 143 s and credited — no `credit-withheld`,
+  `uncoveredObligations: 0`. **Target met: the obligation covered in phase 1,
+  by phase 1.**
+- **Phase 1 cost 137 s and 14 calls, phase 2 another 124 s and 13.** The L3
+  planned the read-only re-verification phase a third time (event 59). In it
+  the model opened with the collapsed list again (75, refused), sent call 1
+  (76), then narrated instead of emitting the envelope (`non-json-envelope`,
+  event 78); the plan validator then rejected a correct replan with a
+  self-contradicting toolset reading — "validate_html is absent from the
+  child's declared tools … Wait — validate_html IS declared … the child has no
+  tool to invoke validate_html" (event 82) — and the phase ended on ground
+  truth with no new probe. **Target not met: 29 calls against fewer than 16.**
+
+What the three campaigns settle, and what they do not:
+
+- The two texts now agree and the model follows them within one call: the
+  taught shape was executed in two runs out of two that reached it (campaign
+  1 found it unaided one phase late; campaign 3 was handed it and used it in
+  phase 1). This is the measured effect of the correction, on two runs.
+- The remaining budget goes to costs this chantier did not touch and now has
+  three measurements of: the L3's second verification phase (62 s / 7 calls,
+  then 124 s / 13, over a file phase 1 had just proven); the L1 narrating
+  instead of emitting the final envelope (two runs, three occurrences); and
+  the L2 plan validator misreading the toolset (three distinct wordings in
+  two runs). Each is recorded here for its own contract, none is gated.
+- Two runs with changing learned state are not a controlled comparison. The
+  14 September failure, the 15 September 16-call delivery and the 29-call
+  delivery here are three observations of one goal under three sources; no
+  cost ratio is claimed.
+
+Worker teardown after the operator interrupt took minutes on this host: 30 s
+after the seeded run ended both workers were still listed, and both were gone
+when inspected two minutes later. Removal happened; its latency is recorded,
+not diagnosed. Two `atoma-preview-proxy-network-check` / `atoma-proxy-test-loopback`
+containers left by an earlier full test-suite run (eight hours old) were
+removed before campaign 3; a test leaving containers behind is a separate
+observation for the tools suite.

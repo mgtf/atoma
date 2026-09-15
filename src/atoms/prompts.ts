@@ -6,6 +6,7 @@
  * whole 2,800-line module into anything wanting one prompt constant.
  */
 import type { Plan } from '../core/types.js';
+import { SMOKE_TWO_CALL_LINES } from '../contracts/probeManifest.js';
 
 /** Recovery must preserve the deliverable and verify its actual runtime. */
 export const FALLBACK_VERIFICATION_GUIDANCE = [
@@ -211,6 +212,18 @@ export const SMOKE_DESIGN_GUIDANCE = [
   `If the control has NO exposed method, click the element itself inside the`,
   `same IIFE (\`document.getElementById(idFromSource).click()\`) — that still`,
   `counts as driving your own state, so the interaction array must be empty.`,
+  `A self-driving smoke executes NO real interaction: with \`interactions: []\``,
+  `nothing is clicked or typed, and beside it every listed interaction is`,
+  `DISCARDED, so the transport record reads executed=0. A phase that declares`,
+  `the "dom-interaction" proof obligation therefore stays UNCOVERED on that`,
+  `shape however complete its snapshots, and the method earns no credit. Under`,
+  `that obligation use REAL selector-based interactions and a READ-ONLY smoke,`,
+  `in TWO calls, because one list that repeats a control and then resets is`,
+  `refused pre-flight: call 1 replays the state-changing control up to the`,
+  `milestone and asserts it; call 2 changes state ONCE, resets, and asserts the`,
+  `initial state. Both calls are accepted and both execute their interactions:`,
+  ...SMOKE_TWO_CALL_LINES.map((line) => `  ${line}`),
+  `The shape below is the SELF-DRIVING call, for state logic no real input has to prove.`,
   `Use this canonical shape instead of inventing a new sequence each time:`,
   ...SMOKE_CANONICAL_STATE_SHAPE.split('\n').map((line) => `  ${line}`),
   `Read CURRENT source for exactElement id and class names; derive thresholds`,

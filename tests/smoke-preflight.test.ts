@@ -16,6 +16,7 @@ import {
   smokeDrivesOwnState,
   uniqueNormalizedIdSelector,
 } from '../src/tools/builtin.js';
+import { SMOKE_TWO_CALL_LINES, SMOKE_TWO_CALL_SHAPE } from '../src/contracts/probeManifest.js';
 
 /**
  * Regression tests for the validate_html smoke pre-flight checks. These
@@ -436,7 +437,7 @@ describe('preflightSmokeRefusals — one round trip reports every applicable ref
     expect(preflightSmokeRefusals('(() => { const a = 1; return a > 0 })()', [])).toEqual([]);
   });
 
-  it('accepts the very example the erased-state refusal hands out', () => {
+  it('accepts the very examples the erased-state refusal hands out', () => {
     const erased = detectResetErasedIntermediateEvidence(
       erasingInteractions,
       'document.querySelector("#count").textContent === "0"'
@@ -447,6 +448,15 @@ describe('preflightSmokeRefusals — one round trip reports every applicable ref
     expect(preflightSmokeRefusals(SMOKE_SELF_DRIVEN_EXAMPLE, erasingInteractions)).toEqual([]);
     expect(smokeDrivesOwnState(SMOKE_SELF_DRIVEN_EXAMPLE)).toBe(true);
     expect(smokeDrivesIntermediateState(SMOKE_SELF_DRIVEN_EXAMPLE)).toBe(true);
+    // Since 2026-09-15 the refusal also hands out the two-call shape with real
+    // interactions (src/contracts/probeManifest.ts). Each half must pass with
+    // ITS OWN interactions kept: a read-only smoke discards nothing.
+    expect(erased).toContain(SMOKE_TWO_CALL_LINES.join(' '));
+    for (const [name, half] of Object.entries(SMOKE_TWO_CALL_SHAPE)) {
+      const interactions = parseInteractions([...half.interactions]);
+      expect(preflightSmokeRefusals(half.smoke, interactions), name).toEqual([]);
+      expect(smokeDrivesOwnState(half.smoke), name).toBe(false);
+    }
   });
 });
 

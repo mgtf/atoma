@@ -211,6 +211,16 @@ describe('the descriptions no longer contradict the runtime', () => {
     expect(props['smoke']!.description).toMatch(/toggle then toggle back/);
   });
 
+  it('names the two-call split before the self-driving remedy, and says the latter executes nothing', () => {
+    // 2026-09-15: this description is the model's FIRST exposure to the
+    // remedy, before any refusal. It used to name `interactions: []` as the
+    // only one — the shape that covers no dom-interaction obligation.
+    const description = props['smoke']!.description!;
+    expect(description).toMatch(/split into TWO calls/);
+    expect(description).toMatch(/executes no real interaction/);
+    expect(description.indexOf('TWO calls')).toBeLessThan(description.indexOf('`interactions: []`'));
+  });
+
   it('states the ordering and the mutual exclusivity where the caller fills it in', () => {
     expect(props['interactions']!.description).toMatch(/COMPLETELY BEFORE `smoke`/);
     expect(props['interactions']!.description).toMatch(/MUTUALLY EXCLUSIVE/);

@@ -84,7 +84,20 @@ Neighbours:
   it around one widget vocabulary. The guidance and the `validate_html`
   pre-flight guards are ONE contract: `SMOKE_ASYNC_TRANSITION_EXAMPLE` is
   exported so `tests/smoke-guidance.test.ts` can feed it to the real guards.
-  Never teach a smoke shape the tool refuses. A SYNCHRONOUS `getComputedStyle`
+  Never teach a smoke shape the tool refuses.
+- The erased-intermediate-state refusal hands out TWO shapes since
+  2026-09-15, rendered from ONE contract constant (`SMOKE_TWO_CALL_SHAPE`,
+  [src/contracts](../contracts/AGENTS.md)) because atoms and tools may not
+  import each other: real interactions up to the milestone under a read-only
+  smoke, then one change plus the reset under a read-only smoke — the only
+  taught shape that also covers a declared `dom-interaction` obligation — and
+  the self-driving IIFE, which passes every guard and executes NO interaction,
+  so both texts say it covers nothing. The covering shape comes first.
+  `tests/smoke-two-call-coverage.test.ts` feeds both calls to the guards and
+  through the attestation seam to `checkProofCoverage`. Why, and the measured
+  cost of teaching the self-driving shape alone:
+  [incident](../../docs/incidents/verification-replay-2026-09-15.md).
+- A SYNCHRONOUS `getComputedStyle`
   read on a TRANSITIONED property returns the pre-transition value (verified
   in Chrome, 2026-08-21): assert the class/inline marker the source toggles,
   or make the smoke async and await past the declared duration — the tool

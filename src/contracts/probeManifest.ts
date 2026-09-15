@@ -243,6 +243,65 @@ export const EXAMPLE_WEB_ENTRY: WebEntry = webEntrySchema.parse({
   consoleErrors: 0,
 });
 
+/**
+ * THE TWO-CALL SHAPE: real input up to the milestone, then one change and the
+ * reset, each under a smoke that only READS. It is the one taught shape that
+ * both survives every `validate_html` pre-flight guard AND leaves a non-empty
+ * `interactionLog` — the fact `establishesDomInteraction`
+ * (`src/contracts/attestation.ts`) reads. The self-driving IIFE the
+ * erased-intermediate-state refusal also hands out passes the guards but
+ * executes nothing, so it never covers a declared `dom-interaction`
+ * obligation.
+ *
+ * MEASURED (docs/incidents/verification-replay-2026-09-15.md, the one home of
+ * the figures): after each erased-state refusal the model adopted the
+ * self-driving shape on its next call; the phase was approved with credit
+ * WITHHELD, and the L3 planned a second verification phase whose whole
+ * purpose was the coverage the first could have earned itself. The model
+ * then found the split on its own — one phase late.
+ *
+ * Call 2 changes state ONCE before the reset on purpose: a fresh page already
+ * sits at the initial state, so a reset click alone proves nothing about the
+ * reset. `[control, reset]` keeps the reset at index 1, below the detector's
+ * threshold, and repeats nothing, so it is accepted.
+ *
+ * It lives HERE because `src/atoms/prompts.ts` and `src/tools/builtin.ts` both
+ * render it and neither may import the other; this module already hosts the
+ * schema-validated taught web probe (`EXAMPLE_WEB_ENTRY`). Vocabulary is
+ * generic on purpose — a state-changing control, a milestone, a reset — with
+ * placeholders in the `FromSource` / `FromContract` convention of
+ * `SMOKE_CANONICAL_STATE_SHAPE`, never one widget's names.
+ * `tests/smoke-two-call-coverage.test.ts` feeds both calls to the real guards
+ * and through the real attestation → coverage path.
+ */
+export const SMOKE_TWO_CALL_SHAPE = {
+  milestone: {
+    interactions: [
+      { type: 'click', selector: '#controlFromSource' },
+      { type: 'click', selector: '#controlFromSource' },
+      { type: 'click', selector: '#controlFromSource' },
+    ],
+    smoke:
+      '(() => { const el = document.querySelector(readoutFromSource); ' +
+      'return { ok: el.textContent === milestoneFromContract, milestone: el.textContent } })()',
+  },
+  reset: {
+    interactions: [
+      { type: 'click', selector: '#controlFromSource' },
+      { type: 'click', selector: '#resetFromSource' },
+    ],
+    smoke:
+      '(() => { const el = document.querySelector(readoutFromSource); ' +
+      'return { ok: el.textContent === initialFromContract, final: el.textContent } })()',
+  },
+} as const;
+
+/** The rendering both the guidance and the refusal quote — derived, never retyped. */
+export const SMOKE_TWO_CALL_LINES: readonly string[] = [
+  `call 1 (real input up to the milestone; the smoke only READS): interactions: ${JSON.stringify(SMOKE_TWO_CALL_SHAPE.milestone.interactions)} smoke: ${SMOKE_TWO_CALL_SHAPE.milestone.smoke}`,
+  `call 2 (one change, then the reset; the smoke only READS): interactions: ${JSON.stringify(SMOKE_TWO_CALL_SHAPE.reset.interactions)} smoke: ${SMOKE_TWO_CALL_SHAPE.reset.smoke}`,
+];
+
 /* ────────────────────── health check ────────────────────── */
 
 /**
