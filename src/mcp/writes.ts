@@ -180,7 +180,7 @@ export function registryRollback(input: { name: string; toVersion: number; actor
       : journal(input.emit, input.actor, {
           kind: 'registry.rolled_back',
           summary: `agent type ${eventLabel(input.name)} rolled back to v${input.toVersion} (now v${after.version}) by ${input.actor.label}`,
-          detail: { name: input.name, tier: before.tier, fromVersion: before.version, toVersion: input.toVersion, liveVersion: after.version, trustBefore: { successes: before.successes, failures: before.failures } },
+          detail: { name: input.name, tier: before.tier, fromVersion: before.version, toVersion: input.toVersion, liveVersion: after.version, trustBefore: { successes: before.successes, failures: before.failures, consecutiveSuccesses: before.consecutiveSuccesses } },
         });
     return {
       name: input.name,
@@ -189,15 +189,16 @@ export function registryRollback(input: { name: string; toVersion: number; actor
       fromVersion: before.version,
       restoredVersion: input.toVersion,
       liveVersion: after.version,
-      trustBefore: { successes: before.successes, failures: before.failures },
-      trustAfter: { successes: after.successes, failures: after.failures },
+      trustThreshold: trustThreshold(),
+      trustBefore: { successes: before.successes, failures: before.failures, consecutiveSuccesses: before.consecutiveSuccesses },
+      trustAfter: { successes: after.successes, failures: after.failures, consecutiveSuccesses: after.consecutiveSuccesses },
       actor: input.actor.label,
       journaled,
       note: noop
         ? `v${input.toVersion} content is identical to the live version; nothing changed.`
         : /^bootstrap-/.test(after.createdBy)
-          ? 'Counters reset — the restored type re-earns trust. This is a canonical/bootstrap type: its seeder re-aligns the prompt on the next run and will patch this rollback away if the seed differs.'
-          : 'Counters reset — the restored type re-earns trust. description is not versioned and was kept as-is.',
+          ? 'Trust streak reset; historical success/failure totals preserved. The restored type re-earns trust through consecutive approved final results. This is a canonical/bootstrap type: its seeder re-aligns the prompt on the next run and will patch this rollback away if the seed differs.'
+          : 'Trust streak reset; historical success/failure totals preserved. The restored type re-earns trust through consecutive approved final results. description is not versioned and was kept as-is.',
     };
   } finally {
     db.close();

@@ -112,7 +112,7 @@ describe('lifecycle ledger', () => {
     expect(readLedger()).toHaveLength(0);
   });
 
-  it('AtomRegistry counter bumps and patch-resets are recorded and project correctly', () => {
+  it('AtomRegistry patches reset trust while historical totals project correctly', () => {
     const db = openDb(':memory:');
     const reg = new AtomRegistry(db);
     const t = reg.create(1, {
@@ -127,8 +127,9 @@ describe('lifecycle ledger', () => {
     const live = reg.getByName(t.name)!;
     expect(projected.successes).toBe(live.successes);
     expect(projected.failures).toBe(live.failures);
-    expect(projected.successes).toBe(1);
-    expect(projected.failures).toBe(0);
+    expect(projected.successes).toBe(3);
+    expect(projected.failures).toBe(1);
+    expect(live.consecutiveSuccesses).toBe(1);
   });
 
   it('counter compensation removes false trust and stays ledger-exact', () => {

@@ -110,8 +110,8 @@ export class RecordingRegistry extends AtomRegistry {
     return t;
   }
 
-  override recordSuccess(name: string, by?: string): void {
-    super.recordSuccess(name, by);
+  override recordSuccess(name: string, by?: string, expectedVersion?: number | null): void {
+    super.recordSuccess(name, by, expectedVersion);
     const target = this.getByName(name);
     this.recorder.record({
       id: randomUUID(),

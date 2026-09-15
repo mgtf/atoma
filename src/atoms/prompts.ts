@@ -6,6 +6,7 @@
  * whole 2,800-line module into anything wanting one prompt constant.
  */
 import type { Plan } from '../core/types.js';
+import type { Atom } from '../core/atom.js';
 import { SMOKE_TWO_CALL_LINES } from '../contracts/probeManifest.js';
 
 /** Recovery must preserve the deliverable and verify its actual runtime. */
@@ -455,6 +456,14 @@ export const FALLBACK_SYSTEM_PROMPT = [
   FALLBACK_VERIFICATION_GUIDANCE,
   'Return the requested JSON format. Report observed evidence and failed or unverified requirements honestly.',
 ].join('\n');
+
+/** Per-attempt coaching must not become a reusable registry instruction. */
+export function carryTaskCoaching<T extends Atom>(source: Atom, replacement: T): T {
+  for (const block of source.contextBlocks()) {
+    if (block.source === 'coaching') replacement.injectContext(block);
+  }
+  return replacement;
+}
 
 /** Per-attempt coaching must not become a reusable registry instruction. */
 export function recoveryContext(task: string, diagnostic: string): string {

@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS atom_types (
   version       INTEGER NOT NULL DEFAULT 1,
   successes     INTEGER NOT NULL DEFAULT 0,
   failures      INTEGER NOT NULL DEFAULT 0,
+  consecutive_successes INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (tier, ordinal)
 );
 
@@ -100,9 +101,22 @@ export function openDb(path: string): DB {
     // the counter it records can share a transaction and so that an in-memory
     // registry cannot append to the real store. See src/core/ledger.ts.
     db.exec(LEDGER_TABLE_DDL);
+    migrateConsecutiveSuccesses(db);
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_atom_types_atom_id ON atom_types(atom_id)');
     return db;
   } catch (error) { db.close(); throw error; }
+}
+
+/** Old totals prove an uninterrupted series only when no failure was recorded.
+ * Never invent the order of mixed outcomes or rewrite their historical totals.
+ */
+function migrateConsecutiveSuccesses(db: DB): void {
+  db.transaction(() => {
+    const columns = db.prepare('PRAGMA table_info(atom_types)').all() as { name: string }[];
+    if (columns.some((column) => column.name === 'consecutive_successes')) return;
+    db.exec(`ALTER TABLE atom_types ADD COLUMN consecutive_successes INTEGER NOT NULL DEFAULT 0;
+      UPDATE atom_types SET consecutive_successes = CASE WHEN failures = 0 THEN successes ELSE 0 END;`);
+  }).immediate();
 }
 
 /** Whether a store still carries the 2026-09-09 per-owner partition. */
@@ -206,6 +220,10 @@ function migrateRegistryToPlatform(db: DB): void {
       ordinals.add(ordinal); takenNames.add(name);
       byTierName.set(`${row.tier}:${row.name}`, platformRow);
     }
+    // The fold creates the new column through SCHEMA, so the incremental
+    // migration will see it already present. Derive only after every absorbed
+    // failure has reached the kept row; mixed histories have unknown order.
+    db.exec('UPDATE atom_types SET consecutive_successes = CASE WHEN failures = 0 THEN successes ELSE 0 END');
     db.exec('DROP TABLE atom_types_partitioned; DROP TABLE atom_versions_partitioned');
     db.exec('CREATE UNIQUE INDEX idx_atom_types_atom_id ON atom_types(atom_id)');
   }).immediate();

@@ -35,19 +35,20 @@ describe('AtomRegistry success/failure counters', () => {
     expect(r.getByName('Water')?.successes).toBe(0);
   });
 
-  it('patch resets both counters (behaviour has changed — past wins do not carry)', () => {
+  it('a behavior patch preserves outcome totals and resets the earned trust streak', () => {
     const r = new AtomRegistry(openDb(':memory:'));
     r.create(1, seed);
-    for (let i = 0; i < 5; i++) r.recordSuccess('Water');
     r.recordFailure('Water');
-    expect(r.getByName('Water')?.successes).toBe(5);
+    for (let i = 0; i < 5; i++) r.recordSuccess('Water');
+    expect(r.getByName('Water')).toMatchObject({ successes: 5, failures: 1, consecutiveSuccesses: 5 });
 
     r.patch('Water', { systemPromptReplace: 'new' }, 'tester');
 
     const after = r.getByName('Water')!;
     expect(after.version).toBe(2);
-    expect(after.successes).toBe(0);
-    expect(after.failures).toBe(0);
+    expect(after.successes).toBe(5);
+    expect(after.failures).toBe(1);
+    expect(after.consecutiveSuccesses).toBe(0);
   });
 
   it('branch produces a fresh type with zeroed counters', () => {

@@ -324,7 +324,12 @@ describe('tenant retrieval downstream: what the platform registry shares', () =>
     ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'Specialize the reader',
       ...(field === 'description'
         ? { scope: 'patch', modifications: { descriptionReplace: marker } }
-        : { scope: 'branch', branchName: marker, modifications: { additionalContext: FACT } }),
+        // A real specialization gets a branch identity; coaching alone now
+        // reuses the existing behavior instead of creating a duplicate.
+        : { scope: 'branch', branchName: marker, modifications: {
+          systemPromptAppend: 'Always quote the supporting passage before giving the answer.',
+          additionalContext: FACT,
+        } }),
     }));
     enqueueAttempt(ctx);
     ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'source consulted' }));

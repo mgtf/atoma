@@ -80,6 +80,7 @@ describe('prompt review regressions', () => {
     const reg = new AtomRegistry(db);
     const oldPrompt = 'Your current subtask: old notes app\nPRIOR ATTEMPT DIAGNOSIS: invented blocker';
     const atom = reg.create(1, { ...seed, systemPrompt: oldPrompt });
+    reg.recordFailure(atom.name, 'test');
     reg.recordSuccess(atom.name, 'test');
     db.close();
     for (const dir of ['runs', 'skills']) {
@@ -91,14 +92,16 @@ describe('prompt review regressions', () => {
     try {
       expect(run()).toContain('preview');
       let copy = openDb(path);
-      expect(new AtomRegistry(copy).getByName(atom.name)!.systemPrompt).toBe(oldPrompt);
+      expect(new AtomRegistry(copy).getByName(atom.name)).toMatchObject({
+        systemPrompt: oldPrompt, successes: 1, failures: 1, consecutiveSuccesses: 1,
+      });
       copy.close();
       expect(run(true)).toContain('"patched":1');
       copy = openDb(path);
       const current = new AtomRegistry(copy).getByName(atom.name)!;
       expect(current.atomId).toBe(atom.atomId);
       expect(current.version).toBe(atom.version + 1);
-      expect(current.successes).toBe(0);
+      expect(current).toMatchObject({ successes: 1, failures: 1, consecutiveSuccesses: 0 });
       expect(current.tools.map(t => t.name)).toEqual(tools.map(t => t.name));
       expect(current.systemPrompt).not.toContain('old notes app');
       expect(copy.prepare('SELECT system_prompt FROM atom_type_versions WHERE version = ?').get(atom.version)).toMatchObject({ system_prompt: oldPrompt });

@@ -542,6 +542,7 @@ describe('L1Atom.skills() integration', () => {
       version: 1,
       successes: 0,
       failures: 0,
+      consecutiveSuccesses: 0,
       createdBy: 'test',
       createdAt: '2026-01-01T00:00:00.000Z',
     });
@@ -561,6 +562,7 @@ describe('L1Atom.skills() integration', () => {
       version: 1,
       successes: 0,
       failures: 0,
+      consecutiveSuccesses: 0,
       createdBy: 'test',
       createdAt: '2026-01-01T00:00:00.000Z',
     };

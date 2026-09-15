@@ -130,18 +130,20 @@ describe('AtomRegistry.describe', () => {
     expect(updated.description).toMatch(/\(branched from Water\)$/);
   });
 
-  it('resets counters because describe is still a patch (behaviour changed)', () => {
+  it('preserves outcome totals and earned trust when only the description changes', () => {
     const r = new AtomRegistry(openDb(':memory:'));
     r.create(1, baseSeed);
+    r.recordFailure('Water');
     r.recordSuccess('Water');
     r.recordSuccess('Water');
-    expect(r.getByName('Water')!.successes).toBe(2);
+    expect(r.getByName('Water')).toMatchObject({ successes: 2, failures: 1, consecutiveSuccesses: 2 });
 
     r.describe('Water', 'fresh description');
 
     const after = r.getByName('Water')!;
     expect(after.description).toBe('fresh description');
-    expect(after.successes).toBe(0);
-    expect(after.failures).toBe(0);
+    expect(after.successes).toBe(2);
+    expect(after.failures).toBe(1);
+    expect(after.consecutiveSuccesses).toBe(2);
   });
 });

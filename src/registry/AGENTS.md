@@ -55,7 +55,26 @@ Neighbours:
 
 ## Trust counters
 
-- Patching or rolling back a type resets its trust counters.
+- `successes` / `failures` retain historical totals; `consecutiveSuccesses`
+  counts approved final results since the last failure or behavior change.
+  These are result credits, not distinct runs. A failure resets only the streak.
+- A prompt/tool/parameter patch or rollback resets the streak, preserving totals;
+  a description-only patch and a no-op preserve both. `type-trust-reset` records
+  the revocation without making the ledger erase historical totals.
+- A supervised credit is bound to the instance's loaded registry version.
+  Results from stale or locally modified behavior still count in history, but
+  cannot grow the current version's streak or borrow its validation bypass.
+- Merging histories or compensating counters resets the streak: unordered
+  evidence must never manufacture consecutive successes. Old stores initialize
+  clean histories from their success total and mixed histories from zero.
+- Automatic creation and branching use `createOrReuse` / `branchOrReuse`.
+  Equivalence includes tier, complete tool declarations, parameters and prompt
+  (apart from the leading persona name), never merely the tools or description.
+  `listCapabilities` presents one oldest identity per equivalent behavior and
+  excludes an entire equivalent group if any member is excluded. It never
+  deletes history, moves skill namespaces or transfers trust between identities.
+  Explicit `create` / `branch` remain allocation APIs for deliberate new identities.
+  Design and adversarial cases: [recoverable trust](../../docs/recoverable-trust-2026-09-15.md).
 
 ## Names and allocation
 
@@ -77,4 +96,4 @@ Neighbours:
 
 ## Intentional choices and rejected shortcuts
 
-- Registry rollback is roll-forward-to-old-content and resets trust.
+- Registry rollback is roll-forward-to-old-content and resets the trust streak.

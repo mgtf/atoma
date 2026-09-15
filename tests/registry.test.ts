@@ -222,7 +222,7 @@ describe('AtomRegistry', () => {
   });
 
   describe('history + rollback (roll-forward to the past)', () => {
-    it('rollback restores an archived version as a NEW live version with counters reset', () => {
+    it('rollback restores an archived version, preserves totals and resets trust', () => {
       const h = r.create(1, { ...baseSeed, systemPrompt: 'v1 prompt', params: { maxTokens: 4000 } });
       r.patch(h.name, { systemPromptReplace: 'v2 prompt', params: { maxTokens: 9000, temperature: 0.2 } }, 'tester');
       r.patch(h.name, { systemPromptReplace: 'v3 prompt' }, 'tester');
@@ -237,8 +237,9 @@ describe('AtomRegistry', () => {
       // which the applyMods merge could never do.
       expect(restored.params).toEqual({ maxTokens: 4000 });
       // The restored behaviour re-earns trust.
-      expect(restored.successes).toBe(0);
+      expect(restored.successes).toBe(2);
       expect(restored.failures).toBe(0);
+      expect(restored.consecutiveSuccesses).toBe(0);
       // v3 was archived on the way out, with a rollback-attributed reason.
       const hist = r.listVersions(h.name);
       expect(hist.map((v) => v.version)).toEqual([1, 2, 3]);

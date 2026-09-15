@@ -14,6 +14,7 @@ import type {
   Verdict,
 } from './types.js';
 import { newAtomId } from './atomId.js';
+import type { AtomType } from '../registry/atomRegistry.js';
 
 export abstract class Atom {
   abstract readonly tier: Tier;
@@ -34,6 +35,7 @@ export abstract class Atom {
   readonly atomId: string;
   readonly name: string;
   readonly ordinal: number;
+  private boundRegistryVersion: number | null;
 
   protected systemPrompt: string;
   protected tools: Tool[];
@@ -43,6 +45,7 @@ export abstract class Atom {
 
   constructor(args: {
     atomId?: string;
+    registryVersion?: number;
     name: string;
     ordinal: number;
     systemPrompt: string;
@@ -52,6 +55,7 @@ export abstract class Atom {
     this.atomId = args.atomId ?? newAtomId();
     this.name = args.name;
     this.ordinal = args.ordinal;
+    this.boundRegistryVersion = args.registryVersion ?? null;
     this.systemPrompt = args.systemPrompt;
     this.tools = [...args.tools];
     this.params = { ...args.params };
@@ -61,6 +65,7 @@ export abstract class Atom {
   abstract execute(task: Task, plan: Plan, ctx: RunContext): Promise<Result>;
 
   applyModifications(mods: AtomModifications): void {
+    const before = JSON.stringify([this.systemPrompt, this.tools, this.params]);
     if (mods.systemPromptReplace !== undefined) {
       this.systemPrompt = mods.systemPromptReplace;
     } else if (mods.systemPromptAppend !== undefined) {
@@ -77,9 +82,22 @@ export abstract class Atom {
     if (mods.params) {
       this.params = { ...this.params, ...mods.params };
     }
+    if (JSON.stringify([this.systemPrompt, this.tools, this.params]) !== before) {
+      this.boundRegistryVersion = null;
+    }
     if (mods.additionalContext) {
       this.injectContext({ source: 'coaching', text: mods.additionalContext });
     }
+  }
+
+  /** The persisted version actually executed; local behavior changes remove this binding. */
+  registryVersion(): number | null {
+    return this.boundRegistryVersion;
+  }
+
+  /** Trust belongs to the loaded identity/version, never to a later row with the same name. */
+  matchesRegistryVersion(type: Pick<AtomType, 'atomId' | 'version'>): boolean {
+    return this.atomId === type.atomId && this.boundRegistryVersion === type.version;
   }
 
   injectContext(input: ContextBlockInput): ContextBlock {

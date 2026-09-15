@@ -124,6 +124,7 @@ export class L1Atom extends Atom {
 
   constructor(args: {
     atomId?: string;
+    registryVersion?: number;
     name: string;
     ordinal: number;
     systemPrompt: string;
@@ -134,6 +135,7 @@ export class L1Atom extends Atom {
   }) {
     super({
       atomId: args.atomId,
+      registryVersion: args.registryVersion,
       name: args.name,
       ordinal: args.ordinal,
       systemPrompt: args.systemPrompt,
@@ -222,6 +224,7 @@ export class L1Atom extends Atom {
     }
     return new L1Atom({
       atomId: type.atomId,
+      registryVersion: type.version,
       name: type.name,
       ordinal: type.ordinal,
       systemPrompt: type.systemPrompt,

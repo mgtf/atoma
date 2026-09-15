@@ -70,8 +70,10 @@ load-bearing.
   validation above the prefilter fast path.
 - `viaPrefilter` is internal and omitted from `planSchema`; an LLM must not be
   able to spoof validator bypass.
-- Trust fast paths require the configured success threshold (default 3) and zero
-  failures. Read it through `trustThreshold()`; invalid or non-positive values
+- Atom trust fast paths require the configured consecutive approved-result
+  threshold (default 3), read through `trustThreshold()`; historical failures do
+  not permanently disqualify a type. Skills retain their separate clean-lifetime
+  counter rule. Invalid or non-positive threshold values
   fall back to the default. Result approval still runs the zero-token ground-truth
   probe first. Contradictions and malformed manifests force review; heuristics
   never reject alone.

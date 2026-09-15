@@ -60,6 +60,8 @@ export type LedgerEventKind =
   | 'direct-failures-cleared'
   | 'counters-reset'
   | 'type-counter-compensation'
+  // A behavior change revokes validation bypass, preserving historical totals.
+  | 'type-trust-reset'
   // `skills forgive` — the skill-side twin of type-counter-compensation:
   // negative deltas retract MISATTRIBUTED increments with a mandatory
   // reason, so an environment failure (not evidence against a recipe) no

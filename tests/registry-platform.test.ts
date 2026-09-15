@@ -143,6 +143,7 @@ describe('folding the per-owner partition back into the platform', () => {
       expect(registryIsPartitioned(db)).toBe(false);
       const registry = new AtomRegistry(db);
       const water = registry.getByName('Water')!;
+      expect(water.consecutiveSuccesses).toBe(0);
       expect(water).toMatchObject({ atomId: operatorWater, tier: 1, ordinal: 1, successes: 7, failures: 4, systemPrompt: 'Water prompt' });
       expect(registry.getByAtomId(projectWater)).toBeNull();
       expect(registry.getByName('Water-Reader')).toMatchObject({ atomId: projectBranch, ordinal: 2, successes: 5, systemPrompt: 'Branch prompt' });
@@ -150,6 +151,7 @@ describe('folding the per-owner partition back into the platform', () => {
       // Ordinal 1 of tier 2 is the operator's: Sclereid takes the next free one.
       expect(registry.getByName('Sclereid')).toMatchObject({ atomId: projectTracheid, tier: 2, ordinal: 2, successes: 1 });
       expect(registry.getByName('Tracheid')).toMatchObject({ ordinal: 1, successes: 3 });
+      expect(registry.getByName('Tracheid')?.consecutiveSuccesses).toBe(3);
       expect(registry.listByTier(1).map((row) => row.name)).toEqual(['Water', 'Water-Reader']);
       expect(db.prepare('SELECT absorbed_atom_id, kept_atom_id, absorbed_name, absorbed_owner FROM atom_id_merges ORDER BY absorbed_owner').all())
         .toEqual([

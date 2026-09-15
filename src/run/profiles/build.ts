@@ -44,9 +44,9 @@ export function defaultWorkspaceRoot(): string {
  * the task's nature.
  *
  * DO NOT EDIT CASUALLY. `seedL3` refreshes the persisted prompt whenever this
- * constant changes, and `AtomRegistry.patch` ZEROES the trust counters — so a
- * one-character change here is the first tier-3 patch in the project's
- * history and costs Meristem its record. `tests/run-profile-build.test.ts` pins
+ * constant changes, and a behavior change resets the type's trust streak while
+ * preserving historical outcome totals. Meristem must earn trust again after
+ * a prompt change. `tests/run-profile-build.test.ts` pins
  * the exact text against what is persisted in the live store.
  */
 export const MERISTEM_SYSTEM_PROMPT = [

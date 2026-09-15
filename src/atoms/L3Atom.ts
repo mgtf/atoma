@@ -10,6 +10,8 @@ import type {
   Verdict,
 } from '../core/types.js';
 import {
+  atomBehaviorKey,
+  compactAtomCatalog,
   stripBranchProvenance,
   type AtomRegistry,
   type AtomType,
@@ -60,6 +62,7 @@ import {
   FALLBACK_VERIFICATION_GUIDANCE,
   FALLBACK_SYSTEM_PROMPT,
   recoveryContext,
+  carryTaskCoaching,
   LITERAL_CONTRACT_PRESERVATION_GUIDANCE,
   MUTATING_SUBTASK_FILE_GUIDANCE,
   PROOF_OBLIGATION_GUIDANCE,
@@ -220,6 +223,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
 
   private constructor(args: {
     atomId?: string;
+    registryVersion?: number;
     name: string;
     ordinal: number;
     systemPrompt: string;
@@ -232,6 +236,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
   }) {
     super({
       atomId: args.atomId,
+      registryVersion: args.registryVersion,
       name: args.name,
       ordinal: args.ordinal,
       systemPrompt: args.systemPrompt,
@@ -255,6 +260,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     const model = modelForTier(3);
     return new L3Atom({
       atomId: type.atomId,
+      registryVersion: type.version,
       name: type.name,
       ordinal: type.ordinal,
       systemPrompt: type.systemPrompt,
@@ -276,6 +282,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     if (type.tier !== 3) throw new Error(`L3Atom.buildWithModel requires tier=3`);
     return new L3Atom({
       atomId: type.atomId,
+      registryVersion: type.version,
       name: type.name,
       ordinal: type.ordinal,
       systemPrompt: type.systemPrompt,
@@ -305,7 +312,8 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     if (this.isFallbackMode()) return this.selfPlan(task, ctx);
 
     this.triedChildren.beginTask(task.description);
-    const catalog = this.registry.listByTier(2);
+    const allL2s = this.registry.listByTier(2);
+    const catalog = compactAtomCatalog(allL2s, this.triedChildren.excluded());
 
     // L3 NEVER short-circuits the prefilter into a skeletal plan.
     // The framework's value at the top tier is decomposition reasoning
@@ -340,13 +348,17 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
         'bootstrap-canonical-http',
         'bootstrap-canonical-filescribe',
       ]);
-      const l1Affinity = (l2Name: string): typeof allL1s =>
-        allL1s.filter(
-          (l1) => canonicalMarkers.has(l1.createdBy) || l1.createdBy === l2Name
-        );
+      const l1Affinity = (l2: AtomType): typeof allL1s => {
+        const key = atomBehaviorKey(2, l2);
+        const equivalentNames = new Set(allL2s
+          .filter(type => atomBehaviorKey(2, type) === key).map(type => type.name));
+        return compactAtomCatalog(allL1s.filter(
+          l1 => canonicalMarkers.has(l1.createdBy) || equivalentNames.has(l1.createdBy)
+        ));
+      };
       const prefilterCatalog = catalog.map((t) => {
         const base = stripBranchProvenance(t.description);
-        const children = l1Affinity(t.name);
+        const children = l1Affinity(t);
         if (children.length === 0) return { name: t.name, description: base };
         // Format the L1-affinity hint on its own line(s) with an
         // explicit "REACHABLE L1 CHILDREN" preamble, not a parenthetical
@@ -890,7 +902,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     // see `src/atoms/capability.ts` for why. Same motivation as
     // `L2Atom.createSubtaskL1`: prevent per-task L2 singletons from
     // poisoning L3's prefilter catalog.
-    const created = this.registry.create(2, {
+    const created = this.registry.createOrReuse(2, {
       description: resolveCreationDescription(seed.description, mergedTools, 2),
       systemPrompt: buildNarrowL2Prompt('', mergedTools),
       tools: mergedTools,
@@ -924,18 +936,18 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
             this.name,
             verdict.reasoning
           );
-          const fresh = L2Atom.fromType(patched, this.registry, this.l2Peers, this.skillRegistry);
+          const fresh = carryTaskCoaching(child, L2Atom.fromType(patched, this.registry, this.l2Peers, this.skillRegistry));
           if (additionalContext) fresh.injectContext({ source: 'coaching', text: additionalContext });
           return fresh;
         }
-        const branched = this.registry.branch(
+        const branched = this.registry.branchOrReuse(
           child.name,
           persistentModifications,
           this.name,
           verdict.branchName
         );
         ctx.logger.info(`[${this.name}] branched L2 ${child.name} → ${branched.name}`);
-        const fresh = L2Atom.fromType(branched, this.registry, this.l2Peers, this.skillRegistry);
+        const fresh = carryTaskCoaching(child, L2Atom.fromType(branched, this.registry, this.l2Peers, this.skillRegistry));
         if (additionalContext) fresh.injectContext({ source: 'coaching', text: additionalContext });
         this.l2Peers.push(fresh);
         return fresh;
@@ -959,7 +971,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
         // Atom.tools is protected — pull the tool signature via the
         // registry, which is the authoritative source anyway.
         const narrowDesc = resolveCreationDescription(undefined, childTools, 2);
-        const branched = this.registry.branch(
+        const branched = this.registry.branchOrReuse(
           child.name,
           {
             systemPromptReplace: narrowPrompt,
@@ -977,12 +989,12 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
         // the narrow-template branch exists specifically to fix the failure
         // that just escalated — letting it try in-flight is strictly more
         // informative than recording it and never exercising it.
-        const fresh = L2Atom.fromType(branched, this.registry, [], this.skillRegistry);
+        const fresh = carryTaskCoaching(child, L2Atom.fromType(branched, this.registry, [], this.skillRegistry));
         fresh.injectContext({ source: 'coaching', text: recoveryContext(subtaskDescription, diagnostic) });
         return fresh;
       },
       onApproved: async (child, _result) => {
-        this.registry.recordSuccess(child.name, this.name);
+        this.registry.recordSuccess(child.name, this.name, child.registryVersion());
       },
       onFailed: async (child, _reason) => {
         this.registry.recordFailure(child.name, this.name);
@@ -1179,7 +1191,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       };
     }
     const type = this.registry.getByName(child.name);
-    if (type && shouldTrustType(type)) {
+    if (type && child.matchesRegistryVersion(type) && shouldTrustType(type)) {
       const approval = trustedApproval(type);
       ctx.recordTrust?.({
         supervisorName: this.name,
@@ -1237,7 +1249,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     // never to an outright reject.
     const payload = { output: result.output, summary: result.summary };
     let trustedProbe: GroundTruthCheck | null = null;
-    if (type && shouldTrustType(type)) {
+    if (type && child.matchesRegistryVersion(type) && shouldTrustType(type)) {
       trustedProbe = await checkGroundTruth({
         ctx,
         subject: 'RESULT',
@@ -1245,23 +1257,27 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
         ...(result.evidence ? { evidence: result.evidence } : {}),
         child,
       });
-      if (!trustedProbe.requiresReview) {
-        const approval = trustedApproval(type);
+      // Recheck after probe I/O: another lane may have changed the shared type.
+      const currentType = this.registry.getByName(child.name);
+      if (!trustedProbe.requiresReview && currentType && child.matchesRegistryVersion(currentType) && shouldTrustType(currentType)) {
+        const approval = trustedApproval(currentType);
         ctx.recordTrust?.({
           supervisorName: this.name,
           supervisorTier: 3,
           childName: child.name,
           childTier: child.tier,
           subject: 'RESULT',
-          successes: type.successes,
-          failures: type.failures,
+          successes: currentType.successes,
+          failures: currentType.failures,
           reasoning: approval.reasoning,
         });
         return approval;
       }
-      const reviewReason = trustedProbe.contradiction
-        ? 'ground-truth evidence contradicts the RESULT'
-        : 'the probe manifest is malformed';
+      const reviewReason = !trustedProbe.requiresReview
+        ? 'the type changed or trust was revoked during the ground-truth probe'
+        : trustedProbe.contradiction
+          ? 'ground-truth evidence contradicts the RESULT'
+          : 'the probe manifest is malformed';
       ctx.logger.warn(
         `[${this.name}] trust fast-path OVERRIDDEN for ${child.name} (${type.successes}✓/${type.failures}✗): ${reviewReason} — falling through to a full verdict`
       );

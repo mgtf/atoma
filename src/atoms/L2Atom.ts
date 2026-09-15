@@ -83,6 +83,7 @@ import {
   FALLBACK_VERIFICATION_GUIDANCE,
   FALLBACK_SYSTEM_PROMPT,
   recoveryContext,
+  carryTaskCoaching,
   LITERAL_CONTRACT_PRESERVATION_GUIDANCE,
   MUTATING_SUBTASK_FILE_GUIDANCE,
   PROOF_OBLIGATION_GUIDANCE,
@@ -265,6 +266,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
 
   constructor(args: {
     atomId?: string;
+    registryVersion?: number;
     name: string;
     ordinal: number;
     systemPrompt: string;
@@ -278,6 +280,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
   }) {
     super({
       atomId: args.atomId,
+      registryVersion: args.registryVersion,
       name: args.name,
       ordinal: args.ordinal,
       systemPrompt: args.systemPrompt,
@@ -300,6 +303,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     if (type.tier !== 2) throw new Error(`L2Atom.fromType requires tier=2`);
     return new L2Atom({
       atomId: type.atomId,
+      registryVersion: type.version,
       name: type.name,
       ordinal: type.ordinal,
       systemPrompt: type.systemPrompt,
@@ -322,7 +326,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     }
 
     this.triedChildren.beginTask(task.description);
-    const catalog = this.registry.listByTier(1);
+    const catalog = this.registry.listCapabilities(1, this.triedChildren.excluded());
 
     // Prefilter may either short-circuit the plan (single-subtask reuse)
     // or drop a hint that survives into the Sonnet plan call. The
@@ -1202,7 +1206,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     const basePrompt = buildNarrowL1Prompt('', mergedTools);
     void subtask;
     void parentTask;
-    const created = this.registry.create(1, {
+    const created = this.registry.createOrReuse(1, {
       description: resolveCreationDescription(seed.description, mergedTools, 1),
       // Default system prompt emphasises SINGLE-RESPONSIBILITY. A freshly
       // created L1 should be a narrow specialist — one concern, one output
@@ -1307,6 +1311,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         // activeSkillId() to bump the SKILL's counters, so the skill that
         // drove a patched run earned nothing (or escaped its failure).
         const carrySkill = (fresh: L1Atom): L1Atom => {
+          carryTaskCoaching(child, fresh);
           const skillId = child instanceof L1Atom ? child.activeSkillId() : null;
           if (!skillId) return fresh;
           // Load from the OWNER namespace, not the (possibly branched)
@@ -1349,7 +1354,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           injectEventSkill(fresh, rejectionEventText(verdict));
           return fresh;
         }
-        const branched = this.registry.branch(
+        const branched = this.registry.branchOrReuse(
           child.name,
           persistentModifications,
           this.name,
@@ -1491,7 +1496,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
                   actorTier: 2,
                   reasoning: diagnostic.slice(0, 400),
                 });
-                const fresh = L1Atom.fromType(childType);
+                const fresh = carryTaskCoaching(child, L1Atom.fromType(childType));
                 fresh.injectContext({
                   source: 'skill',
                   skillId: activeSkillId,
@@ -1518,7 +1523,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
 
         const narrowPrompt = buildNarrowL1Prompt('', childTools);
         const narrowDesc = resolveCreationDescription(undefined, childTools, 1);
-        const branched = this.registry.branch(
+        const branched = this.registry.branchOrReuse(
           child.name,
           {
             systemPromptReplace: narrowPrompt,
@@ -1537,7 +1542,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         // actually tried on the current task — purely a lesson for future
         // runs. By handing the new instance back we let the anti-
         // Frankenstein narrow prompt prove itself in-flight.
-        const freshBranched = L1Atom.fromType(branched);
+        const freshBranched = carryTaskCoaching(child, L1Atom.fromType(branched));
         freshBranched.injectContext({ source: 'coaching', text: recoveryContext(subtaskDescription, diagnostic) });
         // Event-driven recovery guidance rides along with the diagnostic:
         // the branch prompt says WHAT failed, a matched event skill says
@@ -1576,7 +1581,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           }
           return;
         }
-        this.registry.recordSuccess(child.name, this.name);
+        this.registry.recordSuccess(child.name, this.name, child.registryVersion());
         // Skill trust counter bump (C2a). When the supervise loop
         // approves a result and a skill drove the run, record a
         // success on the skill itself — this is what lets future
@@ -2006,7 +2011,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       };
     }
     const type = this.registry.getByName(child.name);
-    if (type && shouldTrustType(type)) {
+    if (type && child.matchesRegistryVersion(type) && shouldTrustType(type)) {
       const approval = trustedApproval(type);
       ctx.recordTrust?.({
         supervisorName: this.name,
@@ -2126,7 +2131,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     // runs its own ground-truth probe internally, so the trusted branch's
     // probe would be a duplicate on that path.
     let trustedProbe: GroundTruthCheck | null = null;
-    if (type && shouldTrustType(type) && gateFindingsBlock === undefined && !proofUncovered) {
+    if (type && child.matchesRegistryVersion(type) && shouldTrustType(type) && gateFindingsBlock === undefined && !proofUncovered) {
       trustedProbe = await checkGroundTruth({
         ctx,
         subject: 'RESULT',
@@ -2134,25 +2139,29 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         ...(result.evidence ? { evidence: result.evidence } : {}),
         child,
       });
-      if (!trustedProbe.requiresReview) {
-        const approval = trustedApproval(type);
+      // A sibling lane can patch the type or revoke trust while the probe awaits I/O.
+      const currentType = this.registry.getByName(child.name);
+      if (!trustedProbe.requiresReview && currentType && child.matchesRegistryVersion(currentType) && shouldTrustType(currentType)) {
+        const approval = trustedApproval(currentType);
         ctx.recordTrust?.({
           supervisorName: this.name,
           supervisorTier: 2,
           childName: child.name,
           childTier: child.tier,
           subject: 'RESULT',
-          successes: type.successes,
-          failures: type.failures,
+          successes: currentType.successes,
+          failures: currentType.failures,
           reasoning: approval.reasoning,
         });
         return activeScriptSkillIgnored
           ? { ...approval, activeSkillFollowed: false }
           : approval;
       }
-      const reviewReason = trustedProbe.contradiction
-        ? 'ground-truth evidence contradicts the RESULT'
-        : 'ground-truth evidence requires review (manifest or durable HTTP docs)';
+      const reviewReason = !trustedProbe.requiresReview
+        ? 'the type changed or trust was revoked during the ground-truth probe'
+        : trustedProbe.contradiction
+          ? 'ground-truth evidence contradicts the RESULT'
+          : 'ground-truth evidence requires review (manifest or durable HTTP docs)';
       ctx.logger.warn(
         `[${this.name}] trust fast-path OVERRIDDEN for ${child.name} (${type.successes}✓/${type.failures}✗): ${reviewReason} — falling through to a full verdict`
       );

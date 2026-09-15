@@ -357,7 +357,7 @@ describe('operator writes over MCP — attributed and journaled', () => {
   function skillsFixture(): { dir: string; l1: string } {
     const dir = mkdtempSync(join(tmpdir(), 'atoma-mcp-writes-'));
     dirs.push(dir);
-    for (const k of ['ATOMA_DB_PATH', 'ATOMA_SKILLS_DIR', 'ATOMA_LEDGER_DB']) saved[k] = process.env[k];
+    for (const k of ['ATOMA_DB_PATH', 'ATOMA_SKILLS_DIR', 'ATOMA_LEDGER_DB', 'ATOMA_TRUST_THRESHOLD']) saved[k] = process.env[k];
     process.env['ATOMA_DB_PATH'] = join(dir, 'atoma.db');
     process.env['ATOMA_LEDGER_DB'] = join(dir, 'atoma.db');
     process.env['ATOMA_SKILLS_DIR'] = join(dir, 'skills');
@@ -411,6 +411,51 @@ describe('operator writes over MCP — attributed and journaled', () => {
     expect(rollback.isError).toBe(true);
     expect(JSON.stringify(rollback.content)).toMatch(/refused/);
     await operator.close();
+  });
+
+  it('reports recovered trust and resets only its streak on an attributed rollback', async () => {
+    const { dir } = skillsFixture();
+    process.env['ATOMA_TRUST_THRESHOLD'] = '4';
+    const db = openDb(join(dir, 'atoma.db'));
+    const registry = new AtomRegistry(db);
+    const type = registry.create(1, { description: 'fixture', systemPrompt: 'original behavior', tools: [], params: {}, createdBy: 'test' });
+    registry.recordFailure(type.name);
+    registry.recordSuccess(type.name);
+    registry.patch(type.name, { systemPromptReplace: 'revised behavior' }, 'test');
+    for (let i = 0; i < 4; i++) registry.recordSuccess(type.name);
+    registry.patch(type.name, { descriptionReplace: 'clearer capability label' }, 'test');
+    db.close();
+
+    const events: unknown[] = [];
+    const admin = viewer('org:owner', true);
+    const { url } = await listen(() => ({ kind: 'principal', viewer: admin, tokenId: 'a' }), { ...TENANT_HOST, emit: (event) => { events.push(event); } });
+    const client = await connect(url);
+    try {
+      const earned = { successes: 5, failures: 1, consecutiveSuccesses: 4, trusted: true };
+      const list = await client.callTool({ name: 'atoma_registry_list', arguments: {} });
+      expect(list.structuredContent).toMatchObject({ trustThreshold: 4, types: [expect.objectContaining({ name: type.name, ...earned })] });
+      const show = await client.callTool({ name: 'atoma_registry_show', arguments: { name: type.name } });
+      expect(show.structuredContent).toMatchObject({ trustThreshold: 4, atom: earned });
+
+      const rollback = await client.callTool({ name: 'atoma_registry_rollback', arguments: { name: type.name, toVersion: 1 } });
+      expect(rollback.isError).not.toBe(true);
+      expect(rollback.structuredContent).toMatchObject({
+        noop: false,
+        trustThreshold: 4,
+        trustBefore: { successes: 5, failures: 1, consecutiveSuccesses: 4 },
+        trustAfter: { successes: 5, failures: 1, consecutiveSuccesses: 0 },
+        journaled: true,
+        note: expect.stringMatching(/historical success\/failure totals preserved/),
+      });
+      expect(events).toEqual([expect.objectContaining({
+        kind: 'registry.rolled_back', actorId: admin.principalId,
+        detail: expect.objectContaining({ trustBefore: { successes: 5, failures: 1, consecutiveSuccesses: 4 } }),
+      })]);
+      const history = await client.callTool({ name: 'atoma_registry_history', arguments: { name: type.name } });
+      expect(history.structuredContent).toMatchObject({ trustThreshold: 4, trust: { successes: 5, failures: 1, consecutiveSuccesses: 0, trusted: false } });
+    } finally {
+      await client.close();
+    }
   });
 });
 

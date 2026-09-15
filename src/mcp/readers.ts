@@ -40,7 +40,7 @@ import { ledgerCount, ledgerDbPath, readLedger, readLedgerTail, projectCounters 
 import type { LedgerEventKind } from '../core/ledger.js';
 import { computeStatsRows, similarityPairs, skillStatus } from '../skills/stats.js';
 import { refusalStampIsCurrent } from '../skills/generations.js';
-import { demoteAfter, promoteThreshold, trustThreshold } from '../atoms/cost.js';
+import { demoteAfter, promoteThreshold, shouldTrustType, trustThreshold } from '../atoms/cost.js';
 import { supervisorDirPath, verdictsDirPath } from '../supervisor/paths.js';
 import { supervisorVerdictSchema, type VerdictMeta } from '../contracts/supervisorVerdict.js';
 import { assessShareability } from '../skills/shareability.js';
@@ -154,6 +154,8 @@ export function registryList(opts: { tier?: 1 | 2 | 3 } = {}): unknown {
         version: a.version,
         successes: a.successes,
         failures: a.failures,
+        consecutiveSuccesses: a.consecutiveSuccesses,
+        trusted: shouldTrustType(a),
         createdBy: a.createdBy,
         createdAt: a.createdAt,
         tools: a.tools.map((tool) => tool.name),
@@ -166,7 +168,7 @@ export function registryList(opts: { tier?: 1 | 2 | 3 } = {}): unknown {
         description: a.description,
       }))
     );
-    return { store: dbPath, types };
+    return { store: dbPath, trustThreshold: trustThreshold(), types };
   } finally {
     db.close();
   }
@@ -182,6 +184,7 @@ export function registryShow(opts: { name: string }): unknown {
     if (!atom) return { store: dbPath, note: `no agent type named "${opts.name}"` };
     return {
       store: dbPath,
+      trustThreshold: trustThreshold(),
       atom: {
         tier: atom.tier,
         rank: taxonomyForTier(atom.tier).rank,
@@ -189,6 +192,8 @@ export function registryShow(opts: { name: string }): unknown {
         version: atom.version,
         successes: atom.successes,
         failures: atom.failures,
+        consecutiveSuccesses: atom.consecutiveSuccesses,
+        trusted: shouldTrustType(atom),
         createdBy: atom.createdBy,
         createdAt: atom.createdAt,
         description: atom.description,
@@ -994,7 +999,13 @@ export function registryHistory(opts: { name: string }): unknown {
       name: atom.name,
       tier: atom.tier,
       liveVersion: atom.version,
-      trust: { successes: atom.successes, failures: atom.failures },
+      trustThreshold: trustThreshold(),
+      trust: {
+        successes: atom.successes,
+        failures: atom.failures,
+        consecutiveSuccesses: atom.consecutiveSuccesses,
+        trusted: shouldTrustType(atom),
+      },
       versions: reg.listVersions(opts.name).map((v) => ({
         version: v.version,
         modifiedBy: v.modifiedBy,
@@ -1003,7 +1014,7 @@ export function registryHistory(opts: { name: string }): unknown {
         tools: v.tools.map((t) => t.name),
         systemPromptChars: v.systemPrompt.length,
       })),
-      note: 'A patch or a rollback RESETS trust: the live counters belong to the live version only. Prompts are omitted here; atoma_registry_show excerpts them.',
+      note: 'A behavior patch or rollback resets the trust streak and preserves historical success/failure totals. Description-only patches preserve the streak. Trust is earned through consecutive approved final results since the last failure or behavior change. Prompts are omitted here; atoma_registry_show excerpts them.',
     };
   } finally {
     db.close();

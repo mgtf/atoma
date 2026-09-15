@@ -1,4 +1,5 @@
 import { basename } from 'node:path';
+import { TRUST_THRESHOLD_SUCCESSES } from '../atoms/cost.js';
 import { updateOrgModels } from '../auth/orgModels.js';
 import type { PlatformEventSink } from '../contracts/platformEvents.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -597,7 +598,7 @@ export const MCP_TOOLS: readonly McpToolSpec[] = [
         {
           title: 'List agent types',
           description:
-            'Persisted molecules, cells and tissues with their earned trust counters and elemental tool metadata. A type with 3+ successes and zero failures is TRUSTED, which lets its supervisor skip LLM validation.',
+            `Persisted molecules, cells and tissues with historical success/failure totals, consecutiveSuccesses, the configured trustThreshold and trusted state, plus elemental tool metadata. Trust requires consecutive approved final results since the last failure or behavior change (default threshold: ${TRUST_THRESHOLD_SUCCESSES}); a trusted type lets its supervisor skip LLM validation.`,
           inputSchema: { tier: z.number().int().min(1).max(3).optional() },
           annotations: READ_ONLY,
         },
@@ -613,7 +614,7 @@ export const MCP_TOOLS: readonly McpToolSpec[] = [
         'atoma_registry_show',
         {
           title: 'Show one agent type',
-          description: 'One molecule, cell or tissue in full, plus its version history. A patch RESETS trust.',
+          description: 'One molecule, cell or tissue in full, plus its version history, historical totals, consecutiveSuccesses, trustThreshold and trusted state. A behavior patch or rollback resets the trust streak while preserving historical totals. A description-only patch preserves both.',
           inputSchema: { name: z.string().min(1) },
           annotations: READ_ONLY,
         },
@@ -932,7 +933,7 @@ export const MCP_TOOLS: readonly McpToolSpec[] = [
         {
           title: 'Roll an agent type back to an older version',
           description:
-            'Restore an older version’s prompt, tools and params as a NEW live version (roll-forward-to-old-content; see atoma_registry_history for versions). Trust RESETS: the restored type re-earns it. A bootstrap type’s seeder may patch the rollback away on the next run. Attributed and journaled.',
+            'Restore an older version’s prompt, tools and params as a NEW live version (roll-forward-to-old-content; see atoma_registry_history for versions). The trust streak resets while historical success/failure totals are preserved; the restored type re-earns trust through consecutive approved final results. A bootstrap type’s seeder may patch the rollback away on the next run. Attributed and journaled.',
           inputSchema: { name: z.string().min(1), toVersion: z.number().int().positive() },
           annotations: MUTATING,
         },
