@@ -505,15 +505,15 @@ npm run viz:mark-turn:analyze
 - Behind the gate `/api/burnin` answers ONLY the platform admin (403 otherwise): an invitation
   must not read operator-level state (review 2026-08-20 §2.2). The admin also reads every
   organisation's projects and run traces, and manages organisations through
-  `/api/admin/organisations` and `/api/admin/invitations` (same-origin POST); writes (create
-  project, start/cancel runs) stay bound to the viewer's ACTIVE organisation for admins too.
-  `visibleViews` is the one nav definition; the ungated developer path is unchanged.
+  `/api/admin/organisations` and `/api/admin/invitations` (same-origin POST); writes stay
+  bound to the viewer's ACTIVE organisation for admins too. `visibleViews` is the one nav
+  definition; the ungated developer path is unchanged.
+- The server FOLDS every configured store at startup (`openDb`); read-only handles never fold,
+  and an unfoldable store is logged, never served as duplicates ([src/registry](../registry/AGENTS.md)).
 - Registry and Skills are WORKSPACE destinations for every authenticated role (Registry since
-  2026-09-15): ONE registry and ONE catalog for every run on the platform, so what a member
-  reads is what their own runs read and earn on ([src/registry](../registry/AGENTS.md),
-  [src/skills](../skills/AGENTS.md)). `/api/registries` and `/api/registry/:id` redact the
-  store's host path to its basename for non-admins; `/api/skills` and its readers serve the
-  catalog from public namespace metadata.
+  2026-09-15): ONE registry and ONE catalog for every run, so a member reads what their own
+  runs earn on ([src/skills](../skills/AGENTS.md)). `/api/registries` and `/api/registry/:id`
+  redact the store's host path for non-admins; `/api/skills` uses public namespace metadata.
 - `/mcp` is the ONE MCP (contract in [src/mcp](../mcp/AGENTS.md)): OAuth or
   API bearer token behind the gate, the operator on the ungated loopback, Host
   pinned either way. `/api/tokens` mints (POST, same-origin, journaled

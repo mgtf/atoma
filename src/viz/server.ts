@@ -1,3 +1,4 @@
+import { openDb, unfoldedRegistryPredicate } from '../registry/db.js';
 import { updateOrgModels } from '../auth/orgModels.js';
 import { createServer, request as httpRequest } from 'node:http';
 import { randomBytes } from 'node:crypto';
@@ -391,6 +392,36 @@ function resolveDbs(): { id: string; label: string; path: string; exists: boolea
 }
 
 const DBS = resolveDbs();
+
+/**
+ * FOLD BEFORE SERVING.
+ *
+ * `openDb` is what migrates a store still partitioned by the 2026-09-09 owner
+ * key into the one platform registry (`docs/platform-trust-2026-09-15.md`).
+ * This server never called it: every store access below is a READ-ONLY handle,
+ * so on a deployed host — where the server is the only process that always
+ * runs — the fold waited for the next run that never came, while the readers,
+ * which no longer filter by owner, showed one row per owner.
+ *
+ * That shipped on 2026-09-15 and doubled every type in the production
+ * Registry: 23 rows where the catalogue has 12. The fold belongs at startup,
+ * before anything serves.
+ *
+ * Idempotent and cheap once folded. A store that cannot be folded is LOUD but
+ * never fatal: the readers below fall back to the owner-filtered rows they
+ * showed before the fold, so a failed migration degrades to the old view
+ * instead of publishing duplicates.
+ */
+for (const entry of DBS) {
+  if (!entry.exists) continue;
+  try {
+    openDb(entry.path).close();
+  } catch (error) {
+    console.error(
+      `[viz] registry fold failed for ${entry.path} — serving owner-filtered rows: ${(error as Error).message}`
+    );
+  }
+}
 
 /**
  * THE AUTH GATE (SaaS A2). Opt-in via the HOST environment
@@ -1740,7 +1771,7 @@ function countsOf(path: string): { 1: number; 2: number; 3: number; total: numbe
   try {
     db = openReadOnly(path);
     const rows = db
-      .prepare(`SELECT tier, COUNT(*) as n FROM atom_types GROUP BY tier`)
+      .prepare(`SELECT tier, COUNT(*) as n FROM atom_types WHERE ${unfoldedRegistryPredicate(db)} GROUP BY tier`)
       .all() as { tier: number; n: number }[];
     const out = { ...zero };
     for (const r of rows) {
@@ -1788,7 +1819,7 @@ function dumpRegistry(id: string): { registry: RegistrySummary; types: RegistryT
   const db = openReadOnly(entry.path);
   try {
     const rows = db
-      .prepare(`SELECT * FROM atom_types ORDER BY tier ASC, ordinal ASC`)
+      .prepare(`SELECT * FROM atom_types WHERE ${unfoldedRegistryPredicate(db)} ORDER BY tier ASC, ordinal ASC`)
       .all() as Array<{
         tier: number;
         ordinal: number;
@@ -1806,7 +1837,7 @@ function dumpRegistry(id: string): { registry: RegistrySummary; types: RegistryT
 
     const versions = db
       .prepare(
-        `SELECT tier, ordinal, version, system_prompt, tools_json, params_json, modified_by, modified_at, reason FROM atom_type_versions ORDER BY version ASC`
+        `SELECT tier, ordinal, version, system_prompt, tools_json, params_json, modified_by, modified_at, reason FROM atom_type_versions WHERE ${unfoldedRegistryPredicate(db)} ORDER BY version ASC`
       )
       .all() as Array<{
         tier: number;
@@ -1952,7 +1983,7 @@ function displayNameForAtomId(atomId: string): string | null {
     let db: Database.Database | null = null;
     try {
       db = new Database(reg.path, { readonly: true, fileMustExist: true });
-      const row = db.prepare(`SELECT name FROM atom_types WHERE atom_id = ?`).get(atomId) as
+      const row = db.prepare(`SELECT name FROM atom_types WHERE ${unfoldedRegistryPredicate(db)} AND atom_id = ?`).get(atomId) as
         | { name: string }
         | undefined;
       if (row) return row.name;
@@ -1973,7 +2004,7 @@ function toolNamesForAtomId(atomName: string): string[] {
     let db: Database.Database | null = null;
     try {
       db = new Database(reg.path, { readonly: true, fileMustExist: true });
-      const row = db.prepare(`SELECT tools_json FROM atom_types WHERE atom_id = ?`).get(atomName) as
+      const row = db.prepare(`SELECT tools_json FROM atom_types WHERE ${unfoldedRegistryPredicate(db)} AND atom_id = ?`).get(atomName) as
         | { tools_json: string }
         | undefined;
       if (row) return (JSON.parse(row.tools_json) as { name: string }[]).map((t) => t.name);

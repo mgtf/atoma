@@ -1,4 +1,4 @@
-import { type DB } from './db.js';
+import { registryIsPartitioned, type DB } from './db.js';
 import { appendLedger } from '../core/ledger.js';
 import type {
   AtomModifications,
@@ -253,7 +253,17 @@ export function rebrandPersona(systemPrompt: string, newName: string): string {
  * the same rows and bump the same counters (`docs/platform-trust-2026-09-15.md`).
  */
 export class AtomRegistry {
-  constructor(private readonly db: DB) {}
+  constructor(private readonly db: DB) {
+    // A store the fold has not reached still carries one row per owner, and
+    // this class no longer knows what an owner is: listing it would merge two
+    // catalogues and writing to it would add rows the fold must then absorb.
+    // `openDb` folds before returning, so reaching this means a READ-ONLY
+    // handle on an unfolded store — refuse it loudly rather than serve a
+    // doubled catalogue (2026-09-15).
+    if (registryIsPartitioned(db)) {
+      throw new Error('registry store is not folded; open it through openDb first');
+    }
+  }
 
   private prepare(sql: string) {
     return this.db.prepare(sql);

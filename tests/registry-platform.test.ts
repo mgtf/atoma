@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { createServer } from 'node:net';
+import { mkdirSync } from 'node:fs';
 import { mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -93,6 +95,27 @@ describe('one platform registry', () => {
   });
 });
 
+async function freePort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  const port = typeof address === 'object' && address ? address.port : 0;
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  return port;
+}
+
+/** Poll until the spawned server answers, so a slow boot is not a failure. */
+async function waitForJson(url: string): Promise<unknown> {
+  for (let attempt = 0; attempt < 120; attempt++) {
+    try {
+      const response = await fetch(url);
+      if (response.ok) return await response.json();
+    } catch { /* not listening yet */ }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(`no response from ${url}`);
+}
+
 describe('folding the per-owner partition back into the platform', () => {
   it('absorbs same-name project rows with their trust, keeps the others whole, backs the file up once', () => {
     const root = directory(); const path = join(root, 'store.db');
@@ -180,6 +203,51 @@ describe('folding the per-owner partition back into the platform', () => {
     expect(readdirSync(root).filter((file) => file.includes('.before-platform-registry-'))).toHaveLength(1);
     legacy.close();
   });
+
+  it('folds the store the VIZ SERVER serves, at startup, before anything reads it', async () => {
+    // THE PRODUCTION FAILURE, 2026-09-15. Every store access in the server is
+    // a READ-ONLY handle, and only `openDb` folds — so on a deployed host the
+    // fold waited for a run that never came, while the readers, which no
+    // longer filter by owner, published one row per owner. The live Registry
+    // listed 23 agents for a 12-agent catalogue. This crosses the same process
+    // boundary the bug did: a real server, spawned on a partitioned store.
+    const root = directory();
+    const path = join(root, 'atoma.db');
+    const project = `project:${randomUUID()}:${randomUUID()}`;
+    partitionedStore(path, [
+      { owner: 'operator', tier: 1, ordinal: 1, name: 'Water', successes: 1, failures: 2 },
+      { owner: project, tier: 1, ordinal: 1, name: 'Water', prompt: 'Project coaching', successes: 4, at: '2026-09-11' },
+    ]).close();
+    mkdirSync(join(root, 'runs'), { recursive: true });
+
+    const port = await freePort();
+    const child = spawn(
+      process.execPath,
+      ['--import', 'tsx', 'src/viz/server.ts', '--host', '127.0.0.1', '--port', String(port),
+        '--dir', join(root, 'runs'), '--db', path, '--skills-dir', join(root, 'skills'), '--no-sentinel'],
+      { cwd: process.cwd(), env: { ...process.env }, stdio: ['ignore', 'pipe', 'pipe'] }
+    );
+    try {
+      const payload = await waitForJson(`http://127.0.0.1:${port}/api/registry/atoma`) as {
+        registry: { counts: Record<string, number> };
+        types: Array<{ name: string; successes: number; failures: number }>;
+      };
+      // ONE Water, carrying both owners' trust — not one row per owner.
+      expect(payload.types.map((type) => type.name)).toEqual(['Water']);
+      expect(payload.types[0]).toMatchObject({ successes: 5, failures: 2 });
+      expect(payload.registry.counts).toMatchObject({ 1: 1, total: 1 });
+    } finally {
+      child.kill('SIGKILL');
+    }
+
+    // And the store on disk is genuinely folded, not merely filtered on read.
+    const db = new Database(path, { readonly: true });
+    try {
+      expect(registryIsPartitioned(db)).toBe(false);
+      expect(db.prepare('SELECT COUNT(*) FROM atom_types').pluck().get()).toBe(1);
+      expect(db.prepare('SELECT absorbed_owner FROM atom_id_merges').pluck().all()).toEqual([project]);
+    } finally { db.close(); }
+  }, 60_000);
 
   it('opens a pre-partition store as it is: the platform schema is its schema', () => {
     const root = directory(); const path = join(root, 'store.db');

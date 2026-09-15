@@ -19,6 +19,11 @@
   Execution follows: the coordinator no longer pins promotion, deterministic
   dispatch or the prefilter cache off for project runs and sends no veto flag;
   a tenant launch insists on `--container` and nothing else.
+  The viz server folds every configured store at startup: it opens every other
+  handle read-only, so without that the fold waited for a run and the readers,
+  no longer filtering by owner, listed one row per owner. Read-only readers
+  keep `unfoldedRegistryPredicate` as the guard for a store the fold has not
+  reached, and `AtomRegistry` refuses one outright.
 - The Registry is a workspace destination for every signed-in role, as Skills
   became on 2026-09-15: `/api/registries` and `/api/registry/:id` answer
   members and viewers, the store's host path reduced to its basename. Burn-in

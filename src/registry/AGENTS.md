@@ -30,6 +30,13 @@ Neighbours:
   unique and skill namespaces stay keyed by that ID. Ledger entities are type
   names; the atom-id-keyed project events of the partitioned period stay in
   the ledger as history and are not compared by `ledger check`.
+- `openDb` is the ONLY thing that folds, and a read-only handle never does.
+  Anything that SERVES the store must fold it first — the viz server does it at
+  startup — and every read-only reader keeps `unfoldedRegistryPredicate`, which
+  is `'1'` on a folded store and the old owner filter otherwise. Without both,
+  a reader that stopped filtering by owner publishes one row PER OWNER; that is
+  how the production Registry came to list every type twice on 2026-09-15.
+  `AtomRegistry` refuses an unfolded store rather than merge two catalogues.
 - `openDb` folds a store still partitioned by owner (2026-09-09 layout) back
   into the platform: whole-file backup first, operator rows kept as they are,
   same-name project rows ABSORBED with their counters added and the identity

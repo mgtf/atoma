@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+import { unfoldedRegistryPredicate } from '../registry/db.js';
 /**
  * atoma ledger CLI — inspect the append-only lifecycle ledger and check
  * the mutable stores against it.
@@ -54,7 +55,7 @@ function renderEntity(entity: string, labels: Map<string, string>): string {
 function displayNamesByAtomId(db: Database.Database): Map<string, string> {
   const out = new Map<string, string>();
   try {
-    for (const r of db.prepare('SELECT atom_id, name FROM atom_types').all() as {
+    for (const r of db.prepare(`SELECT atom_id, name FROM atom_types WHERE ${unfoldedRegistryPredicate(db)}`).all() as {
       atom_id: string | null;
       name: string;
     }[]) {
@@ -109,7 +110,7 @@ function main(): void {
   // Atom types — the SAME file the events came from, so this half of the
   // comparison cannot be mispaired.
   const rows = db
-    .prepare('SELECT name, successes, failures FROM atom_types')
+    .prepare(`SELECT name, successes, failures FROM atom_types WHERE ${unfoldedRegistryPredicate(db)}`)
     .all() as { name: string; successes: number; failures: number }[];
   for (const r of rows) {
     const p = projected.get(r.name) ?? { successes: 0, failures: 0 };

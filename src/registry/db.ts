@@ -111,6 +111,20 @@ export function registryIsPartitioned(db: DB): boolean {
   return columns.some((column) => column.name === 'owner_key');
 }
 
+/**
+ * The guard a read-only reader puts on `atom_types` / `atom_type_versions`.
+ *
+ * On a FOLDED store it is `'1'` — there is one registry and every row belongs
+ * to the platform, so the guard costs nothing and hides nothing. On a store
+ * the fold has not reached (or could not complete) it is the old owner filter,
+ * because a reader that dropped it there shows one row PER OWNER: that is
+ * exactly how the production Registry came to list every type twice on
+ * 2026-09-15. Read-only handles never migrate, so every such reader needs it.
+ */
+export function unfoldedRegistryPredicate(db: DB): string {
+  return registryIsPartitioned(db) ? "owner_key = 'operator'" : '1';
+}
+
 interface OwnedTypeRow {
   owner_key: string; tier: number; ordinal: number; atom_id: string; name: string;
   description: string; system_prompt: string; tools_json: string; params_json: string;

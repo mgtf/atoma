@@ -50,6 +50,16 @@ retrieval corpus a run may search, and who may start a run.
   copy set aside under `.merged-before-platform/`). `migratePlatformSkills`
   still imports the 2026-09-09 per-project trees, now adding their counters
   to the catalog's instead of keeping them in a private scope.
+- THE FOLD RUNS AT VIZ SERVER STARTUP, before anything serves. `openDb` is
+  the only thing that folds, and the server opens every other handle
+  READ-ONLY — so on a deployed host, where the server is the one process that
+  always runs, the fold would otherwise wait for a run that may never come.
+  It is idempotent; a store it cannot fold is logged loudly and served through
+  the guard below rather than taking the server down.
+- Every read-only reader of `atom_types` keeps `unfoldedRegistryPredicate`.
+  On a folded store it is `'1'` and hides nothing; on an unfolded one it is
+  the old owner filter, because a reader without it publishes one row PER
+  OWNER. `AtomRegistry` refuses an unfolded store outright.
 - A tenant run still has to prove it is the run the host launched, on the
   paths the host recorded (`assertProjectRunAuthority`). That check never
   selected rows; it says whether this process may run at all.
@@ -94,6 +104,29 @@ wants a stage off sets it in its own environment, for every run alike.
   platform-admin surfaces.
 - Host paths of the store and the skills tree are still redacted for
   non-admins.
+
+## What went wrong on the way out
+
+The first deployment of this decision shipped the fold but never ran it. The
+viz server opens the store read-only everywhere, so `migrateRegistryToPlatform`
+never fired on production, the store kept its `owner_key`, and the readers —
+which had just stopped filtering by owner — listed the operator's row AND the
+project's row for every type. The live Registry showed 23 agents for a
+12-agent catalogue, two Waters, two Tracheids, two Meristems.
+
+Two defects, both fixed in the follow-up:
+
+- the fold had no trigger on a host that only SERVES. It now runs at server
+  startup, and `tests/registry-platform.test.ts` spawns a real server on a
+  partitioned store to hold it — the same process boundary the bug crossed;
+- un-filtering the readers was only safe on a folded store, and nothing
+  enforced that order. The guard is back on every read-only reader, and
+  `AtomRegistry` throws on an unfolded store instead of merging two
+  catalogues.
+
+The lesson is the ordering one: a migration and the readers that assume it are
+one change, and the reader half must stay correct for a store the migration
+has not reached yet.
 
 ## Rollback
 
