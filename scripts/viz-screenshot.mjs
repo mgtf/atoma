@@ -48,6 +48,7 @@ import { createServer } from 'node:net';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer';
+import { assertMobileProjects } from './viz-mobile-probe.mjs';
 
 const READY_TIMEOUT_MS = 60_000;
 
@@ -691,8 +692,15 @@ try {
       await page.select('select[aria-label="Starting point"]', repositoryMode);
       await page.type('input[aria-label="Source GitHub repository"]', 'https://github.com/acme/app');
     }
+    if (has('--touch-probe')) {
+      if (!authed || !selectFirst || view !== 'Projects') {
+        throw new Error('--touch-probe requires --auth --select-first and the Projects view');
+      }
+      await assertMobileProjects(page, gatedStubs()['/api/projects'][0].projectId);
+    }
     await page.screenshot({ path: outPath });
-    console.log(`viz screenshot: ${outPath} (${view}, ${authed ? 'gated' : 'ungated'}, camera ${cameraMode}${selectFirst ? ', first project selected' : ''}${notifications ? ', notification tray open' : ''}, ${width}x${height})`);
+    const capturedViewport = page.viewport();
+    console.log(`viz screenshot: ${outPath} (${view}, ${authed ? 'gated' : 'ungated'}, camera ${cameraMode}${selectFirst ? ', first project selected' : ''}${notifications ? ', notification tray open' : ''}, ${capturedViewport.width}x${capturedViewport.height})`);
   } finally {
     await browser.close();
   }

@@ -68,7 +68,7 @@ npm run viz:mark-turn:analyze
   goes there, never back into the class.
 - Scrollable GPU content goes through `createScrollPane` (bounded + masked);
   the wheel handler FAILS CLOSED on `scrollMax`, so a view that never declares
-  its max does not scroll. Cull by skipping draws, not by stopping the layout cursor. Detail panes report `detailBounds`/`detailScrollMax`. Runs retains a bounded row window under a fixed mask. Reproject hit targets and shadow anchors on scroll; window crossings, changed data/selection/filters, resize and camera travel rebuild. Retained listeners dispatch to the latest React callback.
+  its max does not scroll. Wheel ticks and one-finger touch drags share ONE router (`scrollAt`): the drag names its pane from where the finger LANDED and converts travel through the live camera. The canvas declares `touch-action: pan-y`, never `none` — the browser's `pointercancel` on a recognised pan is what keeps Pixi from reporting a tap on the row the finger began on (2026-09-15: a phone could neither scroll nor read the rail). Cull by skipping draws, not by stopping the layout cursor. Detail panes report `detailBounds`/`detailScrollMax`. Runs retains a bounded row window under a fixed mask. Reproject hit targets and shadow anchors on scroll; window crossings, changed data/selection/filters, resize and camera travel rebuild. Retained listeners dispatch to the latest React callback.
 - `prefersReducedMotion()` (`renderer/motion.ts`) is the only reduced-motion
   source in the GL client. Every animation system consults it and JUMPS to its
   final state — exit effects are skipped entirely, never left running.
@@ -392,7 +392,7 @@ npm run viz:mark-turn:analyze
   keys the retention on the resolved pair. Any DOM overlay that sits over a
   VIEW is positioned from the `--gpu-sidebar` CSS variable, whose CSS clamp a
   test holds equal to `sidebarWidthForViewport`: overview shrinks 208px to a
-  112px floor; focus preserves that source layout while the camera crops its trailing icon tile. The
+  112px floor, and at or below `SIDEBAR_COMPACT_MAX_VIEWPORT` (431px, where that floor and the 320px content minimum no longer fit together) the rail is the 56px `sidebarCompactWidth` of centred icon tiles with no label column — a label with 20px to live in is an ellipsis, not a destination; focus preserves that source layout while the camera crops its trailing icon tile. The
   run search input is not one of them, it lives in the header band. With a
   Pixi overlay menu open, view DOM overlays stay mounted, render INERT
   (`inert`) and dim (`.gpu-overlays-veiled`): they sit above the canvas, so

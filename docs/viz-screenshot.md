@@ -23,10 +23,17 @@ npm run viz:shot -- --out /tmp/before.png           # explicit destination
 npm run viz:shot -- --url http://127.0.0.1:5173     # attach to a dev stack already running
 npm run viz:shot -- --debug                         # page console + failed requests on stderr
 npm run viz:shot -- --width 528 --height 800        # narrow/compact layouts
+npm run viz:shot -- --auth --select-first --touch-probe  # native mobile swipe regression
 ```
 
 PNGs default to `screenshots/<view>-<auth-mode>-<camera>.png` (git-ignored). Viewport
 defaults to 1600×900 at deviceScaleFactor 2.
+
+`--touch-probe` requires `--auth --select-first` on Projects. It resizes to
+390×600, checks the compact rail, and sends native Chrome touch events over a
+run row. The list must move without opening the run. The captured image shows
+the result after scrolling. Use `--camera overview` or `--camera focus` to
+exercise either camera pose. The same probe is part of `viz:smoke`.
 
 ## What each mode renders
 

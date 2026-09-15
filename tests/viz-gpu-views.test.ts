@@ -20,6 +20,7 @@ import {
   BUTTON_LABEL_INSET,
   GpuRenderer,
   NAV_HOVER_SCALE,
+  TOUCH_SCROLL_SLOP_PX,
   emptyRenderMetrics,
 } from '../src/viz/client-gl/gpu-renderer.js';
 import type {
@@ -57,9 +58,12 @@ import {
 } from '../src/viz/client-gl/renderer/views/sidebar.js';
 import { clampSceneTuningPosition } from '../src/viz/client-gl/tuning.js';
 import {
+  drawViewFrame,
   viewFrame,
   viewFrameGutterRects,
+  VIEW_FRAME_CONTENT_TOP,
   VIEW_FRAME_PAD,
+  VIEW_FRAME_TITLE_Y,
 } from '../src/viz/client-gl/renderer/view-frame.js';
 import { overlayMenuClip } from '../src/viz/client-gl/renderer/overlay-menu-clip.js';
 import {
@@ -130,6 +134,8 @@ import type { AuthUiSnapshot } from '../src/viz/client-gl/AuthControls.js';
 import {
   GPU_COLORS,
   GPU_LAYOUT,
+  SIDEBAR_COMPACT_MAX_VIEWPORT,
+  sidebarIsCompactForViewport,
   sidebarWidthForViewport,
 } from '../src/viz/client-gl/theme.js';
 import { buildAtomaMarkFrame } from '../src/viz/client-gl/brand-mark.js';
@@ -1362,7 +1368,42 @@ describe('the nav rail', () => {
     expect(sidebarWidthForViewport(528)).toBe(GPU_LAYOUT.sidebarWidth);
     expect(sidebarWidthForViewport(500)).toBe(180);
     expect(sidebarWidthForViewport(432)).toBe(GPU_LAYOUT.sidebarMinWidth);
-    expect(sidebarWidthForViewport(320)).toBe(GPU_LAYOUT.sidebarMinWidth);
+    // 432 is the last viewport that holds the labelled floor AND the content
+    // minimum together. One pixel narrower is a phone: icon tiles, no labels.
+    expect(SIDEBAR_COMPACT_MAX_VIEWPORT).toBe(431);
+    expect(sidebarIsCompactForViewport(432)).toBe(false);
+    expect(sidebarIsCompactForViewport(431)).toBe(true);
+    for (const width of [431, 390, 375, 320]) {
+      expect(sidebarWidthForViewport(width)).toBe(GPU_LAYOUT.sidebarCompactWidth);
+    }
+    expect(GPU_LAYOUT.sidebarCompactWidth).toBeLessThan(GPU_LAYOUT.sidebarMinWidth);
+    expect(GPU_LAYOUT.sidebarCompactWidth).toBeGreaterThanOrEqual(GPU_LAYOUT.sidebarFocusButtonWidth);
+  });
+
+  it('draws a phone-width overview rail as icon tiles, never as clipped labels', () => {
+    const ctx = createRecordingCtx();
+    const width = sidebarWidthForViewport(390);
+    drawSidebar(ctx, makeSnapshot({ view: 'skills' }), 844, width);
+    // Overview keeps its wash; only the labels go.
+    expect(ctx.root.children.some((child) => child.label === 'sidebar-band')).toBe(true);
+    const nav = ctx.buttons.filter((button) => button.id.startsWith('nav.'));
+    expect(nav.map((button) => button.id)).toEqual([
+      'nav.projects', 'nav.runs', 'nav.docs', 'nav.registry', 'nav.skills', 'nav.burnin',
+    ]);
+    expect(ctx.texts.some((text) => ['WORKSPACE', 'OPERATE'].includes(text.value))).toBe(false);
+    expect(ctx.tooltips.map((tooltip) => tooltip.text)).toEqual([
+      'Projects', 'Runs', 'Docs', 'Registry', 'Skills', 'Burn-in',
+    ]);
+    for (const button of nav) {
+      // Centred in the strip and fully inside it: the compact overview rail
+      // is on screen edge to edge, unlike the camera-cropped focus rail.
+      expect(button.width).toBe(GPU_LAYOUT.sidebarFocusButtonWidth);
+      expect(button.x).toBe((width - GPU_LAYOUT.sidebarFocusButtonWidth) / 2);
+      expect(button.x + button.width).toBeLessThanOrEqual(width);
+    }
+    const crystal = overviewRailChromeLayout(width);
+    expect(crystal.crystal.x + crystal.crystal.width).toBeLessThanOrEqual(width);
+    expect(nav[0]!.y).toBeGreaterThanOrEqual(crystal.navigationTop);
   });
 
   it('keeps the CSS content offset equal to the rail it must clear', () => {
@@ -1373,6 +1414,12 @@ describe('the nav rail', () => {
     expect(css).toMatch(new RegExp(
       `--gpu-sidebar:\\s*min\\(100vw, clamp\\(${GPU_LAYOUT.sidebarMinWidth}px,` +
       `[\\s\\S]*?100vw - ${GPU_LAYOUT.contentMinWidth}px[\\s\\S]*?${GPU_LAYOUT.sidebarWidth}px`
+    ));
+    // The phone rail: the CSS media boundary and the compact width are the
+    // same two numbers the renderer derives, or a DOM field sits under a tile.
+    expect(css).toMatch(new RegExp(
+      `@media \\(max-width: ${SIDEBAR_COMPACT_MAX_VIEWPORT}px\\)\\s*\\{\\s*:root\\s*\\{\\s*` +
+      `--gpu-sidebar:\\s*min\\(100vw, ${GPU_LAYOUT.sidebarCompactWidth}px\\)`
     ));
     for (const selector of [
       'gpu-run-input', 'gpu-project-form', 'gpu-view-search',
@@ -2189,6 +2236,48 @@ describe('drawSentinel', () => {
     const ctx = createRecordingCtx();
     drawSentinel(ctx, makeSnapshot({ view: 'sentinel' }, { auth }), 1280, 720);
     expect(ctx.scrollMax.sentinel).not.toBeUndefined();
+  });
+});
+
+describe('drawViewFrame on a narrow column', () => {
+  it('fits a long project title inside the phone frame without wrapping into the form', () => {
+    const ctx = createRecordingCtx();
+    const frame = viewFrame(320 - GPU_LAYOUT.sidebarCompactWidth, 700);
+    drawViewFrame(ctx, frame, 'Project: a project name much wider than this phone', '5 runs');
+    const title = ctx.texts[0]!;
+    expect(title.value.endsWith('…')).toBe(true);
+    expect(ctx.measureText(title.value, { size: 16, weight: '700' })).toBeLessThanOrEqual(frame.innerWidth);
+    expect(title.options).toMatchObject({ singleLine: true, width: frame.innerWidth });
+  });
+
+  it('keeps the subtitle on the title line, clear of the content top the DOM form sits at', () => {
+    // A phone's content column: the compact rail leaves 334px of a 390px
+    // viewport. The subtitle used to stack under the title and land under
+    // the project form, which starts at VIEW_FRAME_CONTENT_TOP.
+    const ctx = createRecordingCtx();
+    const frame = viewFrame(390 - GPU_LAYOUT.sidebarCompactWidth, 844);
+    drawViewFrame(ctx, frame, 'Projects', '1 project in this organisation');
+    const title = ctx.texts.find((text) => text.value === 'Projects')!;
+    const subtitle = ctx.texts.find((text) => text.value !== 'Projects')!;
+    expect(subtitle.y).toBe(frame.y + VIEW_FRAME_TITLE_Y + 5);
+    expect(subtitle.y + 11).toBeLessThan(frame.y + VIEW_FRAME_CONTENT_TOP);
+    // Measured from the title, never over it, and inside the frame.
+    expect(subtitle.x).toBeGreaterThan(title.x + ctx.measureText('Projects', { size: 16, weight: '700' }));
+    const options = subtitle.options as { singleLine?: boolean; width?: number };
+    expect(options.singleLine).toBe(true);
+    expect(subtitle.x + (options.width ?? 0)).toBeLessThanOrEqual(frame.innerX + frame.innerWidth);
+  });
+
+  it('ellipsises a subtitle that cannot share the line rather than wrapping it under the form', () => {
+    const ctx = createRecordingCtx();
+    const frame = viewFrame(390 - GPU_LAYOUT.sidebarCompactWidth, 844);
+    const long = 'a very long subtitle that has no hope of fitting beside a long title on a phone';
+    drawViewFrame(ctx, frame, 'Projects', long);
+    const subtitle = ctx.texts.find((text) => text.value !== 'Projects')!;
+    expect(subtitle.value).not.toBe(long);
+    expect(subtitle.value.endsWith('…')).toBe(true);
+    expect(subtitle.value.length).toBeGreaterThan(1);
+    expect(ctx.texts.filter((text) => text.y >= frame.y + VIEW_FRAME_CONTENT_TOP)).toHaveLength(0);
   });
 });
 
@@ -5546,6 +5635,121 @@ describe('render groups — per-frame animation stays off the root batch', () =>
   });
 });
 
+
+describe('touch scrolling — a finger drag drives the same router as the wheel', () => {
+  // Node has no TouchEvent; the handlers read only these members.
+  type TouchLike = { identifier: number; clientX: number; clientY: number };
+  type Internals = {
+    snapshot: GpuRenderSnapshot | null;
+    scrollMax: Partial<Record<string, number>>;
+    runPickerBounds: Rectangle | null;
+    runPickerScrollMax: number;
+    app: unknown;
+    touchScroll: unknown;
+    touchStart(event: { touches: TouchLike[] }): void;
+    touchMove(event: { changedTouches: TouchLike[] }): void;
+    touchEnd(): void;
+  };
+
+  function armRenderer(snapshot: GpuRenderSnapshot, viewport = { width: 390, height: 844 }) {
+    const renderer = new GpuRenderer();
+    const internals = renderer as unknown as Internals;
+    internals.snapshot = snapshot;
+    // A bare canvas outside any camera plane: client pixels ARE renderer
+    // pixels, so the deltas below can be read straight off the finger.
+    internals.app = {
+      canvas: {
+        closest: () => null,
+        getBoundingClientRect: () => ({ left: 0, top: 0, ...viewport }),
+      },
+      screen: viewport,
+    };
+    return internals;
+  }
+
+  it('scrolls the current view by the finger travel once past the slop, and not before', () => {
+    const onScroll = vi.fn();
+    const internals = armRenderer({
+      // Mid-list, so both directions have room; the mock never moves the
+      // state, so every delta is measured from this same 100.
+      ...makeSnapshot({ view: 'projects', scrollY: { ...makeState().scrollY, projects: 100 } }),
+      onScroll,
+    });
+    internals.scrollMax = { projects: 500 };
+    internals.touchStart({ touches: [{ identifier: 7, clientX: 200, clientY: 600 }] });
+    internals.touchMove({
+      changedTouches: [{ identifier: 7, clientX: 200, clientY: 600 - (TOUCH_SCROLL_SLOP_PX - 1) }],
+    });
+    expect(onScroll).not.toHaveBeenCalled();
+    // Finger up the screen = content up = scrollY grows, by exactly the travel.
+    internals.touchMove({ changedTouches: [{ identifier: 7, clientX: 200, clientY: 560 }] });
+    expect(onScroll).toHaveBeenLastCalledWith('projects', 40);
+    internals.touchMove({ changedTouches: [{ identifier: 7, clientX: 200, clientY: 590 }] });
+    expect(onScroll).toHaveBeenLastCalledWith('projects', -30);
+    // Another finger's motion is not this drag.
+    internals.touchMove({ changedTouches: [{ identifier: 8, clientX: 200, clientY: 100 }] });
+    expect(onScroll).toHaveBeenCalledTimes(2);
+    internals.touchEnd();
+    expect(internals.touchScroll).toBeNull();
+  });
+
+  it('fails closed like the wheel: a view with no declared maximum does not move', () => {
+    const onScroll = vi.fn();
+    const internals = armRenderer({ ...makeSnapshot({ view: 'projects' }), onScroll });
+    internals.scrollMax = {};
+    internals.touchStart({ touches: [{ identifier: 1, clientX: 200, clientY: 600 }] });
+    internals.touchMove({ changedTouches: [{ identifier: 1, clientX: 200, clientY: 400 }] });
+    expect(onScroll).toHaveBeenLastCalledWith('projects', 0);
+  });
+
+  it('keeps driving the pane the finger landed on after it wanders out of it', () => {
+    const onScroll = vi.fn();
+    const onRunPickerScroll = vi.fn();
+    const internals = armRenderer({
+      ...makeSnapshot({ view: 'runs', focusedInput: 'run' }),
+      onScroll,
+      onRunPickerScroll,
+    });
+    internals.scrollMax = { runs: 900 };
+    internals.runPickerBounds = new Rectangle(0, 0, 390, 300);
+    internals.runPickerScrollMax = 400;
+    internals.touchStart({ touches: [{ identifier: 2, clientX: 100, clientY: 250 }] });
+    internals.touchMove({ changedTouches: [{ identifier: 2, clientX: 100, clientY: 230 }] });
+    expect(onRunPickerScroll).toHaveBeenLastCalledWith(20);
+    // Now well below the picker: still the picker's drag, never the view's.
+    internals.touchMove({ changedTouches: [{ identifier: 2, clientX: 100, clientY: 700 }] });
+    expect(onRunPickerScroll).toHaveBeenCalledTimes(2);
+    expect(onScroll).not.toHaveBeenCalled();
+  });
+
+  it('is a one-finger gesture: a second finger disarms it', () => {
+    const onScroll = vi.fn();
+    const internals = armRenderer({ ...makeSnapshot({ view: 'projects' }), onScroll });
+    internals.scrollMax = { projects: 500 };
+    internals.touchStart({ touches: [{ identifier: 1, clientX: 200, clientY: 600 }] });
+    internals.touchStart({
+      touches: [
+        { identifier: 1, clientX: 200, clientY: 600 },
+        { identifier: 2, clientX: 240, clientY: 620 },
+      ],
+    });
+    internals.touchMove({ changedTouches: [{ identifier: 1, clientX: 200, clientY: 400 }] });
+    expect(onScroll).not.toHaveBeenCalled();
+  });
+
+  it('declares the vertical pan on the canvas so a drag ends as a pan, not a tap', () => {
+    // Source-level: `touch-action` is a browser contract the handlers depend
+    // on (pointercancel), and nothing behavioural can observe it in Node.
+    const css = readFileSync(resolve('src/viz/client-gl/styles.css'), 'utf8');
+    expect(css).toMatch(/\.gpu-ui-canvas\s*\{[^}]*touch-action:\s*pan-y/);
+    expect(css).not.toMatch(/\.gpu-ui-canvas\s*\{[^}]*touch-action:\s*none/);
+    const source = readFileSync(resolve('src/viz/client-gl/gpu-renderer.ts'), 'utf8');
+    for (const type of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) {
+      expect(source).toMatch(new RegExp(`addEventListener\\('${type}', this\\.\\w+, \\{ passive: true \\}\\)`));
+      expect(source).toMatch(new RegExp(`removeEventListener\\('${type}', this\\.\\w+\\)`));
+    }
+  });
+});
 
 describe('FPS follow-ups', () => {
   it.each(['filterButton', 'navButton', 'atomButton'] as const)('%s settles, wakes on hover, and settles again', (kind) => {

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import puppeteer from 'puppeteer';
 import { assertLiveMarkBead, assertPointerLitMark } from './viz-mark-bead-probe.mjs';
+import { assertMobileProjects } from './viz-mobile-probe.mjs';
 
 const packageMetadata = JSON.parse(
   await readFile(new URL('../package.json', import.meta.url), 'utf8')
@@ -2294,6 +2295,7 @@ try {
         }
         await accountPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 200)));
       }
+      await assertMobileProjects(accountPage, projectId);
       await accountPage.setViewport({ width: 1280, height: 800, deviceScaleFactor: 2 });
       // The orb only exists at this width, and the re-render that brings it
       // back is one frame — which on a software rasteriser is seconds.

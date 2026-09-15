@@ -51,6 +51,12 @@ export const GPU_LAYOUT = {
   sidebarFocusButtonWidth: 44,
   /** Narrowest the rail may become before its labels stop being legible. */
   sidebarMinWidth: 112,
+  /**
+   * The rail a phone gets: one icon tile plus its pad, with no label column
+   * at all. Below the labelled floor a label had 20px to live in and rendered
+   * as an ellipsis, so the rail drops labels rather than clipping them.
+   */
+  sidebarCompactWidth: 56,
   /** Preserve this much view space by shrinking the rail on narrow windows. */
   contentMinWidth: 320,
   gap: 10,
@@ -68,6 +74,9 @@ export const GPU_LAYOUT = {
 export function sidebarWidthForViewport(
   viewportWidth: number
 ): number {
+  if (sidebarIsCompactForViewport(viewportWidth)) {
+    return Math.max(0, Math.min(viewportWidth, GPU_LAYOUT.sidebarCompactWidth));
+  }
   return Math.max(
     0,
     Math.min(
@@ -76,4 +85,18 @@ export function sidebarWidthForViewport(
       Math.max(GPU_LAYOUT.sidebarMinWidth, viewportWidth - GPU_LAYOUT.contentMinWidth)
     )
   );
+}
+
+/**
+ * The widest viewport that cannot hold BOTH the labelled rail at its floor
+ * and the content minimum. From here down the rail is icon tiles only, in
+ * overview as well as focus; `--gpu-sidebar`'s media query mirrors this
+ * exact boundary.
+ */
+export const SIDEBAR_COMPACT_MAX_VIEWPORT =
+  GPU_LAYOUT.sidebarMinWidth + GPU_LAYOUT.contentMinWidth - 1;
+
+/** A phone-width viewport: the rail shows icons, never a clipped label. */
+export function sidebarIsCompactForViewport(viewportWidth: number): boolean {
+  return viewportWidth <= SIDEBAR_COMPACT_MAX_VIEWPORT;
 }
