@@ -56,6 +56,10 @@ Loopback HTTP keeps its development cookie names and paths.
   implementation before this capability may be enabled there.
 - Codex login uses the official app-server device-code account methods. Pending
   attempts are bounded, memory-only and self-scoped from the resolved session.
+  A completed login is verified with a bounded settle window: released Codex
+  (≤0.154) notifies `account/login/completed` BEFORE reloading its auth cache,
+  so the first `account/read` may report no account. Retry until `account/updated`
+  or the window closes; never fail on the first empty read (2026-09-15).
   A run resolves the exact current generation from its requesting principal;
   disconnection deletes the receipt first and never falls back to the host.
   App-server access shares the same per-`CODEX_HOME` lease as run calls. The
