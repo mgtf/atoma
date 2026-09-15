@@ -69,6 +69,12 @@ Loopback HTTP keeps its development cookie names and paths.
   is reaped. Status verification shares the bounded app-server process budget.
   Startup removes only safe UUID generations absent from the receipt set, so a
   crash cannot leave an unbounded credential-bearing staging corpus.
+- Connecting a personal subscription ARMS the three tier pins when, and only
+  when, no level of the chain (account pin > org default > host env) resolves
+  any tier: that member could not launch a run at all, and the account choice
+  is itself the authorization to spend. `armStarterChatGptPins` owns the rule
+  and journals it under the manual kind with `automatic: true`. Never let it
+  overwrite a value, and never arm the HOST's login from it.
 - Personal Claude/claude.ai login is unavailable until Anthropic grants the
   third-party approval its SDK terms require. Keep that a server-owned disabled
   capability, not a client flag or an emulated OAuth flow.

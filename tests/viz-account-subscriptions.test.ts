@@ -222,11 +222,13 @@ describe('personal subscription settings', () => {
     );
 
     const tabs = await screen.findAllByRole('tab');
+    // Reading order of a first setup: identity, then what pays, then the
+    // models those choices unlock, then the MCP address.
     expect(tabs.map((tab) => tab.textContent)).toEqual([
       'General',
-      'LLM models',
       'Your AI subscriptions',
       'Your AI API keys',
+      'LLM models',
       'Atoma MCP',
     ]);
     expect(tabs[0]).toHaveAttribute('aria-selected', 'true');

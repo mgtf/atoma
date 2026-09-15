@@ -12,6 +12,14 @@ import {
   selectionsMixCodexOwners,
 } from '../src/contracts/runPayers.js';
 import { transportOf, parseModelSelector } from '../src/contracts/modelSelector.js';
+import { TIERS } from '../src/contracts/modelSelector.js';
+import {
+  everyTierUnresolved,
+  operatorTierDefaults,
+  pinForTier,
+  principalChatGptStarterPins,
+} from '../src/contracts/tierModels.js';
+import { pricesFor } from '../src/core/metrics.js';
 import {
   decryptBoundSecret,
   encryptBoundSecret,
@@ -211,6 +219,75 @@ describe('the subscriptions are neighbours, not catalogue members', () => {
     );
     expect(selectionsMixCodexOwners(['sub:openai:gpt-5.6-sol', 'own:openai:gpt-5.6-terra'])).toBe(true);
     expect(selectionsMixCodexOwners(['sub:anthropic:sonnet', 'own:openai:gpt-5.6-terra'])).toBe(false);
+  });
+});
+
+describe('the starter gradient armed on an unconfigured account', () => {
+  const EMPTY = { l1: null, l2: null, l3: null } as const;
+
+  it('is a cheapest-first ladder of the requester OWN subscription', () => {
+    const pins = principalChatGptStarterPins();
+    expect(pins).toEqual({
+      l1: 'own:openai:gpt-5.4-mini',
+      l2: 'own:openai:gpt-5.6-terra',
+      l3: 'own:openai:gpt-5.6-sol',
+    });
+    // The account space must admit it on every tier, or the write that arms
+    // it would throw where nothing can report the failure.
+    for (const tier of TIERS) {
+      expect(isAccountTierSelection(pinForTier(pins, tier)!, tier)).toBe(true);
+    }
+    // Never the host's login: an automatic pin may only spend the requester's.
+    expect(Object.values(pins).every((value) => principalChatGptSubscriptionModel(value!))).toBe(true);
+    expect(selectionsMixCodexOwners(Object.values(pins))).toBe(false);
+    // Cheapest rank first, by the one price table the ledger uses.
+    const outputs = TIERS.map((tier) => pricesFor(pinForTier(pins, tier)!).output);
+    expect(outputs).toEqual([...outputs].sort((a, b) => a - b));
+  });
+
+  it('arms only when NO level of the chain resolves any tier', () => {
+    const host = { l1: null, l2: null, l3: null };
+    expect(everyTierUnresolved({ account: EMPTY, org: EMPTY, host })).toBe(true);
+    // One configured tier at any level is a configuration, and a configuration
+    // is never overwritten — the run would have resolved that tier.
+    expect(
+      everyTierUnresolved({
+        account: { ...EMPTY, l2: 'own:openai:gpt-5.6-sol' },
+        org: EMPTY,
+        host,
+      })
+    ).toBe(false);
+    expect(
+      everyTierUnresolved({
+        account: EMPTY,
+        org: { ...EMPTY, l1: 'api:zai:glm-4.5-air' },
+        host,
+      })
+    ).toBe(false);
+    expect(
+      everyTierUnresolved({
+        account: EMPTY,
+        org: EMPTY,
+        host: { ...host, l3: 'api:anthropic:claude-opus-5' },
+      })
+    ).toBe(false);
+  });
+
+  it('reads the host level through the operator snapshot, unparsable values included', () => {
+    expect(
+      everyTierUnresolved({
+        account: EMPTY,
+        org: EMPTY,
+        host: operatorTierDefaults({ ATOMA_MODEL_L1: 'not a selector' }),
+      })
+    ).toBe(true);
+    expect(
+      everyTierUnresolved({
+        account: EMPTY,
+        org: EMPTY,
+        host: operatorTierDefaults({ ATOMA_MODEL_L1: 'api:zai:glm-4.5' }),
+      })
+    ).toBe(false);
   });
 });
 

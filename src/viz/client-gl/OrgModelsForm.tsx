@@ -29,7 +29,14 @@ import type {
 import { useAccountSubscriptions } from './queries.js';
 
 /** The five Settings sections, in tab order. ONE list: the bar and the panels both walk it. */
-export const SETTINGS_TABS = ['general', 'models', 'subscriptions', 'keys', 'mcp'] as const;
+/**
+ * Tab ORDER is the reading order of a first setup: who you are, then what pays
+ * for a run (a subscription, else a key), then the models those choices make
+ * available, and last the MCP address. Models sits after the two credential
+ * tabs because an empty account arms its tiers from the subscription it just
+ * connected, so the pins are already filled by the time it is reached.
+ */
+export const SETTINGS_TABS = ['general', 'subscriptions', 'keys', 'models', 'mcp'] as const;
 export type SettingsTab = (typeof SETTINGS_TABS)[number];
 
 /**

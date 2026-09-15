@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { isAccountTierSelection, isValidTierModelSelection } from '../core/providerCatalog.js';
 import { tierPinVariable, tryParseModelSelector, TIERS, type TierNumber } from './modelSelector.js';
+import { principalChatGptSelection } from './runPayers.js';
 
 /**
  * PER-TIER MODEL SELECTION — THE ONE CHOICE CONTRACT.
@@ -148,4 +149,49 @@ export function operatorTierDefaults(
     out[`l${tier}`] = value && tryParseModelSelector(value) ? value : null;
   }
   return out;
+}
+
+/**
+ * THE STARTER GRADIENT FOR A MEMBER'S OWN CHATGPT LOGIN.
+ *
+ * Connecting a personal subscription is the ONE moment where arming pins on
+ * the member's behalf is a service rather than a liberty: the account choice
+ * is the authorization to spend, and the member just made it for this exact
+ * provider. It is applied only when NOTHING else resolves (see
+ * `everyTierUnresolved`), so it can never displace a choice, an organisation
+ * default or an operator pin — a deployment that configured its tiers keeps
+ * them, and a member who picked models keeps those.
+ *
+ * The gradient follows the cost rule stated in the root contract: the cheapest
+ * model that can answer, per rank. L1 carries the tool loop and the call
+ * volume, L3 the reasoning, so the price order ($2/$12 → $5/$30 by the
+ * `metrics` table) is the tier order.
+ */
+export function principalChatGptStarterPins(): TierModelPins {
+  return accountTierModelPinsSchema.parse({
+    l1: principalChatGptSelection('gpt-5.4-mini'),
+    l2: principalChatGptSelection('gpt-5.6-terra'),
+    l3: principalChatGptSelection('gpt-5.6-sol'),
+  });
+}
+
+/**
+ * True when NO level of the chain names a model on ANY tier, i.e. every run
+ * this principal could launch would fail on the missing pin. Asked with the
+ * same walker the run uses, so "unconfigured" here and "unresolved" at launch
+ * cannot drift apart.
+ */
+export function everyTierUnresolved(input: {
+  readonly account: TierModelPins;
+  readonly org: TierModelPins;
+  readonly host: Record<'l1' | 'l2' | 'l3', string | null>;
+}): boolean {
+  return TIERS.every((tier) =>
+    tierChainCandidates({
+      account: input.account,
+      org: input.org,
+      host: input.host[`l${tier}`],
+      tier,
+    }).every((candidate) => candidate === null)
+  );
 }

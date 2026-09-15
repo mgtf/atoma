@@ -36,6 +36,7 @@ import {
   selectionsMixCodexOwners,
 } from '../contracts/runPayers.js';
 import { operatorTierDefaults } from '../contracts/tierModels.js';
+import { armStarterChatGptPins } from '../auth/accountModels.js';
 import {
   ORG_ROLES,
   sha256Hex,
@@ -500,6 +501,14 @@ const ACCOUNT_SUBSCRIPTIONS: AccountSubscriptionService | null = AUTH?.store
           summary: 'Personal Codex subscription connected',
           detail: { provider: 'codex' },
         });
+        try {
+          armStarterChatGptPins(AUTH.store!, { principalId, orgId }, process.env, emit);
+        } catch (error) {
+          // A convenience, never a precondition: a failed write leaves the
+          // member exactly where a connected subscription without pins
+          // already leaves them, choosing their models in Settings.
+          console.error('[viz subscriptions] could not arm the starter ChatGPT pins', error);
+        }
       },
       onDisconnected: ({ principalId, orgId }) => {
         emit({
