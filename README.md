@@ -32,8 +32,9 @@ extend or self-host them.
   estimates as the agents work.
 - **Build on the result.** Review the generated files and publish delivered
   artifacts to a connected GitHub repository.
-- **Retain useful experience.** Reusable agent types and skills persist between
-  runs, with trust based on their recorded results.
+- **Learn as a platform.** Agent types, skills and the trust they earn are shared
+  by every run on an instance. What one run works out is offered to the next,
+  whoever started it.
 
 ## What could your team build?
 
@@ -94,6 +95,19 @@ supervisors and planners. Model selection is configurable per tier.
 Read **[How atoma works](docs/how-it-works.md)** for the architecture, execution
 boundaries and verification design.
 
+### One catalogue, shared by every run
+
+A run is a run. One instance keeps one agent registry and one skill catalogue,
+and every run reads and writes them — the operator's own runs and every
+organisation's alike. A recipe distilled during one team's run is offered to the
+next team's run, and the trust a component earns is the trust the next supervisor
+reads. Projects, workspaces, run traces and the documents a run may search stay
+scoped to their organisation.
+
+This is the design, not a pending isolation gap. Read
+**[One registry, one trust](docs/platform-trust-2026-09-15.md)** for what is
+shared, what is not, and why.
+
 ### Connect an existing agent through MCP
 
 The console also serves an HTTP MCP endpoint at `https://<your-instance>/mcp`.
@@ -143,11 +157,16 @@ For a hosted instance, follow the [deployment guide](docs/automatic-deployment.m
 atoma is an evolving open-source system with a working web console, project
 runs, GitHub publication, result previews and inspectable execution.
 
-**Full tenant isolation is not complete.** Authenticated projects, workspaces
-and traces are organisation-scoped, but the agent catalogue, trust and lifecycle
-ledger remain instance-global. The platform admin can read across organisations.
-The current control plane is not yet safe for mutually untrusted organisations.
-See the [architecture and roadmap](docs/saas-architecture.md).
+**Shared learning is the design, and it has a price.** One instance means one
+agent registry, one skill catalogue and one lifecycle ledger, shared by every
+organisation on it. Prompts, recipes and trust counters that a run writes are
+readable by every other organisation's runs — including wording a supervisor
+derived from a document that run was given to search. Projects, workspaces and
+traces stay organisation-scoped, and a platform admin can read across
+organisations. An instance therefore suits teams that accept pooling what their
+runs learn; mutually untrusted tenants are not a supported deployment shape.
+See [One registry, one trust](docs/platform-trust-2026-09-15.md) and the
+[architecture and roadmap](docs/saas-architecture.md).
 
 Local file-tool containment is not shell isolation; use the container backend
 for isolated execution. Verification provides evidence for review, not a guarantee
@@ -178,6 +197,7 @@ that every generated application is ready for production.
 | I want to… | Read |
 | --- | --- |
 | Understand the architecture | [How it works](docs/how-it-works.md) |
+| Know what runs share with each other | [One registry, one trust](docs/platform-trust-2026-09-15.md) |
 | Develop locally or contribute | [Development setup](docs/development-setup.md) · [Contributing](CONTRIBUTING.md) |
 | Operate a hosted instance | [Deployment](docs/automatic-deployment.md) · [Configuration](.env.example) |
 | Publish results or enable previews | [GitHub App](docs/github-app-setup.md) · [Preview deployment](docs/preview-deployment.md) |
