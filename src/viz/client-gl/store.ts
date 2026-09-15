@@ -56,7 +56,7 @@ export const ADMIN_VIEWS: readonly ViewName[] = [
  *   instance surface, no admin plane (there are no organisations to manage).
  * - Gated platform admin: everything, plus the admin plane.
  * - Gated member: org-scoped work plus the two platform commons — the Registry
- *   (operator-owned agent types every organisation's runs start from) and the
+ *   (the one platform registry every run reads and earns on) and the
  *   Skills catalog. Burn-in remains private operator state.
  *
  * There is no `launch` tab: a tab that could only DESCRIBE how to phrase a

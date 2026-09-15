@@ -509,11 +509,11 @@ npm run viz:mark-turn:analyze
   project, start/cancel runs) stay bound to the viewer's ACTIVE organisation for admins too.
   `visibleViews` is the one nav definition; the ungated developer path is unchanged.
 - Registry and Skills are WORKSPACE destinations for every authenticated role (Registry since
-  2026-09-15): the commons every organisation's runs start from. `/api/registries` and
-  `/api/registry/:id` show operator-owned rows and history only (ownership is enforced in
-  storage, [src/registry](../registry/AGENTS.md)) and redact the store's host path to its
-  basename for non-admins. `/api/skills` and its readers serve the global catalog from public
-  namespace metadata; trust stays project/hash scoped ([src/skills](../skills/AGENTS.md)).
+  2026-09-15): ONE registry and ONE catalog for every run on the platform, so what a member
+  reads is what their own runs read and earn on ([src/registry](../registry/AGENTS.md),
+  [src/skills](../skills/AGENTS.md)). `/api/registries` and `/api/registry/:id` redact the
+  store's host path to its basename for non-admins; `/api/skills` and its readers serve the
+  catalog from public namespace metadata.
 - `/mcp` is the ONE MCP (contract in [src/mcp](../mcp/AGENTS.md)): OAuth or
   API bearer token behind the gate, the operator on the ungated loopback, Host
   pinned either way. `/api/tokens` mints (POST, same-origin, journaled

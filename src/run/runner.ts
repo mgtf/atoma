@@ -1,5 +1,4 @@
-import { eligibleProjectRun, projectRunPathsMatch, resolveProjectRegistryOwner } from '../projects/runAuthority.js';
-import type { RegistryOwner } from '../contracts/registryOwner.js';
+import { assertProjectRunAuthority } from '../projects/runAuthority.js';
 import { dirname, resolve } from 'node:path';
 import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { setMaxListeners } from 'node:events';
@@ -29,6 +28,7 @@ import { L2Atom } from '../atoms/L2Atom.js';
 import { depthModeSchema, type DepthMode } from '../contracts/depthRouting.js';
 import { runDepthTask } from './depth.js';
 import { SkillRegistry } from '../skills/registry.js';
+import { reconcilePlatformSkills } from '../skills/migratePlatform.js';
 import { isTraceRunId, TraceRecorder, runLabelFromGoal } from '../viz/trace.js';
 import { formatDecompositionReport, formatTimeoutPostMortem } from '../viz/report.js';
 import { RecordingLlmClient } from '../viz/recordingLlm.js';
@@ -653,13 +653,16 @@ export async function startTask(
   const tenantRun = process.env['ATOMA_TENANT_RUN'] === '1';
   const projectPaths = { dbPath, runId: requestedRunId ?? '', workspacePath: workspaceRoot,
     skillsPath: skillsDirPath(), runsPath: runsDir };
-  let registryOwner: RegistryOwner = { kind: 'operator' };
   if (tenantRun) {
-    if (!args.container || process.env['ATOMA_PREFILTER_CACHE'] !== '0' || promotion.enabled || direct.enabled) {
-      throw new RunnerConfigError('project registry requires container isolation and tenant lifecycle settings');
-    }
-    try { registryOwner = resolveProjectRegistryOwner(projectPaths); }
-    catch { throw new RunnerConfigError('project registry launch is unavailable or denied'); }
+    // Container isolation is the one precondition of a tenant launch. The
+    // lifecycle — learning, promotion, dispatch, the prefilter cache — is the
+    // same as any run's (docs/platform-trust-2026-09-15.md).
+    if (!args.container) throw new RunnerConfigError('project run requires container isolation');
+    // The registry and the skills catalog are the platform's, shared by every
+    // run; what a tenant run still has to prove is that it IS the registered
+    // run the host launched, on the exact paths the host recorded.
+    try { assertProjectRunAuthority(projectPaths); }
+    catch { throw new RunnerConfigError('project run launch is unavailable or denied'); }
   }
   let recordedRetrieval = false;
   if (tenantRun) {
@@ -672,11 +675,8 @@ export async function startTask(
       try { haystackLaunch = readHaystackLaunch(process.env); }
       catch (error) { throw new RunnerConfigError((error as Error).message); }
     }
-    // Search never unlocks local shell access to the control plane.
-    if (!args.container || process.env['ATOMA_PREFILTER_CACHE'] !== '0' ||
-        process.env['ATOMA_SKILL_PROMOTE'] !== '0' || process.env['ATOMA_SKILL_DIRECT'] !== '0') {
-      throw new RunnerConfigError('project retrieval requires container isolation and tenant lifecycle settings');
-    }
+    // Retrieval runs in the container like everything else a tenant run does.
+    if (!args.container) throw new RunnerConfigError('project retrieval requires container isolation');
     try {
       const prepared = openProjectRunHaystack(projectPaths, haystackLaunch);
       retrievalBinding = prepared.binding; prepareRetrieval = prepared.prepare;
@@ -684,13 +684,7 @@ export async function startTask(
   }
   const recorder = new TraceRecorder(runsDir);
   const db = openDb(dbPath);
-  const registry = new RecordingRegistry(db, recorder, registryOwner, tenantRun ? () => {
-    try {
-      const run = eligibleProjectRun(db, projectPaths.runId);
-      return !!run && registryOwner.kind === 'project' && run.orgId === registryOwner.orgId &&
-        run.projectId === registryOwner.projectId && projectRunPathsMatch(run, projectPaths);
-    } catch { return false; }
-  } : undefined);
+  const registry = new RecordingRegistry(db, recorder);
   const metrics = new InMemoryMetrics();
   const runSignals: RunSignalCounts = {
     deterministic: 0,
@@ -787,8 +781,8 @@ export async function startTask(
     // accessor from this registry on demand; L2 runs a Haiku
     // skill-prefilter against the matched L1's skills before entering
     // each supervise loop.
-    const skillRegistry = new SkillRegistry(skillsDirPath(),
-      registryOwner.kind === 'project' ? registryOwner.projectId : undefined);
+    const skillRegistry = new SkillRegistry(skillsDirPath());
+    reconcilePlatformSkills({ db, skillsRoot: skillRegistry.rootDir });
     console.log(`skills root: ${skillRegistry.rootDir}`);
 
     if (args.depth) {

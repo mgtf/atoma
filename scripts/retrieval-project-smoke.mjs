@@ -10,7 +10,7 @@ import { setTimeout } from 'node:timers/promises';
 import { AuthStore } from '../dist/auth/store.js';
 import { AtomRegistry } from '../dist/registry/atomRegistry.js';
 import { openDb } from '../dist/registry/db.js';
-import { resolveProjectRegistryOwner } from '../dist/projects/runAuthority.js';
+import { assertProjectRunAuthority } from '../dist/projects/runAuthority.js';
 import { ProjectStore } from '../dist/projects/store.js';
 import { ProjectRunCoordinator, projectRunHostLayout } from '../dist/projects/coordinator.js';
 import { buildArtifactManifest } from '../dist/projects/artifacts.js';
@@ -45,21 +45,18 @@ if (process.argv.includes('--child')) {
     skillsPath: env.ATOMA_SKILLS_DIR, runsPath: env.ATOMA_RUNS_DIR };
   const prepared = openProjectRunHaystack(paths, haystackLaunchSchema.parse(JSON.parse(env[HAYSTACK_LAUNCH_ENV])));
   const binding = prepared.binding;
-  const owner = resolveProjectRegistryOwner({ dbPath: env.ATOMA_DB_PATH, runId: env.ATOMA_RUN_ID,
+  const authorized = assertProjectRunAuthority({ dbPath: env.ATOMA_DB_PATH, runId: env.ATOMA_RUN_ID,
     workspacePath: workspace, skillsPath: env.ATOMA_SKILLS_DIR, runsPath: env.ATOMA_RUNS_DIR });
+  assert.equal(authorized.projectRunId, env.ATOMA_RUN_ID);
   const registryDb = openDb(env.ATOMA_DB_PATH);
   try {
-    const registry = new AtomRegistry(registryDb, owner);
+    // ONE platform registry: what this run creates and earns is what every
+    // other handle on the store reads (docs/platform-trust-2026-09-15.md).
+    const registry = new AtomRegistry(registryDb);
     const type = registry.create(1, { description: SOURCE, systemPrompt: SOURCE, tools: [], params: {}, createdBy: 'compiled-smoke' });
-    registry.patch(type.name, { systemPromptAppend: 'Private coaching' }, 'compiled-smoke');
+    registry.patch(type.name, { systemPromptAppend: 'Shared coaching' }, 'compiled-smoke');
     registry.recordSuccess(type.name);
-    assert.equal(new AtomRegistry(registryDb, owner).getByAtomId(type.atomId).successes, 1);
-    for (const other of [{ kind: 'operator' }, { ...owner, projectId: randomUUID() },
-      { ...owner, orgId: randomUUID(), projectId: randomUUID() }]) {
-      const isolated = new AtomRegistry(registryDb, other);
-      assert.deepEqual(isolated.listByTier(1), []);
-      assert.equal(isolated.getByAtomId(type.atomId), null);
-    }
+    assert.equal(new AtomRegistry(registryDb).getByAtomId(type.atomId).successes, 1);
   } finally { registryDb.close(); }
   const run = { signal: new AbortController().signal, deadlineAt: Date.now() + 30_000 };
   mkdirSync(workspace, { recursive: true });

@@ -334,11 +334,12 @@ under owner namespaces keyed by atom id (`skills/<atom-id>/`). Compilation's
 measured value is maintenance verification, not from-scratch builds, and every
 operator lifecycle action is attributable.
 
-Skills are a platform commons by design: what one organisation's runs learn is
-meant to make every other organisation's runs cheaper. The organisation bounds
-TRUST and EXECUTION RIGHTS, never knowledge. Bodies are stored globally and
-visible to every signed-in user; project trust is bound to the body hash. The
-premise and its threat model are in
+Skills and the registry are a platform commons: a RUN IS A RUN. The operator's
+runs and every organisation's runs read the same catalog and the same registry
+and earn trust on the same counters; the organisation bounds projects,
+workspaces, traces and retrieval corpora, never knowledge or trust (owner
+decision 2026-09-15, [docs/platform-trust-2026-09-15.md](docs/platform-trust-2026-09-15.md)).
+The earlier premise and its threat model are in
 [docs/saas-architecture.md](docs/saas-architecture.md#skills-are-a-commons).
 
 ## Tools and runtime isolation
@@ -409,7 +410,7 @@ Read the archived sections before changing something that merely looks odd.
   historical narrative rather than reproducible claims. New measurements
   restore the rule.
 - `docs/saas-architecture.md` is a design boundary, not evidence that the local
-  product is multi-tenant. Trust counters remain runtime-local.
+  product is multi-tenant. Trust counters are platform-wide, never per organisation.
 - Keep outward-facing docs aligned with actual supported commands and packaged
   artifacts. Do not advertise development-only paths as release contracts.
 - `docs:check` now GENERATES what is tabular and ASSERTS what is prose. The
@@ -438,6 +439,7 @@ The frozen record contains the full dated reasoning behind these rules:
 - [GPU frame cost on an integrated GPU, measured 2026-09-06](docs/incidents/gpu-frame-cost-2026-09-06.md)
 - [a browser-verification phase on a Node server, twice — 2026-09-07](docs/incidents/notes-app-browser-phase-2026-09-07.md)
 - [verification replays on standing proof, the seeded counter — 2026-09-15](docs/incidents/verification-replay-2026-09-15.md)
+- [one registry, one trust: a run is a run — owner decision 2026-09-15](docs/platform-trust-2026-09-15.md)
 - [external code review](docs/code-review-2026-08-14.md)
 - [code review 2026-08-18](docs/code-review-2026-08-18.md)
 - [supervisor-held proof attestation (A1) design review 2026-08-22](docs/supervisor-attestation-a1-review-2026-08-22.md)

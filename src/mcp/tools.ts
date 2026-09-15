@@ -71,7 +71,7 @@ import { WriteRefused, registryRollback, skillDrop, skillMerge, skillReset, type
  * TIERS (`identity.ts`):
  *   viewer   — read an organisation's projects, runs and traces, plus the two
  *              platform commons the viz shows every signed-in role (since
- *              2026-09-15): the operator-owned registry (list, show, history)
+ *              2026-09-15): the one platform registry (list, show, history)
  *              and the skill catalog (list, show) — see `commonsForTier`
  *   member   — start, cancel and publish that organisation's runs
  *   admin    — the organisation's members and model defaults
@@ -162,9 +162,9 @@ type ToolResult = {
 /**
  * The registry and skill readers are the platform COMMONS, open to every tier
  * since 2026-09-15 exactly as the viz opens them (`registrySummaryFor` in
- * `src/viz/server.ts`). Their rows are already operator-filtered in storage,
- * so a project's private branches never ride along; what is NOT for a tenant
- * is the HOST PATH of the store or of the skills tree, so any tier below
+ * `src/viz/server.ts`): one registry, one trust, for every run on the
+ * platform (`docs/platform-trust-2026-09-15.md`). What is NOT for a tenant is
+ * the HOST PATH of the store or of the skills tree, so any tier below
  * platform gets the basename — enough to name the store, nothing about the
  * host's filesystem layout. The platform payload is byte-for-byte the old one.
  */

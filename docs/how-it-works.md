@@ -454,9 +454,10 @@ otherwise occur. They now share a transaction.
 **Recipes stay on disk, and that is a decision rather than an omission.** `SKILL.md` is the
 portable interchange format — it can be read, grepped, hand-edited and exported to other agent
 tooling verbatim. Sidecars carry skill counters and provenance. Project workspaces, traces and skills
-live below `orgs/<orgId>/projects/<projectId>/`; the operator paths above remain
-separate. Agent trust is still instance-global. The intended shared skill commons
-with per-organisation trust is a design boundary, not a shipped guarantee.
+live below `orgs/<orgId>/projects/<projectId>/`; the registry and the skills
+catalog are the platform's, one of each, and every run — the operator's or an
+organisation's — reads them and earns trust on them alike
+([`platform-trust-2026-09-15.md`](platform-trust-2026-09-15.md)).
 
 The machine-global MCP run lease uses `~/.atoma/mcp-run-lock.db`; private subscription
 profiles and their locks have their own operational storage. Supervisor verdicts
@@ -553,12 +554,11 @@ Recorded so nobody has to discover it in a demo:
 - **No full multi-tenancy.** The web console is open on loopback by default and has an optional
   multi-organisation login gate. A first login creates a personal organisation unless it redeems
   an invitation; a principal may join several organisations and choose an active one.
-  Authenticated projects, their run workspaces, traces and project skills are scoped to that
-  organisation for now, while a platform admin can read across organisations. Skills are
-  meant to become a commons shared across organisations, with trust earned per organisation;
-  the partitioning is containment, not the premise. The atom catalogue, atom
-  trust and lifecycle ledger remain instance-global, so this is not yet safe for mutually
-  untrusted organisations; see the dated boundary in
+  Authenticated projects, their run workspaces and traces are scoped to that
+  organisation, while a platform admin can read across organisations. The agent registry,
+  the skills catalog, their trust counters and the lifecycle ledger are ONE per platform by
+  decision (a run is a run), so this is not a deployment shape for mutually untrusted
+  organisations; see the dated boundary in
   [`saas-architecture.md`](saas-architecture.md).
 - **Self-hosting requires operator setup.** The repository includes a compiled
   deployment workflow and host templates, but deploying requires a configured host,

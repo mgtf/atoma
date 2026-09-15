@@ -117,8 +117,8 @@ list. These values come from the host snapshot, never a tenant prompt.
   preference level. Disconnect is refused while that principal has an active
   run, so credential deletion cannot race an already captured generation.
 
-- The door does NOT change the lifecycle settings a project run pins. Those
-  are stated once, under "What a tenant run may learn" below.
+- The door does NOT change what a project run may learn or execute. That is
+  stated once, under "What a tenant run may learn" below.
 
 ## Readers outside this subsystem
 
@@ -193,23 +193,23 @@ list. These values come from the host snapshot, never a tenant prompt.
   the point of the platform: a tenant's runs get cheaper as their project
   grows. It was off, and two delivered runs measured the cost of that —
   $0.59 spent, `learnedSkills: 0`, nothing carried forward.
-- `ATOMA_SKILLS_DIR` points at the host's GLOBAL catalog. New run receipts
-  persist this selected path, and launch authority compares it to that receipt.
-  Legacy receipts retain their recorded layout. The coordinator migrates old
-  project recipes with backups before admitting new work; bodies become common,
-  while project/hash-scoped metadata remains private to execution
+- `ATOMA_SKILLS_DIR` points at the host's ONE catalog, and `ATOMA_DB_PATH` at
+  the host's ONE registry: a tenant run reads and earns exactly what every
+  other run does ([platform trust record](../../docs/platform-trust-2026-09-15.md)).
+  New run receipts persist the selected skills path, and launch authority
+  (`assertProjectRunAuthority`) compares workspace, runs and skills paths to
+  that receipt before any writable handle — it gates the launch, never the
+  rows. Legacy receipts retain their recorded layout. The coordinator folds
+  old partitions with backups before admitting new work
   ([skill storage contract](../skills/AGENTS.md)).
-- PROMOTION and DETERMINISTIC DISPATCH stay off, and explicitly: a project run
-  is `--seed`ed from the previous delivered workspace, and a seeded workspace
-  is the maintenance-mode signal that enables promotion BY DEFAULT. Silence
-  would therefore promote tenant scripts to trusted executables as a side
-  effect of seeding. `--no-promote-skills` and `--no-direct-skills` also
-  travel as FLAGS, because those are the final word over both the environment
-  and the seed ([src/skills](../skills/AGENTS.md)).
-- The PREFILTER CACHE stays off for a different reason, and the difference
-  matters: it is the one lifecycle store that is not partitioned per project.
-  It lives in the shared product store, so one tenant's cached planning
-  decisions would be readable to the next. Partitioning it is its own change.
+- PROMOTION, DETERMINISTIC DISPATCH and the PREFILTER CACHE follow the same
+  defaults as any run on the host (a run is a run,
+  [platform trust record](../../docs/platform-trust-2026-09-15.md)): a seeded
+  workspace enables promotion, dispatch is on unless the host env says
+  `ATOMA_SKILL_DIRECT=0`, and the cache is the platform's. The coordinator
+  pins none of them and sends no veto flag; the one thing a tenant launch
+  insists on is `--container`. A host that wants a lifecycle stage off says
+  so in its own environment, for every run alike.
 - A measurement that depends on PROMOTION or deterministic dispatch therefore
   still cannot be run as a project run. Learning, now, can.
 - A FAILED run records what it cost. The outcome vocabulary is

@@ -106,7 +106,7 @@ async function freePorts(count) {
 function gatedStubs() {
   const principalId = '11111111-2222-3333-4444-555555555555';
   const projectId = 'aaaaaaaa-1111-4222-8333-bbbbbbbbbbbb';
-  // Registry is a member destination: the operator-owned store, named by its
+  // Registry is a member destination: the one platform store, named by its
   // basename only (the server redacts the host path for non-admins).
   const registry = { id: 'atoma', label: 'atoma', path: 'atoma.db', exists: true, counts: { 1: 1, 2: 0, 3: 0, total: 1 } };
   const sharedMolecule = {

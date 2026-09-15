@@ -1,8 +1,8 @@
 # Registry — AGENTS.md
 
 `src/registry/` owns the tier-keyed atom-type table: identity, names,
-ordinals, versions, provenance and trust counters. Identity is tier-keyed within
-an immutable owner; atom IDs remain globally unique.
+ordinals, versions, provenance and trust counters. There is ONE table for the
+whole platform; atom IDs are globally unique.
 
 Read [`AGENTS.md`](../../AGENTS.md) first: it holds the cross-cutting rules.
 Everything below is stated once, here, and is not repeated at the root.
@@ -15,24 +15,29 @@ Neighbours:
 - [`src/atoms`](../atoms/AGENTS.md) — branching and escalation
 - [`src/cli`](../cli/AGENTS.md) — the operator commands
 
-## Ownership
+## One registry, one trust
 
-- Every registry statement binds one owner: operator or `(orgId, projectId)`.
-  Model-authored prompts, descriptions, names, tools, history and trust are
-  project data, including escalation branches. No automatic shared-row fallback.
-- The runner resolves ownership from the current registered run, active project,
-  requesting member and host paths before providers or workspace setup, and
-  rechecks that authority on access. A model or environment project ID is not a grant.
-- Names are unique across tiers WITHIN an owner; UUID atom IDs stay globally
-  unique and skill namespaces stay keyed by that ID. Project ledger entities
-  use atom IDs, with owner and display name in detail; legacy operator entities
-  remain byte-honest. Registry operator readers never aggregate private types.
-- `openDb` backs up the whole SQLite file before atomically migrating legacy
-  rows and history to operator ownership. It never guesses a tenant from prose
-  or imports old rows into projects. Existing IDs, skills, traces, ledger and
-  caches are untouched. Legacy project recipes remain preserved but unattached;
-  admitting their old metadata requires an explicit attribution workflow.
-  Deployment/rollback procedure: [ownership record](../../docs/project-registry-ownership-2026-09-09.md).
+- A RUN IS A RUN (owner decision 2026-09-15,
+  [platform trust record](../../docs/platform-trust-2026-09-15.md)). The
+  operator's runs, every organisation's project runs and the benchmarks read
+  the same rows and bump the same counters. `AtomRegistry` takes a database
+  and nothing else; there is no owner, no per-caller predicate, no fallback.
+- What a tenant run still proves before any writable handle is that it IS the
+  run the host registered, on the host's recorded paths
+  (`assertProjectRunAuthority` in [src/projects](../projects/AGENTS.md)). That
+  check gates the launch, never the rows.
+- Names are unique across tiers in the one table; UUID atom IDs stay globally
+  unique and skill namespaces stay keyed by that ID. Ledger entities are type
+  names; the atom-id-keyed project events of the partitioned period stay in
+  the ledger as history and are not compared by `ledger check`.
+- `openDb` folds a store still partitioned by owner (2026-09-09 layout) back
+  into the platform: whole-file backup first, operator rows kept as they are,
+  same-name project rows ABSORBED with their counters added and the identity
+  mapping written to `atom_id_merges` (the skills catalog follows it), other
+  project rows kept whole with a fresh ordinal or `-<n>` suffix only on
+  collision. One immediate transaction; a failed fold leaves the store as it
+  was beside its backup. Superseded record, kept as evidence:
+  [ownership record](../../docs/project-registry-ownership-2026-09-09.md).
 
 ## Descriptions and bootstrap
 
@@ -58,7 +63,7 @@ Neighbours:
   LLM `overrideName` occupies a name without consuming its ordinal. The check
   belongs on the allocator that inserts, not on `branch` — only there does it
   also cover a name squatted ACROSS tiers (`atom_types.name` is UNIQUE across
-  tiers within its owner while the pools are per-tier) and a store that already
+  tiers while the pools are per-tier) and a store that already
   contains a squatter. Reserving the pool against `branch` instead was tried
   and reverted: it closed one tier of three and renamed branches to orphan
   `-2` names whose unsuffixed twin could never be issued.

@@ -4,10 +4,25 @@
 
 ### Changed
 
+- ONE registry, ONE skill catalog, ONE trust for the whole platform — a run is
+  a run (`docs/platform-trust-2026-09-15.md`). `atom_types` loses its owner
+  column; `openDb` folds a partitioned store back with a whole-file backup,
+  absorbing same-name project rows into the platform row with their counters
+  added (`atom_id_merges` records the identities) and keeping every other
+  project row whole. `SkillRegistry` loses its trust scope; the coordinator
+  and the runner fold `.trust/…` sidecars and absorbed-identity namespaces
+  into the catalog, setting aside what they displace. `AtomRegistry` and
+  `SkillRegistry` constructors take only their store. A tenant run still
+  proves it is the registered run (`assertProjectRunAuthority`). Text a
+  validator derives from one organisation's retrieval corpus and writes into a
+  prompt now reaches every organisation's next run; the corpus itself does not.
+  Execution follows: the coordinator no longer pins promotion, deterministic
+  dispatch or the prefilter cache off for project runs and sends no veto flag;
+  a tenant launch insists on `--container` and nothing else.
 - The Registry is a workspace destination for every signed-in role, as Skills
   became on 2026-09-15: `/api/registries` and `/api/registry/:id` answer
-  members and viewers with operator-owned rows and history only, the store's
-  host path reduced to its basename. Burn-in stays the platform admin's.
+  members and viewers, the store's host path reduced to its basename. Burn-in
+  stays the platform admin's.
 - The MCP commons readers follow: `atoma_registry_list`, `atoma_registry_show`,
   `atoma_registry_history`, `atoma_skills_list` and `atoma_skills_show` sit on
   the `viewer` tier, with `store` and `skillsDir` redacted to basenames below

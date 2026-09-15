@@ -17,7 +17,7 @@ import { retrievalObservations } from '../src/cli/retrievalObservations.js';
 import { parseRunLog } from '../src/cli/burnin.js';
 import { openDb } from '../src/registry/db.js';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
-import { resolveProjectRegistryOwner } from '../src/projects/runAuthority.js';
+import { assertProjectRunAuthority } from '../src/projects/runAuthority.js';
 import { ProjectStore } from '../src/projects/store.js';
 
 const repo = resolve(import.meta.dirname, '..');
@@ -98,10 +98,10 @@ describe('registered Haystack treatment', () => {
           import { readFileSync } from 'node:fs'; import assert from 'node:assert/strict';
           import { openProjectRunRetrievalAuthority } from './src/projects/retrievalLaunch.ts';
           import { openProjectRunHaystack } from './src/projects/retrievalHaystackLaunch.ts';
-          import { resolveProjectRegistryOwner } from './src/projects/runAuthority.ts';
+          import { assertProjectRunAuthority } from './src/projects/runAuthority.ts';
           import { createProjectRetrievalTool } from './src/tools/projectRetrieval.ts';
-          const input = JSON.parse(readFileSync(0, 'utf8')); const owner = resolveProjectRegistryOwner(input);
-          assert.equal(owner.kind, 'project');
+          const input = JSON.parse(readFileSync(0, 'utf8')); const authorized = assertProjectRunAuthority(input);
+          assert.equal(authorized.projectRunId, input.runId);
           if (input.treatment) {
             const prepared = openProjectRunHaystack(input, input.launch);
             await prepared.prepare({ signal: new AbortController().signal, deadlineAt: Date.now() + 10000 });
@@ -113,9 +113,12 @@ describe('registered Haystack treatment', () => {
         const response = JSON.parse(execFileSync(process.execPath, ['--import', 'tsx', '--input-type=module', '--eval', script], {
           cwd: repo, input: JSON.stringify(input), encoding: 'utf8', timeout: 10_000,
         }));
-        const db = openDb(input.dbPath!); const registry = new AtomRegistry(db, resolveProjectRegistryOwner(input as Parameters<typeof resolveProjectRegistryOwner>[0]));
-        expect(registry.listByTier(1)).toEqual([]);
-        registry.create(1, { description: 'Within-run learning', systemPrompt: 'Private trial', tools: [], params: {}, createdBy: 'trial' }); db.close();
+        assertProjectRunAuthority(input as Parameters<typeof assertProjectRunAuthority>[0]);
+        // One platform registry: every attempt of the campaign learns into the same rows.
+        const db = openDb(input.dbPath!); const registry = new AtomRegistry(db);
+        const before = registry.listByTier(1).length;
+        registry.create(1, { description: 'Within-run learning', systemPrompt: 'Shared trial', tools: [], params: {}, createdBy: 'trial' });
+        expect(registry.listByTier(1)).toHaveLength(before + 1); db.close();
         const seed = opts.extraArgs![opts.extraArgs!.indexOf('--seed') + 1]!;
         cpSync(seed, input.workspacePath!, { recursive: true });
         const inventory = JSON.parse(readFileSync(join(seed, 'CORPUS.json'), 'utf8'));

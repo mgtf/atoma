@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { migratePlatformSkills } from '../skills/migratePlatform.js';
+import { migratePlatformSkills, reconcilePlatformSkills } from '../skills/migratePlatform.js';
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -623,25 +623,14 @@ export function projectRunEnvironment(input: {
     // runs should get cheaper as their project grows. It was off, and two
     // delivered runs measured what that costs — $0.59 spent, `learnedSkills:
     // 0`, nothing carried into the next run.
-    //
-    // The host selects the global body catalog. The runner scopes runtime
-    // metadata by project and body hash; another project's trust never travels.
     ATOMA_SKILL_LEARN: '1',
     ATOMA_EVENT_SKILLS: '1',
-    // PROMOTION AND DETERMINISTIC DISPATCH STAY OFF. A project run is
-    // `--seed`ed from the previous delivered workspace, which is itself the
-    // maintenance-mode signal that enables promotion by default — so leaving
-    // these unset would promote tenant scripts to trusted executables as a
-    // side effect of the seeding. Promotion is what turns a learned recipe
-    // into something that RUNS without a model reading it, and that needs
-    // measurement this product has not done for tenant work.
-    ATOMA_SKILL_PROMOTE: '0',
-    ATOMA_SKILL_DIRECT: '0',
-    // The prefilter cache stays off for a different reason: it is the one
-    // lifecycle store that is NOT partitioned per project — it lives in the
-    // shared product store, so one tenant's cached planning decisions would be
-    // readable to the next. Partitioning it is its own change.
-    ATOMA_PREFILTER_CACHE: '0',
+    // A RUN IS A RUN (docs/platform-trust-2026-09-15.md): promotion,
+    // deterministic dispatch and the prefilter cache follow the same defaults
+    // as any run on this host — a seeded workspace enables promotion, direct
+    // dispatch is on unless the host says ATOMA_SKILL_DIRECT=0, and the cache
+    // is the platform's. Nothing is pinned to '0' here any more, and no veto
+    // flag travels below; a host that wants them off says so in its own env.
     // THE SECOND GATE'S INPUT. A tenant run's child re-checks, at launch,
     // that every machine-bound selector it can see was authorised HERE —
     // `assertTransportHonoursCredentials` in `src/run/providers.ts`.
@@ -898,6 +887,7 @@ export class ProjectRunCoordinator {
     this.root = path.resolve(options.projectsRoot ?? DEFAULT_PROJECTS_ROOT);
     this.skillsRoot = path.resolve(skillsDirPath(options.skillsDir, this.hostEnv));
     migratePlatformSkills({ dbPath: this.dbPath, projectsRoot: this.root, skillsRoot: this.skillsRoot });
+    reconcilePlatformSkills({ db: this.dbPath, skillsRoot: this.skillsRoot });
     this.driver = options.driver ?? spawnRun;
     this.acquireLease = options.acquireLease ?? acquireRunLease;
     this.publisher = options.publisher;
@@ -1194,13 +1184,10 @@ export class ProjectRunCoordinator {
         signal: controller.signal,
         cleanWorkspace: true,
         extraArgs: [
+          // Container isolation is the one thing a tenant launch insists on.
+          // No lifecycle veto travels: a project run promotes, dispatches and
+          // caches like any run (docs/platform-trust-2026-09-15.md).
           '--container',
-          // `--no-learn-skills` is gone; the two vetoes below remain, and they
-          // are the FINAL word over both the environment and the seed
-          // (`src/skills/AGENTS.md`). Without them a seeded workspace would
-          // re-enable promotion underneath the env above.
-          '--no-promote-skills',
-          '--no-direct-skills',
           ...(seedFrom ? ['--seed', seedFrom] : []),
         ],
         env: environment,

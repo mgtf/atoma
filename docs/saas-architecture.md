@@ -1,16 +1,15 @@
 # atoma SaaS architecture
 
-> **Implementation update — 2026-09-15:** Project runs now read and write one
-> platform skill catalog. Every authenticated user can browse it. Existing
-> project recipes are copied with backups; runtime skill trust is stored per
-> project and exact body hash. Shared guidance no longer requires a project
-> offer. Deterministic execution and promotion remain restricted in project
-> runs. This implements the user's global-knowledge requirement; it does not
-> claim the remaining storage-concurrency roadmap below is complete. Since the
-> same day, the operator-owned registry — the agent types every organisation's
-> runs start from — is browsable read-only by every authenticated user as well,
-> private project branches excluded and the store's host path redacted. The
-> dated review below describes the earlier partitioned implementation.
+> **Owner decision — 2026-09-15:** A RUN IS A RUN. There is one registry and
+> one skill catalog for the whole platform, and one set of trust counters that
+> the operator's runs and every organisation's runs read and move alike. The
+> per-owner registry of 2026-09-09 and the per-project skill trust of this
+> morning are folded back with backups (`docs/platform-trust-2026-09-15.md`).
+> Every authenticated user browses both; the store's host path is redacted.
+> Tenant runs learn, promote, dispatch and cache like any run, in a container.
+> The organisation bounds projects, workspaces, traces and
+> retrieval corpora — not knowledge, not trust. The dated review below
+> describes the earlier partitioned implementation and the premise it served.
 
 > **CURRENT REVIEW: 2026-09-08.**
 >
@@ -31,10 +30,10 @@
 > system. Do not use the existence of auth tables or projects as evidence that
 > the atom catalogue, trust state or lifecycle ledger are tenant-safe.
 >
-> The product premise, stated 2026-09-06, is Track B: skills are a commons
+> The product premise, stated 2026-09-06, was Track B: skills are a commons
 > shared across organisations, and the organisation bounds trust and execution
-> rights, not knowledge. Today's project-local partitioning is containment on
-> the way there, not the design (§2, *Skills are a commons*).
+> rights, not knowledge. On 2026-09-15 the owner went further: the organisation
+> bounds neither knowledge nor trust (`platform-trust-2026-09-15.md`).
 
 ## 1. Current state — 2026-09-08
 
@@ -59,10 +58,9 @@ dedicated-instance gate:
   belongs to exactly one organisation. Gated project, run, trace, workspace,
   GitHub installation and publication reads are scoped from the authenticated
   viewer, not from an organisation id supplied by the browser.
-- Project learning is enabled and isolated under the project's own skills
-  root. Promotion, deterministic skill dispatch and the shared prefilter cache
-  are disabled for project runs. The isolation is containment until the
-  body/trust split lands, not the intended resting place of a skill (§2).
+- Project learning, promotion, deterministic skill dispatch and the prefilter
+  cache follow the same defaults as any run, on the one platform catalog and
+  registry (owner decision 2026-09-15, `platform-trust-2026-09-15.md`).
 - The atom catalogue, atom trust counters and lifecycle ledger remain
   instance-global. They are opened from the same product SQLite store for every
   project run.
@@ -142,9 +140,8 @@ Project runs apply the current conservative tenant profile mechanically in
 - a run-specific workspace, trace directory and artifact manifest;
 - a project-specific skills directory;
 - skill learning and skill events on;
-- skill promotion and deterministic dispatch off, in both environment and CLI
-  flags so a maintenance seed cannot silently re-enable them;
-- the shared prefilter cache off;
+- skill promotion, deterministic dispatch and the prefilter cache at the
+  host's defaults, like any run (2026-09-15);
 - `ATOMA_TENANT_RUN=1` so the child process re-checks machine-bound transports.
 
 The Element worker container mounts only the workspace, uses a deny-by-default

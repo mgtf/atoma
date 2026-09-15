@@ -762,20 +762,18 @@ describe('viz auth gate (process level)', () => {
     expect((await fetch(`${base}/api/burnin`, { headers })).status).toBe(403);
   });
 
-  it('serves the operator-owned registry to every viewer, private branches and host path excluded', async () => {
+  it('serves the one platform registry to every viewer, host path excluded', async () => {
     const instance = tempInstance();
     const invitation = randomBytes(32).toString('base64url');
     createInvitation(instance.dbPath, invitation, 'org:viewer');
-    // One operator-owned type — the commons every organisation's runs start
-    // from — and one branch a project's own run authored, in the same store.
-    // A member reads the first and never learns the second exists, not even
-    // through the counts.
+    // ONE registry for every run on the platform: what a member reads here is
+    // what their own runs read and earn on (docs/platform-trust-2026-09-15.md).
     const seed = { tools: [], params: {}, createdBy: 'seed' };
     const db = openDb(instance.dbPath);
     try {
-      const orgId = db.prepare('SELECT org_id FROM auth_organisations').pluck().get() as string;
-      new AtomRegistry(db, { kind: 'operator' }).create(1, { ...seed, description: 'Shared capability', systemPrompt: 'Shared routing guidance' });
-      new AtomRegistry(db, { kind: 'project', orgId, projectId: randomUUID() }).create(1, { ...seed, description: 'Private price is 731 euros', systemPrompt: 'Private routing guidance' });
+      const registry = new AtomRegistry(db);
+      const shared = registry.create(1, { ...seed, description: 'Shared capability', systemPrompt: 'Shared routing guidance' });
+      registry.recordSuccess(shared.name);
     } finally { db.close(); }
     const provider = await startFakeProvider({ port: await freePort(), subject: 921 });
     const port = await freePort();
@@ -797,9 +795,8 @@ describe('viz auth gate (process level)', () => {
     const body = await dump.json() as { registry: { path: string }; types: Array<Record<string, unknown>> };
     expect(body.registry.path).toBe('atoma.db');
     expect(body.types).toEqual([
-      expect.objectContaining({ tier: 1, description: 'Shared capability', systemPrompt: 'Shared routing guidance' }),
+      expect.objectContaining({ tier: 1, description: 'Shared capability', systemPrompt: 'Shared routing guidance', successes: 1 }),
     ]);
-    expect(JSON.stringify(body)).not.toContain('Private');
     // Burn-in stays the operator's alone.
     expect((await fetch(`${base}/api/burnin`, { headers })).status).toBe(403);
   });

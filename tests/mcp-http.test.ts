@@ -1,5 +1,4 @@
 import { haystackTestEnvironment } from './helpers/haystack.js';
-import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -424,23 +423,20 @@ describe('the platform commons over MCP — registry and skill catalog', () => {
     }
   });
 
-  it('serves a viewer the operator-owned rows with host paths redacted, and the platform the whole payload', async () => {
+  it('serves a viewer the platform registry with host paths redacted, and the platform the whole payload', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'atoma-mcp-commons-'));
     dirs.push(dir);
     for (const k of ['ATOMA_DB_PATH', 'ATOMA_SKILLS_DIR']) saved[k] = process.env[k];
     const dbPath = join(dir, 'atoma.db');
     process.env['ATOMA_DB_PATH'] = dbPath;
     process.env['ATOMA_SKILLS_DIR'] = join(dir, 'skills');
-    // One operator-owned molecule — the commons — and one branch a project's
-    // own run authored, in the same store: the commons readers serve the first
-    // and never the second, whoever asks. A recipe hangs under the first.
+    // ONE platform registry (docs/platform-trust-2026-09-15.md): one molecule
+    // with a recipe under it, read by whoever asks.
     const seed = { tools: [], params: {}, createdBy: 'seed' };
     const shared = (() => {
       const db = openDb(dbPath);
       try {
-        const created = new AtomRegistry(db, { kind: 'operator' }).create(1, { ...seed, description: 'Shared capability', systemPrompt: 'Shared routing guidance' });
-        new AtomRegistry(db, { kind: 'project', orgId: randomUUID(), projectId: randomUUID() }).create(1, { ...seed, description: 'Private price is 731 euros', systemPrompt: 'Private routing guidance' });
-        return created;
+        return new AtomRegistry(db).create(1, { ...seed, description: 'Shared capability', systemPrompt: 'Shared routing guidance' });
       } finally { db.close(); }
     })();
     new SkillRegistry(join(dir, 'skills')).save(shared.atomId, { id: 'verify-browser-behaviour', description: 'Verify browser behaviour', whenToUse: 'When a browser interaction needs proof', kind: 'llm', body: 'Inspect the resulting state.' });
@@ -465,7 +461,6 @@ describe('the platform commons over MCP — registry and skill catalog', () => {
       const hostPath = JSON.stringify(dir).slice(1, -1);
       const list = await asViewer.callTool({ name: 'atoma_registry_list', arguments: {} });
       expect(list.structuredContent).toMatchObject({ store: 'atoma.db', types: [expect.objectContaining({ name: shared.name, description: 'Shared capability' })] });
-      expect(JSON.stringify(list)).not.toContain('Private');
       expect(JSON.stringify(list)).not.toContain(hostPath);
       const show = await asViewer.callTool({ name: 'atoma_registry_show', arguments: { name: shared.name } });
       expect(show.structuredContent).toMatchObject({ store: 'atoma.db', atom: { name: shared.name, systemPrompt: 'Shared routing guidance' } });

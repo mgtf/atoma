@@ -19,7 +19,6 @@ import { retrievalContext } from './helpers/projectRetrievalCorpus.js';
 import { ProjectRetrievalLaunchStore } from '../src/projects/retrievalLaunch.js';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
-import { resolveProjectRegistryOwner } from '../src/projects/runAuthority.js';
 import { closeStoreHandles } from '../src/core/stores.js';
 
 vi.mock('../src/run/toolBackend.js', async original => ({
@@ -96,20 +95,21 @@ describe('trusted retrieval injection through startTask', () => {
     expect(() => process.kill(Number(readFileSync(join(root, 'haystack.pid'), 'utf8')), 0)).toThrow();
   });
 
-  it('constructs a private registry through startTask for a synthetic benchmark control without a receipt', async () => {
+  it('runs a synthetic benchmark control on the one platform registry, and refuses nothing after cancellation', async () => {
     const root = environment(); const f = projectRetrievalFixture(root); const current = f.makeRun();
     for (const [key, value] of Object.entries({ ATOMA_TENANT_RUN: '1', ATOMA_RUN_ID: current.run.projectRunId,
       ATOMA_DB_PATH: f.dbPath, ATOMA_BUILD_WORKSPACE: current.layout.workspacePath, ATOMA_RUNS_DIR: current.layout.runsPath,
       ATOMA_SKILLS_DIR: current.layout.skillsPath, ATOMA_SKILL_PROMOTE: '0', ATOMA_SKILL_DIRECT: '0', ATOMA_PREFILTER_CACHE: '0' })) vi.stubEnv(key, value);
     resetHostLifecycleSnapshotForTests();
-    const db = openDb(f.dbPath); const operator = new AtomRegistry(db);
-    operator.create(1, { description: 'Legacy private material', systemPrompt: 'Must never enter a project', tools: [], params: {}, createdBy: 'legacy' });
+    const db = openDb(f.dbPath); const platform = new AtomRegistry(db);
+    // A row another run left behind is exactly what this run should start from.
+    platform.create(1, { description: 'Earlier shared material', systemPrompt: 'Shared by every run', tools: [], params: {}, createdBy: 'earlier-run' });
     vi.mocked(buildTierClients).mockReturnValue({ ollama: new MockLlmClient() });
     vi.mocked(containerToolBackend).mockImplementation(async opts => localToolBackend({ workspaceRoot: opts.workspaceRoot, logger: silentLogger() }));
     let captured: AtomRegistry | undefined;
     const seedCatalog = vi.fn((ctx: Parameters<typeof buildProfile.seedCatalog>[0]) => {
       captured = ctx.registry;
-      expect(ctx.registry.listByTier(1)).toEqual([]);
+      expect(ctx.registry.listByTier(1).map(type => type.systemPrompt)).toEqual(['Shared by every run']);
       ctx.registry.create(1, { description: 'Project price 731', systemPrompt: 'Project price 731', tools: [], params: {}, createdBy: 'project' });
       return buildProfile.seedCatalog(ctx);
     });
@@ -117,12 +117,11 @@ describe('trusted retrieval injection through startTask', () => {
       producedBy: { tier: 3, name: 'Meristem', viaFallback: false } });
     const handle = await startTask({ ...buildProfile, seedCatalog }, ['--container', '--no-promote-skills', '--no-direct-skills', 'Read workspace.']);
     await handle.settled;
-    const owner = resolveProjectRegistryOwner({ dbPath: f.dbPath, runId: current.run.projectRunId,
-      workspacePath: current.layout.workspacePath, skillsPath: current.layout.skillsPath, runsPath: current.layout.runsPath });
-    expect(new AtomRegistry(db, owner).listByTier(1)[0]?.systemPrompt).toBe('Project price 731');
-    expect(operator.listByTier(1)[0]?.systemPrompt).toBe('Must never enter a project');
+    // What the project run created is on the platform registry, beside what was
+    // there and beside the canonical types the profile bootstraps.
+    expect(platform.listByTier(1).map(type => type.systemPrompt)).toEqual(expect.arrayContaining(['Shared by every run', 'Project price 731']));
     f.projects.transitionProjectRun({ orgId: f.viewer.orgId, projectRunId: current.run.projectRunId, from: 'running', to: 'cancelled' });
-    expect(() => captured!.listByTier(1)).toThrow('access denied');
+    expect(captured!.listByTier(1).map(type => type.systemPrompt)).toContain('Project price 731');
     await handle.shutdown(); db.close();
   });
 
@@ -135,7 +134,7 @@ describe('trusted retrieval injection through startTask', () => {
       ATOMA_SKILL_PROMOTE: '0', ATOMA_SKILL_DIRECT: '0', ATOMA_PREFILTER_CACHE: '0' })) vi.stubEnv(key, value);
     resetHostLifecycleSnapshotForTests(); vi.mocked(buildTierClients).mockClear();
     await expect(startTask(buildProfile, ['--container', '--no-promote-skills', '--no-direct-skills', 'Read workspace.']))
-      .rejects.toThrow('project registry launch is unavailable or denied');
+      .rejects.toThrow('project run launch is unavailable or denied');
     expect(buildTierClients).not.toHaveBeenCalled(); expect(existsSync(join(root, 'wrong-workspace'))).toBe(false);
   });
 
