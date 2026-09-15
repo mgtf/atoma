@@ -1187,7 +1187,7 @@ describe('the nav rail', () => {
     expect(groups).toHaveLength(1);
     expect(groups[0]).toMatchObject({ group: 'workspace' });
     expect(rows.filter((row) => row.kind === 'item').map((row) => row.view)).toEqual([
-      'projects', 'runs', 'docs',
+      'projects', 'runs', 'skills', 'docs',
     ]);
   });
 
@@ -1211,7 +1211,7 @@ describe('the nav rail', () => {
     expect(ctx.root.children.some((child) => child.label === 'sidebar-band')).toBe(true);
     const nav = ctx.buttons.filter((button) => button.id.startsWith('nav.'));
     expect(nav.map((button) => button.id)).toEqual([
-      'nav.projects', 'nav.runs', 'nav.docs', 'nav.registry', 'nav.skills', 'nav.burnin',
+      'nav.projects', 'nav.runs', 'nav.skills', 'nav.docs', 'nav.registry', 'nav.burnin',
     ]);
     expect(nav.filter((button) => button.active).map((button) => button.id)).toEqual([
       'nav.skills',
@@ -1248,11 +1248,11 @@ describe('the nav rail', () => {
     expect(ctx.root.children.some((child) => child.label === 'sidebar-band')).toBe(false);
     const nav = ctx.buttons.filter((button) => button.id.startsWith('nav.'));
     expect(nav.map((button) => button.id)).toEqual([
-      'nav.projects', 'nav.runs', 'nav.docs', 'nav.registry', 'nav.skills', 'nav.burnin',
+      'nav.projects', 'nav.runs', 'nav.skills', 'nav.docs', 'nav.registry', 'nav.burnin',
     ]);
     expect(ctx.texts.some((text) => ['WORKSPACE', 'OPERATE'].includes(text.value))).toBe(false);
     expect(ctx.tooltips.map((tooltip) => tooltip.text)).toEqual([
-      'Projects', 'Runs', 'Docs', 'Registry', 'Skills', 'Burn-in',
+      'Projects', 'Runs', 'Skills', 'Docs', 'Registry', 'Burn-in',
     ]);
     for (const button of nav) {
       expect(button.x).toBe(GPU_LAYOUT.sidebarWidth - FOCUS_SIDEBAR_BUTTON_WIDTH);
@@ -1388,11 +1388,11 @@ describe('the nav rail', () => {
     expect(ctx.root.children.some((child) => child.label === 'sidebar-band')).toBe(true);
     const nav = ctx.buttons.filter((button) => button.id.startsWith('nav.'));
     expect(nav.map((button) => button.id)).toEqual([
-      'nav.projects', 'nav.runs', 'nav.docs', 'nav.registry', 'nav.skills', 'nav.burnin',
+      'nav.projects', 'nav.runs', 'nav.skills', 'nav.docs', 'nav.registry', 'nav.burnin',
     ]);
     expect(ctx.texts.some((text) => ['WORKSPACE', 'OPERATE'].includes(text.value))).toBe(false);
     expect(ctx.tooltips.map((tooltip) => tooltip.text)).toEqual([
-      'Projects', 'Runs', 'Docs', 'Registry', 'Skills', 'Burn-in',
+      'Projects', 'Runs', 'Skills', 'Docs', 'Registry', 'Burn-in',
     ]);
     for (const button of nav) {
       // Centred in the strip and fully inside it: the compact overview rail
@@ -1676,7 +1676,7 @@ describe('visibleViews', () => {
     // Gated member: no instance-global operator surfaces — the server 403s
     // them, so the tabs must not exist to poison the global data error.
     // Docs stays: it is static prose, not a fetch of gated data.
-    expect(visibleViews({ ...base, viewer })).toEqual(['projects', 'runs', 'docs']);
+    expect(visibleViews({ ...base, viewer })).toEqual(['projects', 'runs', 'skills', 'docs']);
     // The admin plane is FIVE destinations, one per job, not one tab holding
     // organisations, the journal, the ledger and the sentinel at once — and
     // the composer that used to ride at the foot of the organisation list is

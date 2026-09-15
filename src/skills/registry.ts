@@ -8,9 +8,10 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { randomUUID } from 'node:crypto';
-import { appendLedger, appendLedgerStrict } from '../core/ledger.js';
-import { join, resolve } from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
+import { appendLedger as appendLifecycle, appendLedgerStrict as appendLifecycleStrict } from '../core/ledger.js';
+import { dirname, join, relative, resolve } from 'node:path';
+import { skillNamespaceInfoSchema, type SkillNamespaceInfo } from '../contracts/skillCatalog.js';
 import type { Skill, SkillFrontmatter, SkillLanguage, SkillMeta, SkillProvenance } from './types.js';
 import { asStoredNamespace, type SkillNamespace } from './namespace.js';
 
@@ -62,8 +63,71 @@ export const REFUSAL_REASON_MAX_CHARS = 500;
 export class SkillRegistry {
   readonly rootDir: string;
 
-  constructor(rootDir = './skills') {
+  constructor(rootDir = './skills', private readonly trustScope?: string) {
     this.rootDir = resolve(rootDir);
+    if (trustScope) sanitise(trustScope);
+  }
+
+  /** Bodies are common; runtime trust is scoped and bound to exact body bytes. */
+  trustMetaPath(metaPath: string): string {
+    if (!this.trustScope) return metaPath;
+    const bodyPath = join(dirname(metaPath), 'SKILL.md');
+    const digest = createHash('sha256').update(existsSync(bodyPath) ? readFileSync(bodyPath) : '').digest('hex');
+    return join(this.rootDir, '.trust', this.trustScope, digest, relative(this.rootDir, metaPath));
+  }
+
+  registerNamespace(namespace: string, info: SkillNamespaceInfo): void {
+    const parsed = skillNamespaceInfoSchema.parse(info);
+    const dir = this.namespaceDir(namespace);
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, '_namespace.json');
+    const bytes = JSON.stringify(parsed);
+    if (existsSync(file) && readFileSync(file, 'utf8') === bytes) return;
+    const temp = `${file}.${randomUUID()}.tmp`;
+    writeFileSync(temp, bytes);
+    renameSync(temp, file);
+  }
+
+  namespaceInfo(namespace: string): SkillNamespaceInfo | null {
+    try {
+      return skillNamespaceInfoSchema.parse(JSON.parse(readFileSync(join(this.namespaceDir(namespace), '_namespace.json'), 'utf8')));
+    } catch { return null; }
+  }
+
+  private scopedEvent(event: Parameters<typeof appendLifecycle>[0]) {
+    if (!this.trustScope) return event;
+    const [namespace, id] = event.entity.split('/');
+    if (!namespace || !id) throw new Error('project skill events require a complete identity');
+    const metaPath = this.trustMetaPath(join(this.skillDir(namespace, id), '_meta.json'));
+    const entity = relative(this.rootDir, dirname(metaPath)).split('\\').join('/');
+    return { ...event, entity, detail: { ...event.detail, skill: event.entity, projectId: this.trustScope } };
+  }
+
+  private recordEvent(event: Parameters<typeof appendLifecycle>[0]) {
+    appendLifecycle(this.scopedEvent(event));
+  }
+
+  private recordEventStrict(event: Parameters<typeof appendLifecycleStrict>[0]) {
+    appendLifecycleStrict(this.scopedEvent(event));
+  }
+
+  /** Operator audit includes every retained, body-bound project counter. */
+  scopedCounterRecords(): Array<{ entity: string; meta: SkillMeta }> {
+    const records: Array<{ entity: string; meta: SkillMeta }> = [];
+    const walk = (dir: string) => {
+      if (!existsSync(dir)) return;
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const file = join(dir, entry.name);
+        if (entry.isDirectory()) walk(file);
+        else if (entry.isFile() && entry.name === '_meta.json') {
+          const read = readMetaChecked(file);
+          if (read.corrupt) throw new Error(`unreadable skill trust: ${file}`);
+          records.push({ entity: relative(this.rootDir, dir).split('\\').join('/'), meta: read.meta });
+        }
+      }
+    };
+    walk(join(this.rootDir, '.trust'));
+    return records;
   }
 
   /** Return the full directory holding all skills for an L1 molecule. */
@@ -88,10 +152,12 @@ export class SkillRegistry {
     metaPath: string,
     mutate: (current: SkillMeta) => SkillMeta | undefined
   ): SkillMeta | null {
+    metaPath = this.trustMetaPath(metaPath);
     const read = readMetaChecked(metaPath);
     if (read.corrupt) return null;
     const next = mutate(read.meta);
     if (next === undefined) return read.meta;
+    mkdirSync(dirname(metaPath), { recursive: true });
     writeMetaAtomic(metaPath, next);
     return next;
   }
@@ -121,7 +187,12 @@ export class SkillRegistry {
       try {
         const text = readFileSync(skillFile, 'utf8');
         const { frontmatter, body } = parseFrontmatter(text);
-        const meta = readMeta(join(skillDir, '_meta.json'));
+        const catalogMeta = readMeta(join(skillDir, '_meta.json'));
+        const scopedMeta = this.trustScope ? readMeta(this.trustMetaPath(join(skillDir, '_meta.json'))) : null;
+        const meta = scopedMeta ? { ...scopedMeta,
+          ...(catalogMeta.provenance ? { provenance: catalogMeta.provenance } : {}),
+          ...(catalogMeta.compiledGeneration ? { compiledGeneration: catalogMeta.compiledGeneration } : {}),
+          ...(catalogMeta.declaredWrites ? { declaredWrites: catalogMeta.declaredWrites } : {}) } : catalogMeta;
         const fallbackPath = join(skillDir, FALLBACK_FILENAME);
         const fallbackBody = existsSync(fallbackPath)
           ? readFileSync(fallbackPath, 'utf8').trim()
@@ -193,7 +264,7 @@ export class SkillRegistry {
     // A body rewrite changes the meaning of several metadata fields. Check
     // the sidecar BEFORE touching SKILL.md so a torn counter record cannot be
     // silently paired with a new body or normalised to 0/0.
-    if (this.mutateMeta(metaPath, () => undefined) === null) {
+    if ((this.trustScope && readMetaChecked(metaPath).corrupt) || this.mutateMeta(metaPath, () => undefined) === null) {
       throw new Error(`save: refusing to rewrite ${skill.id} while ${metaPath} is unreadable`);
     }
     const md = renderFrontmatter(
@@ -207,7 +278,14 @@ export class SkillRegistry {
       },
       skill.body
     );
-    writeFileSync(join(dir, 'SKILL.md'), md, 'utf8');
+    const bodyPath = join(dir, 'SKILL.md');
+    if (this.trustScope) {
+      const temp = `${bodyPath}.${randomUUID()}.tmp`;
+      try {
+        writeFileSync(temp, md, 'utf8');
+        renameSync(temp, bodyPath);
+      } finally { rmSync(temp, { force: true }); }
+    } else writeFileSync(bodyPath, md, 'utf8');
     // Preserve existing counters if a meta file is already there.
     // INTENTIONALLY DROP `promotionRefusedAt`: a save() means the body
     // changed (or the kind flipped). Sonnet's prior refusal was a
@@ -236,7 +314,11 @@ export class SkillRegistry {
     if (meta === null) {
       throw new Error(`save: ${metaPath} became unreadable during the rewrite`);
     }
-    appendLedger({
+    if (this.trustScope) {
+      writeMetaAtomic(metaPath, { successes: 0, failures: 0, updatedAt: meta.updatedAt,
+        ...(meta.provenance ? { provenance: meta.provenance } : {}) });
+    }
+    this.recordEvent({
       kind: 'skill-save',
       entity: `${l1Name}/${skill.id}`,
       detail: { kind: skill.kind, ...(provenance ? { mechanism: provenance.mechanism } : {}) },
@@ -287,7 +369,7 @@ export class SkillRegistry {
       updatedAt: at,
     }));
     if (next === null) return null;
-    appendLedger({
+    this.recordEvent({
       kind: 'promotion-refused',
       entity: `${l1Name}/${skillId}`,
       detail: { ...(generation ? { generation } : {}), ...(trimmed ? { reason: trimmed.slice(0, 160) } : {}) },
@@ -310,7 +392,7 @@ export class SkillRegistry {
       updatedAt: nowIso(),
     }));
     if (next === null) return 0;
-    appendLedger({
+    this.recordEvent({
       kind: 'direct-failure',
       entity: `${l1Name}/${skillId}`,
       detail: { streak: next.directFailures ?? 0 },
@@ -369,10 +451,11 @@ export class SkillRegistry {
    * itself only refuses a missing skill (returns false).
    */
   drop(l1Name: string, skillId: string): boolean {
+    if (this.trustScope) throw new Error('catalog deletion is operator-only');
     const dir = this.skillDir(l1Name, skillId);
     if (!existsSync(join(dir, 'SKILL.md'))) return false;
     rmSync(dir, { recursive: true, force: true });
-    appendLedger({ kind: 'skill-drop', entity: `${l1Name}/${skillId}` });
+    this.recordEvent({ kind: 'skill-drop', entity: `${l1Name}/${skillId}` });
     return true;
   }
 
@@ -387,10 +470,11 @@ export class SkillRegistry {
    * is already gone.
    */
   dropNamespace(ns: string): boolean {
+    if (this.trustScope) throw new Error('catalog deletion is operator-only');
     const dir = this.namespaceDir(ns);
     if (!existsSync(dir)) return false;
     rmSync(dir, { recursive: true, force: true });
-    appendLedger({ kind: 'skill-drop', entity: ns, detail: { namespace: true } });
+    this.recordEvent({ kind: 'skill-drop', entity: ns, detail: { namespace: true } });
     return true;
   }
 
@@ -411,6 +495,7 @@ export class SkillRegistry {
    * Returns the merged keeper, or null when either skill is missing.
    */
   merge(l1Name: string, keepId: string, absorbId: string): Skill | null {
+    if (this.trustScope) throw new Error('catalog merging is operator-only');
     if (keepId === absorbId) return null;
     const keepDir = this.skillDir(l1Name, keepId);
     const absorbDir = this.skillDir(l1Name, absorbId);
@@ -435,7 +520,7 @@ export class SkillRegistry {
       throw new Error(`merge: ${metaPath} became unreadable during the merge`);
     }
     rmSync(absorbDir, { recursive: true, force: true });
-    appendLedger({
+    this.recordEvent({
       kind: 'skill-merge',
       entity: `${l1Name}/${keepId}`,
       detail: { absorbed: absorbId },
@@ -495,6 +580,7 @@ export class SkillRegistry {
     /** Compiler-declared write paths, already cross-checked by the caller. */
     declaredWrites?: readonly string[];
   }): Skill {
+    if (this.trustScope) throw new Error('project skill promotion is disabled');
     const dir = this.skillDir(args.l1Name, args.skillId);
     const skillFile = join(dir, 'SKILL.md');
     if (!existsSync(skillFile)) {
@@ -552,7 +638,7 @@ export class SkillRegistry {
       args.scriptBody
     );
     writeFileSync(skillFile, md, 'utf8');
-    appendLedger({
+    this.recordEvent({
       kind: 'promote',
       entity: `${args.l1Name}/${args.skillId}`,
       detail: { language: args.language, ...(args.compiledGeneration ? { compiledGeneration: args.compiledGeneration } : {}) },
@@ -592,6 +678,7 @@ export class SkillRegistry {
    * those as "nothing to demote" rather than as errors.
    */
   demoteToLlm(l1Name: string, skillId: string): Skill | null {
+    if (this.trustScope) return null;
     const dir = this.skillDir(l1Name, skillId);
     const skillFile = join(dir, 'SKILL.md');
     if (!existsSync(skillFile)) return null;
@@ -619,7 +706,7 @@ export class SkillRegistry {
       kind: 'llm',
       body: fallbackBody,
     });
-    appendLedger({ kind: 'demote', entity: `${l1Name}/${skillId}` });
+    this.recordEvent({ kind: 'demote', entity: `${l1Name}/${skillId}` });
     return demoted;
   }
 
@@ -652,7 +739,7 @@ export class SkillRegistry {
       ...(cur.provenance ? { provenance: cur.provenance } : {}),
     }));
     if (meta === null) return null;
-    appendLedger({
+    this.recordEvent({
       kind: 'counters-reset',
       entity: `${l1Name}/${skillId}`,
       detail: { reason: 'reset' },
@@ -714,7 +801,7 @@ export class SkillRegistry {
     // append lands in the benign store>ledger direction. Same operator
     // discipline as reset/drop/merge: never against a live run — the
     // read-modify-write on _meta.json is not locked against one.
-    appendLedgerStrict({
+    this.recordEventStrict({
       kind: 'skill-counter-compensation',
       entity: `${l1Name}/${skillId}`,
       detail: { successes, failures, reason: args.reason.trim() },
@@ -735,6 +822,7 @@ export class SkillRegistry {
   listNamespaces(): SkillNamespace[] {
     if (!existsSync(this.rootDir)) return [];
     return readdirSync(this.rootDir)
+      .filter((entry) => !entry.startsWith('.'))
       .filter((entry) => {
         try {
           return statSync(join(this.rootDir, entry)).isDirectory();
@@ -757,7 +845,7 @@ export class SkillRegistry {
    */
   recordSuccess(l1Name: string, skillId: string, opts?: { via?: string }): void {
     if (!this.bump(l1Name, skillId, 'success')) return;
-    appendLedger({
+    this.recordEvent({
       kind: 'skill-success',
       entity: `${l1Name}/${skillId}`,
       ...(opts?.via && opts.via !== l1Name ? { detail: { via: opts.via } } : {}),
@@ -767,7 +855,7 @@ export class SkillRegistry {
   /** Bump the failure counter for a known skill (no-op if not found). */
   recordFailure(l1Name: string, skillId: string, opts?: { via?: string }): void {
     if (!this.bump(l1Name, skillId, 'failure')) return;
-    appendLedger({
+    this.recordEvent({
       kind: 'skill-failure',
       entity: `${l1Name}/${skillId}`,
       ...(opts?.via && opts.via !== l1Name ? { detail: { via: opts.via } } : {}),
@@ -1011,7 +1099,7 @@ function assertSkillMetaShape(value: unknown): asserts value is SkillMeta {
 const corruptMetaPaths = new Set<string>();
 
 /** `readMeta`, plus whether the file was unreadable rather than absent. */
-function readMetaChecked(path: string): { meta: SkillMeta; corrupt: boolean } {
+export function readMetaChecked(path: string): { meta: SkillMeta; corrupt: boolean } {
   corruptMetaPaths.delete(path);
   const meta = readMeta(path);
   return { meta, corrupt: corruptMetaPaths.has(path) };

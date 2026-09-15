@@ -170,12 +170,12 @@ function GpuAppContent({
     state.selectedRegistryId,
     state.view === 'registry' && operatorSurfaces
   );
-  const namespacesQuery = useSkillNamespaces(state.view === 'skills' && operatorSurfaces);
+  const namespacesQuery = useSkillNamespaces(state.view === 'skills' && apiReady);
   const namespaceNames = useMemo(
     () => (namespacesQuery.data ?? []).map((item) => item.l1Name),
     [namespacesQuery.data]
   );
-  const skillLists = useSkillLists(namespaceNames, state.view === 'skills' && operatorSurfaces);
+  const skillLists = useSkillLists(namespaceNames, state.view === 'skills' && apiReady);
   const selectedRunEvent = useMemo(
     () => runQuery.data?.events.find((event) => event.id === state.selectedEventId) ?? null,
     [runQuery.data, state.selectedEventId]
@@ -189,7 +189,7 @@ function GpuAppContent({
       ? { l1Name: runSkillNs, id: selectedRunEvent.skillId }
       : null;
   const skillSelection = state.view === 'skills' ? state.selectedSkill : runSkillSelection;
-  const skillDetailQuery = useSkillDetail(skillSelection, Boolean(skillSelection) && operatorSurfaces);
+  const skillDetailQuery = useSkillDetail(skillSelection, Boolean(skillSelection) && apiReady);
   const burninQuery = useBurnin(state.view === 'burnin' && operatorSurfaces);
   // The family guidance renders inside the project run form, so it is fetched
   // with the Projects view. It is supplementary copy, never gating: it is

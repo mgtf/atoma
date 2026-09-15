@@ -227,6 +227,8 @@ export const projectRunHostPathsSchema = z
     workspacePath: z.string().min(1).max(4_096),
     runsPath: z.string().min(1).max(4_096),
     logPath: z.string().min(1).max(4_096),
+    /** Global catalog selected by the host; absent on legacy run receipts. */
+    skillsPath: z.string().min(1).max(4_096).optional(),
   })
   .strict();
 

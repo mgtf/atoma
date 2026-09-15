@@ -302,7 +302,7 @@ load-bearing and they are stated once, where the call sites are.
 - `src/contracts/` owns shared runtime shapes. Define a schema once, infer
   types from it, and import it everywhere; do not duplicate interfaces.
 - `src/core/stores.ts` defines the primary product SQLite store for atom types,
-  atom trust, ledger, history, and prefilter cache. Skill `_meta.json` sidecars
+  atom trust, ledger, history, and prefilter cache. Skill metadata sidecars
   and the operational MCP lease DB are explicit exceptions; do not add another
   product store or silently migrate disposable cache data.
 - The registry is one tier-keyed table. Migrations, backups, skill namespaces,
@@ -336,8 +336,8 @@ operator lifecycle action is attributable.
 
 Skills are a platform commons by design: what one organisation's runs learn is
 meant to make every other organisation's runs cheaper. The organisation bounds
-TRUST and EXECUTION RIGHTS, never knowledge. Today's project-local partitioning
-is containment until the body/trust split lands, not the product premise; the
+TRUST and EXECUTION RIGHTS, never knowledge. Bodies are stored globally and
+visible to every signed-in user; project trust is bound to the body hash. The
 premise and its threat model are in
 [docs/saas-architecture.md](docs/saas-architecture.md#skills-are-a-commons).
 

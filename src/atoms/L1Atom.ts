@@ -208,6 +208,9 @@ export class L1Atom extends Atom {
     // about skills can omit the arg and get a skill-less atom.
     let skills: readonly Skill[] = [];
     if (skillRegistry) {
+      skillRegistry.registerNamespace(namespaceOf(type), {
+        name: type.name, tools: type.tools.map((tool) => tool.name),
+      });
       try {
         skills = skillRegistry.loadFor(namespaceOf(type));
       } catch {

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { migratePlatformSkills } from '../skills/migratePlatform.js';
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -13,6 +14,7 @@ import type {
 } from '../contracts/projects.js';
 import type { TierModelPins } from '../contracts/tierModels.js';
 import { PERSONAL_CODEX_PROFILE_ROOT_ENV } from '../core/codexHomeLease.js';
+import { skillsDirPath } from '../core/stores.js';
 import { LLM_PROVIDER_CATALOG, findProvider } from '../core/providerCatalog.js';
 import {
   ledgerTouchesAnySubscription,
@@ -97,6 +99,7 @@ export interface ProjectCoordinatorOptions {
   readonly hostEnv?: NodeJS.ProcessEnv;
   /** Host root whose layout is `orgs/<orgId>/projects/<projectId>/runs/<runId>`. */
   readonly projectsRoot?: string;
+  readonly skillsDir?: string;
   readonly driver?: ProjectRunDriver;
   readonly acquireLease?: RunLeaseAcquirer;
   readonly publisher?: ProjectRunPublisher;
@@ -621,11 +624,8 @@ export function projectRunEnvironment(input: {
     // delivered runs measured what that costs — $0.59 spent, `learnedSkills:
     // 0`, nothing carried into the next run.
     //
-    // What makes it safe here is `ATOMA_SKILLS_DIR` above: it points at
-    // `<projectRoot>/skills`, so what a run learns is partitioned PER PROJECT.
-    // Nothing crosses to another project, let alone another organisation, and
-    // the cross-tenant question stays where it belongs — a reviewed offer with
-    // a human gate (`docs/platform-skill-offer-review-2026-08-23.md`).
+    // The host selects the global body catalog. The runner scopes runtime
+    // metadata by project and body hash; another project's trust never travels.
     ATOMA_SKILL_LEARN: '1',
     ATOMA_EVENT_SKILLS: '1',
     // PROMOTION AND DETERMINISTIC DISPATCH STAY OFF. A project run is
@@ -869,6 +869,7 @@ export class ProjectRunCoordinator {
   private readonly dbPath: string;
   private readonly hostEnv: NodeJS.ProcessEnv;
   private readonly root: string;
+  private readonly skillsRoot: string;
   private readonly driver: ProjectRunDriver;
   private readonly acquireLease: RunLeaseAcquirer;
   private readonly publisher?: ProjectRunPublisher;
@@ -895,6 +896,8 @@ export class ProjectRunCoordinator {
     this.dbPath = path.resolve(options.dbPath);
     this.hostEnv = { ...(options.hostEnv ?? process.env) };
     this.root = path.resolve(options.projectsRoot ?? DEFAULT_PROJECTS_ROOT);
+    this.skillsRoot = path.resolve(skillsDirPath(options.skillsDir, this.hostEnv));
+    migratePlatformSkills({ dbPath: this.dbPath, projectsRoot: this.root, skillsRoot: this.skillsRoot });
     this.driver = options.driver ?? spawnRun;
     this.acquireLease = options.acquireLease ?? acquireRunLease;
     this.publisher = options.publisher;
@@ -1076,6 +1079,7 @@ export class ProjectRunCoordinator {
           workspacePath: candidatePaths.workspacePath,
           runsPath: candidatePaths.runsPath,
           logPath: candidatePaths.logPath,
+          skillsPath: this.skillsRoot,
         },
       });
     } catch (error) {
@@ -1108,7 +1112,7 @@ export class ProjectRunCoordinator {
     );
     const paths = {
       ...run.hostPaths,
-      skillsPath: layout.skillsPath,
+      skillsPath: run.hostPaths.skillsPath ?? layout.skillsPath,
       artifactManifestPath: layout.artifactManifestPath,
     };
     const subscriptionGrant = this.resolveSubscriptionGrant(input.principalId);

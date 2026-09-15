@@ -1,5 +1,14 @@
 # atoma SaaS architecture
 
+> **Implementation update — 2026-09-15:** Project runs now read and write one
+> platform skill catalog. Every authenticated user can browse it. Existing
+> project recipes are copied with backups; runtime skill trust is stored per
+> project and exact body hash. Shared guidance no longer requires a project
+> offer. Deterministic execution and promotion remain restricted in project
+> runs. This implements the user's global-knowledge requirement; it does not
+> claim the remaining storage-concurrency roadmap below is complete. The
+> dated review below describes the earlier partitioned implementation.
+
 > **CURRENT REVIEW: 2026-09-08.**
 >
 > This document is the architecture boundary for hosted atoma. It is organised

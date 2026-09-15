@@ -313,6 +313,9 @@ function gatedStubs() {
       updatedAt: '2026-08-20T00:00:00.000Z',
     }],
     [`/api/projects/${projectId}/runs`]: runs,
+    '/api/skills': [{ l1Name: 'shared-molecule', l1Label: 'Water', count: 1 }],
+    '/api/skills/shared-molecule': [{ id: 'verify-browser-behaviour', description: 'Verify browser behaviour with an observed interaction.', whenToUse: 'When a browser interaction needs verification.', kind: 'llm', successes: 0, failures: 0, updatedAt: '2026-09-15T00:00:00.000Z' }],
+    '/api/skills/shared-molecule/verify-browser-behaviour': { id: 'verify-browser-behaviour', description: 'Verify browser behaviour with an observed interaction.', whenToUse: 'When a browser interaction needs verification.', kind: 'llm', successes: 0, failures: 0, updatedAt: '2026-09-15T00:00:00.000Z', body: 'Establish the initial state. Activate the relevant control. Inspect the resulting state and report the observed evidence.' },
     // The Runs view auto-selects the newest index entry and loads its trace,
     // so these two stubs make `--view Runs` render the full run surface:
     // summary card, metric tiles, branch filter chips and the timeline.
@@ -655,16 +658,18 @@ try {
     }
 
     if (selectFirst) {
-      const spot = await page.evaluate(() => {
+      const prefix = view === 'Skills' ? 'skill.select.' : 'project.select.';
+      await page.waitForFunction((key) => globalThis.__ATOMA_GPU__?.hitTargets().some(entry => entry.id.startsWith(key)), { timeout: READY_TIMEOUT_MS }, prefix);
+      const spot = await page.evaluate((key) => {
         const handle = globalThis.__ATOMA_GPU__;
-        const row = handle?.hitTargets().find((entry) => entry.id.startsWith('project.select.'));
+        const row = handle?.hitTargets().find((entry) => entry.id.startsWith(key));
         if (!row || !handle.projectRendererPoint) return null;
         return handle.projectRendererPoint(
           row.x + row.width / 2,
           row.y + row.height / 2
         );
-      });
-      if (!spot) throw new Error('--select-first: no project row on screen');
+      }, prefix);
+      if (!spot) throw new Error('--select-first: no selectable row on screen');
       await page.mouse.click(spot.x, spot.y);
       await page.evaluate(() => new Promise((resolveWait) => setTimeout(resolveWait, 800)));
     }
@@ -700,7 +705,7 @@ try {
     }
     await page.screenshot({ path: outPath });
     const capturedViewport = page.viewport();
-    console.log(`viz screenshot: ${outPath} (${view}, ${authed ? 'gated' : 'ungated'}, camera ${cameraMode}${selectFirst ? ', first project selected' : ''}${notifications ? ', notification tray open' : ''}, ${capturedViewport.width}x${capturedViewport.height})`);
+    console.log(`viz screenshot: ${outPath} (${view}, ${authed ? 'gated' : 'ungated'}, camera ${cameraMode}${selectFirst ? ', first row selected' : ''}${notifications ? ', notification tray open' : ''}, ${capturedViewport.width}x${capturedViewport.height})`);
   } finally {
     await browser.close();
   }

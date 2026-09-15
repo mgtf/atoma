@@ -22,7 +22,9 @@ export interface ProjectRunPaths {
 export function projectRunPathsMatch(run: ProjectRun, input: ProjectRunPaths): boolean {
   return resolve(input.workspacePath) === resolve(run.hostPaths.workspacePath) &&
     resolve(input.runsPath) === resolve(run.hostPaths.runsPath) &&
-    resolve(input.skillsPath) === join(dirname(dirname(dirname(resolve(run.hostPaths.workspacePath)))), 'skills');
+    resolve(input.skillsPath) === (run.hostPaths.skillsPath
+      ? resolve(run.hostPaths.skillsPath)
+      : join(dirname(dirname(dirname(resolve(run.hostPaths.workspacePath)))), 'skills'));
 }
 
 /** Resolves before any writable handle or provider is opened, even with retrieval disabled. */

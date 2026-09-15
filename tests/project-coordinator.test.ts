@@ -162,14 +162,13 @@ describe('project run environment', () => {
     // Measured before this was on — two delivered runs, $0.59, learnedSkills 0.
     const env = runEnv({
       ...BASE,
-      skillsPath: '/control/projects/p1/skills',
+      skillsPath: '/control/skills',
       hostEnv: { PATH: '/bin', ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
     });
     expect(env['ATOMA_SKILL_LEARN']).toBe('1');
     expect(env['ATOMA_EVENT_SKILLS']).toBe('1');
-    // What makes that safe: skills are partitioned per PROJECT, so nothing
-    // learned here can reach another project, let alone another organisation.
-    expect(env['ATOMA_SKILLS_DIR']).toBe('/control/projects/p1/skills');
+    // The host selects the global catalog; runtime counters remain scoped.
+    expect(env['ATOMA_SKILLS_DIR']).toBe(resolvePath('/control/skills'));
     // PROMOTION stays off explicitly, because a project run is seeded from the
     // last delivered workspace and a seed enables promotion by default — so
     // silence here would promote tenant scripts as a side effect of seeding.
@@ -992,6 +991,7 @@ describe('ProjectRunCoordinator', () => {
       store: f.store,
       dbPath: f.dbPath,
       projectsRoot: f.root,
+      skillsDir: join(f.root, 'skills'),
       hostEnv: { ...haystackTestEnvironment(f.root), PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
       driver,
       acquireLease: async () => lease(),
@@ -1014,6 +1014,8 @@ describe('ProjectRunCoordinator', () => {
     );
     await coordinator.waitForIdle();
     expect(driver.mock.calls[0]?.[0].env?.['ATOMA_RUNS_DIR']).toBe(tracesDir);
+    expect(driver.mock.calls[0]?.[0].env?.['ATOMA_SKILLS_DIR']).toBe(join(f.root, 'skills'));
+    expect(f.store.getProjectRun(f.viewer.orgId, started.projectRunId)?.hostPaths.skillsPath).toBe(join(f.root, 'skills'));
     const failed = f.store.getProjectRun(f.viewer.orgId, started.projectRunId)!;
     expect(failed.status).toBe('failed');
     expect(failed.error).toMatch(/API key is invalid/);

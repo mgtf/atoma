@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS project_runs (
   workspace_path                TEXT NOT NULL,
   runs_path                     TEXT NOT NULL,
   log_path                      TEXT NOT NULL,
+  skills_path                   TEXT,
   trace_id                      TEXT,
   stats_json                    TEXT CHECK (stats_json IS NULL OR json_valid(stats_json)),
   artifact_manifest_json        TEXT CHECK (artifact_manifest_json IS NULL OR json_valid(artifact_manifest_json)),
@@ -248,6 +249,7 @@ interface ProjectRunRow {
   workspace_path: string;
   runs_path: string;
   log_path: string;
+  skills_path?: string | null;
   trace_id: string | null;
   stats_json: string | null;
   artifact_manifest_json: string | null;
@@ -350,6 +352,7 @@ function runFromRow(row: ProjectRunRow): ProjectRun {
       workspacePath: row.workspace_path,
       runsPath: row.runs_path,
       logPath: row.log_path,
+      ...(row.skills_path ? { skillsPath: row.skills_path } : {}),
     },
     ...(row.repository_base_json ? { repositoryBase: parseJson(row.repository_base_json, 'repository base') } : {}),
     traceId: row.trace_id,
@@ -510,6 +513,7 @@ export class ProjectStore {
       for (const [table, column] of [
         ['projects', 'repository_source_json'],
         ['project_runs', 'repository_base_json'],
+        ['project_runs', 'skills_path'],
         ['project_publications', 'pull_request_url'],
         ['project_publications', 'seed_commit_sha'],
       ]) {
@@ -1024,8 +1028,8 @@ export class ProjectStore {
         .prepare(
           `INSERT INTO project_runs (
              project_run_id, project_id, org_id, requested_by_principal_id, request_key,
-             goal, status, workspace_path, runs_path, log_path, created_at, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)`
+             goal, status, workspace_path, runs_path, log_path, skills_path, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`
         )
         .run(
           requestedRunId,
@@ -1037,6 +1041,7 @@ export class ProjectStore {
           paths.workspacePath,
           paths.runsPath,
           paths.logPath,
+          paths.skillsPath ?? null,
           now,
           now
         );

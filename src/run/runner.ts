@@ -787,7 +787,8 @@ export async function startTask(
     // accessor from this registry on demand; L2 runs a Haiku
     // skill-prefilter against the matched L1's skills before entering
     // each supervise loop.
-    const skillRegistry = new SkillRegistry(skillsDirPath());
+    const skillRegistry = new SkillRegistry(skillsDirPath(),
+      registryOwner.kind === 'project' ? registryOwner.projectId : undefined);
     console.log(`skills root: ${skillRegistry.rootDir}`);
 
     if (args.depth) {

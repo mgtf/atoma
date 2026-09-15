@@ -752,21 +752,19 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       // SHARED-CATALOG VISIBILITY (commit B): resolved ONCE per subtask,
       // here where l1Type and its tools are in hand. Donor namespaces are
       // those whose bucket the reader can EXECUTE (required ⊆ reader
-      // tools); orphaned namespaces (type gone from the registry) are
-      // never offered. Kill switch: ATOMA_SKILL_SHARED_CATALOG=0.
+      // tools). Published namespace metadata supplies cross-project donor
+      // capabilities without exposing private atom prompts. Kill switch:
+      // ATOMA_SKILL_SHARED_CATALOG=0.
       const readerToolNames = (l1Type.tools ?? []).map((t) => t.name);
       const visibleNs = visibleSkillNamespaces({
         home: namespaceOf(l1Type),
         readerToolNames,
         namespaces: this.skillRegistry.listNamespaces(),
-        // A namespace is an atom id now, so this MUST resolve by id: with
-        // getByName every donor came back null, every donor counted as an
-        // orphaned namespace, and the shared catalog emptied itself in
-        // silence. `getByAtomId` returns null only for a namespace whose atom
-        // really is gone, which is the case the null was meant to express.
+        // Resolve local atom ids first, then the public catalog metadata for
+        // donors learned by another project. Neither lookup exposes prompts.
         toolNamesFor: (ns: SkillNamespace) => {
           const t = this.registry.getByAtomId(ns);
-          return t ? (t.tools ?? []).map((x) => x.name) : null;
+          return t ? (t.tools ?? []).map((x) => x.name) : this.skillRegistry?.namespaceInfo(ns)?.tools ?? null;
         },
       });
       visibleNsForHooks = visibleNs;

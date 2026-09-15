@@ -1,10 +1,8 @@
 # Visualizer — AGENTS.md
 
-`src/viz/` owns the trace projection, the gated HTTP surfaces and web push,
-plus the GPU product client and its frozen MUI fallback.
+`src/viz/` owns trace projection, gated HTTP, web push and the GPU client (MUI is frozen).
 
-Read [`AGENTS.md`](../../AGENTS.md) first: it holds the cross-cutting rules.
-Everything below is stated once, here, and is not repeated at the root.
+Read [`AGENTS.md`](../../AGENTS.md) first for cross-cutting rules.
 Traces are immutable evidence: project them, never rewrite them.
 
 Neighbours:
@@ -505,7 +503,7 @@ npm run viz:mark-turn:analyze
   unset keys from checkout `.env`. Do not load `.env` inside `src/viz/server.ts`:
   process-level tests spawn it from the repository cwd with a cleaned env.
 - Behind the gate the instance-global operator surfaces (`/api/registries`,
-  `/api/registry/:id`, `/api/skills/*`, `/api/burnin`) answer ONLY the platform
+  `/api/registry/:id`, `/api/burnin`) answer ONLY the platform
   admin (403 otherwise) — an invitation must not read operator-level state (review 2026-08-20 §2.2). The admin also
   reads every organisation's projects and run traces, and manages organisations
   through `/api/admin/organisations` and `/api/admin/invitations` (same-origin
@@ -514,6 +512,8 @@ npm run viz:mark-turn:analyze
   gated members get org surfaces only; the ungated developer path is unchanged.
   Registry ownership is enforced in storage ([src/registry](../registry/AGENTS.md));
   these operator readers show only operator-owned rows and history.
+- Skills is a WORKSPACE destination for every authenticated role. `/api/skills` and namespace/detail readers
+  serve the global catalog using public namespace metadata. Trust stays project/hash scoped ([src/skills](../skills/AGENTS.md)).
 - `/mcp` is the ONE MCP (contract in [src/mcp](../mcp/AGENTS.md)): OAuth or
   API bearer token behind the gate, the operator on the ungated loopback, Host
   pinned either way. `/api/tokens` mints (POST, same-origin, journaled

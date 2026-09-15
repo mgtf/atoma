@@ -740,6 +740,7 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
     store: projectStore,
     dbPath,
     projectsRoot: PROJECTS_ROOT,
+    skillsDir: SKILLS_DIR,
     ...(publisher ? { publisher } : {}),
     // Describe the deliverable while the workspace is still this run's. The
     // adapter stays one call wide; `src/preview/service.ts` owns what a
@@ -1925,6 +1926,8 @@ function listSkillsForL1(l1Name: string): SkillSummary[] {
  */
 /** Resolve a namespace key back to the molecule's display name. */
 function displayNameForAtomId(atomId: string): string | null {
+  const published = skillRegistry.namespaceInfo(atomId);
+  if (published) return published.name;
   for (const reg of listRegistries()) {
     if (!reg.exists) continue;
     let db: Database.Database | null = null;
@@ -1944,6 +1947,8 @@ function displayNameForAtomId(atomId: string): string | null {
 }
 
 function toolNamesForAtomId(atomName: string): string[] {
+  const published = skillRegistry.namespaceInfo(atomName);
+  if (published) return published.tools;
   for (const reg of listRegistries()) {
     if (!reg.exists) continue;
     let db: Database.Database | null = null;
@@ -2658,8 +2663,6 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
     const operatorApi =
       pathname === '/api/registries' ||
       pathname.startsWith('/api/registry/') ||
-      pathname === '/api/skills' ||
-      pathname.startsWith('/api/skills/') ||
       pathname === '/api/burnin';
     if (operatorApi && !viewer.platformAdmin) {
       sendJson(res, 403, { error: 'platform admin required' });

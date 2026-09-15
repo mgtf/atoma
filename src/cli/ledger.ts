@@ -145,6 +145,14 @@ function main(): void {
       }
     }
   }
+  for (const { entity, meta } of skills.scopedCounterRecords()) {
+    skillCount++;
+    const p = projected.get(entity) ?? { successes: 0, failures: 0 };
+    if (meta.successes < p.successes || meta.failures < p.failures) {
+      impossible++;
+      console.log(`✗ IMPOSSIBLE  skill ${entity}: store ${meta.successes}✓/${meta.failures}✗ < ledger ${p.successes}✓/${p.failures}✗`);
+    } else if (meta.successes > p.successes || meta.failures > p.failures) expectedDrift++;
+  }
   console.log(`skills checked: ${skillCount} (dir: ${skills.rootDir})`);
 
   console.log('');

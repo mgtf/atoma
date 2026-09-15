@@ -15,6 +15,7 @@ import { GITHUB_COPY } from '../src/github/http.js';
 import { ProjectStore } from '../src/projects/store.js';
 import { projectRunHostLayout } from '../src/projects/coordinator.js';
 import { sleepInhibitorHint } from '../src/sentinel/resident.js';
+import { SkillRegistry } from '../src/skills/registry.js';
 
 /**
  * Process-level contract: real viz server, real SQLite and a local OAuth app.
@@ -723,6 +724,42 @@ describe('viz auth gate (process level)', () => {
     });
   }, 120_000);
 
+  it('migrates project skills at startup and serves their existing URLs to ordinary viewers', async () => {
+    const instance = tempInstance();
+    const invitation = randomBytes(32).toString('base64url');
+    createInvitation(instance.dbPath, invitation, 'org:viewer');
+    const projectsRoot = join(instance.root, 'projects');
+    const namespace = '5412001e-43f6-439c-b6ce-95bd4f41c21b';
+    const skillId = 'recover-missing-live-browser-proof';
+    const db = new Database(instance.dbPath);
+    try {
+      const orgId = db.prepare('SELECT org_id FROM auth_organisations').pluck().get() as string;
+      const principalId = db.prepare('SELECT principal_id FROM auth_principals').pluck().get() as string;
+      const project = new ProjectStore(db).createProject({ orgId, principalId,
+        project: { name: 'Learning', slug: 'learning', repositoryTarget: { installationId: '123', owner: 'owner', name: 'learning', visibility: 'private' } } });
+      const layout = projectRunHostLayout(projectsRoot, orgId, project.projectId, randomUUID());
+      new SkillRegistry(layout.skillsPath).save(namespace, { id: skillId, description: 'Restore browser proof', whenToUse: 'When live browser proof is missing', kind: 'llm', body: 'Inspect the browser probe result.' });
+    } finally { db.close(); }
+    const provider = await startFakeProvider({ port: await freePort(), subject: 920 });
+    const port = await freePort();
+    const base = `http://127.0.0.1:${port}`;
+    const running = startViz([...instance.args, '--port', String(port)], {
+      ...providerEnv(provider, base), ATOMA_PROJECTS_ROOT: projectsRoot,
+    });
+    await waitReady(running, `${base}/auth/whoami`);
+    expect((await fetch(`${base}/api/skills`)).status).toBe(401);
+    const jar = new CookieJar();
+    expect((await fetchWithJar(jar, `${base}/auth/login?provider=github&invite=${invitation}`)).status).toBe(200);
+    const headers = { cookie: jar.header(base)! };
+    expect(await (await fetch(`${base}/auth/whoami`, { headers })).json()).toMatchObject({ platformAdmin: false });
+    expect(await (await fetch(`${base}/api/skills`, { headers })).json()).toContainEqual({ l1Name: namespace, l1Label: namespace, count: 1 });
+    expect(await (await fetch(`${base}/api/skills/${namespace}`, { headers })).json()).toEqual([expect.objectContaining({ id: skillId })]);
+    const detail = await fetch(`${base}/api/skills/${namespace}/${skillId}`, { headers });
+    expect(detail.status).toBe(200);
+    expect(await detail.json()).toMatchObject({ body: 'Inspect the browser probe result.' });
+    expect((await fetch(`${base}/api/registries`, { headers })).status).toBe(403);
+  });
+
   it('reserves operator surfaces and the admin control plane to a CLI-granted platform admin', async () => {
     const instance = tempInstance();
     const benchmark = seedBenchmark(join(instance.runsDir, 'benchmarks'));
@@ -744,7 +781,8 @@ describe('viz auth gate (process level)', () => {
     expect(await whoamiBefore.json()).toMatchObject({ authenticated: true, platformAdmin: false });
     expect(await (await fetch(`${base}/api/runs`, { headers: cookie })).json()).toEqual([]);
     expect((await fetch(`${base}/api/runs/${benchmark.start.runId}`, { headers: cookie })).status).toBe(404);
-    for (const path of ['/api/registries', '/api/skills', '/api/burnin', '/api/admin/organisations']) {
+    expect((await fetch(`${base}/api/skills`, { headers: cookie })).status).toBe(200);
+    for (const path of ['/api/registries', '/api/burnin', '/api/admin/organisations']) {
       const refused = await fetch(`${base}${path}`, { headers: cookie });
       expect(refused.status).toBe(403);
     }

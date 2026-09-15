@@ -17,8 +17,17 @@ Neighbours:
 
 Skills follow learn → match/inject → earn credit → compile → trusted dispatch.
 
-- Skills live under owner namespaces on disk, keyed by atom id
-  (`skills/<atom-id>/`). Operator and MCP arguments go through
+- Skill bodies live in the PLATFORM `ATOMA_SKILLS_DIR`, under stable atom-id
+  namespaces (`skills/<atom-id>/`). `_namespace.json` publishes only the molecule
+  label and tool names (schema in `contracts/skillCatalog.ts`), so compatible
+  readers can reuse recipes without reading another project's atom prompts.
+  Project runtime metadata lives under `.trust/<project-id>/<body-sha256>/`;
+  body changes start fresh trust and ledger identities include that scope/hash.
+  Project promotion, direct dispatch, deletion and catalog merging stay disabled.
+  `migratePlatformSkills` backs up legacy project trees, copies bodies once,
+  preserves their counters in the original project's trust scope and leaves
+  source files untouched. Conflicting bodies at one identity refuse migration.
+  All signed-in users can browse the global catalog. Operator and MCP arguments go through
   `resolveMoleculeRef` (name or id → `{ atomId, name }`). Metadata
   sidecars are data: read them strictly before mutation and write
   atomically. Never turn corruption into valid zero counters.

@@ -193,15 +193,12 @@ list. These values come from the host snapshot, never a tenant prompt.
   the point of the platform: a tenant's runs get cheaper as their project
   grows. It was off, and two delivered runs measured the cost of that —
   $0.59 spent, `learnedSkills: 0`, nothing carried forward.
-- What makes it safe TODAY is PARTITIONING, not restraint: `ATOMA_SKILLS_DIR`
-  points at `<projectRoot>/skills`, so what a run learns belongs to that
-  project alone. Nothing reaches another project, let alone another
-  organisation, yet. That is containment, not the premise: skills are a
-  platform commons, and the organisation bounds trust and execution rights,
-  not knowledge ([the premise](../../docs/saas-architecture.md#skills-are-a-commons)).
-  Sharing a body arrives with the body/trust split; the human gate applies to
-  execution rights, i.e. compiled scripts and direct dispatch
-  ([offer review](../../docs/platform-skill-offer-review-2026-08-23.md)).
+- `ATOMA_SKILLS_DIR` points at the host's GLOBAL catalog. New run receipts
+  persist this selected path, and launch authority compares it to that receipt.
+  Legacy receipts retain their recorded layout. The coordinator migrates old
+  project recipes with backups before admitting new work; bodies become common,
+  while project/hash-scoped metadata remains private to execution
+  ([skill storage contract](../skills/AGENTS.md)).
 - PROMOTION and DETERMINISTIC DISPATCH stay off, and explicitly: a project run
   is `--seed`ed from the previous delivered workspace, and a seeded workspace
   is the maintenance-mode signal that enables promotion BY DEFAULT. Silence

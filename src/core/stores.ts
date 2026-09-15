@@ -47,8 +47,8 @@ export function storeDbPath(
 }
 
 /** Resolve the skills root: explicit flag → `ATOMA_SKILLS_DIR` → default. */
-export function skillsDirPath(explicit?: string): string {
-  return explicit ?? process.env['ATOMA_SKILLS_DIR'] ?? DEFAULT_SKILLS_DIR;
+export function skillsDirPath(explicit?: string, env: NodeJS.ProcessEnv = process.env): string {
+  return explicit ?? env['ATOMA_SKILLS_DIR'] ?? DEFAULT_SKILLS_DIR;
 }
 
 /**
