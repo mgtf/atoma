@@ -33,12 +33,18 @@ Neighbours:
   which has no organisations, shows the operator the operator tools and
   nothing tenant-shaped.
 - THE LADDER (`identity.ts`): `viewer` reads an organisation's projects, runs
-  and traces; `member` starts, cancels and publishes its runs; `admin` reads
-  the organisation's members and sets its model defaults; `platform` — the
+  and traces, plus the two platform commons the viz shows every signed-in role
+  (since 2026-09-15): the operator-owned registry (`atoma_registry_list`,
+  `_show`, `_history`) and the skill catalog (`atoma_skills_list`, `_show`) —
+  rows are operator-filtered in storage, and below `platform` the payload's
+  `store` and `skillsDir` are basenames, never host paths (`commonsForTier`);
+  `member` starts, cancels and publishes its runs; `admin` reads the
+  organisation's members and sets its model defaults; `platform` — the
   platform-admin flag, or the operator on the ungated loopback — everything
-  above plus operator runs, registry, skills, ledger, the operator corpus,
-  friction, the journal and every organisation. A platform admin READS every
-  organisation and WRITES only in its active one, exactly as the HTTP routes.
+  above plus operator runs, skill analytics (`stats`, `review`), the four
+  writes, ledger, the operator corpus, friction, the journal and every
+  organisation. A platform admin READS every organisation and WRITES only in
+  its active one, exactly as the HTTP routes.
 - ONE SESSION, ONE SERVER, ONE CALLER (`http.ts`). `initialize` authenticates
   the caller and builds a server holding exactly their tools; every later
   request must present the same caller or the session ends with a 401. Hiding

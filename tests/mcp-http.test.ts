@@ -1,4 +1,5 @@
 import { haystackTestEnvironment } from './helpers/haystack.js';
+import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -9,6 +10,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthStore, sha256Hex, type Viewer } from '../src/auth/store.js';
 import { closeStoreHandles } from '../src/core/stores.js';
 import { SkillRegistry } from '../src/skills/registry.js';
+import { AtomRegistry } from '../src/registry/atomRegistry.js';
+import { openDb } from '../src/registry/db.js';
 import { resetRunsForTest, startRun, type RunDriver } from '../src/mcp/run.js';
 import { FAMILIES_URI, operatorRunUri } from '../src/mcp/resources.js';
 import { McpHttpHost } from '../src/mcp/http.js';
@@ -174,9 +177,18 @@ describe('the catalogue by tier', () => {
     const asMember = names({ kind: 'principal', viewer: viewer('org:member'), tokenId: 't' }, TENANT_HOST);
     const asAdmin = names({ kind: 'principal', viewer: viewer('org:admin'), tokenId: 't' }, TENANT_HOST);
     const asPlatform = names({ kind: 'principal', viewer: viewer('org:viewer', true), tokenId: 't' }, TENANT_HOST);
-    expect(asViewer).toEqual(['atoma_families', 'atoma_projects_list', 'atoma_project_runs', 'atoma_run_status', 'atoma_run_trace', 'atoma_run_preview']);
-    expect(asMember).toEqual([...asViewer, 'atoma_project_create', 'atoma_run_start', 'atoma_run_cancel', 'atoma_publication_retry']);
-    expect(asAdmin).toEqual([...asMember, 'atoma_org_members', 'atoma_org_models']);
+    // The viewer ladder: the organisation's own readers plus the two platform
+    // commons the viz shows every signed-in role — registry and skill catalog.
+    expect(asViewer).toEqual([
+      'atoma_families', 'atoma_projects_list', 'atoma_project_runs', 'atoma_run_status', 'atoma_run_trace', 'atoma_run_preview',
+      'atoma_registry_list', 'atoma_registry_show', 'atoma_skills_list', 'atoma_registry_history', 'atoma_skills_show',
+    ]);
+    // Each rung adds exactly its own rows (the table interleaves the tiers).
+    const above = (lower: string[], upper: string[]) => upper.filter((name) => !lower.includes(name));
+    expect(asMember).toEqual(expect.arrayContaining(asViewer));
+    expect(above(asViewer, asMember)).toEqual(['atoma_project_create', 'atoma_run_start', 'atoma_run_cancel', 'atoma_publication_retry']);
+    expect(asAdmin).toEqual(expect.arrayContaining(asMember));
+    expect(above(asMember, asAdmin)).toEqual(['atoma_org_members', 'atoma_org_models']);
     // The tray needs the host's notification builder; this host has none, so
     // the platform ladder is the whole table minus that one row.
     expect(asPlatform).toEqual(MCP_TOOL_NAMES.filter((name) => !['atoma_notifications', 'atoma_benchmark_start'].includes(name)));
@@ -191,10 +203,16 @@ describe('the catalogue by tier', () => {
     expect(asOperator).toContain('atoma_operator_run_start');
     expect(asOperator).toContain('atoma_registry_list');
     expect(asOperator).toContain('atoma_run_trace');
-    // The readers and writes the roadmap owed, all platform-tier.
-    for (const owed of ['atoma_skills_show', 'atoma_ledger_tail', 'atoma_costs', 'atoma_registry_history', 'atoma_verdicts_list', 'atoma_verdict_show', 'atoma_sentinel_health', 'atoma_skill_reset', 'atoma_skill_drop', 'atoma_skill_merge', 'atoma_registry_rollback']) {
+    // The operator-only readers and writes the roadmap owed, all platform-tier:
+    // skill analytics and the four lifecycle writes included.
+    for (const owed of ['atoma_ledger_tail', 'atoma_costs', 'atoma_skills_stats', 'atoma_skills_review', 'atoma_verdicts_list', 'atoma_verdict_show', 'atoma_sentinel_health', 'atoma_skill_reset', 'atoma_skill_drop', 'atoma_skill_merge', 'atoma_registry_rollback']) {
       expect(asOperator).toContain(owed);
       expect(asAdmin).not.toContain(owed);
+    }
+    // The commons readers reach the operator too: one table, one row each.
+    for (const commons of ['atoma_registry_list', 'atoma_registry_show', 'atoma_registry_history', 'atoma_skills_list', 'atoma_skills_show']) {
+      expect(asOperator).toContain(commons);
+      expect(asViewer).toContain(commons);
     }
   });
 
@@ -243,14 +261,15 @@ describe('the HTTP host', () => {
     const client = await connect(url, 'member-token');
     const names = await toolNames(client);
     expect(names).toContain('atoma_run_start');
+    expect(names).toContain('atoma_registry_list');
     expect(names).not.toContain('atoma_org_members');
-    expect(names).not.toContain('atoma_registry_list');
+    expect(names).not.toContain('atoma_skills_stats');
     // Not registered on this session at all: the server answers "unknown tool",
-    // never the registry.
-    const refused = await client.callTool({ name: 'atoma_registry_list', arguments: {} });
+    // never the skill analytics.
+    const refused = await client.callTool({ name: 'atoma_skills_stats', arguments: {} });
     expect(refused.isError).toBe(true);
     expect(JSON.stringify(refused.content)).toMatch(/not found|unknown tool/i);
-    expect(JSON.stringify(refused.content)).not.toContain('molecule');
+    expect(JSON.stringify(refused.content)).not.toContain('threshold');
     await client.close();
   });
 
@@ -393,6 +412,78 @@ describe('operator writes over MCP — attributed and journaled', () => {
     expect(rollback.isError).toBe(true);
     expect(JSON.stringify(rollback.content)).toMatch(/refused/);
     await operator.close();
+  });
+});
+
+describe('the platform commons over MCP — registry and skill catalog', () => {
+  const saved: Record<string, string | undefined> = {};
+  afterEach(() => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  it('serves a viewer the operator-owned rows with host paths redacted, and the platform the whole payload', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-mcp-commons-'));
+    dirs.push(dir);
+    for (const k of ['ATOMA_DB_PATH', 'ATOMA_SKILLS_DIR']) saved[k] = process.env[k];
+    const dbPath = join(dir, 'atoma.db');
+    process.env['ATOMA_DB_PATH'] = dbPath;
+    process.env['ATOMA_SKILLS_DIR'] = join(dir, 'skills');
+    // One operator-owned molecule — the commons — and one branch a project's
+    // own run authored, in the same store: the commons readers serve the first
+    // and never the second, whoever asks. A recipe hangs under the first.
+    const seed = { tools: [], params: {}, createdBy: 'seed' };
+    const shared = (() => {
+      const db = openDb(dbPath);
+      try {
+        const created = new AtomRegistry(db, { kind: 'operator' }).create(1, { ...seed, description: 'Shared capability', systemPrompt: 'Shared routing guidance' });
+        new AtomRegistry(db, { kind: 'project', orgId: randomUUID(), projectId: randomUUID() }).create(1, { ...seed, description: 'Private price is 731 euros', systemPrompt: 'Private routing guidance' });
+        return created;
+      } finally { db.close(); }
+    })();
+    new SkillRegistry(join(dir, 'skills')).save(shared.atomId, { id: 'verify-browser-behaviour', description: 'Verify browser behaviour', whenToUse: 'When a browser interaction needs proof', kind: 'llm', body: 'Inspect the resulting state.' });
+
+    const callers: Record<string, McpCaller> = {
+      'viewer-token': { kind: 'principal', viewer: viewer('org:viewer'), tokenId: 'v' },
+      'platform-token': { kind: 'principal', viewer: viewer('org:owner', true), tokenId: 'p' },
+    };
+    const { url } = await listen((req) => {
+      const bearer = /^Bearer (.+)$/.exec(String(req.headers.authorization ?? ''))?.[1];
+      return bearer ? callers[bearer] ?? null : null;
+    }, TENANT_HOST);
+    const asViewer = await connect(url, 'viewer-token');
+    const asPlatform = await connect(url, 'platform-token');
+    try {
+      const names = await toolNames(asViewer);
+      for (const commons of ['atoma_registry_list', 'atoma_registry_show', 'atoma_registry_history', 'atoma_skills_list', 'atoma_skills_show']) expect(names).toContain(commons);
+      for (const operatorOnly of ['atoma_skills_stats', 'atoma_skills_review', 'atoma_registry_rollback', 'atoma_skill_drop']) expect(names).not.toContain(operatorOnly);
+
+      // The store is named by basename only: the host's filesystem layout is
+      // operator information. (The path is JSON-escaped, hence the slice.)
+      const hostPath = JSON.stringify(dir).slice(1, -1);
+      const list = await asViewer.callTool({ name: 'atoma_registry_list', arguments: {} });
+      expect(list.structuredContent).toMatchObject({ store: 'atoma.db', types: [expect.objectContaining({ name: shared.name, description: 'Shared capability' })] });
+      expect(JSON.stringify(list)).not.toContain('Private');
+      expect(JSON.stringify(list)).not.toContain(hostPath);
+      const show = await asViewer.callTool({ name: 'atoma_registry_show', arguments: { name: shared.name } });
+      expect(show.structuredContent).toMatchObject({ store: 'atoma.db', atom: { name: shared.name, systemPrompt: 'Shared routing guidance' } });
+      const history = await asViewer.callTool({ name: 'atoma_registry_history', arguments: { name: shared.name } });
+      expect(history.structuredContent).toMatchObject({ store: 'atoma.db' });
+      const skills = await asViewer.callTool({ name: 'atoma_skills_list', arguments: {} });
+      expect(skills.structuredContent).toMatchObject({ skillsDir: 'skills', namespaces: [{ l1: shared.name, l1Key: shared.atomId, skills: [expect.objectContaining({ id: 'verify-browser-behaviour' })] }] });
+      const skill = await asViewer.callTool({ name: 'atoma_skills_show', arguments: { l1: shared.name, id: 'verify-browser-behaviour' } });
+      expect(skill.structuredContent).toMatchObject({ skillsDir: 'skills' });
+      expect(JSON.stringify(skill.structuredContent)).toContain('Inspect the resulting state.');
+      expect(JSON.stringify(skill.structuredContent)).not.toContain(hostPath);
+
+      // The platform payload is the old one, host path included.
+      const whole = await asPlatform.callTool({ name: 'atoma_registry_list', arguments: {} });
+      expect(whole.structuredContent).toMatchObject({ store: dbPath });
+      const wholeSkills = await asPlatform.callTool({ name: 'atoma_skills_list', arguments: {} });
+      expect(wholeSkills.structuredContent).toMatchObject({ skillsDir: join(dir, 'skills') });
+    } finally { await asViewer.close(); await asPlatform.close(); }
   });
 });
 

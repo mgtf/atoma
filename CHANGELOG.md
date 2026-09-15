@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Changed
+
+- The Registry is a workspace destination for every signed-in role, as Skills
+  became on 2026-09-15: `/api/registries` and `/api/registry/:id` answer
+  members and viewers with operator-owned rows and history only, the store's
+  host path reduced to its basename. Burn-in stays the platform admin's.
+- The MCP commons readers follow: `atoma_registry_list`, `atoma_registry_show`,
+  `atoma_registry_history`, `atoma_skills_list` and `atoma_skills_show` sit on
+  the `viewer` tier, with `store` and `skillsDir` redacted to basenames below
+  `platform`. Skill analytics (`atoma_skills_stats`, `atoma_skills_review`),
+  the four lifecycle writes and the prompt surface stay platform-tier, and a
+  client that already saw these readers gets the same payload as before.
+
 ## v0.3.0 — 2026-09-08
 
 One model selector for every tier, runs as MCP tasks over a replayable SSE
