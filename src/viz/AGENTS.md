@@ -70,9 +70,9 @@ npm run viz:mark-turn:analyze
 - `prefersReducedMotion()` (`renderer/motion.ts`) is the only reduced-motion
   source in the GL client. Every animation system consults it and JUMPS to its
   final state — exit effects are skipped entirely, never left running.
-- The GPU client uses one Pixi context (WebGPU with WebGL fallback). Do not add
-  a second context for a tiny widget. Smoke tests assert exactly one canvas and
-  both backends.
+- The GPU client uses one Pixi context (WebGPU with WebGL fallback). Do not add a second context for a tiny widget. Smoke tests assert exactly one canvas and both backends.
+- The renderer stops its ticker when the document is hidden or loses focus. Camera draws are gated too;
+  background snapshots coalesce until focus returns, when the latest scene is rebuilt before animation resumes.
 - Keep GPU animation state out of React/Zustand hot paths. Use mutable samples
   read once per frame; do not rebuild the scene for pointer motion. A subtree
   that MUTATES EVERY FRAME draws into its own render group (`ctx.animatedLayer`,

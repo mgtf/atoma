@@ -816,6 +816,43 @@ try {
     // every arm here gates on `load` plus the app's own readiness attribute.
     await page.goto(`http://127.0.0.1:${port}/?atomaDiag=1`, { waitUntil: 'load' });
     await page.waitForSelector('.gpu-ui-host[data-gpu-backend]', { timeout: READY_TIMEOUT_MS });
+    await page.bringToFront();
+    await page.waitForFunction(() => globalThis.__ATOMA_GPU__?.app.ticker.started);
+    await page.evaluate(() => {
+      const { app } = globalThis.__ATOMA_GPU__;
+      globalThis.__ATOMA_ACTIVITY_PROBE__ = { ticks: 0, draws: 0 };
+      app.ticker.add(() => { globalThis.__ATOMA_ACTIVITY_PROBE__.ticks++; });
+      const render = app.renderer.render.bind(app.renderer);
+      app.renderer.render = (...args) => {
+        globalThis.__ATOMA_ACTIVITY_PROBE__.draws++;
+        return render(...args);
+      };
+    });
+    await page.waitForFunction(() => globalThis.__ATOMA_ACTIVITY_PROBE__.draws > 2);
+    const backgroundCover = await browser.newPage();
+    try {
+      await backgroundCover.bringToFront();
+      await page.waitForFunction(
+        () => !document.hasFocus() && !globalThis.__ATOMA_GPU__.app.ticker.started,
+        { polling: 50 }
+      );
+      const before = await page.evaluate(() => ({ ...globalThis.__ATOMA_ACTIVITY_PROBE__ }));
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const after = await page.evaluate(() => ({ ...globalThis.__ATOMA_ACTIVITY_PROBE__ }));
+      if (before.ticks !== after.ticks || before.draws !== after.draws) {
+        throw new Error(`inactive GPU work continued: ${JSON.stringify({ before, after })}`);
+      }
+      await page.bringToFront();
+      await page.waitForFunction(
+        (draws) => globalThis.__ATOMA_GPU__.app.ticker.started &&
+          globalThis.__ATOMA_ACTIVITY_PROBE__.draws > draws,
+        {}, after.draws
+      );
+      console.log('viz GPU background suspension: zero ticks/draws; foreground resumed');
+    } finally {
+      await backgroundCover.close();
+      await page.bringToFront();
+    }
     const rasteriser = await readRasteriser(page);
     const softwareRastered = SOFTWARE_RASTERISERS.test(rasteriser);
     await assertLiveMarkBead(page);

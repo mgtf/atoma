@@ -527,6 +527,22 @@ export class GpuRenderer {
   private avatarOrbsRetained = new Set<string>();
   private host: HTMLElement | null = null;
   private initialized = false;
+  private suspended = false;
+  private pendingSnapshot: GpuRenderSnapshot | null = null;
+
+  private readonly syncRenderActivity = () => {
+    const suspended = document.hidden || !document.hasFocus();
+    this.suspended = suspended;
+    if (suspended) {
+      this.app.stop();
+      return;
+    }
+    if (!this.initialized) return;
+    const pending = this.pendingSnapshot;
+    this.pendingSnapshot = null;
+    if (pending) this.render(pending, true);
+    this.app.start();
+  };
   private snapshot: GpuRenderSnapshot | null = null;
   /** The current bounded timeline window; dropped before scene teardown. */
   runsScroll: { origin: number; min: number; max: number; move: (offset: number) => void } | null = null;
@@ -1102,6 +1118,7 @@ export class GpuRenderer {
   };
 
   private readonly renderCameraFrame = () => {
+    if (this.suspended) return;
     // The mark has published this frame's optics. Idle chrome pays no field
     // tick, layout read or draw; an illuminated gem reuses the one receiver.
     this.setFarFieldActive(this.farFieldScenery || readMarkFieldLight().length > 0 ||
@@ -1174,6 +1191,7 @@ export class GpuRenderer {
     const antialias = params.get('atomaQuality') !== 'performance';
     try {
       await this.app.init({
+        autoStart: false,
         resizeTo: host,
         preference: forceWebGl ? ['webgl'] : ['webgpu', 'webgl'],
         antialias,
@@ -1187,6 +1205,7 @@ export class GpuRenderer {
       this.app.destroy();
       this.app = new Application();
       await this.app.init({
+        autoStart: false,
         resizeTo: host,
         preference: ['webgl'],
         antialias,
@@ -1346,6 +1365,10 @@ export class GpuRenderer {
       };
     }
     this.initialized = true;
+    window.addEventListener('focus', this.syncRenderActivity);
+    window.addEventListener('blur', this.syncRenderActivity);
+    document.addEventListener('visibilitychange', this.syncRenderActivity);
+    this.syncRenderActivity();
   }
 
   destroy() {
@@ -1357,6 +1380,12 @@ export class GpuRenderer {
     // destroyed Application (2026-08-27, 3.14). One frame wide, and reachable
     // every HMR reload. Nulling it here is what makes those guards false.
     this.snapshot = null;
+    this.pendingSnapshot = null;
+    this.suspended = true;
+    this.app.stop();
+    window.removeEventListener('focus', this.syncRenderActivity);
+    window.removeEventListener('blur', this.syncRenderActivity);
+    document.removeEventListener('visibilitychange', this.syncRenderActivity);
     this.runsScroll = null;
     this.cameraFrameUnsubscribe?.();
     this.cameraFrameUnsubscribe = null;
@@ -1439,6 +1468,12 @@ export class GpuRenderer {
    * it also samples saturates at vsync and cannot show this.
    */
   render(snapshot: GpuRenderSnapshot, forceRebuild = false) {
+    // Keep only the latest data while inactive; rebuilding can itself upload
+    // textures. Camera callbacks are gated separately from the Pixi ticker.
+    if (this.suspended) {
+      this.pendingSnapshot = snapshot;
+      return;
+    }
     const startedAt = performance.now();
     try {
       if (forceRebuild || !this.tryScrollRuns(snapshot)) this.renderScene(snapshot);

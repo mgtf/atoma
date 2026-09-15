@@ -1464,6 +1464,46 @@ describe('the nav rail', () => {
     expect(css).toMatch(/\.gpu-project-form\s*\{[\s\S]*?--gpu-overlay-top:\s*104px/);
   });
 
+  it('stops inactive rendering and rebuilds only the latest snapshot on return', () => {
+    let focused = true;
+    let hidden = false;
+    vi.stubGlobal('document', { get hidden() { return hidden; }, hasFocus: () => focused });
+    const renderer = new GpuRenderer();
+    const start = vi.fn();
+    const stop = vi.fn();
+    const internals = renderer as unknown as {
+      initialized: boolean;
+      app: unknown;
+      syncRenderActivity: () => void;
+      renderCameraFrame: () => void;
+      renderScene: (snapshot: GpuRenderSnapshot) => void;
+    };
+    internals.app = { start, stop };
+    internals.initialized = true;
+    const rebuild = vi.spyOn(internals, 'renderScene').mockImplementation(() => {});
+    try {
+      focused = false;
+      internals.syncRenderActivity();
+      expect(stop).toHaveBeenCalledOnce();
+      renderer.render(makeSnapshot({ view: 'runs' }));
+      const latest = makeSnapshot({ view: 'skills' });
+      renderer.render(latest);
+      // A camera callback must not reach the absent GPU renderer either.
+      expect(() => internals.renderCameraFrame()).not.toThrow();
+      expect(rebuild).not.toHaveBeenCalled();
+      hidden = true;
+      focused = true;
+      internals.syncRenderActivity();
+      expect(start).not.toHaveBeenCalled();
+      hidden = false;
+      internals.syncRenderActivity();
+      expect(rebuild).toHaveBeenCalledExactlyOnceWith(latest);
+      expect(start).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('breaks the end-of-transition identity guard BEFORE tearing the app down', () => {
     // 2026-08-27, 3.14. Two transition completions re-render from a
     // `requestAnimationFrame` guarded only by `this.snapshot === <the snapshot
