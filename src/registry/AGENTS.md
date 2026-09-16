@@ -50,6 +50,15 @@ Neighbours:
 
 - Registry descriptions are reusable capability labels, never task narratives.
   Route creation descriptions through `resolveCreationDescription`.
+- OPEN, measured not designed: the prefilter routes on the DESCRIPTION while
+  `atomBehaviorKey` deduplicates on the PROMPT, and they disagree. Same tool
+  signature means the same description by construction, so identities with
+  distinct prompts show the catalogue identical lines it cannot choose between,
+  and a validator patch splits an equivalent group permanently. `createOrReuse`
+  bounds the creation rate, not the catalogue. Evidence and the refuted
+  credit-loss hypothesis:
+  [the production catalogue, measured](../../docs/incidents/registry-catalogue-2026-09-16.md).
+  Do not design the reconciliation in the session that hits it.
 - Canonical bootstrap is idempotent and bucket-specific. Prompt/tool changes
   patch and reset trust only when content genuinely differs.
 

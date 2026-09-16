@@ -18,6 +18,14 @@ patches erased both counters, and automatic creation did not compare behavior.
 Tool identity alone does not prove equivalent workflows: instructions and
 parameters can distinguish useful specialists sharing the same elements.
 
+The store was queried on 2026-09-16, before any run executed against this
+change: [the production catalogue, measured](incidents/registry-catalogue-2026-09-16.md).
+It confirms the counts above, records that the ledger and the store agree
+exactly (no credit is lost at any rank), and shows the reuse rule collapsing
+one group of three while four historical molecules keep distinct prompts under
+a shared description. That last point is the limit this change did not reach
+and the measurement states as an open design question.
+
 ## Contract
 
 - Historical successes and failures survive future patches and rollbacks.
