@@ -66,8 +66,9 @@ The following claims are **not** supported:
 - isolation between mutually untrusted organisations;
 - a dedicated one-organisation deployment (self-signup creates organisations);
 - durable payer attribution for runs funded by API keys only;
-- platform-enforced quotas, metered rebilling, or a retention policy for
-  traces and workspaces.
+- platform-enforced run quotas or budgets, metered rebilling, or a retention
+  policy for traces and workspaces (preview admission is bounded per
+  organisation; runs are not).
 
 ### Ownership model
 
@@ -107,7 +108,7 @@ Current resource scopes:
 | Traces, workspaces, manifests | project/run | `projectRunHostLayout` stores them below `orgs/<org>/projects/<project>/runs/<run>`. |
 | Retrieval corpus | project | Only the project's own passages are searchable (`ownPassages` stays 0 for another project). A validator's paraphrase of a passage, written into a prompt or a description, is platform knowledge. |
 | Atom bodies and trust | platform | `atom_types` has no owner column; `AtomRegistry` takes a database and nothing else, and refuses an unfolded store. Readers keep `unfoldedRegistryPredicate` as a guard. |
-| Skill bodies and counters | platform filesystem | Learning, promotion, deterministic dispatch, drop and merge are available to every run. Counters live in `_meta.json`, read-modify-write, single writer by construction (one run at a time). |
+| Skill bodies and counters | platform filesystem | Learning, promotion, deterministic dispatch, drop and merge are available to every run. Counters live in `_meta.json`, whole-file read-modify-write. NOT single-writer: `atoma_skill_reset`, `_drop` and `_merge` are platform-tier MCP tools that take no run lease (`src/mcp/writes.ts` imports none), and the production viz server enables them (`operatorRuns: true`). A bearer token can mutate counters while a run is in flight. |
 | Lifecycle ledger | platform SQLite table | `lifecycle_events(seq, at, kind, entity, detail)`. Type counters are keyed by name again; the atom-id-keyed project events of the partitioned period stay as byte-honest history and are not compared. |
 | Platform events | organisation/project/run-aware | The control-plane audit journal carries nullable scope ids and a retention window (`ATOMA_EVENTS_RETENTION_DAYS`, default 90). |
 | Prefilter decisions | platform SQLite table | Content-addressed, transactional, read and written across every organisation's runs. The existence/volume oracle is accepted (Layer 4). |
@@ -312,13 +313,17 @@ Model-authored artifact paths are relative, `ToolSandbox`-mediated and confined
 to the workspace.
 
 **T6 — Every counter mutation is one atomic statement inside the required
-transaction.** *Deviation: skill counters in `_meta.json` are whole-object
-read/modify/write, safe only while one run at a time is the enforced
-topology (the MCP run lease). Closing it is Gate 0 work.*
+transaction.** *Two distinct deviations. (a) Skill counters in `_meta.json`
+are whole-file read/modify/write, and the run lease does not cover the
+platform-tier skill write tools, so a second writer is reachable today — this
+is FILE concurrency and Gate 0 does not fix it (W4). (b) Every registry write
+transaction is deferred, and `create` reads `usedOrdinals` before its INSERT —
+this is STORE concurrency and is fixed without Gate 0 (W4a).*
 
 **T7 — Every lifecycle event is attributable.** It carries a stable entity id
 plus project, run and actor when it arises in those scopes. *Deviation: the
-table has `at/kind/entity/detail` only.*
+table is `lifecycle_events(seq, at, kind, entity, detail)` — no organisation,
+project, run or actor column, and type entities are name-keyed.*
 
 **T8 — Raw traces never become learning input.** Traces contain prompts, tool
 I/O and workspace excerpts; only distilled bodies enter the catalogue.
@@ -384,7 +389,13 @@ production.
 
 ### Decision gate 0 — hardened SQLite or PostgreSQL
 
-Next, and blocking items W3, W4, W5 and W8 below.
+Next as a DECISION, and blocking W4 alone. The earlier claim that it also
+blocked W5, W6 and W8 did not survive verification: W5 is one additive table
+on the store that already holds `project_runs`, W6's plumbing is additive
+columns on an existing table, and W8 targets the systemd deployment running
+today rather than a packaged stack. Those three INFORM the decision — they
+measure the writer topology and prove the restore — without being blocked by
+it.
 
 | Criterion | Hardened SQLite | PostgreSQL |
 |---|---|---|
@@ -395,37 +406,54 @@ Next, and blocking items W3, W4, W5 and W8 below.
 | Backup/restore | coordinated file/WAL snapshot with restore drill | logical/physical backup with restore drill |
 | Failover | process/node recovery; no multi-node claim | explicit pool, failover and reconnection policy |
 | Development | local file stays simple | provisioned dev/test database, isolated fixtures |
-| Fit | a one-node product with one launcher process as the only other writer | a separate launcher service plus web node, or any horizontal growth |
+| Fit | a one-node product whose concurrent writers stay bounded and enumerated | writers that cannot be enumerated, or horizontal growth |
 
 The decision record must state: (1) maximum control-plane nodes and writer
 processes; (2) migration ownership and rollback/cutover policy; (3) allocation
 and counter transaction semantics; (4) backup, restore and disaster-recovery
 test; (5) local developer and CI provisioning; (6) the migration path for the
-existing store and skill sidecars. The separate launcher (W1) is a second
-writer of run state and must be counted in (1).
+existing store and skill sidecars.
+
+Point (1) must be answered against the MEASURED topology, not the intended
+one. Concurrent writers on one store file already exist: the viz server, the
+run child (the coordinator injects `ATOMA_DB_PATH` into it), the mender as a
+separate host service, operator CLIs, and the platform-tier MCP write tools.
+`src/projects/store.ts` says so in its own comment. Whether the launcher joins
+them is an OPEN DESIGN CHOICE, not a constraint: `src/launcher/docker.ts`
+imports no database, and the repository's precedent for run-slot state is a
+machine-local file (`~/.atoma/mcp-run-lock.db`), not the product store.
+Decision 6 settles it.
 
 ### Work items
 
 | # | Item | Status | Blocked by | Done when |
 |---|---|---|---|---|
-| **W1** | Separate launcher service | contract + in-process backend done | — | `DockerLauncher` runs in its own container behind a permissioned socket; the web image holds no `docker.sock` (D1). |
-| **W2** | Worker transport behind the launcher | not started | W1 design | The Element worker speaks a socket/network protocol issued by the launcher; `containerExecutor.ts` no longer owns attach/remove; `workerRunArgs` isolation assertions still pass (D2, D4). |
-| **W3** | Launcher-managed workspaces | not started | W1, Gate 0 | Workspace handles are volumes, not host paths; lease, TTL, bounded stop, reverse teardown and orphan reconciliation are launcher operations (D3, D4). |
-| **W4** | Skill counters out of `_meta.json` | not started | Gate 0 | Every counter, promotion and demotion mutation is one statement in one transaction with its ledger event (T6, R4, R8). |
-| **W5** | Durable payer ledger for every run | subscription-touching runs only | Gate 0 | The three-row `RunPayerLedger` is persisted for API-key-only runs too, queryable per organisation and per run (T10). |
-| **W6** | Scoped lifecycle attribution | not started | Gate 0 | `lifecycle_events` carries stable entity id, project, run and actor; type counters stop being name-keyed; integrity projections group by the same keys (T4, T7). |
-| **W7** | Web, launcher images and a reference stack | worker/preview/mender images exist | W1 | Two more image definitions, one compose/stack file, digest pins; boots on a clean Linux host. |
-| **W8** | Backup, restore, disaster recovery for a hosted store | `npm run backup` (dated, pruned, off-machine) | Gate 0 | A restore drill on the packaged stack, documented RPO/RTO, secret rotation procedure. The 2026-09-14 drill ([recovery-drill-2026-09-14.md](recovery-drill-2026-09-14.md)) covers the local store only. |
-| **W9** | Trace and workspace retention | platform events only (90 d) | decision 2 | A retention window for `orgs/<org>/projects/<project>/runs/<run>/` traces and workspaces, enforced by a job the operator can run and audit. |
-| **W10** | Quotas and cost ceilings per organisation | none | decision 3 | Per-organisation budget and concurrency limits enforced at run admission, visible in the console. |
-| **W11** | Break-glass cross-organisation read | ordinary `platform:admin` power | decision 1 | Explicit, attributable, journaled, time-bounded, with the customer-notification policy the owner chooses. |
+| **W0** | Close the launcher contract leak | not started | — | `src/tools/egressSidecar.ts` and `src/viz/server.ts` construct and call through `ContainerLauncher` only; `removeNetworkBefore` and `previewOwnership` are on the contract or gone. Until then W1 cannot be a transport swap. |
+| **W1** | Separate launcher service | contract + in-process backend done | W0 | `DockerLauncher` runs in its own container behind a permissioned socket; the web image holds no `docker.sock` (D1). |
+| **W2** | Worker transport behind the launcher | not started | W1; possibly W3 — a socket preserving `--network none` must be bind-mounted on a path both sides see, which is the workspace story (unverified) | The Element worker speaks a socket/network protocol issued by the launcher; `containerExecutor.ts` no longer owns attach/remove; `workerRunArgs` isolation assertions still pass (D2, D4). |
+| **W3** | Launcher-managed workspaces | not started | W1; Gate 0 only if leases persist in the product store (decision 6) | Workspace handles are volumes, not host paths; lease, TTL, bounded stop, reverse teardown and orphan reconciliation are launcher operations (D3, D4). |
+| **W4** | Skill counters out of `_meta.json` | not started | Gate 0 | Every counter, promotion and demotion mutation is one statement in one transaction with its ledger event (T6, R4). Gate 0 decides dialect and transaction mode, not placement — T6 already forces the counters into the store holding `lifecycle_events`. `save`, `promoteToScript`, `demoteToLlm` and `merge` become file+DB pairs no transaction covers, so the crash ordering must be re-derived, not ported. |
+| **W4a** | Registry write-transaction correctness | not started | — | All eleven registry write transactions are `.immediate()`; both product-store open paths set `busy_timeout` explicitly instead of inheriting the driver default; a regression allocates ordinals across connections and processes. This is R8 for the STORE, owed under either Gate 0 branch. It does NOT close `_meta.json` file concurrency — that is W4. |
+| **W5** | Durable payer ledger for every run | subscription-touching runs only, as a capped JSON blob in `platform_events` | — (the org-scoped cost READ surface waits on decision 3) | The three-row `RunPayerLedger` is persisted for API-key-only runs too, in the same transaction as the queued→running transition (T10). The coordinator resolves payers THROUGH `payerForSelector` — the contract's canonical rule, which today has no caller while the coordinator open-codes a copy. Removing the duplication means adopting the contract, not deleting it. |
+| **W6** | Scoped lifecycle attribution | not started | — for the additive columns; a backfill rule for the entity re-key | `lifecycle_events` carries organisation, project, run and actor; type counters stop being name-keyed; integrity projections group by the same keys (T4, T7). ORDERING CONSTRAINT: the migration lands on BOTH open paths at once — `appendLedger` swallows its own failure, so a column added on one path turns every append on the other into silent loss. |
+| **W7** | Web, launcher images and a reference stack | worker/preview/mender images exist; no `.dockerignore`, so the worker build sends the whole working tree as context | W1 for the web image — `src/viz/server.ts` constructs `DockerLauncher` in-process for previews, so a web container honouring D1 loses previews until W1 lands | Two more image definitions, one compose/stack file, digest pins, a `.dockerignore`; boots on a clean Linux host. |
+| **W8-a** | A restore drill valid on the deployed shape | `scripts/restore-drill.py` requires all six tiers and fails on any skip; `src/cli/backup.ts` resolves `archive` to `~/.atoma/archive`, a developer-machine path absent from the documented production env | — | The drill distinguishes a tier NOT APPLICABLE to a deployment from one expected and lost — ignoring `skipped` wholesale would make it falsely reassuring. It passes on a production-shaped fixture, which proves the fix; a real snapshot from the host is verified separately and proves more. The manifest records that `store.db` needs an externally held `ATOMA_SECRET_ENCRYPTION_KEY` to yield usable organisation keys, without containing it. |
+| **W8-b** | Hosted backup and disaster recovery | `npm run backup` (dated, pruned, off-machine); the 2026-09-14 drill ([recovery-drill-2026-09-14.md](recovery-drill-2026-09-14.md)) covers the local store only | W8-a, W7 | A restore drill on the packaged stack and documented RPO/RTO. Proving recovery requires retrieving the encryption key separately and decrypting under control; documenting the dependency is not that proof. Secret ROTATION is distinct from restoration and is its own work: there is no re-encryption implementation in `src/auth/`, and the AAD binds the key identity, so rotation means decrypt-under-old then re-encrypt-under-new for every row plus the GitHub token wrapping key. |
+| **W9** | Trace and workspace retention | platform events only (90 d); nothing sweeps run traces, workspaces or `lifecycle_events` | W8-a, decision 2 | A retention window for `orgs/<org>/projects/<project>/runs/<run>/` traces and workspaces, enforced by a job the operator can run and audit. The preview TTL (`idleMs`, `hardMs`) is a precedent for the shape, not an implementation. Strictly after W8-a: deleting run bytes before restoration is proven destroys the evidence the snapshot exists to keep. Decision 2 must also settle whether expiry drops the `project_runs` row or only the bytes — publications, verdicts and the run index reference it. |
+| **W10** | Quotas and cost ceilings per organisation | bounded admission exists for PREVIEWS only (`maxPerOrg: 2`, `maxGlobal: 4`, enforced in `PreviewManager.assertCapacity`) — a precedent for the shape, not an implementation of this item: there is no financial budget and no per-organisation run limit | W5 (budget half), decision 3 | Per-organisation budget and concurrency limits enforced at run admission, visible in the console. The budget half needs a durable payer record; the run-concurrency half has nothing to divide while the machine-global lease allows one run at a time. |
+| **W11** | Break-glass cross-organisation read | ordinary `platform:admin` power at five widening paths (`src/projects/service.ts:157,182`, `src/viz/server.ts:1679,1688`, `src/mcp/tools.ts:335`); none writes a journal row, `src/contracts/platformEvents.ts` has no cross-org read kind, and `auth_platform_admins` has no expiry column | decision 1 | Explicit, attributable, journaled, time-bounded, with the customer-notification policy the owner chooses. The capability is in use with no record today; decision 1 is independent of Gate 0 and does not wait for the sequence below. |
 | **W12** | Platform terms | none | decision 5 | Terms of use covering what a run contributes to and consumes from the commons; separate from AGPL-3.0. |
 | **W13** | Packaged-stack acceptance | `auth-release-smoke.mjs` (loopback IdP, temp store) | W1, W7 | Boots the stack; proves founder login, invitation, role enforcement, Element-workload isolation, delivery, restart, backup/restore and denied control-plane reachability from the worker network. |
-| **W14** | Shared-learning acceptance | `tests/project-retrieval-privacy.test.ts` characterises the leak | W13 | Two organisations on one stack: no cross-org trace/workspace/corpus read, and a recipe learned by one is dispatched by the other's next run. |
+| **W14** | Shared-learning acceptance | `tests/project-retrieval-privacy.test.ts` characterises the corpus side; nothing asserts cross-org skill reuse | W13 for the isolation half only | Two organisations on one stack: no cross-org trace/workspace/corpus read. The SHARED half — a recipe learned by one organisation dispatched by the other's next run — is assertable in one process since 2026-09-15 and needs no stack; it is the only mechanical proof that the decision was implemented and not merely documented. |
 
-Order: Gate 0 → W1 → W2 ∥ W4 ∥ W5 ∥ W6 → W3 → W7 → W13 → W14. W8–W12 depend on
-owner decisions and can be prepared in parallel; W9 and W10 need only the
-decision, not Gate 0.
+Order: **W8-a → W4a → W5 → W6** → Gate 0 → W4 → W0 → W1 → W2 → W3 → W7 → W13 →
+W14. The first four need no owner decision, and they give Gate 0 a measured
+writer topology and a proven restore to decide against.
+
+Outside that sequence: **decision 1 does not wait for it.** The cross-org
+exposure is standing, the reads are unjournaled, and the answer is independent
+of Gate 0. W9 follows W8-a and decision 2; W10 follows W5 and decision 3; W12
+needs only decision 5 and no engineering.
 
 ### Open owner decisions
 
@@ -439,6 +467,15 @@ decision, not Gate 0.
 5. Under which terms does an organisation's run contribute to and consume the
    commons? These are platform terms, separate from the repository's
    AGPL-3.0 licence. (W12)
+6. Does the launcher stay stateless? D4 assigns it leases and TTLs; if those
+   persist in the product store it becomes a Gate 0 writer, and if they persist
+   in a machine-local file as the run lease already does, the launcher arm
+   stays un-gated. (W1, W3, Gate 0 point 1)
+
+Decision 1 carries the largest standing exposure and the fewest dependencies:
+no Gate 0, no launcher, no schema. Taking it early avoids building W11 twice,
+since both the notification audience and the grant's time bound fall out of
+the answer.
 
 Closed since the previous review, by the 2026-09-15 decision: who approves
 global bodies (nobody — there is no gate); whether a dynamic atom can become a
