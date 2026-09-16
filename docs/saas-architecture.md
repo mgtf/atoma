@@ -1,435 +1,349 @@
-# atoma SaaS architecture
+# atoma hosted architecture
 
-> **Owner decision — 2026-09-15:** A RUN IS A RUN. There is one registry and
-> one skill catalog for the whole platform, and one set of trust counters that
-> the operator's runs and every organisation's runs read and move alike. The
-> per-owner registry of 2026-09-09 and the per-project skill trust of this
-> morning are folded back with backups (`docs/platform-trust-2026-09-15.md`).
-> Every authenticated user browses both; the store's host path is redacted.
-> Tenant runs learn, promote, dispatch and cache like any run, in a container.
-> The organisation bounds projects, workspaces, traces and
-> retrieval corpora — not knowledge, not trust. The dated review below
-> describes the earlier partitioned implementation and the premise it served.
-
-> **CURRENT REVIEW: 2026-09-08.**
+> **CURRENT REVIEW: 2026-09-16.** Reconciled against source at `76c041f`
+> after the owner decision of 2026-09-15 (*a run is a run*,
+> [`platform-trust-2026-09-15.md`](platform-trust-2026-09-15.md)). This review
+> records implementation state and available verification coverage, not a new
+> test run or a hosted deployment acceptance.
 >
-> This document is the architecture boundary for hosted atoma. It is organised
-> in four layers on purpose:
+> This document is the architecture boundary for hosted atoma. It has four
+> layers on purpose:
 >
 > 1. **Current state** is descriptive and dated.
 > 2. **Normative invariants** are constraints every implementation must
 >    satisfy; current deviations are named explicitly.
-> 3. **Roadmap** separates the dedicated Track A product from the multi-tenant
->    shared-learning Track B product.
-> 4. **Historical evidence** links the incidents, measurements and rejected
->    designs that established those rules.
+> 3. **Remaining work** is one ordered list with an owner-decision register.
+>    It replaces the earlier Track A / Track B roadmap.
+> 4. **Historical evidence** links the incidents, measurements, rejected
+>    designs and superseded premises that established the rules.
 >
-> The short verdict is: atoma now has a locally implemented, opt-in
-> multi-organisation control plane and an organisation-scoped project corpus.
-> It is neither a production SaaS deployment nor the Track B shared-learning
-> system. Do not use the existence of auth tables or projects as evidence that
-> the atom catalogue, trust state or lifecycle ledger are tenant-safe.
->
-> The product premise, stated 2026-09-06, was Track B: skills are a commons
-> shared across organisations, and the organisation bounds trust and execution
-> rights, not knowledge. On 2026-09-15 the owner went further: the organisation
-> bounds neither knowledge nor trust (`platform-trust-2026-09-15.md`).
+> The short verdict: atoma is a **single shared-learning instance** with a
+> multi-organisation control plane. One registry, one skill catalogue, one
+> trust state and one lifecycle ledger serve every run on the instance — the
+> operator's and every organisation's alike. Projects, workspaces, traces,
+> retrieval corpora and the right to start a run are organisation-scoped;
+> knowledge and trust are not. **Mutually distrusting organisations on one
+> instance is not a supported deployment shape**, and no work in Layer 3 aims
+> to make it one. What remains is the production boundary and the
+> operational substrate for the shape that IS supported.
 
-## 1. Current state — 2026-09-08
+## 1. Current state — 2026-09-16
 
-This reconciliation is based on source, schemas, contracts and test definitions
-at `6e9af3c`. It records implementation and available verification coverage,
-not a new test run or a hosted deployment acceptance.
+### What the product is
 
-### Status and claim boundary
-
-The authenticated product surface is substantially beyond the original
-dedicated-instance gate:
-
+- One instance holds one `atom_types` table, one `skills/` catalogue, one set
+  of trust counters and one `lifecycle_events` ledger. Every run — CLI, MCP,
+  operator viz, gated project run — reads and moves them. A store partitioned
+  by owner (2026-09-09) or a skill tree with per-project `.trust/` sidecars
+  (2026-09-15 morning) is folded back at `openDb` / `reconcilePlatformSkills`,
+  with a whole-file backup beside it.
 - `AuthStore` persists principals, provider identities, organisations,
   memberships, sessions, invitations, account model pins, organisation model
   defaults, encrypted organisation provider keys and non-secret personal
   subscription receipts.
 - An unknown provider subject logging in without an invitation creates a new
-  personal organisation. An invitation joins its target organisation. A
+  personal organisation; an invitation joins its target organisation. A
   principal may belong to several organisations and select an active one.
-  Therefore **one organisation per deployment is not mechanically enforced**.
-- A persisted product run belongs to exactly one project, and that project
-  belongs to exactly one organisation. Gated project, run, trace, workspace,
-  GitHub installation and publication reads are scoped from the authenticated
-  viewer, not from an organisation id supplied by the browser.
-- Project learning, promotion, deterministic skill dispatch and the prefilter
-  cache follow the same defaults as any run, on the one platform catalog and
-  registry (owner decision 2026-09-15, `platform-trust-2026-09-15.md`).
-- The atom catalogue, atom trust counters and lifecycle ledger remain
-  instance-global. They are opened from the same product SQLite store for every
-  project run.
-- The platform event journal is organisation/project/run-scoped; it does not
-  replace the unscoped lifecycle ledger.
+- A persisted product run belongs to exactly one project, and that project to
+  exactly one organisation. Gated project, run, trace, workspace, GitHub
+  installation and publication reads are scoped from the authenticated viewer,
+  never from an organisation id supplied by the browser.
+- Project runs learn, promote, dispatch deterministically and use the
+  prefilter cache at the host's defaults, like any run. Nothing is pinned to
+  `0` for a tenant run any more.
 
-The supported claim today is therefore:
+The supported claim today is:
 
-> atoma has a multi-organisation control plane with an organisation-scoped
-> project corpus and conservative, project-local learning.
+> atoma is a multi-organisation control plane over one shared-learning
+> instance: organisations own projects, workspaces, traces and retrieval
+> corpora; the registry, the skill catalogue, trust and the ledger are the
+> platform's and every run reads and writes them.
 
-The following claims are not supported:
+The following claims are **not** supported:
 
-- production hosted SaaS;
-- isolation between mutually untrusted organisations at every decision point;
-- safe or approved cross-organisation skill or atom-body sharing;
-- organisation-local atom trust;
-- an approved platform body catalogue;
-- metered platform-key rebilling or general end-user provider-subscription
-  passthrough beyond the explicit principal-owned Codex path below.
+- production hosted SaaS (no separate launcher, no web/launcher images, no
+  reference stack, no packaged-stack acceptance);
+- isolation between mutually untrusted organisations;
+- a dedicated one-organisation deployment (self-signup creates organisations);
+- durable payer attribution for runs funded by API keys only;
+- platform-enforced quotas, metered rebilling, or a retention policy for
+  traces and workspaces.
 
-### Current ownership model
+### Ownership model
 
 `Principal` is the internal actor. Provider subjects and email snapshots stay
 in the auth plane; product rows use `principal_id`. The schema supports human,
 service and system principals, although not every non-human writer has been
 migrated to a first-class principal yet.
 
-`Organisation` is the current authorization boundary and the target isolation
-and billing boundary. `Project` is optional as an organisation resource, but it
-is **mandatory for every persisted product run**. A future API may create a
-default project for convenience; storage still records a `project_id`.
+`Organisation` is the authorization boundary for projects and execution
+rights, and the billing boundary. `Project` is optional as an organisation
+resource but **mandatory for every persisted product run**.
 
 ```text
-Platform
-├── Organisation
-│   ├── Membership (principal × organisation × role)
-│   ├── Provider keys and model defaults
-│   └── Project
-│       ├── Project skills
-│       └── Run
-│           ├── Workspace
-│           ├── Trace
-│           ├── Declared artifact manifest
-│           └── Publication
-└── Instance-global substrate — not Track B safe yet
-    ├── Atom catalogue
-    ├── Atom trust counters
-    ├── Lifecycle ledger
-    └── Prefilter cache table
+Platform — shared by every run
+├── Atom registry (atom_types, atom_type_versions, trust counters)
+├── Skill catalogue (skills/<atom-id>/…, counters in _meta.json)
+├── Lifecycle ledger (lifecycle_events)
+├── Prefilter cache
+└── Organisation
+    ├── Membership (principal × organisation × role)
+    ├── Provider keys and model defaults
+    └── Project
+        ├── Retrieval corpus
+        └── Run
+            ├── Workspace
+            ├── Trace
+            ├── Declared artifact manifest
+            └── Publication
 ```
 
 Current resource scopes:
 
-| Resource | Current scope | Current behavior |
+| Resource | Scope | Behaviour today |
 |---|---|---|
 | Principals, identities, sessions | instance control plane | Provider identities join on `(provider, subject)`, never email. A session names one active organisation. |
 | Projects, project runs and cost | organisation | A run has one project and one requesting principal. `org:viewer` reads but cannot execute. |
-| Traces, workspaces and manifests | project/run | `projectRunHostLayout` stores them below `orgs/<org>/projects/<project>/runs/<run>`. |
-| Project skill bodies and counters | project filesystem | Learning is on. Promotion and deterministic dispatch are off. Nothing is offered to another project or organisation yet; the premise is that bodies travel and trust does not (§2). |
-| Atom bodies and trust | instance SQLite row | `atom_types.successes/failures` have no `org_id`. Dynamic atom types have no platform/org scope column. |
-| Lifecycle ledger | instance SQLite table | `lifecycle_events` has `at/kind/entity/detail` and no `org_id` or `store_id`. Atom entities remain name-keyed. |
-| Platform events | organisation/project/run-aware | The control-plane audit journal already carries nullable scope ids and retention. |
-| Prefilter decisions | instance SQLite table | Content-addressed and transactionally stored, but disabled for project runs because policy on the cross-org existence signal is not settled. |
-| Provider credentials | organisation or host, injected per run | Organisation keys are encrypted at rest. Selection follows account pin → organisation default → host default; the resolved run receives only its credential snapshot. |
-| Host subscription | operator exception | Per-tier `sub:` selectors require the platform-admin door, are limited to one operator-declared organisation and are re-authorised per run. |
-| Personal Codex subscription | principal | `org:member+` connects a private Codex profile. Only runs requested by that principal may resolve its exact profile generation; Codex is supported on L1/L2/L3. |
-| Operator CLI/MCP run corpus | instance operator scope | It remains separate from the gated project corpus and is not exposed as tenant data. |
+| Traces, workspaces, manifests | project/run | `projectRunHostLayout` stores them below `orgs/<org>/projects/<project>/runs/<run>`. |
+| Retrieval corpus | project | Only the project's own passages are searchable (`ownPassages` stays 0 for another project). A validator's paraphrase of a passage, written into a prompt or a description, is platform knowledge. |
+| Atom bodies and trust | platform | `atom_types` has no owner column; `AtomRegistry` takes a database and nothing else, and refuses an unfolded store. Readers keep `unfoldedRegistryPredicate` as a guard. |
+| Skill bodies and counters | platform filesystem | Learning, promotion, deterministic dispatch, drop and merge are available to every run. Counters live in `_meta.json`, read-modify-write, single writer by construction (one run at a time). |
+| Lifecycle ledger | platform SQLite table | `lifecycle_events(seq, at, kind, entity, detail)`. Type counters are keyed by name again; the atom-id-keyed project events of the partitioned period stay as byte-honest history and are not compared. |
+| Platform events | organisation/project/run-aware | The control-plane audit journal carries nullable scope ids and a retention window (`ATOMA_EVENTS_RETENTION_DAYS`, default 90). |
+| Prefilter decisions | platform SQLite table | Content-addressed, transactional, read and written across every organisation's runs. The existence/volume oracle is accepted (Layer 4). |
+| Provider credentials | organisation or host, injected per run | Organisation keys encrypted at rest. Selection is account pin → organisation default → host default; the run receives only its credential snapshot. |
+| Host subscription | operator exception | Per-tier `sub:` selectors need the platform-admin door, are limited to one operator-declared organisation and are re-authorised per run. |
+| Personal Codex subscription | principal | `org:member+` connects a private Codex profile; only that principal's runs may resolve its exact generation; Codex serves L1/L2/L3. |
+| Operator CLI/MCP run corpus | instance operator scope | Separate from the gated project corpus; not exposed as tenant data. |
 
 ### Implemented safeguards
 
-Project runs apply the current conservative tenant profile mechanically in
-`projectRunEnvironment` and `ProjectRunCoordinator`:
+`projectRunEnvironment` and `ProjectRunCoordinator` set, for every project run:
 
 - `ATOMA_REQUIRE_ISOLATION=1` and `ATOMA_CONTAINER=1`;
-- `ATOMA_EGRESS=0` unless a future reviewed product policy changes it;
+- `ATOMA_EGRESS=1` (isolated, proxied egress) unless the host snapshot says
+  `ATOMA_EGRESS=0`; `ATOMA_EGRESS_ALLOWLIST` comes from the host, never a
+  prompt;
 - a run-specific workspace, trace directory and artifact manifest;
-- a project-specific skills directory;
-- skill learning and skill events on;
-- skill promotion, deterministic dispatch and the prefilter cache at the
-  host's defaults, like any run (2026-09-15);
-- `ATOMA_TENANT_RUN=1` so the child process re-checks machine-bound transports.
+- `ATOMA_SKILL_LEARN=1`, `ATOMA_EVENT_SKILLS=1`; promotion, direct dispatch
+  and the prefilter cache at the host's defaults;
+- `ATOMA_TENANT_RUN=1` so the child re-checks that every machine-bound
+  selector it can see was authorised by the coordinator
+  (`assertTransportHonoursCredentials`), with `ATOMA_SUBSCRIPTION_TIERS`
+  naming exactly the authorised tiers;
+- `assertProjectRunAuthority`: the child proves it is the run the host
+  launched, on the paths the host recorded. It selects no rows.
 
 The Element worker container mounts only the workspace, uses a deny-by-default
 network, drops capabilities, sets `no-new-privileges` and applies resource
-bounds.
+bounds. Optional egress uses one internal network and one proxy sidecar per
+run; the control plane is not reachable from that network.
 
-The optional egress topology uses one internal network and one proxy sidecar per
-run; the control plane is not directly reachable from that network.
-
-Surrogate atom identity is implemented with a UUID `atom_id`. Skill namespaces
-derive from that id through `namespaceOf`, while operator surfaces resolve a
-display name. Path traversal through all-dot components and removed-identity
-resurrection are both fixed and regression-tested.
+Atom identity is a UUID `atom_id`; skill namespaces derive from it through
+`namespaceOf`, and operator surfaces resolve a display name. Path traversal
+through all-dot components and removed-identity resurrection are fixed and
+regression-tested.
 
 Provider construction consumes a per-run environment snapshot. Configuration
-errors throw `RunnerConfigError` instead of exiting the process. Machine-bound
-transports are refused for tenant work unless the parent explicitly authorised
-the platform-admin host-subscription exception or resolved the requesting
-principal's private Codex generation, and the child receives the exact
-authorised tier set. `RunPayerLedger` contains exactly three rows, L1, L2 and
-L3, each with its resolved selector, transport and payer; there is no base
-transport row. Today that full ledger is journaled when a run touches the host
-or requesting principal's subscription; pure organisation-key or host-key
-attribution remains transient. The shape lives in
-[`src/contracts/runPayers.ts`](../src/contracts/runPayers.ts); the subscription
-journal trigger is in `ProjectRunCoordinator` and the viz server.
+errors throw `RunnerConfigError`. `RunPayerLedger` has exactly three rows —
+L1, L2, L3 — each with selector, transport and payer. That ledger is journaled
+when a run touches the host or requesting principal's subscription
+(`onSubscriptionTransport` in `ProjectRunCoordinator` and the viz server);
+pure organisation-key or host-key attribution remains transient.
 
-Provider login remains identity only. It never grants inference entitlement.
-Per-run organisation or host API-key snapshots and the operator's deliberately
-narrow host-subscription exception are inference funding mechanisms. Personal
-Codex connection is a separate, explicit account-self-care flow: credentials
-remain in a principal-private provider profile and only that principal's runs
-may spend it. Codex supports all three tiers; L1 uses Atoma's host-side tool
-loop through `ToolSandbox` and the configured Element executor. Personal Claude
-subscription login remains unavailable pending
-the third-party approval Anthropic requires.
+Provider login is identity only and never grants inference entitlement.
+Personal Claude subscription login remains unavailable pending the third-party
+approval Anthropic requires.
+
+Atom trust is recoverable since 2026-09-15
+([`recoverable-trust-2026-09-15.md`](recoverable-trust-2026-09-15.md)):
+historical counters survive patches and rollbacks, one failure no longer
+excludes a type permanently, and automatic creation compares behaviour before
+cloning.
 
 ### Missing production substrate
 
-The model-authored Element worker has an OS boundary. The production
-control-plane/launcher boundary does not yet exist as a separate OS boundary.
-The closed `ContainerLauncher` contract and `DockerLauncher` backend are
-implemented for egress and preview profiles, including workspace issuance and
-orphan-removal primitives. The backend still runs inside the calling process;
-workspace handles still refer to host directories. The Element worker's
-attached stdio transport remains in `src/tools/containerExecutor.ts`, outside
-that launcher contract. These are implementation steps toward D1–D4, not
-evidence that the production boundary is satisfied. The current split and its
-limitations are recorded in
-[`src/launcher/AGENTS.md`](../src/launcher/AGENTS.md).
+The model-authored Element worker has an OS boundary. The
+control-plane/launcher boundary does not. `ContainerLauncher` is a closed
+typed contract and `DockerLauncher` implements it for egress and preview
+profiles, with workspace issuance and orphan-removal primitives — but the
+backend runs **inside the viz server process**, workspace handles are host
+directories, and the worker's attached stdio transport stays in
+`src/tools/containerExecutor.ts`, outside the contract
+([`src/launcher/AGENTS.md`](../src/launcher/AGENTS.md), *What is IN-PROCESS
+today*). "The launcher owns the images and the flags" is a code-organisation
+property, not yet a security boundary.
 
-The decided deployment target is Linux and Docker images with a separate
-launcher:
-
-- the web/control-plane container never mounts `docker.sock`;
-- the launcher is the only Docker API holder;
-- callers use a closed typed interface, never raw image names, commands,
-  environment maps, mount paths or Docker options;
-- workspaces become launcher-managed volumes;
-- leases, TTLs, orphan reconciliation and reverse-order teardown move behind
-  the launcher boundary;
-- the same boundary launches each run's Element worker and egress sidecar, and
-  result-preview workloads.
-
-That direction is recorded in
-[the Docker launcher decision](deployment-docker-launcher-2026-08-28.md).
-The separate launcher deployment is not implemented. Worker, preview and
-mender image definitions exist, but there is no web image, launcher image,
-reference hosted stack or migration to launcher-managed volumes.
-
-Other production gaps are:
-
-- no accepted product-store backend for multi-writer tenancy;
-- no trust split or platform body catalogue;
-- no hosted backup/restore and disaster-recovery contract;
-- no trace/workspace retention policy;
-- no platform-enforced quotas or metered rebilling;
-- no durable per-tier payer attribution for runs that touch only organisation
-  or host API keys;
-- `platform:admin` cross-org read is ordinary operator power today, not a
-  break-glass flow with customer notification;
-- no full packaged-stack acceptance covers the hosted
-  auth/projects/BYO/host-subscription control plane. `release:check` does include
-  a compiled auth smoke covering founder login, CLI invitation, member
-  admission, PKCE, MCP OAuth, session gating and logout; this is narrower than
-  Track A or Track B acceptance.
+Decided target ([launcher decision](deployment-docker-launcher-2026-08-28.md)):
+Linux, Docker images, one separate launcher service. The web container never
+mounts `docker.sock`; the launcher is the only Docker API holder; callers use
+closed profiles; workspaces are launcher-managed volumes; leases, TTLs, orphan
+reconciliation and reverse teardown live behind the launcher; the same boundary
+launches Element workers, egress sidecars and preview workloads. Images that
+exist: `worker`, `preview`, `mender`. Images that do not: `web`, `launcher`.
+There is no reference stack.
 
 ### The next code decision
 
-**The next code decision is hardened SQLite versus PostgreSQL.**
-
-The dated analysis and recommended PostgreSQL migration shape are recorded in
-[PostgreSQL migration analysis — 2026-09-02](postgresql-migration-analysis-2026-09-02.md).
-It is an input to this gate, not an accepted owner decision by itself.
-
-It precedes the trust split. `atom_trust`, `skill_trust`, platform body,
-approval and scoped lifecycle-event tables must not be added under a
-“temporary” backend assumption. Every table created before the choice adds a
-second schema, migration, fixture set, backup story and cutover path.
-
-Track A can justify hardened SQLite if it deliberately remains a one-node,
-bounded-writer product. Track B, multiple control-plane nodes or database-level
-tenant concurrency strongly favour PostgreSQL. This is a topology decision,
-not a query-syntax preference; Layer 3 defines the decision gate.
+**Gate 0: hardened SQLite versus PostgreSQL.** The dated analysis and the
+recommended migration shape are in
+[PostgreSQL migration analysis — 2026-09-02](postgresql-migration-analysis-2026-09-02.md);
+it is an input, not an accepted owner decision. What it gates has narrowed
+since 2026-09-15: there is no trust split to build on it. It gates (a) moving
+skill counters out of `_meta.json` into atomic statements, (b) durable payer
+attribution for API-key runs, (c) scoped lifecycle attribution, and (d) any
+second writer — a separate launcher service, a second control-plane node, or
+concurrent runs. Every table created before the choice adds a second schema,
+migration, fixture set, backup story and cutover path.
 
 ## 2. Normative invariants
 
-This layer defines the accepted constraints for either roadmap track; it does
-not claim that the current implementation already satisfies them. Layers 1
-and 3 name the gaps. New work must not deepen those gaps. A future design may
-change an invariant only by naming the threat it replaces and providing
-stronger evidence. “The code happens to work this way today” is not such
-evidence.
+Constraints every implementation must satisfy. Layer 1 and Layer 3 name the
+current deviations; new work must not deepen them. An invariant changes only
+by naming the threat it replaces and providing stronger evidence. "The code
+happens to work this way today" is not such evidence.
 
 ### Tenancy, identity and authorization
 
-- The organisation is the maximum trust and isolation boundary. A project may
-  be stricter; no runtime trust signal may be broader.
+- The organisation bounds projects, workspaces, traces, retrieval corpora and
+  execution rights. It bounds nothing about the registry or the skills.
 - Product data references an internal principal. Provider subjects and email
   claims do not flow into domain keys or paths.
 - Identities link only on `(provider, provider_subject)`. Email is a display
-  snapshot, never an automatic join key.
+  snapshot, never a join key.
 - Provider login is an identity signal, never an inference entitlement.
-- Read of costs is not authority to execute. `org:viewer` cannot start or
+- Reading costs is not authority to execute. `org:viewer` cannot start or
   cancel a run.
 - If platform-admin cross-org read survives, it is break-glass: explicit,
   attributable, audited and subject to a product decision on customer
-  notification.
+  notification. Today it is ordinary operator power.
 
 ### Skills are a commons
 
-Stated 2026-09-06. It replaces the earlier working assumption that skills are
-partitioned by organisation and that cross-organisation sharing is an
-exception. The threat evidence in §4 is unchanged; this premise is compatible
-with it because what the attack chain transfers is execution rights, and
-execution rights are exactly what does not travel.
+Stated 2026-09-06, amended 2026-09-15. The 2026-09-06 form — bodies travel,
+trust is earned again by each organisation — is superseded: **a run is a run**.
 
-- **Skills are a platform commons.** What one organisation's runs learn is
-  meant to reach every other organisation. A body that stays in one project is
-  a transitional state. Learning that never leaves its tenant makes atoma a set
-  of private caches, not a collaborative platform, and pays distillation and
-  compilation once per tenant instead of once.
-- **The organisation bounds trust and execution rights, never knowledge.** A
-  body may travel; the right to run it without a validator is earned again,
-  from zero, by each receiving organisation. That is the body/trust split in
-  the shared-learning construction below.
-- **Provenance travels with the body.** Author organisation, version, hash and
-  the approval that admitted the body to the platform catalogue are immutable
-  and visible to the receiver. Authorship is attribution, never authority.
-- **The offer path is the normal path.** A catalogue nobody can get into is an
-  absent feature with a safety story attached ([offer
-  review](platform-skill-offer-review-2026-08-23.md) §1). Reviewer latency and
-  fatigue are therefore product requirements, not afterthoughts (owner
-  decision 1).
+- **One registry, one catalogue, one trust.** What one organisation's run
+  learns — a molecule, a patched prompt, a distilled recipe, a success or a
+  failure — is platform knowledge and platform trust the moment it is
+  written. There is no per-organisation copy, no zero-trust restart and no
+  offer/approval gate between organisations, because there is no boundary for
+  a body to cross.
+- **Knowledge leaks by design; corpora do not.** A validator's paraphrase of a
+  private passage, written into a prompt, is visible to every next run. The
+  passage itself is not searchable from another project. An instance
+  therefore suits teams that accept pooling what their runs learn.
+- **Provenance is attribution, never authority.** Ledger events and skill
+  frontmatter record which run wrote what; that record grants nothing.
 - **Sharing terms belong to the platform, not to the code licence.** The
-  licence an author grants on a body offered to the catalogue, and the
-  platform's right to distribute it, are platform terms still to be written
-  (owner decision 7).
+  terms under which an organisation's runs contribute to and consume the
+  commons are platform terms still to be written (decision 5, Layer 3).
 
-What the premise does not change: human approval before a body enters the
-catalogue, the zero-trust start in the receiving organisation, the exclusion
-of raw trace content from platform learning, and the open prefilter policy.
-Whether instruction-text bodies may be admitted by a lighter path than
-scripts is owner decision 8; this document records the premise, not that
-mechanism.
+What the amendment did not change: raw trace content is never learning
+input; static scans are hygiene, never authorization; container isolation is
+what bounds a hostile body, and it bounds blast radius, not authorship.
 
 ### Resource ownership
 
-| Resource | Normative target scope |
+| Resource | Normative scope |
 |---|---|
-| Run record, trace, cost and publication | organisation/project |
+| Run record, trace, cost, publication | organisation/project |
 | Workspace and artifacts | run-private, readable only through organisation policy |
-| Canonical platform atom body | platform |
-| Dynamic atom body | organisation until explicitly offered and approved |
-| Atom trust | organisation or stricter |
-| Organisation-authored skill body | organisation/project until offered; offering is the expected path |
-| Approved platform skill body | platform body with immutable approval provenance |
-| Skill trust, matches and demotion state | organisation or stricter |
-| Lifecycle event | store + organisation + stable entity; project/run/actor where applicable |
-| Platform event | explicit audience and nullable organisation/project/run scope |
-| Raw trace content | never platform-learning input |
-| Prefilter decision | explicit policy: platform content-addressed with accepted oracle, or organisation-salted; never accidental sharing |
-| Provider credential | organisation or platform/host owned; injected as a per-run snapshot and never inferred from login |
+| Retrieval corpus | project |
+| Atom body, atom trust | platform |
+| Skill body, skill trust, matches, promotion/demotion state | platform |
+| Lifecycle event | store + stable entity id; project/run/actor where the event arises there |
+| Platform event | explicit audience, nullable organisation/project/run scope, retention window |
+| Raw trace content | never learning input |
+| Prefilter decision | platform, content-addressed; the existence oracle is accepted |
+| Provider credential | organisation or platform/host owned; per-run snapshot, never inferred from login |
 
 ### Deployment invariants
 
 **D1 — The web/control plane never holds the Docker socket.** The launcher is
-the only component allowed to create or destroy workloads.
+the only component allowed to create or destroy workloads. *Not satisfied:
+`DockerLauncher` runs in the viz server process.*
 
 **D2 — The launcher accepts closed profiles, not Docker syntax.** A caller
 cannot choose an image, mount, network, command, capability or arbitrary
-environment entry.
+environment entry. *Satisfied at the contract level for egress and preview;
+the worker path bypasses the contract for its stdio transport.*
 
 **D3 — Every run's model-authored Element workload receives its own boundary.**
-Its only writable product mount is its workspace volume. Other workspaces,
-stores, skills, credentials and the control plane are unreachable from that
-workload. Egress is deny-by-default.
+Its only writable product mount is its workspace. Stores, skills,
+credentials, other workspaces and the control plane are unreachable from it.
+Egress is deny-by-default. *Satisfied for the worker container; workspaces
+are host directories, not launcher volumes.*
 
 **D4 — Lifecycle ownership follows workload ownership.** The launcher owns
-heartbeat, deadlines, bounded stop, reverse teardown and orphan reconciliation.
-Kubernetes may later implement the same interface; callers do not change.
+heartbeat, deadlines, bounded stop, reverse teardown and orphan
+reconciliation. *Partially satisfied: primitives exist in-process; the worker
+lifecycle is in `containerExecutor.ts`.*
 
-### Ten testable invariants
+### Testable invariants
 
 **T1 — No store is reachable from a run's model-authored execution sandbox.**
-An Element worker cannot read the atom store, skills belonging to another
-scope, credentials, control-plane state or another workspace through a
-relative or absolute path. Network policy also blocks direct control-plane
-access. The supervisor child receives the product-store path by design and is
-outside this invariant.
+An Element worker cannot read the atom store, the skill catalogue,
+credentials, control-plane state or another run's workspace through any path.
+Network policy blocks direct control-plane access. The supervisor child
+receives the store path by design and is outside this invariant.
 
-**T2 — Trust counters never cross an organisation boundary.** Successes,
-failures, direct failures, matches, promotion state and demotion streaks are
-keyed by `(org_id, stable_entity_id)` or a stricter project scope. No aggregate
-over organisations may feed a fast path.
+**T2 — Trust and knowledge are platform-wide; only execution rights and
+corpora are scoped.** No code path filters `atom_types`, skills or trust by
+organisation. A reader that finds an unfolded store refuses or guards
+(`unfoldedRegistryPredicate`); it never publishes one row per owner.
+*(Replaces the pre-2026-09-15 T2, which forbade cross-organisation trust
+aggregation.)*
 
-**T3 — A body crossing an organisation boundary passes an approval gate.**
-Both `kind: llm` and `kind: script` require an explicit offer and a human
-approval record bound to the exact body version and hash. The reviewer reads
-the script source or instruction text. Static scans and any future behavioural
-attestation may provide evidence; neither can authorise distribution.
+**T3 — A tenant run proves its authority, not its rows.**
+`assertProjectRunAuthority` says whether this process may run at all, on the
+paths the host recorded; it selects nothing. `ATOMA_TENANT_RUN` arms the
+child's transport re-check. *(Replaces the pre-2026-09-15 T3 body-approval
+gate, which has no boundary left to guard.)*
 
 **T4 — Identity uses stable surrogate ids; names are display labels.**
-`atom_id` is a UUID. Identity-critical references, namespaces and future trust
-rows use stable ids. A human-readable name may accompany an event but cannot be
-the only identity when correctness depends on it.
+`atom_id` is a UUID. Identity-critical references and namespaces use stable
+ids. *Deviation: `lifecycle_events.entity` is name-keyed for type counters.*
 
 **T5 — No control-plane path or identity is derived from model output.**
-Model-authored names, branch labels, task text and verdict prose cannot become
+Model-authored names, branch labels, task text and verdict prose never become
 a control-plane filesystem component, primary key or persistent namespace.
-Model-authored artifact paths are relative, mediated by `ToolSandbox` and
-confined to the run workspace.
+Model-authored artifact paths are relative, `ToolSandbox`-mediated and confined
+to the workspace.
 
-**T6 — Every counter mutation is one atomic database statement inside the
-required transaction.** Whole-object read/modify/write sidecars are not an
-acceptable multi-writer trust store. Promotion, reset and their events commit
-with the counters they change.
+**T6 — Every counter mutation is one atomic statement inside the required
+transaction.** *Deviation: skill counters in `_meta.json` are whole-object
+read/modify/write, safe only while one run at a time is the enforced
+topology (the MCP run lease). Closing it is Gate 0 work.*
 
-**T7 — Every lifecycle event is attributable.** It carries `store_id`,
-`org_id` and a stable entity id, plus project, run and actor when the event
-arises in those scopes. Integrity projections group by the same keys.
+**T7 — Every lifecycle event is attributable.** It carries a stable entity id
+plus project, run and actor when it arises in those scopes. *Deviation: the
+table has `at/kind/entity/detail` only.*
 
-**T8 — Raw traces never become global-learning input.** Traces contain prompts,
-tool I/O and workspace excerpts. Only a reviewed distilled body can cross an
-organisation boundary.
+**T8 — Raw traces never become learning input.** Traces contain prompts, tool
+I/O and workspace excerpts; only distilled bodies enter the catalogue.
 
-**T9 — Execution rights are role-gated.** Reading a run, trace or cost does not
-grant the right to spend budget or execute model-authored code.
+**T9 — Execution rights are role-gated.** Reading a run, trace or cost does
+not grant the right to spend budget or execute model-authored code.
 
-**T10 — Outbound provider credentials and payer decisions are per-run values.**
-They are never ambient mutable process state. A machine-bound transport is
-operator-only except for the explicit platform-admin, declared-organisation
-host-subscription path, re-authorised per run, re-checked by the child and
-recorded in the payer ledger, or an exact principal-owned Codex generation
-resolved from the requesting identity. Absence or revocation never falls back
-to a host profile or another payer. Every access to that generation holds the
-same cross-process SQLite lease through provider-child reap, including timeout
-and cancellation paths.
-
-### Shared-learning construction
-
-Bodies and trust are different resources:
-
-1. Organisation learning starts local and validated.
-2. An offer names one exact body version and hash. The existing mechanical
-   pre-screen may reject or prioritise it; it cannot approve it.
-3. A human operator reviews the script source or instruction text, is the only
-   “yes”, and journals the decision against that version and hash.
-4. The receiving organisation starts the body at zero trust and earns its own
-   clean validated executions.
-5. Cross-org corroboration is not a trust tier. Self-serve organisations make
-   it a linear Sybil cost and give the attack a misleading provenance story.
-
-The proposed behavioural-attestation and powerless-dossier workflow is a
-design candidate, not an invariant. Track B must accept, amend or reject that
-design before implementation.
-
-The platform value that survives is substantial: distillation and compilation
-can be paid once, and an approved LLM recipe can guide a receiving
-organisation's first validated run. What never transfers is permission to
-execute without a validator.
+**T10 — Outbound provider credentials and payer decisions are per-run
+values.** Never ambient mutable process state. A machine-bound transport is
+operator-only except the platform-admin, declared-organisation host
+subscription (re-authorised per run, re-checked by the child, recorded in the
+payer ledger) or an exact principal-owned Codex generation resolved from the
+requesting identity. Absence or revocation never falls back to another payer.
+Every access to that generation holds the same cross-process SQLite lease
+through provider-child reap, including timeout and cancellation paths.
 
 ### Engineering rules to apply now
 
-The identifiers R1–R11 remain stable because code and historical reviews cite
-them.
+R1–R11 keep their numbers because code and dated reviews cite them. R1 is
+amended; the others are unchanged.
 
-**R1 —** Never design correctness around platform-global counters.
+**R1 —** *(amended 2026-09-15)* Trust counters are platform-global by design.
+Never add an organisation, project or owner key to registry, skill or trust
+storage; a partition is a product decision, not a refactor, and the two that
+were tried are folded back with backups.
 
 **R2 —** Never let model-authored text become a control-plane path, identity
 key or persistent namespace. Workspace artifact paths stay relative and
@@ -458,165 +372,111 @@ hostile body and proves that property at the actual process/container boundary.
 
 **R11 —** Never link identities or join organisations by email alone.
 
-## 3. Roadmap — Track A / Track B
+## 3. Remaining work
 
-### Track definitions and present position
-
-| | Track A — dedicated deployment | Track B — multi-tenant shared learning |
-|---|---|---|
-| Organisations served | exactly one, enforced mechanically | many mutually untrusted organisations |
-| Cross-org body sharing | none | reviewed platform bodies |
-| Trust scope | instance is one organisation | organisation or project |
-| Runtime isolation | mandatory | mandatory |
-| Review workflow | not required for cross-org sharing | required and staffed |
-| Storage topology | one-node hardened SQLite may fit | PostgreSQL is favoured if nodes/writers scale |
-| Product claim | dedicated hosted atoma | hosted shared-learning SaaS |
-
-Track B is the product target since 2026-09-06 (§2, *Skills are a commons*);
-Track A stays a supported deployment shape, not the thesis. The current
-repository is between the tracks: its control plane permits several
-organisations, while atom trust remains instance-global. Project-local skills
-and disabled deterministic dispatch contain one attack path, but they do not
-make global atom trust tenant-safe. **Do not deploy the current instance to
-mutually untrusted organisations and call it Track B.**
+The Track A / Track B split is retired. Track A ("exactly one organisation,
+mechanically enforced") was never built and is not the product; Track B
+("many mutually untrusted organisations with a body/trust split") is the
+premise the 2026-09-15 decision withdrew. What remains is **one hosted shape**
+— a shared-learning instance for organisations that accept the commons — and
+the list below is everything between the current code and calling that shape
+production.
 
 ### Decision gate 0 — hardened SQLite or PostgreSQL
 
-This gate is next and blocks the trust split.
+Next, and blocking items W3, W4, W5 and W8 below.
 
 | Criterion | Hardened SQLite | PostgreSQL |
 |---|---|---|
-| Intended topology | one control-plane node, explicitly bounded writers | multiple processes/nodes and database-mediated concurrency |
-| Allocation | `BEGIN IMMEDIATE`, explicit `busy_timeout`, bounded retry on busy | row/advisory locks, serializable allocation where required |
-| Schema lifecycle | one migrator, migration separate from ordinary open | versioned migrations and controlled rollout |
-| Skill counters | move out of `_meta.json` into atomic tables | move into the same transactional schema |
-| Backup/restore | coordinated file/WAL snapshot with restore drill | managed or operator-run logical/physical backup with restore drill |
-| Failover | process/node recovery; no transparent multi-node failover claim | explicit pool, failover and connection recovery policy |
-| Development | local file remains simple | provisioned dev/test database and isolated fixtures |
-| Track fit | Track A if the one-node limit is a product constraint | Track B or any multi-node target |
+| Topology | one control-plane node, explicitly bounded writers | multiple processes/nodes, database-mediated concurrency |
+| Allocation | `BEGIN IMMEDIATE`, explicit `busy_timeout`, bounded retry | row/advisory locks, serializable allocation where required |
+| Schema lifecycle | one migrator, migration separate from ordinary open | versioned migrations, controlled rollout |
+| Skill counters | move out of `_meta.json` into atomic tables | same, in the transactional schema |
+| Backup/restore | coordinated file/WAL snapshot with restore drill | logical/physical backup with restore drill |
+| Failover | process/node recovery; no multi-node claim | explicit pool, failover and reconnection policy |
+| Development | local file stays simple | provisioned dev/test database, isolated fixtures |
+| Fit | a one-node product with one launcher process as the only other writer | a separate launcher service plus web node, or any horizontal growth |
 
-The decision record must state:
+The decision record must state: (1) maximum control-plane nodes and writer
+processes; (2) migration ownership and rollback/cutover policy; (3) allocation
+and counter transaction semantics; (4) backup, restore and disaster-recovery
+test; (5) local developer and CI provisioning; (6) the migration path for the
+existing store and skill sidecars. The separate launcher (W1) is a second
+writer of run state and must be counted in (1).
 
-1. maximum control-plane nodes and writer processes;
-2. migration ownership and rollback/cutover policy;
-3. allocation and counter transaction semantics;
-4. backup, restore and disaster-recovery test;
-5. local developer and CI provisioning;
-6. the migration path for the existing product store and skill sidecars.
+### Work items
 
-No `atom_trust`, `skill_trust`, platform-body, approval or redesigned
-`lifecycle_events` table lands before this gate closes.
+| # | Item | Status | Blocked by | Done when |
+|---|---|---|---|---|
+| **W1** | Separate launcher service | contract + in-process backend done | — | `DockerLauncher` runs in its own container behind a permissioned socket; the web image holds no `docker.sock` (D1). |
+| **W2** | Worker transport behind the launcher | not started | W1 design | The Element worker speaks a socket/network protocol issued by the launcher; `containerExecutor.ts` no longer owns attach/remove; `workerRunArgs` isolation assertions still pass (D2, D4). |
+| **W3** | Launcher-managed workspaces | not started | W1, Gate 0 | Workspace handles are volumes, not host paths; lease, TTL, bounded stop, reverse teardown and orphan reconciliation are launcher operations (D3, D4). |
+| **W4** | Skill counters out of `_meta.json` | not started | Gate 0 | Every counter, promotion and demotion mutation is one statement in one transaction with its ledger event (T6, R4, R8). |
+| **W5** | Durable payer ledger for every run | subscription-touching runs only | Gate 0 | The three-row `RunPayerLedger` is persisted for API-key-only runs too, queryable per organisation and per run (T10). |
+| **W6** | Scoped lifecycle attribution | not started | Gate 0 | `lifecycle_events` carries stable entity id, project, run and actor; type counters stop being name-keyed; integrity projections group by the same keys (T4, T7). |
+| **W7** | Web, launcher images and a reference stack | worker/preview/mender images exist | W1 | Two more image definitions, one compose/stack file, digest pins; boots on a clean Linux host. |
+| **W8** | Backup, restore, disaster recovery for a hosted store | `npm run backup` (dated, pruned, off-machine) | Gate 0 | A restore drill on the packaged stack, documented RPO/RTO, secret rotation procedure. The 2026-09-14 drill ([recovery-drill-2026-09-14.md](recovery-drill-2026-09-14.md)) covers the local store only. |
+| **W9** | Trace and workspace retention | platform events only (90 d) | decision 2 | A retention window for `orgs/<org>/projects/<project>/runs/<run>/` traces and workspaces, enforced by a job the operator can run and audit. |
+| **W10** | Quotas and cost ceilings per organisation | none | decision 3 | Per-organisation budget and concurrency limits enforced at run admission, visible in the console. |
+| **W11** | Break-glass cross-organisation read | ordinary `platform:admin` power | decision 1 | Explicit, attributable, journaled, time-bounded, with the customer-notification policy the owner chooses. |
+| **W12** | Platform terms | none | decision 5 | Terms of use covering what a run contributes to and consumes from the commons; separate from AGPL-3.0. |
+| **W13** | Packaged-stack acceptance | `auth-release-smoke.mjs` (loopback IdP, temp store) | W1, W7 | Boots the stack; proves founder login, invitation, role enforcement, Element-workload isolation, delivery, restart, backup/restore and denied control-plane reachability from the worker network. |
+| **W14** | Shared-learning acceptance | `tests/project-retrieval-privacy.test.ts` characterises the leak | W13 | Two organisations on one stack: no cross-org trace/workspace/corpus read, and a recipe learned by one is dispatched by the other's next run. |
 
-### Reconciled phase status
-
-| Phase | Current status | Remaining work |
-|---|---|---|
-| 0 — product decisions | partial | Storage backend is next. Reviewer staffing, dynamic-atom offers, break-glass, retention, quotas and platform-key rebilling remain open. |
-| 1 — OS boundary | Element sandbox implemented; egress/preview launcher in-process | Separate the launcher under its own OS identity, migrate the worker transport and workspaces, complete lifecycle ownership and add hosted acceptance. |
-| 2 — credentials per run | implemented | Preserve snapshot and child gates; close or explicitly bound SDK profile/WIF fallback outside tenant project runs. |
-| 3 — surrogate identity | implemented for atom and skill namespace | Move remaining identity-critical lifecycle attribution from names to stable ids during the trust/ledger schema change. |
-| 4 — bodies separated from trust | containment only | Implement scoped trust tables, atom scope and uniform home/donor policy after Gate 0. |
-| 5 — storage concurrency | not decided | Execute the chosen backend plan; remove filesystem trust counters. |
-| 6 — control plane | advanced locally, with compiled auth/MCP OAuth smoke | Add hosted deployment, lifecycle attribution, trace/workspace retention, quotas, API-key payer persistence and packaged-stack acceptance. |
-| 7 — body offer/review | design only | Decide the staffed review contract, then build its approval record and platform catalogue after the trust split. |
-
-### Track A — dedicated deployment exit criteria
-
-Track A is the shortest honest hosted product. It does not require cross-org
-learning, but it does require the production boundary:
-
-1. Choose the product-store backend. If SQLite wins, implement and test the
-   one-node contract rather than relying on low traffic.
-2. Move the existing launcher backend into a separate service, complete the
-   worker transport boundary, and package web/launcher images, a pinned worker
-   image and a reference stack. The web image has no Docker socket.
-3. Move run workspaces to launcher-managed volumes and put lease, TTL, stop and
-   orphan recovery behind the launcher.
-4. Make “one organisation per deployment” true at the admission boundary, or
-   stop calling the product dedicated. Open self-signup cannot silently create
-   a second organisation.
-5. Keep per-run credentials and the operator subscription door mechanical and
-   attributable.
-6. Define trace/workspace retention, backup/restore, secret rotation and
-   platform-admin procedure.
-7. Add a release acceptance that boots the packaged stack and proves founder
-   login, invitation, role enforcement, Element-workload isolation, delivery,
-   restart, backup/restore and denied control-plane reachability.
-
-### Track B — multi-tenant shared learning build order
-
-Track B depends on the Track A runtime boundary and Gate 0. Its data work is one
-coherent change, not a sequence of temporary schemas:
-
-1. Create platform body identity/provenance, organisation/project trust and
-   dynamic-atom scope under the chosen backend.
-2. Move skill counters and promotion/demotion state out of sidecars.
-3. Key trust and lifecycle attribution on stable ids and organisation/store;
-   keep display names as projections only.
-4. Apply organisation/project visibility before the existing deterministic
-   bucket/tool compatibility filters.
-5. Decide the prefilter policy explicitly: accept and document the
-   content-addressed existence oracle, or salt/partition by organisation.
-6. Close the body-offer decision, then build a staffed workflow with human
-   approval and immutable version/hash provenance. The current candidate adds
-   a mechanical pre-screen, script attestation and powerless dossier.
-7. Add break-glass support access, customer-notification policy, quotas,
-   retention and billing attribution.
-8. Run an adversarial acceptance with two mutually untrusted organisations:
-   no cross-org store/trace/workspace read, no transferred trust, no implicit
-   body visibility, and an approved body arriving at zero trust.
-
-The launcher deployment boundary can be completed in parallel with the selected
-database foundation.
-The platform offer workflow cannot safely precede the trust split.
+Order: Gate 0 → W1 → W2 ∥ W4 ∥ W5 ∥ W6 → W3 → W7 → W13 → W14. W8–W12 depend on
+owner decisions and can be prepared in parallel; W9 and W10 need only the
+decision, not Gate 0.
 
 ### Open owner decisions
 
-The storage backend is first. The remaining decisions can be prepared in
-parallel but do not block writing its decision record:
+1. Is platform-admin cross-organisation read retained? If so, is customer
+   notification mandatory, and at what latency? (W11)
+2. Retention periods for traces, workspaces, platform events and lifecycle
+   events. (W9)
+3. Is the platform BYO-key only, or will it meter and rebill platform API
+   keys? Quotas depend on the answer. (W10, W5)
+4. Gate 0 itself: SQLite or PostgreSQL, with the six-point record above.
+5. Under which terms does an organisation's run contribute to and consume the
+   commons? These are platform terms, separate from the repository's
+   AGPL-3.0 licence. (W12)
 
-1. Who approves global bodies, at what latency, and with which reviewer-fatigue
-   countermeasure?
-2. Can a dynamic atom ever become a platform atom, and what evidence is
-   required?
-3. Is platform-admin cross-org read retained; if so, is customer notification
-   mandatory?
-4. What are trace, workspace, platform-event and lifecycle-event retention
-   periods?
-5. Is the platform eventually a BYO-key product only, or will it meter and
-   rebill platform API keys?
-6. Is the prefilter existence oracle accepted for Track B?
-7. Under which terms does an author offer a body to the catalogue, and what
-   distribution right does the platform receive? These are platform terms,
-   separate from the repository's AGPL-3.0 licence.
-8. May instruction-text bodies be admitted to the catalogue by a lighter path
-   than compiled scripts, given that only scripts carry execution rights?
+Closed since the previous review, by the 2026-09-15 decision: who approves
+global bodies (nobody — there is no gate); whether a dynamic atom can become a
+platform atom (it already is one); whether the prefilter existence oracle is
+accepted (yes); whether instruction-text bodies get a lighter admission path
+(moot). Reopening any of them means reopening the decision itself.
 
 ## 4. Historical evidence
 
-This layer is evidence, not a second contract. The complete pre-reconciliation
-document is preserved verbatim as
+Evidence, not a second contract. The complete pre-reconciliation document is
+preserved verbatim as
 [pre-reconciliation evidence](incidents/saas-architecture-evidence-through-2026-08-28.md).
-Older code comments and dated reviews that cite former §3, §4.2, §5 or §7
-resolve through the legacy map below.
+Older code comments and dated reviews that cite former §3, §4.2, §5, §7, T2,
+T3, Track A or Track B resolve through the legacy map below.
 
 ### Evidence chronology
 
 | Date | Finding or decision | Disposition | Evidence |
 |---|---|---|---|
 | 2026-08-09–14 | In-process `ToolSandbox` was not an OS boundary; an allowlisted shell child could traverse or use absolute paths. | Worker isolation and egress topology implemented; production launcher still missing. | [engineering record](incidents/engineering-record-2026-08-14.md#saas--multi-tenancy--docssaas-architecturemd), `tests/workspace-outside-repo.test.ts`, `tests/container-isolation.test.ts` |
-| 2026-08-09–14 | A global skill body plus global trust could transfer execution rights or sabotage counters across tenants. | Normative body/trust split; project runs currently avoid sharing and disable promotion/direct dispatch. | [archived attack chain](incidents/saas-architecture-evidence-through-2026-08-28.md#41-the-evidence); [offer review](platform-skill-offer-review-2026-08-23.md) |
-| 2026-08-09 | `scanScriptBody` accepted 8 of 9 concat-obfuscated payloads in the recorded corpus, and one host class skipped the external-URL check. | Hygiene filter only; never an authorization gate. | [archived reproduction](incidents/saas-architecture-evidence-through-2026-08-28.md#41-the-evidence); `tests/script-scan.test.ts` |
+| 2026-08-09–14 | A global skill body plus global trust could transfer execution rights or sabotage counters across tenants. | Led to the body/trust split premise, later withdrawn (2026-09-15). The threat is unchanged and is why mutually distrusting organisations are unsupported. | [archived attack chain](incidents/saas-architecture-evidence-through-2026-08-28.md#41-the-evidence); [offer review](platform-skill-offer-review-2026-08-23.md) |
+| 2026-08-09 | `scanScriptBody` accepted 8 of 9 concat-obfuscated payloads; one host class skipped the external-URL check. | Hygiene filter only; never an authorization gate (R5). | [archived reproduction](incidents/saas-architecture-evidence-through-2026-08-28.md#41-the-evidence); `tests/script-scan.test.ts` |
 | 2026-08-09 | An all-dot atom/skill component escaped the skills root; removed ordinals could resurrect a namespace. | Both fixed at persistence/path boundaries. | `tests/atom-name-path-escape.test.ts`, `tests/registry-remove.test.ts` |
-| 2026-08-17–18 | Identity audit mapped 221 sites; 163 would break on a blind name→id flip. Namespace text also reached prompts and operator surfaces. | UUID identity, one namespace derivation and display resolution landed. The non-atomic migration harness was later deleted after the one store converged. | [archived identity audit](incidents/saas-architecture-evidence-through-2026-08-28.md#92b-what-the-nameid-flip-actually-requires-mapped-2026-08-17); [code review 2026-08-18](code-review-2026-08-18.md), `tests/atom-identity.test.ts` |
-| 2026-08-17–18 | Provider auth mutated ambient env and killed the process; tier pins could escape the snapshot. | Per-run snapshot, `RunnerConfigError` and tier-pin application landed. | `src/run/auth.ts`, `tests/provider-selection.test.ts` |
-| 2026-08-20 | Auth/projects/GitHub gate landed while registry and trust remained instance-global. | Multi-org control plane is current; it is explicitly not Track B. | commit `4459dc0` and current subsystem contracts |
-| 2026-08-23 | Four-post offer workflow proposed: pre-screen, script attestation, powerless dossier, human approval. | Design only. Project-local learning, its independent first step, later landed. | [platform skill offer review](platform-skill-offer-review-2026-08-23.md), [session snapshot](decided-not-built-2026-08-23.md) |
-| 2026-08-27–28 | Encrypted BYO keys and per-tier model precedence landed. A narrow operator host-subscription exception was decided and implemented. | Current control-plane behavior; no consumer-subscription passthrough. | [subscription decision](subscription-per-tier-design-2026-08-28.md), commit `6a033b3` |
-| 2026-09-04 | Principal-scoped Codex device login, private provider profiles and personal payer rows landed. | Initially L2/L3-only; later extended to L1 too. Requester-only ownership remains; personal Claude login remains unavailable. | `src/auth/subscriptionProfiles.ts`, `src/contracts/runPayers.ts` |
-| 2026-08-28 | SaaS deployment selected Docker images plus one in-house launcher; Kubernetes deferred behind the interface. | Closed contract and in-process egress/preview backend now implemented; separate service, hosted stack and volume migration still missing. | [launcher decision](deployment-docker-launcher-2026-08-28.md), [current launcher contract](../src/launcher/AGENTS.md) |
-| 2026-09-06 | Premise changed: skills are a platform commons; the organisation bounds trust and execution rights, not knowledge. Track B named as the product target. | Documentation only. The body/trust split, the human gate on catalogue entry and the Track B build order are unchanged; owner decisions 7 and 8 added. | §2 *Skills are a commons*; [root contract](../AGENTS.md#skills-lifecycle); [projects contract](../src/projects/AGENTS.md) |
-| 2026-09-08 review | Current code supports Codex on all tiers, a three-row payer ledger and compiled auth/MCP OAuth smoke coverage. | Reconciled current-state claims; no new hosted acceptance or closure of Gate 0, trust splitting or body approval. | `src/contracts/runPayers.ts`, `tests/project-coordinator.test.ts`, `scripts/auth-release-smoke.mjs`, `package.json` |
+| 2026-08-17–18 | Identity audit mapped 221 sites; 163 would break on a blind name→id flip. | UUID identity, one namespace derivation and display resolution landed. | [archived identity audit](incidents/saas-architecture-evidence-through-2026-08-28.md#92b-what-the-nameid-flip-actually-requires-mapped-2026-08-17); [code review 2026-08-18](code-review-2026-08-18.md), `tests/atom-identity.test.ts` |
+| 2026-08-17–18 | Provider auth mutated ambient env and killed the process; tier pins could escape the snapshot. | Per-run snapshot, `RunnerConfigError`, tier-pin application landed. | `src/run/auth.ts`, `tests/provider-selection.test.ts` |
+| 2026-08-20 | Auth/projects/GitHub gate landed while registry and trust remained instance-global. | Multi-org control plane is current. | commit `4459dc0` |
+| 2026-08-23 | Four-post offer workflow proposed: pre-screen, script attestation, powerless dossier, human approval. | Design only; obsolete since 2026-09-15 — there is no boundary for a body to cross. | [platform skill offer review](platform-skill-offer-review-2026-08-23.md), [session snapshot](decided-not-built-2026-08-23.md) |
+| 2026-08-27–28 | Encrypted BYO keys and per-tier model precedence landed; narrow operator host-subscription exception decided and implemented. | Current behaviour; no consumer-subscription passthrough. | [subscription decision](subscription-per-tier-design-2026-08-28.md), commit `6a033b3` |
+| 2026-08-28 | Deployment selected Docker images plus one in-house launcher; Kubernetes deferred behind the interface. | Closed contract and in-process backend implemented; separate service, images, stack and volumes missing (W1–W3, W7). | [launcher decision](deployment-docker-launcher-2026-08-28.md), [launcher contract](../src/launcher/AGENTS.md) |
+| 2026-09-02 | PostgreSQL migration analysis. | Input to Gate 0, not a decision. | [analysis](postgresql-migration-analysis-2026-09-02.md) |
+| 2026-09-04 | Principal-scoped Codex device login, private profiles, personal payer rows. | Current; extended to L1 later. Personal Claude login unavailable. | `src/auth/subscriptionProfiles.ts`, `src/contracts/runPayers.ts` |
+| 2026-09-06 | Premise: skills are a commons; the organisation bounds trust and execution rights, not knowledge. | Superseded 2026-09-15: the organisation bounds neither knowledge nor trust. | [public release record](public-release-2026-09-06.md) |
+| 2026-09-08 review | Codex on all tiers, three-row payer ledger, compiled auth/MCP OAuth smoke. | Reconciled state at the time. | `scripts/auth-release-smoke.mjs`, `tests/project-coordinator.test.ts` |
+| 2026-09-09 | Per-owner registry: `atom_types` keyed by `operator` or `(orgId, projectId)`; each project bootstrapped and trusted its own copies. Downstream privacy audit of retrieval paraphrase. | Folded back 2026-09-15 with backup (`*.before-platform-registry-<uuid>.db`, `atom_id_merges`). The privacy risk is unchanged; its partition answer is withdrawn. | [ownership record](project-registry-ownership-2026-09-09.md), [retrieval record](incidents/project-retrieval-record-2026-09-09.md) |
+| 2026-09-14 | Offline recovery drill on the local store; acceptance-contract proposal. | Local evidence only; W8 needs the hosted equivalent. | [recovery drill](recovery-drill-2026-09-14.md), [acceptance contract](acceptance-contract-2026-09-14.md) |
+| 2026-09-15 morning | Per-project skill trust (`.trust/<project>/<sha>/`), project runs unable to promote/dispatch/drop/merge. | Folded back the same day (`reconcilePlatformSkills`). | commit `9e1d670` → `2911881` |
+| 2026-09-15 | **A run is a run.** One registry, one catalogue, one trust, one lifecycle. Promotion, dispatch and the prefilter cache at host defaults for tenant runs. Recoverable atom trust. | Current design. Mutually distrusting organisations on one instance are not a supported shape. | [platform trust](platform-trust-2026-09-15.md), [recoverable trust](recoverable-trust-2026-09-15.md), commits `2911881`, `63f5317`, `418b25d`, `5d0e0ac` |
+| 2026-09-16 review | This reconciliation: Track A/B retired, T2/T3/R1 rewritten, remaining work listed as W1–W14. | No new acceptance run; no closure of Gate 0. | this document at `76c041f` |
 
 <a id="3-prerequisite-f1-the-sandbox-is-not-an-isolation-boundary"></a>
 
@@ -626,82 +486,88 @@ The original reproduction launched an allowlisted shell with only `cwd` as a
 filesystem constraint and read a marker outside the workspace. Moving the
 default build workspace out of the repository reduced accidental blast radius;
 it did not create a security boundary. The container worker then proved the
-required shape: workspace-only mount, no direct host/control-plane reachability,
-loopback inside the workload, and optional outbound access only through the
-per-run proxy topology.
+required shape: workspace-only mount, no direct host/control-plane
+reachability, loopback inside the workload, optional outbound access only
+through the per-run proxy topology.
 
-The lasting conclusion is T1 plus D1–D4: tenant isolation is a workload and
-deployment property, not a repository-layer `WHERE org_id = ?`.
+The lasting conclusion is T1 plus D1–D4: isolation is a workload and
+deployment property, not a repository-layer `WHERE org_id = ?`. The
+2026-09-15 decision makes this literal: there is no `org_id` on the registry
+to filter by, and the only isolation the platform claims is the one the
+container provides.
 
 ### Shared-learning threat evidence
 
-The historical attack chain established five distinct facts:
+The historical attack chain established five facts that remain true:
 
 1. bodies are distilled from tenant-influenced tasks and outputs;
 2. a script skill's first injection is already execution, before deterministic
    dispatch trust;
 3. static scans are intentionally incomplete and bypassable;
 4. output envelopes prove what a script reports, not everything it did;
-5. pooled failures are also an availability attack, not merely a code-execution
-   risk.
+5. pooled failures are also an availability attack.
 
-Container isolation bounds the blast radius of model-authored Element
-execution; it does not authorise a body for another organisation. That is why
-the construction needs both a platform body review and organisation-local
-trust.
+Between 2026-08-14 and 2026-09-15 the answer was a partition: bodies travel
+only through a human gate, and trust restarts per organisation. The owner
+withdrew that answer on 2026-09-15 after reading the Registry as a freshly
+invited member with zero runs: an empty registry per organisation defeats the
+product. Container isolation now carries the whole security claim — it bounds
+what a hostile body can reach, not who wrote it — and the product claim is
+correspondingly narrowed to organisations that accept pooling.
 
 ### Identity and cache evidence
 
-The 221/163 identity audit is retained in the archived document because it
-explains why the UUID flip required one namespace derivation and display
-resolution before changing the key. It also records a deleted migration
-harness whose database stamp and filesystem rename were not atomic. The code is
-gone after the only pre-production store converged. That failure is evidence
-for Gate 0's migration-ownership and cutover requirements, including tests at
-the real process/filesystem boundary.
+The 221/163 identity audit explains why the UUID flip required one namespace
+derivation and display resolution before changing the key. It also records a
+deleted migration harness whose database stamp and filesystem rename were not
+atomic; that failure is evidence for Gate 0's migration-ownership and cutover
+requirements. The 2026-09-15 fold (`migrateRegistryToPlatform`) applied the
+lesson: one immediate transaction, a whole-file backup first, and a fold that
+cannot complete leaves the partitioned store untouched.
 
 The prefilter cache analysis found that a byte-identical content-addressed key
 does not reveal input content the requester lacks, but a hit exposes a weak
-existence/volume oracle through timing and observability. The old target
-accepted that tradeoff; the current project path disables the shared cache.
-This evidence is why Track B step 5 requires an explicit choice rather than
-inheriting either behavior by accident.
+existence/volume oracle through timing and observability. The project path
+disabled the shared cache during the partitioned period; since 2026-09-15 the
+oracle is accepted as a consequence of the commons.
 
 ### Accepted, rejected and deferred
 
-- **Accepted and implemented:** UUID atom identity; project-scoped learning;
-  per-run credential snapshots; BYO keys; narrow per-tier host subscription;
-  Element-worker isolation and per-run egress topology; the closed launcher
-  contract and in-process egress/preview backend; principal-owned Codex on all
-  tiers and the three-row payer contract.
-- **Accepted, not implemented:** the separate launcher service and complete
-  Docker-image hosted deployment, including the worker transport and volume
-  migration.
-- **Designed, not accepted as a shipped gate:** platform body offer workflow.
-- **Rejected:** cross-org trust corroboration; static scan as authorization;
-  raw Docker options at the launcher boundary; mounting `docker.sock` in the
-  web container; a standalone bucket-directory re-key.
+- **Accepted and implemented:** UUID atom identity; one platform registry,
+  catalogue and trust; recoverable atom trust; per-run credential snapshots;
+  BYO keys; narrow per-tier host subscription; Element-worker isolation and
+  per-run egress topology; the closed launcher contract with an in-process
+  egress/preview backend; principal-owned Codex on all tiers and the three-row
+  payer contract.
+- **Accepted, not implemented:** the separate launcher service, worker
+  transport migration, launcher-managed volumes, web/launcher images and a
+  reference stack (W1–W3, W7); atomic skill counters, durable payer ledger and
+  scoped lifecycle attribution after Gate 0 (W4–W6).
+- **Superseded:** the body/trust split, organisation-local trust, the
+  platform body offer/approval workflow, the per-owner registry and the
+  per-project skill trust. Their records stay as evidence.
+- **Rejected:** cross-org trust corroboration as a trust tier; static scan as
+  authorization; raw Docker options at the launcher boundary; `docker.sock`
+  in the web container; a standalone bucket-directory re-key.
 - **Deferred:** Kubernetes until multi-node scheduling, platform-enforced
   quotas or launcher ownership becomes the larger operational cost.
 
 ### Legacy section map
 
-| Former section | Current home |
+| Former reference | Current home |
 |---|---|
-| §1 target and provider identity | Layer 1 current state; Layer 2 identity/T10 |
-| §2 resource classification | Layer 1 current scopes; Layer 2 target ownership |
-| §3 sandbox prerequisite | Layer 2 T1/D1–D4; Layer 4 isolation evidence |
+| §1 target and provider identity | Layer 1 current state; Layer 2 identity, T10 |
+| §2 resource classification | Layer 1 scopes; Layer 2 resource ownership |
+| §3 sandbox prerequisite (F1) | Layer 2 T1, D1–D4; Layer 4 isolation evidence |
 | §4.1 attack chain | Layer 4 shared-learning threat evidence |
-| §4.2 safe construction | Layer 2 T2/T3 and shared-learning construction |
+| §4.2 safe construction, T2/T3 (pre-2026-09-15), shared-learning construction | Superseded; Layer 4 threat evidence and chronology 2026-09-15 |
 | §5 invariants | Layer 2 T1–T10 |
-| §6 repository changes | Layer 3 phase status and track roadmaps |
+| §6 repository changes, Track A / Track B, phase table | Layer 3 work items W1–W14 |
 | §7 rules for today | Layer 2 R1–R11 |
 | §8 open/rejected questions | Layer 3 open decisions; Layer 4 dispositions |
-| §9 build order and migration audit | Layer 3 roadmap; Layer 4 identity evidence |
+| §9 build order and migration audit | Layer 3 order; Layer 4 identity evidence |
 
 ### Verification and release evidence
-
-The active local verification commands remain:
 
 ```bash
 npm run docs:check
@@ -710,19 +576,13 @@ npm run release:check
 npm run doctor -- --container
 ```
 
-Release acceptances
-[v0.1.1](release-acceptance-v0.1.1.md) and
+Release acceptances [v0.1.1](release-acceptance-v0.1.1.md) and
 [v0.1.3](release-acceptance-v0.1.3.md) prove packaged MCP, worker/egress and
-compiled lifecycle properties from their dates. They predate the current
-multi-org/BYO/host-subscription control plane and are not its acceptance.
-The current `release:check` also runs
+compiled lifecycle properties from their dates; they predate the multi-org,
+BYO and host-subscription control plane. `release:check` runs
 [`scripts/auth-release-smoke.mjs`](../scripts/auth-release-smoke.mjs) against
-the compiled viz server and auth CLI: founder login, CLI invitation, member
-admission, PKCE, MCP OAuth, session gating and logout. Its loopback identity
-provider and temporary store verify the packaged auth path, not a hosted
-container stack or live inference funding.
-
-Track A still requires a new packaged-stack acceptance covering the remaining
-deployment and operational criteria above; Track B requires a separate
-two-organisation adversarial acceptance. The 2026-09-08 reconciliation inspected
-these scripts and tests without re-running them.
+the compiled viz server and auth CLI — founder login, CLI invitation, member
+admission, PKCE, MCP OAuth, session gating, logout — with a loopback identity
+provider and a temporary store. That verifies the packaged auth path, not a
+hosted container stack or live inference funding. W13 and W14 are the
+acceptances this document still lacks.

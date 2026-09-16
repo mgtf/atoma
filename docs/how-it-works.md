@@ -586,7 +586,7 @@ Recorded so nobody has to discover it in a demo:
 |---|---|
 | Why does mechanism X exist? | `AGENTS.md` for the active contract, then its linked engineering-record entry |
 | What was tried and rejected? | `docs/incidents/engineering-record-2026-08-14.md` § *Considered and rejected* |
-| What would multi-tenancy require? | [`saas-architecture.md`](saas-architecture.md) Layer 2 invariants and Layer 3 Track A/Track B roadmap |
+| What would a hosted deployment require? | [`saas-architecture.md`](saas-architecture.md) Layer 2 invariants and Layer 3 remaining work (W1–W14) |
 | What does a real run look like? | `npm run viz` for existing traces; `npm run viz:demo` writes a mocked run, and `npm run preview:demo` opens a seeded authenticated preview without paid inference |
 | How does another agent drive atoma? | Claude Code: `claude mcp add atoma --transport http <origin>/mcp --header "Authorization: Bearer <token>"`. Codex CLI: an `[mcp_servers.atoma]` table in `~/.codex/config.toml` with `url` and `bearer_token_env_var = "ATOMA_MCP_TOKEN"`. One MCP, the tools your role admits, plus a goal-template prompt per task family at the platform tier |
 | Are the economics real? | `npm run burnin` measures a new corpus using model quota; historical CSVs were archived at the 2026-08-18 reset |
