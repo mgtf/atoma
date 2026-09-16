@@ -42,6 +42,16 @@ retrieval corpus a run may search, and who may start a run.
   name suffix only when it would collide. One immediate transaction; a fold
   that cannot complete leaves the partitioned store untouched beside its
   backup.
+- AN ABSORBED ROW CONTRIBUTES ITS COUNTERS, NOT ITS PROMPT, and that asymmetry
+  is deliberate rather than a shortcut. Rows are ordered operator-first, so the
+  row that survives on a canonical name carries the canonical prompt. Keeping
+  the project's patched prompt there instead would not have held: the canonical
+  bootstrap (`profile.seedCatalog`) runs on every run and patches back any type
+  whose content genuinely differs from its seed. That patch resets the trust
+  streak — so a fold that preserved the divergent prompt would have handed the
+  next run a type whose earned standing it immediately revoked, losing exactly
+  the trust the fold had just merged. The absorbed row's prompt and version
+  history stay readable in the backup.
 - `SkillRegistry` takes a root directory and nothing else. `reconcilePlatformSkills`
   (run by the coordinator at startup and by the runner before a run) folds the
   `.trust/…` sidecars into the public `_meta.json` (counters added, the tree
