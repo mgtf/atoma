@@ -198,6 +198,14 @@ separately billed `OPENAI_API_KEY`. The full contract is in
 ### Release contract
 
 - Supported source verification is `npm ci` then `npm run release:check`.
+- Production auto-deployment is DELIBERATELY ARMED: the repository variable
+  `ATOMA_DEPLOY_ENABLED` is `true`. This is the iteration model, not an
+  exceptional release ceremony: every successful CI run caused by a push to
+  `main` deploys that exact revision to production. Treat `git push origin
+  main` as a production action; do not describe deployment as hypothetically
+  disabled or propose toggling the variable for ordinary iteration. The
+  deploy preflight remains the runtime safety gate and refuses while a run or
+  preview is live.
 - The MCP is served by the compiled viz server on `/mcp` (`npm run viz:serve`);
   there is no separate MCP entrypoint since 2026-09-05.
 - `npm run auth` is the compiled identity/invitation CLI
