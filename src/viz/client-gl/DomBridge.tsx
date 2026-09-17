@@ -202,7 +202,7 @@ export function DomBridge({
   const view = useGpuStore((state) => state.view);
   const sceneCameraMode = useGpuStore((state) => state.sceneCameraMode);
   const entered = useGpuStore((state) => state.entered);
-  const handheld = useGpuStore((state) => state.handheld);
+  const handheld = useGpuStore((state) => state.handheld && !state.handheldAccepted);
   const handheldBlocked = useGpuStore((state) => state.handheldBlocked);
   const locale = useGpuStore((state) => state.locale);
   const selectedRunId = useGpuStore((state) => state.selectedRunId);

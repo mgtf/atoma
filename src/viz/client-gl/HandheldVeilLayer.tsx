@@ -1,4 +1,4 @@
-import type { RefObject } from 'react';
+import { useEffect, useState, type RefObject } from 'react';
 import type { HandheldWhiteoutPhase } from './handheld-whiteout.js';
 
 /**
@@ -12,18 +12,36 @@ export function HandheldVeilLayer({
   phase,
   floodRef,
   notice,
+  continueLabel,
+  onContinue,
 }: {
   phase: HandheldWhiteoutPhase;
   floodRef: RefObject<HTMLDivElement | null>;
   notice: string;
+  continueLabel: string;
+  onContinue: () => void;
 }) {
+  const [canContinue, setCanContinue] = useState(false);
+  useEffect(() => {
+    if (phase !== 'white') {
+      setCanContinue(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setCanContinue(true), 500);
+    return () => window.clearTimeout(timer);
+  }, [phase]);
   if (phase === 'idle') return null;
   return (
     <div className="gpu-handheld-veil" data-phase={phase}>
       <div ref={floodRef} className="gpu-handheld-veil__flood" aria-hidden="true" />
-      <p className="gpu-handheld-veil__notice" role="status">
-        {phase === 'white' ? notice : null}
-      </p>
+      <div className="gpu-handheld-veil__notice">
+        <p role="status">{phase === 'white' ? notice : null}</p>
+        {phase === 'white' && canContinue ? (
+          <button className="gpu-handheld-veil__continue" onClick={onContinue}>
+            {continueLabel}
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }

@@ -151,6 +151,17 @@ button, input, textarea, select { font: inherit; }
 .gpu-handheld-veil[data-phase="white"] .gpu-handheld-veil__notice {
   opacity: 1;
 }
+.gpu-handheld-veil__continue {
+  margin-top: 16px;
+  padding: 12px 20px;
+  border: 1px solid #0d1726;
+  border-radius: 8px;
+  background: #0d1726;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .gpu-handheld-veil__notice {

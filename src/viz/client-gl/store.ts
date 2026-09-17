@@ -227,6 +227,8 @@ export interface GpuUiState {
    * mobile journey is unfinished (2026-09-18), so Continue closes the door.
    */
   handheld: boolean;
+  handheldAccepted: boolean;
+  acceptHandheld: () => void;
   /** Continue was pressed on a handheld device: the control re-labels and disables. */
   handheldBlocked: boolean;
   /**
@@ -362,6 +364,13 @@ function viewChange(
 
 /** Sampled once at load; GpuApp refreshes the store when the media query flips. */
 const HANDHELD_AT_LOAD = isHandheldDevice();
+function initialHandheldAccepted(): boolean {
+  try {
+    return typeof sessionStorage !== 'undefined' && sessionStorage.getItem('atoma.viz.handheldAccepted') === '1';
+  } catch {
+    return false;
+  }
+}
 
 export const useGpuStore = create<GpuUiState>()((set, get) => ({
   // The app opens on PROJECTS: it is the authenticated launch surface. Runs
@@ -420,8 +429,17 @@ export const useGpuStore = create<GpuUiState>()((set, get) => ({
   },
   // A handheld browser that once entered on the desktop path — or before
   // this gate existed — must not walk past it on the persisted bit alone.
-  entered: HANDHELD_AT_LOAD ? false : initialEntered(),
+  entered: HANDHELD_AT_LOAD && !initialHandheldAccepted() ? false : initialEntered(),
   handheld: HANDHELD_AT_LOAD,
+  handheldAccepted: initialHandheldAccepted(),
+  acceptHandheld: () => {
+    try {
+      sessionStorage.setItem('atoma.viz.handheldAccepted', '1');
+    } catch {
+      // Acceptance still works when storage is unavailable.
+    }
+    set({ handheldAccepted: true, handheldBlocked: false });
+  },
   handheldBlocked: false,
   accountMenuOpen: false,
   localeMenuOpen: false,
@@ -429,10 +447,8 @@ export const useGpuStore = create<GpuUiState>()((set, get) => ({
   tuningPanelOpen: initialTuningPanelOpen(),
   announcementResetSignal: 0,
   enter: () => {
-    // A handheld device is never admitted: Continue closes the door instead,
-    // and nothing is persisted, so a later desktop visit on a shared profile
-    // still meets an honest first arrival.
-    if (get().handheld) {
+    // Show the mobile disclaimer until the visitor explicitly accepts it.
+    if (get().handheld && !get().handheldAccepted) {
       set({ handheldBlocked: true });
       return;
     }
@@ -462,7 +478,7 @@ export const useGpuStore = create<GpuUiState>()((set, get) => ({
         localeMenuOpen: false,
         notificationsMenuOpen: false,
       }),
-  setHandheld: (handheld) => set(handheld ? { handheld: true, entered: false } : { handheld: false }),
+  setHandheld: (handheld) => set(handheld && !get().handheldAccepted ? { handheld: true, entered: false } : { handheld }),
   blockHandheld: () => set({ handheldBlocked: true }),
   // The three chrome menus are exclusive: opening one closes the others, so
   // two overlays can never contest the same corner of the header.

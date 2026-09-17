@@ -157,6 +157,7 @@ function GpuAppContent({
   const {
     phase: handheldPhase,
     begin: beginHandheldWhiteout,
+    dismiss: dismissHandheldWhiteout,
     floodRef: handheldFloodRef,
   } = useHandheldWhiteout();
   // Continue is ONE gesture with two exits: on a handheld device it closes
@@ -502,11 +503,10 @@ function GpuAppContent({
     return () => query.removeEventListener('change', refresh);
   }, []);
 
-  // A handheld device is never inside the product, whatever the persisted
-  // arrival bit or a race with whoami says.
+  // Mobile visitors acknowledge the disclaimer before ordinary admission.
   useEffect(() => {
-    if (state.handheld && state.entered) useGpuStore.setState({ entered: false });
-  }, [state.entered, state.handheld]);
+    if (state.handheld && !state.handheldAccepted && state.entered) useGpuStore.setState({ entered: false });
+  }, [state.entered, state.handheld, state.handheldAccepted]);
 
   useEffect(() => {
     const runs = runsQuery.data ?? [];
@@ -1163,6 +1163,8 @@ function GpuAppContent({
         phase={handheldPhase}
         floodRef={handheldFloodRef}
         notice={t('welcome.handheld.hint')}
+        continueLabel={t('welcome.handheld.continue')}
+        onContinue={dismissHandheldWhiteout}
       />
     </main>
   );

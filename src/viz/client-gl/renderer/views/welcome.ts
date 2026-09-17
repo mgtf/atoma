@@ -149,7 +149,7 @@ export function drawWelcome(
   width: number,
   height: number
 ): void {
-  const handheld = snapshot.state.handheld;
+  const handheld = snapshot.state.handheld && !snapshot.state.handheldAccepted;
   const layout = welcomeLayout(width, height, handheld);
   ctx.retainAtomaMark(layout.markX, layout.markY, layout.scale, {
     bobPx: FLOAT_AMPLITUDE_PX,

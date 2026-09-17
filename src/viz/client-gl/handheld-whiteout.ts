@@ -74,6 +74,7 @@ export function useHandheldWhiteout(): {
   phase: HandheldWhiteoutPhase;
   /** True when this hook took the activation (handheld); false to let the ordinary enter run. */
   begin: () => boolean;
+  dismiss: () => void;
   floodRef: RefObject<HTMLDivElement | null>;
 } {
   const [phase, setPhase] = useState<HandheldWhiteoutPhase>('idle');
@@ -89,7 +90,7 @@ export function useHandheldWhiteout(): {
 
   const begin = useCallback((): boolean => {
     const store = useGpuStore.getState();
-    if (!store.handheld) return false;
+    if (!store.handheld || store.handheldAccepted) return false;
     // The button re-labels and disables at once: feedback first, light after.
     store.blockHandheld();
     if (phaseRef.current !== 'idle') return true;
@@ -132,5 +133,15 @@ export function useHandheldWhiteout(): {
     return true;
   }, []);
 
-  return { phase, begin, floodRef };
+  const dismiss = useCallback(() => {
+    if (frameRef.current) cancelAnimationFrame(frameRef.current);
+    frameRef.current = 0;
+    setMarkCoreSurge(0);
+    phaseRef.current = 'idle';
+    setPhase('idle');
+    useGpuStore.getState().acceptHandheld();
+    useGpuStore.getState().enter();
+  }, []);
+
+  return { phase, begin, dismiss, floodRef };
 }
