@@ -105,6 +105,10 @@ Neighbours:
   synchronous operation (`withLedgerScope`), never a parameter threaded into
   the supervise loop. A multi-tenant process uses the latter only; a promise
   inside it is refused because it would outlive the scope.
+- `entity` is the display label and `entity_id` the stable key (T4); the
+  projection groups by `ledgerEntityKey`. The backfill resolves labels
+  against the current store and leaves the rest NULL — never rewrite
+  `entity`, never invent an id for a label that no longer resolves.
 
 ## Metrics and traces
 

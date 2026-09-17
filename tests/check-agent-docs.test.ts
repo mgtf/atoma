@@ -82,11 +82,11 @@ describe('subsystem line budgets', () => {
     // The second 2026-08-31 bug: the Map is keyed 'src/viz/AGENTS.md', and a
     // raw win32 relative() ('src\\viz\\AGENTS.md') missed it, re-imposing the
     // 500-line default on a 569-line file.
-    expect(subsystemLineBudget('C:\\repo', 'C:\\repo\\src\\viz\\AGENTS.md', win32)).toBe(600);
+    expect(subsystemLineBudget('C:\\repo', 'C:\\repo\\src\\viz\\AGENTS.md', win32)).toBe(620);
   });
 
   it('resolves the same exception on a POSIX root', () => {
-    expect(subsystemLineBudget('/repo', '/repo/src/viz/AGENTS.md', posix)).toBe(600);
+    expect(subsystemLineBudget('/repo', '/repo/src/viz/AGENTS.md', posix)).toBe(620);
   });
 
   it('gives every other subsystem the default, on either root shape', () => {

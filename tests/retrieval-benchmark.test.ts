@@ -277,7 +277,12 @@ describe('maintenance scorer — actual behavior with immutable evaluator code',
   });
 });
 
-describe('retrieval benchmark CLI — actual child process', () => {
+// These tests spawn real children — a tsx-loaded CLI with a 20s budget and a
+// full `tsc` with a 30s one — so the default 15s test timeout expired BEFORE
+// the child's own budget did whenever the machine was busy: the suite's only
+// recurring failure under full parallelism (2026-09-17/18), never in
+// isolation. The test budget now exceeds the children's.
+describe('retrieval benchmark CLI — actual child process', { timeout: 90_000 }, () => {
   function cli(args: string[]) {
     return spawnSync(process.execPath, ['--import', 'tsx', 'src/cli/benchmark.ts', 'retrieval', ...args], {
       cwd: repo, encoding: 'utf8', timeout: 20_000,

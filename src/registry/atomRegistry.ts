@@ -341,7 +341,17 @@ export class AtomRegistry {
    *     `check` reads as ledger > store: the IMPOSSIBLE direction.
    */
   private note(event: Parameters<typeof appendLedger>[0]): void {
-    appendLedger(event, this.db);
+    // The stable key (T4) rides along with the display label: every event
+    // here names a type by its current name, inside the transaction that
+    // touches its row, so the id is one indexed read away and never stale.
+    appendLedger({ ...event, entityId: event.entityId ?? this.atomIdOf(event.entity) }, this.db);
+  }
+
+  private atomIdOf(name: string): string | undefined {
+    const row = this.prepare(`SELECT atom_id FROM atom_types WHERE name = ?`).get(name) as
+      | { atom_id: string }
+      | undefined;
+    return row?.atom_id;
   }
 
   listByTier(tier: Tier): AtomType[] {

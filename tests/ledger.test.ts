@@ -129,7 +129,7 @@ describe('lifecycle ledger', () => {
     reg.recordFailure(t.name);
     reg.patch(t.name, { systemPromptAppend: 'more' }, 'test', 'why');
     reg.recordSuccess(t.name);
-    const projected = projectCounters(readLedger(db)).get(t.name)!;
+    const projected = projectCounters(readLedger(db)).get(t.atomId)!;
     const live = reg.getByName(t.name)!;
     expect(projected.successes).toBe(live.successes);
     expect(projected.failures).toBe(live.failures);
@@ -152,7 +152,7 @@ describe('lifecycle ledger', () => {
     });
 
     expect(corrected.successes).toBe(1);
-    expect(projectCounters(readLedger(db)).get(t.name)).toEqual({
+    expect(projectCounters(readLedger(db)).get(t.atomId)).toEqual({
       successes: 1,
       failures: 0,
     });
@@ -201,7 +201,7 @@ describe('lifecycle ledger', () => {
     reg.recordFailure(gone.name);
     reg.mergeInto(keep.name, [gone.name]);
     const live = reg.getByName(keep.name)!;
-    const projected = projectCounters(readLedger(db)).get(keep.name)!;
+    const projected = projectCounters(readLedger(db)).get(keep.atomId)!;
     expect(live.successes).toBe(3);
     expect(projected.successes).toBe(live.successes);
     expect(projected.failures).toBe(live.failures);
@@ -382,6 +382,57 @@ describe('scoped lifecycle attribution (T7)', () => {
     // An exception inside restores too.
     expect(() => withLedgerScope({ actorType: 'system' }, () => { throw new Error('boom'); })).toThrow(/boom/);
     expect(ledgerScope()).toEqual({ runId: 'run-9', actorType: 'cli' });
+  });
+
+  it('type events carry the atom id beside the name, and the projection groups by it (T4)', () => {
+    const db = openDb(join(dir, 'store.db'));
+    const reg = new AtomRegistry(db);
+    const t = reg.create(1, { description: 'x', systemPrompt: 'p', tools: [], params: {}, createdBy: 'test' });
+    reg.recordSuccess(t.name);
+    reg.recordFailure(t.name);
+    const events = readLedger(db);
+    expect(events.map((e) => [e.entity, e.entityId])).toEqual([[t.name, t.atomId], [t.name, t.atomId]]);
+    const projected = projectCounters(events);
+    expect(projected.get(t.atomId)).toEqual({ successes: 1, failures: 1 });
+    expect(projected.has(t.name)).toBe(false);
+    // Skill rows: the label already is the stable key.
+    const skills = new SkillRegistry(join(dir, 'skills'));
+    skills.save(t.atomId, { id: 's', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
+    expect(readLedger(db).at(-1)).toMatchObject({ entity: `${t.atomId}/s`, entityId: `${t.atomId}/s` });
+    db.close();
+  });
+
+  it('backfills stable ids from the store as it is now, and leaves unresolvable labels NULL', () => {
+    // A store from before the column: type rows keyed by name, skill rows
+    // keyed by id (T4) or by name (pre-T4), and one label whose type is gone.
+    const path = join(dir, 'store.db');
+    const seed = openDb(path);
+    const reg = new AtomRegistry(seed);
+    const water = reg.create(1, { description: 'x', systemPrompt: 'p', tools: [], params: {}, createdBy: 'test' });
+    seed.exec(`DROP INDEX IF EXISTS idx_lifecycle_entity_id; ALTER TABLE lifecycle_events DROP COLUMN entity_id;
+      INSERT INTO lifecycle_events (at, kind, entity) VALUES
+        ('2026-01-01T00:00:00.000Z', 'type-success', '${water.name}'),
+        ('2026-01-01T00:00:01.000Z', 'type-success', 'Gone'),
+        ('2026-01-01T00:00:02.000Z', 'skill-success', '${water.atomId}/s'),
+        ('2026-01-01T00:00:03.000Z', 'skill-failure', '${water.name}/legacy')`);
+    seed.close();
+
+    const db = openDb(path);
+    const events = readLedger(db);
+    expect(events.map((e) => e.entityId ?? null)).toEqual([
+      water.atomId, null, `${water.atomId}/s`, `${water.atomId}/legacy`,
+    ]);
+    // Labels are bytes of history: untouched.
+    expect(events.map((e) => e.entity)).toEqual([water.name, 'Gone', `${water.atomId}/s`, `${water.name}/legacy`]);
+    // The projection now meets the store on the id, and the orphan keeps its own key.
+    const projected = projectCounters(events);
+    expect(projected.get(water.atomId)).toEqual({ successes: 1, failures: 0 });
+    expect(projected.get('Gone')).toEqual({ successes: 1, failures: 0 });
+    // Idempotent: a second open changes nothing.
+    db.close();
+    const again = openDb(path);
+    expect(readLedger(again)).toEqual(events);
+    again.close();
   });
 
   it('an event that names its own scope overrides the process scope field by field', () => {

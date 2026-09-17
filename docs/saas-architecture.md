@@ -186,10 +186,11 @@ There is no reference stack.
 
 ### The next code decision
 
-**Gate 0: hardened SQLite versus PostgreSQL.** The dated analysis and the
-recommended migration shape are in
+**Gate 0: hardened SQLite versus PostgreSQL.** Decided for hardened SQLite on
+2026-09-18 (see the gate's record in Layer 3). The dated analysis and the
+migration shape it did not adopt are in
 [PostgreSQL migration analysis — 2026-09-02](postgresql-migration-analysis-2026-09-02.md);
-it is an input, not an accepted owner decision. What it gates has narrowed
+it stays an input for the day evidence reopens the gate. What it gated had narrowed
 since 2026-09-15: there is no trust split to build on it. It gates (a) moving
 skill counters out of `_meta.json` into atomic statements, (b) durable payer
 attribution for API-key runs, (c) scoped lifecycle attribution, and (d) any
@@ -304,7 +305,11 @@ gate, which has no boundary left to guard.)*
 
 **T4 — Identity uses stable surrogate ids; names are display labels.**
 `atom_id` is a UUID. Identity-critical references and namespaces use stable
-ids. *Deviation: `lifecycle_events.entity` is name-keyed for type counters.*
+ids. *Since 2026-09-18 `lifecycle_events.entity_id` carries the stable key
+(`atom_id`, or `<atom-id>/<skill-id>`) and `entity` stays the display label;
+`ledger check` and `projectCounters` group by the id. Backfill rule: resolve
+each label against the store as it is now, leave NULL what does not resolve,
+rewrite no bytes.*
 
 **T5 — No control-plane path or identity is derived from model output.**
 Model-authored names, branch labels, task text and verdict prose never become
@@ -325,8 +330,7 @@ plus project, run and actor when it arises in those scopes. *Since 2026-09-18
 the row carries organisation, project, run and a typed actor (the
 `platform_events` vocabulary): a run child sets the scope once from the record
 `assertProjectRunAuthority` proves, operator writes over the MCP carry the
-bearer's principal per request, the CLI carries `cli`. Remaining deviation:
-type entities are name-keyed (T4).*
+bearer's principal per request, the CLI carries `cli`. No remaining deviation.*
 
 **T8 — Raw traces never become learning input.** Traces contain prompts, tool
 I/O and workspace excerpts; only distilled bodies enter the catalogue.
@@ -392,7 +396,21 @@ production.
 
 ### Decision gate 0 — hardened SQLite or PostgreSQL
 
-Next as a DECISION, and blocking W4 alone. The earlier claim that it also
+**Decided 2026-09-18: hardened SQLite.** The owner asked to stabilise, not to
+migrate, and the evidence gathered for the gate points the same way: four
+processes contending on one store file serialise correctly once every write
+transaction takes its lock before its read (W4a, measured); two additive
+migrations landed on both open paths without incident (W5, W6); the restore
+drill passes on the deployed shape (W8-a). PostgreSQL is reopened only on
+evidence this instance cannot produce today — a second host sharing the
+store, or a measured `SQLITE_BUSY` after the `busy_timeout` with every
+writer `.immediate()`. W4 is therefore unblocked and stays SQLite: one
+statement per counter mutation, in the transaction that appends its ledger
+event, on the store that already holds `lifecycle_events`. It is deferred as
+a matter of size, not of decision. The record below is kept as the evidence
+the decision was taken against.
+
+The gate was a DECISION blocking W4 alone. The earlier claim that it also
 blocked W5, W6 and W8 did not survive verification: W5 is one additive table
 on the store that already holds `project_runs`, W6's plumbing is additive
 columns on an existing table, and W8 targets the systemd deployment running
@@ -434,27 +452,26 @@ Decision 6 settles it.
 | **W0** | Close the launcher contract leak | not started | — | `src/tools/egressSidecar.ts` and `src/viz/server.ts` construct and call through `ContainerLauncher` only; `removeNetworkBefore` and `previewOwnership` are on the contract or gone. Until then W1 cannot be a transport swap. |
 | **W1** | Separate launcher service | contract + in-process backend done | W0 | `DockerLauncher` runs in its own container behind a permissioned socket; the web image holds no `docker.sock` (D1). |
 | **W2** | Worker transport behind the launcher | not started | W1; possibly W3 — a socket preserving `--network none` must be bind-mounted on a path both sides see, which is the workspace story (unverified) | The Element worker speaks a socket/network protocol issued by the launcher; `containerExecutor.ts` no longer owns attach/remove; `workerRunArgs` isolation assertions still pass (D2, D4). |
-| **W3** | Launcher-managed workspaces | not started | W1; Gate 0 only if leases persist in the product store (decision 6) | Workspace handles are volumes, not host paths; lease, TTL, bounded stop, reverse teardown and orphan reconciliation are launcher operations (D3, D4). |
-| **W4** | Skill counters out of `_meta.json` | not started | Gate 0 | Every counter, promotion and demotion mutation is one statement in one transaction with its ledger event (T6, R4). Gate 0 decides dialect and transaction mode, not placement — T6 already forces the counters into the store holding `lifecycle_events`. `save`, `promoteToScript`, `demoteToLlm` and `merge` become file+DB pairs no transaction covers, so the crash ordering must be re-derived, not ported. |
+| **W3** | Launcher-managed workspaces | not started | W1 (decision 6: leases stay in a machine-local file, so no store writer) | Workspace handles are volumes, not host paths; lease, TTL, bounded stop, reverse teardown and orphan reconciliation are launcher operations (D3, D4). |
+| **W4** | Skill counters out of `_meta.json` | not started; unblocked by Gate 0 (SQLite), deferred as heavy under the stabilisation mandate | — | Every counter, promotion and demotion mutation is one statement in one transaction with its ledger event (T6, R4). Gate 0 decides dialect and transaction mode, not placement — T6 already forces the counters into the store holding `lifecycle_events`. `save`, `promoteToScript`, `demoteToLlm` and `merge` become file+DB pairs no transaction covers, so the crash ordering must be re-derived, not ported. |
 | **W4a** | Registry write-transaction correctness | **done** (`8a4f2ff`) | — | All eleven registry write transactions are `.immediate()`; both product-store open paths set `busy_timeout` explicitly instead of inheriting the driver default; a regression allocates ordinals across connections and processes. This is R8 for the STORE, owed under either Gate 0 branch. It does NOT close `_meta.json` file concurrency — that is W4. |
 | **W5** | Durable payer ledger for every run | **done** (`5154832`): `project_run_payers`, three immutable rows per run, written in the queued→running transaction; the coordinator resolves payers through `payerForSelector` | — (the org-scoped cost READ surface waits on decision 3) | The three-row `RunPayerLedger` is persisted for API-key-only runs too, in the same transaction as the queued→running transition (T10). The coordinator resolves payers THROUGH `payerForSelector`, the contract's canonical rule. The synthetic benchmark control (`retrievalProjectAttempt`) transitions its accounting run directly and records no payer; it spends nothing. |
-| **W6** | Scoped lifecycle attribution | **scope columns done** (2026-09-18): `lifecycle_events` carries `org_id`, `project_id`, `run_id`, `actor_type`, `actor_id`; one `ensureLedgerSchema` on both open paths; the runner, the MCP writes and the CLI set the scope. The entity re-key is NOT done | a backfill rule for the entity re-key (name → `atom_id` for type events; skill entities are already id-keyed) | Type counters stop being name-keyed and integrity projections group by the stable id (T4). The ordering constraint held: the migration is one function called from `openDb` and from the cached handle, and `tests/ledger.test.ts` drives a legacy-shaped store through each path first. A read-only reader on an unmigrated snapshot still reads it, without scope. |
+| **W6** | Scoped lifecycle attribution | **done** (2026-09-18): `lifecycle_events` carries `org_id`, `project_id`, `run_id`, `actor_type`, `actor_id` and `entity_id`; one `ensureLedgerSchema` on both open paths; the runner, the MCP writes and the CLI set the scope; `ledger check` compares types by `atom_id` | — | Backfill rule taken by the owner: resolve each label against the current store, leave NULL what does not resolve, rewrite nothing. The ordering constraint held: the migration is one function called from `openDb` and from the cached handle, and `tests/ledger.test.ts` drives a legacy-shaped store through each path first, then a pre-column store through the backfill. A read-only reader on an unmigrated snapshot still reads it, without scope or id. |
 | **W7** | Web, launcher images and a reference stack | worker/preview/mender images exist; no `.dockerignore`, so the worker build sends the whole working tree as context | W1 for the web image — `src/viz/server.ts` constructs `DockerLauncher` in-process for previews, so a web container honouring D1 loses previews until W1 lands | Two more image definitions, one compose/stack file, digest pins, a `.dockerignore`; boots on a clean Linux host. |
 | **W8-a** | A restore drill valid on the deployed shape | **done for the fixture** (`bdb6bf9`); NOT yet run against a snapshot from the real host | — | The drill distinguishes a tier NOT APPLICABLE to a deployment from one expected and lost — ignoring `skipped` wholesale would make it falsely reassuring. It passes on a production-shaped fixture, which proves the fix; a real snapshot from the host is verified separately and proves more. The manifest records that `store.db` needs an externally held `ATOMA_SECRET_ENCRYPTION_KEY` to yield usable organisation keys, without containing it. |
 | **W8-b** | Hosted backup and disaster recovery | `npm run backup` (dated, pruned, off-machine); the 2026-09-14 drill ([recovery-drill-2026-09-14.md](recovery-drill-2026-09-14.md)) covers the local store only | W8-a, W7 | A restore drill on the packaged stack and documented RPO/RTO. Proving recovery requires retrieving the encryption key separately and decrypting under control; documenting the dependency is not that proof. Secret ROTATION is distinct from restoration and is its own work: there is no re-encryption implementation in `src/auth/`, and the AAD binds the key identity, so rotation means decrypt-under-old then re-encrypt-under-new for every row plus the GitHub token wrapping key. |
-| **W9** | Trace and workspace retention | platform events only (90 d); nothing sweeps run traces, workspaces or `lifecycle_events` | W8-a, decision 2 | A retention window for `orgs/<org>/projects/<project>/runs/<run>/` traces and workspaces, enforced by a job the operator can run and audit. The preview TTL (`idleMs`, `hardMs`) is a precedent for the shape, not an implementation. Strictly after W8-a: deleting run bytes before restoration is proven destroys the evidence the snapshot exists to keep. Decision 2 must also settle whether expiry drops the `project_runs` row or only the bytes — publications, verdicts and the run index reference it. |
+| **W9** | Trace and workspace retention | platform events only (90 d); nothing sweeps run traces, workspaces or `lifecycle_events` | W8-a (decision 2: 90 days for finished runs' traces and workspaces; `lifecycle_events` never swept) | A retention window for `orgs/<org>/projects/<project>/runs/<run>/` traces and workspaces, enforced by a job the operator can run and audit. The preview TTL (`idleMs`, `hardMs`) is a precedent for the shape, not an implementation. Strictly after W8-a: deleting run bytes before restoration is proven destroys the evidence the snapshot exists to keep. Decision 2 must also settle whether expiry drops the `project_runs` row or only the bytes — publications, verdicts and the run index reference it. |
 | **W10** | Quotas and cost ceilings per organisation | bounded admission exists for PREVIEWS only (`maxPerOrg: 2`, `maxGlobal: 4`, enforced in `PreviewManager.assertCapacity`) — a precedent for the shape, not an implementation of this item: there is no financial budget and no per-organisation run limit | W5 (budget half), decision 3 | Per-organisation budget and concurrency limits enforced at run admission, visible in the console. The budget half needs a durable payer record; the run-concurrency half has nothing to divide while the machine-global lease allows one run at a time. |
 | **W11** | Break-glass cross-organisation read | ordinary `platform:admin` power at five widening paths (`src/projects/service.ts:157,182`, `src/viz/server.ts:1679,1688`, `src/mcp/tools.ts:335`); none writes a journal row, `src/contracts/platformEvents.ts` has no cross-org read kind, and `auth_platform_admins` has no expiry column | decision 1 | Explicit, attributable, journaled, time-bounded, with the customer-notification policy the owner chooses. The capability is in use with no record today; decision 1 is independent of Gate 0 and does not wait for the sequence below. |
-| **W12** | Platform terms | none | decision 5 | Terms of use covering what a run contributes to and consumes from the commons; separate from AGPL-3.0. |
+| **W12** | Platform terms | none | decision 5 taken: the commons is the product; a legal text to write, no engineering | Terms of use covering what a run contributes to and consumes from the commons; separate from AGPL-3.0. |
 | **W13** | Packaged-stack acceptance | `auth-release-smoke.mjs` (loopback IdP, temp store) | W1, W7 | Boots the stack; proves founder login, invitation, role enforcement, Element-workload isolation, delivery, restart, backup/restore and denied control-plane reachability from the worker network. |
 | **W14** | Shared-learning acceptance | `tests/project-retrieval-privacy.test.ts` characterises the corpus side; nothing asserts cross-org skill reuse | W13 for the isolation half only | Two organisations on one stack: no cross-org trace/workspace/corpus read. The SHARED half — a recipe learned by one organisation dispatched by the other's next run — is assertable in one process since 2026-09-15 and needs no stack; it is the only mechanical proof that the decision was implemented and not merely documented. |
 
-Order: ~~W8-a~~ → ~~W4a~~ → ~~W5~~ → ~~W6 (scope)~~ → Gate 0 → W4 → W0 → W1 →
-W2 → W3 → W7 → W13 → W14. W8-a and W4a landed on 2026-09-17, W5 and the scope
-half of W6 on 2026-09-18; none needed an owner decision, and together they
-give Gate 0 a measured writer topology, a proven restore, and two more
-additive migrations that landed on SQLite without incident. The entity re-key
-half of W6 waits on its backfill rule and is not on Gate 0's path.
+Order: ~~W8-a~~ → ~~W4a~~ → ~~W5~~ → ~~W6~~ → ~~Gate 0~~ → W4 → W0 → W1 → W2 →
+W3 → W7 → W13 → W14. W8-a and W4a landed on 2026-09-17, W5 and W6 on
+2026-09-18, and Gate 0 was decided the same day on what they measured. What
+remains is engineering under a stabilisation mandate: W4 first when it is
+taken up, none of it urgent, none of it a migration.
 
 What W4a measured, and what Gate 0 should read from it: reverting only the
 eleven `.immediate()` calls, with the explicit `busy_timeout` left in place,
@@ -464,32 +481,56 @@ store file is not a future topology to design for — it is the one that runs,
 and SQLite serialises it correctly once the write lock is taken before the
 read.
 
-Outside that sequence: **decision 1 does not wait for it.** The cross-org
-exposure is standing, the reads are unjournaled, and the answer is independent
-of Gate 0. W9 follows W8-a and decision 2; W10 follows W5 and decision 3; W12
-needs only decision 5 and no engineering.
+Outside that sequence: decision 1 was taken on 2026-09-18 (retained,
+journaled); the reads are STILL unjournaled until W11's de-duplication rule
+is designed against a measured poll rate. W9 follows W8-a with its retention
+fixed; W10 is concurrency only; W12 needs a text and no engineering.
 
-### Open owner decisions
+### Owner decisions, taken 2026-09-18
 
-1. Is platform-admin cross-organisation read retained? If so, is customer
-   notification mandatory, and at what latency? (W11)
-2. Retention periods for traces, workspaces, platform events and lifecycle
-   events. (W9)
-3. Is the platform BYO-key only, or will it meter and rebill platform API
-   keys? Quotas depend on the answer. (W10, W5)
-4. Gate 0 itself: SQLite or PostgreSQL, with the six-point record above.
-5. Under which terms does an organisation's run contribute to and consume the
-   commons? These are platform terms, separate from the repository's
-   AGPL-3.0 licence. (W12)
-6. Does the launcher stay stateless? D4 assigns it leases and TTLs; if those
-   persist in the product store it becomes a Gate 0 writer, and if they persist
-   in a machine-local file as the run lease already does, the launcher arm
-   stays un-gated. (W1, W3, Gate 0 point 1)
+Taken together under one mandate: stabilise the instance that runs; no
+storage migration, no new heavy mechanism. Each decision names what it
+unblocks and what it deliberately leaves for later.
 
-Decision 1 carries the largest standing exposure and the fewest dependencies:
-no Gate 0, no launcher, no schema. Taking it early avoids building W11 twice,
-since both the notification audience and the grant's time bound fall out of
-the answer.
+1. **Platform-admin cross-organisation read is retained, and every such read
+   must be journaled.** The exposure is real but the power is the operator's
+   own on the operator's own host; removing it would remove support. What
+   changes is that it stops being silent: W11 becomes "journal each of the
+   five widening paths as a `security`-severity platform event naming the
+   admin and the organisation read, and notify the organisation through the
+   one notification source". NOT designed in this session: the run index is
+   polled every second by the admin's own browser, so a naive journal row per
+   read would flood the 50 000-row journal in a day. The de-duplication rule
+   (per admin, per organisation, per session, or per window) is designed
+   once, against a measured poll rate, as one reviewed commit — the
+   cooling-off rule. No expiry column and no time-bound grant for now: the
+   `grant-admin`/`revoke-admin` CLI is the bound.
+2. **Retention: 90 days for run traces and workspaces of finished runs,
+   aligned with platform events; `lifecycle_events` is never swept.** It is
+   the integrity record `ledger check` folds over, and a fold over a
+   truncated history is exactly the false IMPOSSIBLE the ledger exists to
+   rule out. W9 is an operator-run, audited job; the preview TTL is its
+   shape precedent.
+3. **BYO-key only.** The platform does not meter or rebill API keys it
+   holds; an organisation spends its own keys or its members' subscriptions,
+   and the host's keys are the operator's cost. W10 therefore has no
+   financial half: it is per-organisation concurrency, on the model
+   `PreviewManager.assertCapacity` already applies to previews. The payer
+   ledger (W5) stays the record of who paid, for the operator's own books.
+4. **Gate 0: hardened SQLite**, recorded above with its evidence.
+5. **Terms: the commons is the product.** A run contributes what it learns
+   and consumes what others learned, with organisation boundaries on
+   projects, workspaces, traces and corpora only (the 2026-09-15 decision).
+   W12 is a legal text stating exactly that, separate from AGPL-3.0; no
+   engineering, and the text is the owner's to write or commission.
+6. **The launcher stays stateless.** Leases and TTLs persist in a
+   machine-local file, as the MCP run lease already does, never in the
+   product store. W3 is thereby un-gated and the launcher arm never becomes a
+   store writer.
+
+Decision 1 was the one the owner had asked to take without waiting; its
+journaling design is the one piece of engineering here that is scoped but
+deliberately not built in the session that scoped it.
 
 Closed since the previous review, by the 2026-09-15 decision: who approves
 global bodies (nobody — there is no gate); whether a dynamic atom can become a
@@ -528,6 +569,7 @@ T3, Track A or Track B resolve through the legacy map below.
 | 2026-09-15 morning | Per-project skill trust (`.trust/<project>/<sha>/`), project runs unable to promote/dispatch/drop/merge. | Folded back the same day (`reconcilePlatformSkills`). | commit `9e1d670` → `2911881` |
 | 2026-09-15 | **A run is a run.** One registry, one catalogue, one trust, one lifecycle. Promotion, dispatch and the prefilter cache at host defaults for tenant runs. Recoverable atom trust. | Current design. Mutually distrusting organisations on one instance are not a supported shape. | [platform trust](platform-trust-2026-09-15.md), [recoverable trust](recoverable-trust-2026-09-15.md), commits `2911881`, `63f5317`, `418b25d`, `5d0e0ac` |
 | 2026-09-16 review | This reconciliation: Track A/B retired, T2/T3/R1 rewritten, remaining work listed as W1–W14. | No new acceptance run; no closure of Gate 0. | this document at `76c041f` |
+| 2026-09-17 → 18 | W8-a, W4a, W5, W6 landed; Gate 0 and owner decisions 1–6 taken under a stabilisation mandate (hardened SQLite, no migration). | Current design. W11's journaling design and W4 remain the next engineering. | commits `bdb6bf9`, `8a4f2ff`, `5154832`, `437c713`, and this document |
 
 <a id="3-prerequisite-f1-the-sandbox-is-not-an-isolation-boundary"></a>
 
@@ -592,8 +634,8 @@ oracle is accepted as a consequence of the commons.
   payer contract.
 - **Accepted, not implemented:** the separate launcher service, worker
   transport migration, launcher-managed volumes, web/launcher images and a
-  reference stack (W1–W3, W7); atomic skill counters, durable payer ledger and
-  scoped lifecycle attribution after Gate 0 (W4–W6).
+  reference stack (W1–W3, W7); atomic skill counters (W4). The durable payer
+  ledger and scoped lifecycle attribution (W5, W6) are implemented.
 - **Superseded:** the body/trust split, organisation-local trust, the
   platform body offer/approval workflow, the per-owner registry and the
   per-project skill trust. Their records stay as evidence.

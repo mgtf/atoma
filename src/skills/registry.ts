@@ -92,12 +92,14 @@ export class SkillRegistry {
     } catch { return null; }
   }
 
+  // A skill entity is `<namespace>/<skill-id>` and the namespace is the
+  // owning molecule's atom id (T4), so the label already IS the stable key.
   private recordEvent(event: Parameters<typeof appendLifecycle>[0]) {
-    appendLifecycle(event);
+    appendLifecycle({ entityId: event.entity, ...event });
   }
 
   private recordEventStrict(event: Parameters<typeof appendLifecycleStrict>[0]) {
-    appendLifecycleStrict(event);
+    appendLifecycleStrict({ entityId: event.entity, ...event });
   }
 
   /** Return the full directory holding all skills for an L1 molecule. */

@@ -3,6 +3,11 @@ import { ATOMA_MARK_LOCAL_CENTER } from '../atoma-mark.js';
 import { GPU_COLORS } from '../../theme.js';
 
 const BUTTON_WIDTH = 200;
+/**
+ * The handheld gate's single control carries a sentence once pressed, so it
+ * is wider than the desktop Continue and bounded by the phone's edges.
+ */
+const HANDHELD_BUTTON_WIDTH = 300;
 const BUTTON_HEIGHT = 46;
 /** Space from the mark's visual edge to the inspect row. Must stay ABOVE the
  *  film crop (`crystalClip` uses a +18 pad below the crystal). */
@@ -69,8 +74,15 @@ export interface WelcomeLayout {
  * The inspect row must stay below the lighting-film crop. `scripts/viz-mark-turn.mjs`
  * duplicates MARK_TO_SLIDER / SLIDER_HEIGHT / SLIDER_TO_BUTTON / BUTTON_HEIGHT /
  * EDGE — keep them in lockstep (tests/viz-mark-turn.test.ts holds both).
+ *
+ * `handheld` widens the one control the handheld gate draws (its pressed
+ * label is a sentence) within the phone's side margins; nothing else moves.
  */
-export function welcomeLayout(width: number, height: number): WelcomeLayout {
+export function welcomeLayout(
+  width: number,
+  height: number,
+  handheld = false
+): WelcomeLayout {
   const controlsHeight =
     MARK_TO_SLIDER +
     (WELCOME_SHOW_INSPECT ? SLIDER_HEIGHT + SLIDER_TO_BUTTON : 0) +
@@ -96,6 +108,9 @@ export function welcomeLayout(width: number, height: number): WelcomeLayout {
   const copyY = WELCOME_SHOW_INSPECT
     ? sliderY + SLIDER_HEIGHT + SLIDER_TO_BUTTON
     : sliderY;
+  const buttonWidth = handheld
+    ? Math.max(BUTTON_WIDTH, Math.min(HANDHELD_BUTTON_WIDTH, width - EDGE * 2))
+    : BUTTON_WIDTH;
   return {
     scale,
     markX: width / 2 - ATOMA_MARK_LOCAL_CENTER,
@@ -112,9 +127,9 @@ export function welcomeLayout(width: number, height: number): WelcomeLayout {
     copyY,
     copyWidth,
     copyHeight: COPY_HEIGHT,
-    buttonX: (width - BUTTON_WIDTH) / 2,
+    buttonX: (width - buttonWidth) / 2,
     buttonY: copyY + COPY_HEIGHT + COPY_TO_BUTTON,
-    buttonWidth: BUTTON_WIDTH,
+    buttonWidth,
     buttonHeight: BUTTON_HEIGHT,
     versionX: width / 2,
     versionY: height - VERSION_BOTTOM,
@@ -134,7 +149,8 @@ export function drawWelcome(
   width: number,
   height: number
 ): void {
-  const layout = welcomeLayout(width, height);
+  const handheld = snapshot.state.handheld;
+  const layout = welcomeLayout(width, height, handheld);
   ctx.retainAtomaMark(layout.markX, layout.markY, layout.scale, {
     bobPx: FLOAT_AMPLITUDE_PX,
     bobPeriodMs: FLOAT_PERIOD_MS,
@@ -172,7 +188,44 @@ export function drawWelcome(
   );
   tagline.anchor.set(0.5, 0);
   const login = snapshot.data.login;
-  if (login) {
+  if (handheld) {
+    // HANDHELD GATE (temporary, 2026-09-18): the mobile journey is unfinished,
+    // so a phone meets the hero crystal and ONE Continue whether or not the
+    // auth gate is on — never the provider buttons, which would start an
+    // OAuth flow into a product it cannot use. Pressed, the control says why
+    // and disables while the bead's light closes the scene (GpuApp owns the
+    // white-out; `handheldBlocked` is the one signal both surfaces read).
+    const blocked = snapshot.state.handheldBlocked;
+    ctx.button(
+      ctx.root,
+      'welcome.continue',
+      'button',
+      blocked ? snapshot.t('welcome.handheld.blocked') : snapshot.t('welcome.continue'),
+      layout.buttonX,
+      layout.buttonY,
+      layout.buttonWidth,
+      layout.buttonHeight,
+      false,
+      snapshot.onActivate,
+      GPU_COLORS.primary,
+      true,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      blocked
+    );
+    if (blocked) {
+      const hint = ctx.text(
+        ctx.root,
+        snapshot.t('welcome.handheld.hint'),
+        layout.copyX,
+        layout.buttonY + layout.buttonHeight + 14,
+        { size: 12, color: GPU_COLORS.muted, width: layout.copyWidth, alpha: 0.9 }
+      );
+      hint.anchor.set(0.5, 0);
+    }
+  } else if (login) {
     // TENANCY LANDED: the continue control IS the login now. One button per
     // configured provider, and a bounced login failure renders under them
     // from the catalogs — never raw query-string text.

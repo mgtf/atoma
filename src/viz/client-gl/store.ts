@@ -8,6 +8,7 @@ import { applyDocumentLocale } from '../client/i18n-catalog.js';
 import type { EventFilters } from '../client/run-utils.js';
 import type { SceneCameraMode } from './scene-camera.js';
 import type { DocsThemeKey } from './docs-content.js';
+import { isHandheldDevice } from './handheld.js';
 
 export { DOC_THEMES, type DocsThemeKey } from './docs-content.js';
 
@@ -220,6 +221,15 @@ export interface GpuUiState {
    */
   entered: boolean;
   /**
+   * The visitor's device has only coarse, hover-less pointers — a phone or a
+   * tablet. ONE sample of `isHandheldDevice()`, refreshed when its media
+   * query changes. While true the arrival gate never admits the app: the
+   * mobile journey is unfinished (2026-09-18), so Continue closes the door.
+   */
+  handheld: boolean;
+  /** Continue was pressed on a handheld device: the control re-labels and disables. */
+  handheldBlocked: boolean;
+  /**
    * The account menu behind the header orb. Not a view: it is an overlay drawn
    * above every view, and it closes on navigation so it can never outlive the
    * screen it was opened from.
@@ -241,6 +251,10 @@ export interface GpuUiState {
   showWelcome: () => void;
   /** Crystal route: focused content restores overview; overview opens Welcome. */
   activateCrystal: () => void;
+  /** Live media-query sample. Becoming handheld throws the visitor back behind the gate. */
+  setHandheld: (handheld: boolean) => void;
+  /** The handheld gate's only transition; `enter()` takes it on a handheld device. */
+  blockHandheld: () => void;
   toggleAccountMenu: () => void;
   closeAccountMenu: () => void;
   toggleLocaleMenu: () => void;
@@ -346,7 +360,10 @@ function viewChange(
   };
 }
 
-export const useGpuStore = create<GpuUiState>()((set) => ({
+/** Sampled once at load; GpuApp refreshes the store when the media query flips. */
+const HANDHELD_AT_LOAD = isHandheldDevice();
+
+export const useGpuStore = create<GpuUiState>()((set, get) => ({
   // The app opens on PROJECTS: it is the authenticated launch surface. Runs
   // is where you go to watch what you started, a second step rather than the
   // arrival. Ungated developer mode gets its no-project-routes empty state.
@@ -401,13 +418,24 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
     announce: 0,
     settings: 0,
   },
-  entered: initialEntered(),
+  // A handheld browser that once entered on the desktop path — or before
+  // this gate existed — must not walk past it on the persisted bit alone.
+  entered: HANDHELD_AT_LOAD ? false : initialEntered(),
+  handheld: HANDHELD_AT_LOAD,
+  handheldBlocked: false,
   accountMenuOpen: false,
   localeMenuOpen: false,
   notificationsMenuOpen: false,
   tuningPanelOpen: initialTuningPanelOpen(),
   announcementResetSignal: 0,
   enter: () => {
+    // A handheld device is never admitted: Continue closes the door instead,
+    // and nothing is persisted, so a later desktop visit on a shared profile
+    // still meets an honest first arrival.
+    if (get().handheld) {
+      set({ handheldBlocked: true });
+      return;
+    }
     try {
       if (typeof localStorage !== 'undefined') {
         localStorage.setItem('atoma.viz.entered', '1');
@@ -434,6 +462,8 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
         localeMenuOpen: false,
         notificationsMenuOpen: false,
       }),
+  setHandheld: (handheld) => set(handheld ? { handheld: true, entered: false } : { handheld: false }),
+  blockHandheld: () => set({ handheldBlocked: true }),
   // The three chrome menus are exclusive: opening one closes the others, so
   // two overlays can never contest the same corner of the header.
   toggleAccountMenu: () => set((state) => ({

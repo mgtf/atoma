@@ -73,7 +73,7 @@ describe('recoverable atom trust', () => {
       expect(shouldTrustType(registry.getByName(type.name)!)).toBe(true);
       const restored = registry.rollback(type.name, 1);
       expect(restored).toMatchObject({ successes: 6, failures: 1, consecutiveSuccesses: 0 });
-      expect(projectCounters(readLedger(db)).get(type.name)).toEqual({ successes: 6, failures: 1 });
+      expect(projectCounters(readLedger(db)).get(type.atomId)).toEqual({ successes: 6, failures: 1 });
       expect(readLedger(db).filter((event) => event.kind === 'type-trust-reset')).toHaveLength(2);
     } finally { db.close(); }
   });
@@ -90,7 +90,7 @@ describe('recoverable atom trust', () => {
       for (let i = 0; i < 3; i++) registry.recordSuccess(first.name);
       const corrected = registry.compensateCounters(first.name, { successes: -1, reason: 'Invalid observation' });
       expect(shouldTrustType(corrected)).toBe(false);
-      expect(projectCounters(readLedger(db)).get(first.name)).toEqual({ successes: 8, failures: 0 });
+      expect(projectCounters(readLedger(db)).get(first.atomId)).toEqual({ successes: 8, failures: 0 });
     } finally { db.close(); }
   });
 

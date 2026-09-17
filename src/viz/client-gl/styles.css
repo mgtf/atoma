@@ -96,6 +96,69 @@ button, input, textarea, select { font: inherit; }
   }
 }
 
+/* The handheld gate's white-out. Above every product surface, the entry veil
+   and the decorative cursor, below nothing: it is the last thing a phone sees.
+   `__flood` is the ONE element the rAF loop transforms — a pre-painted radial
+   gradient scaled outwards from the bead, compositor-only, no per-frame
+   gradient repaint — and the veil itself goes solid once the phase is
+   `white`. Its 55% solid stop is `HANDHELD_FLOOD_SOLID` in
+   handheld-whiteout.ts: at full scale it must reach every viewport corner. */
+.gpu-handheld-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  overflow: hidden;
+  pointer-events: auto;
+  touch-action: none;
+  background: transparent;
+}
+.gpu-handheld-veil[data-phase="white"] {
+  background: #fff;
+}
+.gpu-handheld-veil__flood {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  transform-origin: 50% 50%;
+  will-change: transform, opacity;
+  background: radial-gradient(
+    circle closest-side,
+    #fff 0%,
+    #fff 55%,
+    rgba(255, 255, 255, 0.72) 70%,
+    rgba(255, 255, 255, 0) 100%
+  );
+}
+.gpu-handheld-veil[data-phase="white"] .gpu-handheld-veil__flood {
+  display: none;
+}
+.gpu-handheld-veil__notice {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(320px, calc(100vw - 48px));
+  margin: 0;
+  transform: translate(-50%, -50%);
+  color: #0d1726;
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  text-align: center;
+  opacity: 0;
+  transition: opacity 600ms ease-out 300ms;
+}
+.gpu-handheld-veil[data-phase="white"] .gpu-handheld-veil__notice {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gpu-handheld-veil__notice {
+    transition-duration: 0ms;
+    transition-delay: 0ms;
+  }
+}
+
 .atoma-pointer-cursor {
   position: fixed;
   top: 0;

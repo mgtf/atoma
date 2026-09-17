@@ -288,6 +288,11 @@ export interface MarkShell {
       uv: readonly [number, number];
       on: number;
     };
+    /**
+     * Multiplies the bead's wall light (`uCoreIntensity`). 1 at rest; the
+     * handheld gate's surge pushes it past 1 (`renderer/mark-surge.ts`).
+     */
+    coreGain?: number;
   }): void;
   /**
    * Releases the shader, the three geometries and every vertex/index buffer.
@@ -538,8 +543,13 @@ export function createMarkShell(): MarkShell | null {
         uv: readonly [number, number];
         on: number;
       };
+      coreGain?: number;
     }) {
       const beadVisible = options?.beadVisible !== false;
+      const coreGain =
+        options?.coreGain !== undefined && Number.isFinite(options.coreGain)
+          ? Math.max(0, options.coreGain)
+          : 1;
       for (const [index, facet] of ATOMA_MARK_MESH.facets.entries()) {
         const shaded = frame.facets[index]!;
         const near = markFacetNearness(shaded.centroid[2]);
@@ -580,7 +590,7 @@ export function createMarkShell(): MarkShell | null {
         uniforms.uCore[0] = frame.core3[0];
         uniforms.uCore[1] = frame.core3[1];
         uniforms.uCore[2] = frame.core3[2];
-        uniforms.uCoreIntensity = MARK_SHELL_CORE_INTENSITY;
+        uniforms.uCoreIntensity = MARK_SHELL_CORE_INTENSITY * coreGain;
         uniforms.uPulse = frame.pulse;
       } else {
         // Empty cavity: no filament in the texture, no analytic wall light,

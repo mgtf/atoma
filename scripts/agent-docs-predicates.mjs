@@ -55,8 +55,12 @@ export const SUBSYSTEM_LINE_BUDGET = 500;
 // an agent opens on its own, so the alternative to this line was shaving
 // sentences until rules lost the reasons they exist for — the exact failure
 // the 2026-08-23 note above records.
+// 2026-09-18: src/viz sat AT its 600 cap when the handheld gate rule landed
+// (one line). Raised to 620 for the same reason as above rather than
+// condensing an unrelated rule to make room; a test pins the number so the
+// next raise is a conscious change too.
 export const SUBSYSTEM_LINE_BUDGET_OVERRIDES = new Map([
-  ['src/viz/AGENTS.md', 600],
+  ['src/viz/AGENTS.md', 620],
   ['src/preview/AGENTS.md', 560],
 ]);
 

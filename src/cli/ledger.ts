@@ -124,10 +124,12 @@ function main(): void {
   // Atom types — the SAME file the events came from, so this half of the
   // comparison cannot be mispaired.
   const rows = db
-    .prepare(`SELECT name, successes, failures FROM atom_types WHERE ${unfoldedRegistryPredicate(db)}`)
-    .all() as { name: string; successes: number; failures: number }[];
+    .prepare(`SELECT atom_id, name, successes, failures FROM atom_types WHERE ${unfoldedRegistryPredicate(db)}`)
+    .all() as { atom_id: string | null; name: string; successes: number; failures: number }[];
   for (const r of rows) {
-    const p = projected.get(r.name) ?? { successes: 0, failures: 0 };
+    // Keyed by the stable id (T4). The name is the fallback for a store whose
+    // rows never resolved — a pre-T4 store read read-only, say.
+    const p = (r.atom_id ? projected.get(r.atom_id) : undefined) ?? projected.get(r.name) ?? { successes: 0, failures: 0 };
     if (r.successes < p.successes || r.failures < p.failures) {
       impossible++;
       console.log(

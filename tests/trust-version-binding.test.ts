@@ -49,7 +49,7 @@ describe('RecordingRegistry forwards supervised version bindings', () => {
       expect(registry.getByName(original.name)).toMatchObject({ successes: 2, consecutiveSuccesses: 0 });
       registry.recordSuccess(original.name, 'supervisor', changed.version);
       expect(registry.getByName(original.name)).toMatchObject({ successes: 3, consecutiveSuccesses: 1 });
-      expect(projectCounters(readLedger(db)).get(original.name)?.successes).toBe(3);
+      expect(projectCounters(readLedger(db)).get(original.atomId)?.successes).toBe(3);
     } finally { db.close(); }
   });
 });
@@ -188,7 +188,7 @@ describe.each([1, 2] as const)('L%i trust is bound to the instantiated registry 
         successes: TRUST_THRESHOLD_SUCCESSES + 1,
         consecutiveSuccesses: 0,
       });
-      expect(projectCounters(readLedger(db)).get(type.name)?.successes).toBe(TRUST_THRESHOLD_SUCCESSES + 1);
+      expect(projectCounters(readLedger(db)).get(type.atomId)?.successes).toBe(TRUST_THRESHOLD_SUCCESSES + 1);
       expect(ctx.llm.calls.filter(call => call.role === 'validate-result')).toHaveLength(1);
     } finally { db.close(); }
   });

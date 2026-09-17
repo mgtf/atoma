@@ -282,6 +282,8 @@ export const TOUCH_SCROLL_SLOP_PX = 6;
  */
 const BUTTON_LABEL_IDLE = 0xa9b5ca;
 const BUTTON_LABEL_IDLE_TINT = multiplyTint(GPU_COLORS.text, BUTTON_LABEL_IDLE);
+/** A disabled button stays legible — it is saying why it cannot be used. */
+const BUTTON_DISABLED_ALPHA = 0.62;
 const FPS_BITMAP_FONT_NAME = 'AtomaFps';
 const FPS_BITMAP_FONT_CACHE_KEY = `${FPS_BITMAP_FONT_NAME}-bitmap`;
 const FPS_BITMAP_STYLE = new TextStyle({
@@ -2999,10 +3001,17 @@ export class GpuRenderer {
     /** Optional top offset for compound buttons that draw secondary copy. */
     labelY?: number,
     /** Accessible name when the visual label is a spinner glyph. */
-    accessibleLabel?: string
+    accessibleLabel?: string,
+    /**
+     * Drawn but inert: no tap, no hover, dimmed. The handheld gate's pressed
+     * Continue is the one caller today — a control that must stay readable
+     * while it says it can no longer be used.
+     */
+    disabled = false
   ) {
     const container = new Container();
     container.position.set(x, y);
+    if (disabled) container.alpha = BUTTON_DISABLED_ALPHA;
     this.addSurfaceShadow(container, width, height, {
       radius: 7,
       alpha: 0.4,
@@ -3055,11 +3064,13 @@ export class GpuRenderer {
         });
       }
     }
-    container.eventMode = 'static';
+    // `eventMode = 'none'` is the disabled state: no tap, and no hover tint
+    // either, so the control cannot look live under a finger.
+    container.eventMode = disabled ? 'none' : 'static';
     container.cursor = spinning ? 'wait' : 'pointer';
     container.hitArea = new Rectangle(0, 0, width, height);
     container.on('pointertap', () => {
-      if (spinning) return;
+      if (spinning || disabled) return;
       onActivate(id);
     });
     container.on('pointerover', () => {

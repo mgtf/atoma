@@ -26,6 +26,7 @@ npm run viz:shot -- --url http://127.0.0.1:5173     # attach to a dev stack alre
 npm run viz:shot -- --debug                         # page console + failed requests on stderr
 npm run viz:shot -- --width 528 --height 800        # narrow/compact layouts
 npm run viz:shot -- --auth --select-first --touch-probe  # native mobile swipe regression
+npm run viz:shot -- --handheld                      # phone: the handheld gate, pressed, then the white-out (3 PNGs)
 ```
 
 PNGs default to `screenshots/<view>-<auth-mode>-<camera>.png` (git-ignored). Viewport
@@ -53,6 +54,14 @@ exercise either camera pose. The same probe is part of `viz:smoke`.
   (+ commit receipt), failed (+ error line) and cost display. `/api/runs` and
   its trace are stubbed too, so `--view Runs` renders a full run: summary card
   with the metric tiles, branch filter chips, and a two-phase forked timeline.
+- **`--handheld`** — a phone (390×844 at DPR 3, touch as the only pointer, so
+  Chrome's own `(any-pointer: coarse) and (any-hover: none)` drives the gate;
+  `?atomaHandheld=1` is deliberately NOT used, the predicate is what is being
+  proven). Captures `<out>-gate.png` (hero crystal, one Continue, no provider
+  anchors even when the auth gate is armed), taps the CANVAS control with a
+  real touch, captures `<out>-flare.png` mid white-out with the re-labelled
+  disabled button, then `<out>-white.png`. Fails if the media query did not
+  match, if a provider anchor rendered, or if the tap admitted the app.
 - **`--select-first`** — clicks the first project row through the canvas hit
   targets (`?atomaDiag=1`), so the expanded run list and the run form render.
 - **`--scroll-end`** — Settings only: scrolls `.gpu-org-models-form` to its

@@ -102,6 +102,7 @@ import {
   pinMarkElapsedMs,
   setMarkBeadVisible,
 } from '../src/viz/client-gl/renderer/mark-clock.js';
+import { MARK_SURGE, setMarkCoreSurge } from '../src/viz/client-gl/renderer/mark-surge.js';
 import { drawRegistry } from '../src/viz/client-gl/renderer/views/registry.js';
 import {
   drawRuns,
@@ -170,6 +171,7 @@ interface RecordedButton {
   height: number;
   active: boolean;
   spinning?: boolean;
+  disabled?: boolean;
   onActivate?: (id: string) => void;
 }
 
@@ -466,7 +468,8 @@ function createRecordingCtx(): RecordingCtx {
       spinning,
       labelMaxWidth,
       _labelY,
-      accessibleLabel
+      accessibleLabel,
+      disabled
     ) {
       // The real `button()` FITS its label to its own width against measured
       // glyphs, so views hand it unbounded copy on purpose. Recording the raw
@@ -487,6 +490,7 @@ function createRecordingCtx(): RecordingCtx {
         height,
         active,
         spinning: spinning === true,
+        disabled: disabled === true,
         onActivate,
       });
       ctx.recordHitTarget(parent, {
@@ -625,6 +629,8 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     selectedDocsTheme: 'quick',
     scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 0, docs: 0, admin: 0, journal: 0, ledger: 0, sentinel: 0, announce: 0, settings: 0 },
     entered: true,
+    handheld: false,
+    handheldBlocked: false,
     accountMenuOpen: false,
     localeMenuOpen: false,
     notificationsMenuOpen: false,
@@ -633,6 +639,8 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     enter: noop,
     showWelcome: noop,
     activateCrystal: noop,
+    setHandheld: noop,
+    blockHandheld: noop,
     toggleAccountMenu: noop,
     closeAccountMenu: noop,
     toggleLocaleMenu: noop,
@@ -1055,6 +1063,103 @@ describe('drawWelcome as the login gate', () => {
     expect(
       ctx.texts.some((text) => text.value === I18N_CATALOGS.en['login.noProviders'])
     ).toBe(true);
+  });
+});
+
+describe('drawWelcome on a handheld device', () => {
+  const WIDTH = 390;
+  const HEIGHT = 844;
+  const GATED = {
+    login: { providers: [{ id: 'github', label: 'GitHub' }], notice: null },
+  };
+
+  afterEach(() => {
+    setMarkCoreSurge(0);
+    pinMarkElapsedMs(null);
+  });
+
+  it('offers ONE wide Continue instead of the provider buttons, even behind the auth gate', () => {
+    const ctx = createRecordingCtx();
+    drawWelcome(ctx, makeSnapshot({ entered: false, handheld: true }, GATED), WIDTH, HEIGHT);
+    expect(ctx.buttons.map((button) => button.id)).toEqual(['welcome.continue']);
+    const button = ctx.buttons[0]!;
+    expect(button.label).toBe(I18N_CATALOGS.en['welcome.continue']);
+    expect(button.disabled).toBe(false);
+    expect(button.active).toBe(false);
+    const layout = welcomeLayout(WIDTH, HEIGHT, true);
+    expect(button.width).toBe(layout.buttonWidth);
+    expect(button.x).toBe(layout.buttonX);
+    expect(button.x + button.width / 2).toBe(WIDTH / 2);
+    // Wider than the desktop Continue, inside the phone's side margins.
+    expect(layout.buttonWidth).toBeGreaterThan(welcomeLayout(WIDTH, HEIGHT).buttonWidth);
+    expect(layout.buttonX).toBeGreaterThan(0);
+    // The crystal and the tagline stay: the gate is the arrival, not an error page.
+    expect(ctx.markRoot.children.length).toBe(1);
+    expect(ctx.texts.some((text) => text.value === I18N_CATALOGS.en['welcome.tagline'])).toBe(true);
+    expect(ctx.texts.some((text) => text.value === I18N_CATALOGS.en['welcome.handheld.hint'])).toBe(false);
+  });
+
+  it('re-labels and disables the control once pressed, and says why beneath it', () => {
+    const ctx = createRecordingCtx();
+    drawWelcome(
+      ctx,
+      makeSnapshot({ entered: false, handheld: true, handheldBlocked: true }, GATED),
+      WIDTH,
+      HEIGHT
+    );
+    const button = ctx.buttons.find((item) => item.id === 'welcome.continue');
+    expect(button).toBeTruthy();
+    // The full sentence fits the widened control: no ellipsis.
+    expect(button!.label).toBe(I18N_CATALOGS.en['welcome.handheld.blocked']);
+    expect(button!.disabled).toBe(true);
+    expect(button!.active).toBe(false);
+    expect(button!.spinning).toBe(false);
+    expect(
+      ctx.metrics.hitTargets.find((target) => target.id === 'welcome.continue')?.label
+    ).toBe(I18N_CATALOGS.en['welcome.handheld.blocked']);
+    const hint = ctx.texts.find((text) => text.value === I18N_CATALOGS.en['welcome.handheld.hint']);
+    expect(hint).toBeTruthy();
+    expect(hint!.y).toBeGreaterThan(button!.y + button!.height);
+    expect(hint!.x).toBe(WIDTH / 2);
+    expect(ctx.buttons.map((item) => item.id)).not.toContain('login.provider.github');
+  });
+
+  it('keeps the widened control inside a narrow phone and unchanged on the desktop', () => {
+    const narrow = welcomeLayout(320, 640, true);
+    expect(narrow.buttonX).toBeGreaterThanOrEqual(28);
+    expect(narrow.buttonX + narrow.buttonWidth).toBeLessThanOrEqual(320 - 28);
+    expect(narrow.buttonWidth).toBeGreaterThanOrEqual(200);
+    const desktop = welcomeLayout(1280, 800);
+    expect(welcomeLayout(1280, 800, false)).toEqual(desktop);
+    expect(desktop.buttonWidth).toBe(200);
+  });
+
+  it('swells the bead with the surge and leaves it untouched at rest', () => {
+    // Pin the clock so both attaches share one pose; only the surge differs.
+    pinMarkElapsedMs(1_000);
+    const findByLabel = (node: Container, label: string): Container | null => {
+      if (node.label === label) return node;
+      for (const child of node.children) {
+        const found = findByLabel(child, label);
+        if (found) return found;
+      }
+      return null;
+    };
+    const coreScaleAt = (surge: number) => {
+      setMarkCoreSurge(surge);
+      const ctx = createRecordingCtx();
+      drawWelcome(ctx, makeSnapshot({ entered: false, handheld: true }), WIDTH, HEIGHT);
+      const core = findByLabel(ctx.markRoot, 'mark-core');
+      expect(core).not.toBeNull();
+      return { scale: core!.scale.x, bloomAlpha: core!.children[0]!.alpha };
+    };
+    const rest = coreScaleAt(0);
+    const restAgain = coreScaleAt(0);
+    expect(restAgain).toEqual(rest);
+    const flare = coreScaleAt(1);
+    expect(flare.scale).toBeCloseTo(rest.scale * (1 + MARK_SURGE.coreScale), 6);
+    expect(flare.bloomAlpha).toBeGreaterThanOrEqual(rest.bloomAlpha);
+    expect(flare.bloomAlpha).toBeLessThanOrEqual(1);
   });
 });
 
@@ -4358,7 +4463,9 @@ describe('attachAtomaMark glass layering', () => {
     );
     expect(source).toContain('if (shell) glassGlow.visible = false');
     expect(source).toContain('behind.visible = false');
-    expect(source).toContain('shell?.update(frame, { beadVisible, lamp, pointerClip })');
+    expect(source).toContain(
+      'shell?.update(frame, { beadVisible, lamp, pointerClip, coreGain: shellGain })'
+    );
     expect(source).toContain('pointerLampForLocal');
     expect(source).toContain('bobPx');
     const paintStart = source.indexOf('const paint = ');

@@ -202,6 +202,8 @@ export function DomBridge({
   const view = useGpuStore((state) => state.view);
   const sceneCameraMode = useGpuStore((state) => state.sceneCameraMode);
   const entered = useGpuStore((state) => state.entered);
+  const handheld = useGpuStore((state) => state.handheld);
+  const handheldBlocked = useGpuStore((state) => state.handheldBlocked);
   const locale = useGpuStore((state) => state.locale);
   const selectedRunId = useGpuStore((state) => state.selectedRunId);
   const selectedProjectId = useGpuStore((state) => state.selectedProjectId);
@@ -260,7 +262,22 @@ export function DomBridge({
         <span data-release-version={releaseVersion}>
           {t('welcome.version', { version: releaseVersion })}
         </span>
-        {loginLinks ? (
+        {handheld ? (
+          // HANDHELD GATE: one Continue whatever the auth gate says, the
+          // mirror of the canvas control. Pressed, it re-labels and disables,
+          // and the reason follows as plain copy while the light closes the
+          // scene; the white page's `role="status"` notice is the announcement.
+          <>
+            <button
+              disabled={handheldBlocked}
+              aria-disabled={handheldBlocked}
+              onClick={() => (onEnter ?? enter)()}
+            >
+              {handheldBlocked ? t('welcome.handheld.blocked') : t('welcome.continue')}
+            </button>
+            {handheldBlocked ? <p>{t('welcome.handheld.hint')}</p> : null}
+          </>
+        ) : loginLinks ? (
           // The arrival gate is the login: real anchors so keyboard and
           // assistive tech reach the provider flow without the GL canvas.
           loginLinks.map((link) => {

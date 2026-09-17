@@ -123,6 +123,12 @@ export interface LedgerEvent {
   readonly kind: LedgerEventKind;
   /** `Water` for an L1 molecule, `Water/web-build-loop` for its skills. */
   readonly entity: string;
+  /**
+   * The STABLE key (T4): the type's `atom_id`, or `<atom-id>/<skill-id>` for a
+   * skill. `entity` stays the display label it always was. Absent on a row
+   * written before the column, or whose label no longer resolves.
+   */
+  readonly entityId?: string;
   readonly detail?: Record<string, unknown>;
   /** Absent when the event carries no organisation, project, run or actor. */
   readonly scope?: LedgerScope;
@@ -152,7 +158,11 @@ CREATE TABLE IF NOT EXISTS lifecycle_events (
   project_id TEXT,
   run_id     TEXT,
   actor_type TEXT,
-  actor_id   TEXT
+  actor_id   TEXT,
+  -- Stable entity key (T4): atom_id for a type, <atom-id>/<skill-id> for a
+  -- skill. Backfilled once from atom_types by ensureLedgerSchema; NULL when
+  -- the label never resolved. \`entity\` keeps the display label.
+  entity_id  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_lifecycle_entity ON lifecycle_events(entity);
 `;
@@ -160,15 +170,68 @@ CREATE INDEX IF NOT EXISTS idx_lifecycle_entity ON lifecycle_events(entity);
 /** The scope columns, in the order the DDL declares them. */
 export const LEDGER_SCOPE_COLUMNS = ['org_id', 'project_id', 'run_id', 'actor_type', 'actor_id'] as const;
 
+/** Every column added after the original five, in DDL order. */
+const LEDGER_ADDED_COLUMNS = [...LEDGER_SCOPE_COLUMNS, 'entity_id'] as const;
+
 /**
- * Indexes over the scope columns live here rather than in the table DDL: on a
+ * Indexes over the added columns live here rather than in the table DDL: on a
  * store created before the columns existed, `CREATE INDEX` on them would fail
  * before the ALTER that adds them had run.
  */
 const LEDGER_SCOPE_INDEX_DDL = `
 CREATE INDEX IF NOT EXISTS idx_lifecycle_run ON lifecycle_events(run_id);
 CREATE INDEX IF NOT EXISTS idx_lifecycle_org ON lifecycle_events(org_id);
+CREATE INDEX IF NOT EXISTS idx_lifecycle_entity_id ON lifecycle_events(entity_id);
 `;
+
+/**
+ * Whether `atom_types` is here and FOLDED, i.e. names are unique. On a store
+ * the platform fold has not reached, one name can belong to several owners
+ * and a backfill by name would pick one of them silently; the fold runs in
+ * `openDb` before this, so the cached-handle path simply waits its turn.
+ */
+function atomTypesResolvable(db: LedgerDb): boolean {
+  const table = db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'atom_types'`).get();
+  if (!table) return false;
+  const columns = (db.prepare('PRAGMA table_info(atom_types)').all() as { name: string }[]).map((c) => c.name);
+  return columns.includes('atom_id') && !columns.includes('owner_key');
+}
+
+/**
+ * THE BACKFILL RULE for the entity re-key (owner decision 2026-09-18):
+ * resolve each label against the store AS IT IS NOW, and leave NULL what does
+ * not resolve. A type row's `entity` is a name; a skill row's is
+ * `<namespace>/<skill-id>` where the namespace is an atom id since T4 and a
+ * name before it. Nothing is invented for a label whose type is gone (its
+ * counters are gone too, so `ledger check` never compares it) and nothing is
+ * rewritten: `entity` keeps its bytes. Idempotent, and re-run on every
+ * schema step so a store that gained atom_types after its ledger (the
+ * cached-handle path opening first) catches up on the next open.
+ */
+function backfillEntityIds(db: LedgerDb): void {
+  if (!atomTypesResolvable(db)) return;
+  db.transaction(() => {
+    // Type rows: the label is the current name.
+    db.exec(`UPDATE lifecycle_events
+      SET entity_id = (SELECT atom_id FROM atom_types WHERE atom_types.name = lifecycle_events.entity)
+      WHERE entity_id IS NULL AND instr(entity, '/') = 0
+        AND EXISTS (SELECT 1 FROM atom_types WHERE atom_types.name = lifecycle_events.entity)`);
+    // Skill rows whose namespace already is an atom id.
+    db.exec(`UPDATE lifecycle_events
+      SET entity_id = entity
+      WHERE entity_id IS NULL AND instr(entity, '/') > 0
+        AND EXISTS (SELECT 1 FROM atom_types
+                    WHERE atom_types.atom_id = substr(lifecycle_events.entity, 1, instr(lifecycle_events.entity, '/') - 1))`);
+    // Skill rows from before T4, namespaced by the molecule's name.
+    db.exec(`UPDATE lifecycle_events
+      SET entity_id = (SELECT atom_id FROM atom_types
+                       WHERE atom_types.name = substr(lifecycle_events.entity, 1, instr(lifecycle_events.entity, '/') - 1))
+                      || substr(entity, instr(entity, '/'))
+      WHERE entity_id IS NULL AND instr(entity, '/') > 0
+        AND EXISTS (SELECT 1 FROM atom_types
+                    WHERE atom_types.name = substr(lifecycle_events.entity, 1, instr(lifecycle_events.entity, '/') - 1))`);
+  }).immediate();
+}
 
 function ledgerColumns(db: LedgerDb): Set<string> {
   const rows = db.prepare('PRAGMA table_info(lifecycle_events)').all() as { name: string }[];
@@ -181,16 +244,17 @@ function ledgerColumns(db: LedgerDb): Set<string> {
  * viz server, say) can open one store within the same second.
  */
 function migrateLedgerScopeColumns(db: LedgerDb): void {
-  const missing = LEDGER_SCOPE_COLUMNS.filter((column) => !ledgerColumns(db).has(column));
+  const missing = LEDGER_ADDED_COLUMNS.filter((column) => !ledgerColumns(db).has(column));
   if (missing.length > 0) {
     db.transaction(() => {
       const present = ledgerColumns(db);
-      for (const column of LEDGER_SCOPE_COLUMNS) {
+      for (const column of LEDGER_ADDED_COLUMNS) {
         if (!present.has(column)) db.exec(`ALTER TABLE lifecycle_events ADD COLUMN ${column} TEXT`);
       }
     }).immediate();
   }
   db.exec(LEDGER_SCOPE_INDEX_DDL);
+  backfillEntityIds(db);
 }
 
 /**
@@ -357,8 +421,8 @@ export function appendLedgerStrict(event: Omit<LedgerEvent, 'at'>, db?: LedgerDb
  */
 export function insertEvent(db: LedgerDb, ev: LedgerEvent): void {
   db.prepare(
-    `INSERT INTO lifecycle_events (at, kind, entity, detail, org_id, project_id, run_id, actor_type, actor_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO lifecycle_events (at, kind, entity, detail, org_id, project_id, run_id, actor_type, actor_id, entity_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     ev.at,
     ev.kind,
@@ -368,7 +432,8 @@ export function insertEvent(db: LedgerDb, ev: LedgerEvent): void {
     ev.scope?.projectId ?? null,
     ev.scope?.runId ?? null,
     ev.scope?.actorType ?? null,
-    ev.scope?.actorId ?? null
+    ev.scope?.actorId ?? null,
+    ev.entityId ?? null
   );
 }
 
@@ -377,6 +442,7 @@ interface EventRow {
   kind: string;
   entity: string;
   detail: string | null;
+  entity_id?: string | null;
   org_id?: string | null;
   project_id?: string | null;
   run_id?: string | null;
@@ -392,8 +458,8 @@ interface EventRow {
  */
 function selectList(db: LedgerDb): string {
   const present = ledgerColumns(db);
-  const scoped = LEDGER_SCOPE_COLUMNS.every((column) => present.has(column));
-  return scoped ? `at, kind, entity, detail, ${LEDGER_SCOPE_COLUMNS.join(', ')}` : 'at, kind, entity, detail';
+  const added = LEDGER_ADDED_COLUMNS.filter((column) => present.has(column));
+  return ['at', 'kind', 'entity', 'detail', ...added].join(', ');
 }
 
 function rowScope(r: EventRow): LedgerScope | undefined {
@@ -423,6 +489,7 @@ function rowToEvent(r: EventRow): LedgerEvent {
     at: r.at,
     kind: r.kind as LedgerEventKind,
     entity: r.entity,
+    ...(r.entity_id ? { entityId: r.entity_id } : {}),
     ...(detail ? { detail } : {}),
     ...(scope ? { scope } : {}),
   };
@@ -499,12 +566,18 @@ export interface ProjectedCounters {
   failures: number;
 }
 
+/** The key a projection groups by: the stable id when the row has one. */
+export function ledgerEntityKey(ev: Pick<LedgerEvent, 'entity' | 'entityId'>): string {
+  return ev.entityId ?? ev.entity;
+}
+
 /**
  * Project per-entity success/failure counters from the ledger, honouring
  * the events that RESET them (counters-reset, promote — promotion zeroes
  * the counters by contract, the script form re-earns trust; skill-save
  * does NOT reset, matching SkillRegistry.save's counter-preserving
- * contract).
+ * contract). Grouped by `ledgerEntityKey`: rows that resolved to a stable
+ * id group by it, rows that did not keep their label as key.
  */
 export function projectCounters(events: LedgerEvent[]): Map<string, ProjectedCounters> {
   const map = new Map<string, ProjectedCounters>();
@@ -517,7 +590,7 @@ export function projectCounters(events: LedgerEvent[]): Map<string, ProjectedCou
     return c;
   };
   for (const ev of events) {
-    const c = get(ev.entity);
+    const c = get(ledgerEntityKey(ev));
     switch (ev.kind) {
       case 'type-success':
       case 'skill-success':

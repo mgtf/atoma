@@ -67,7 +67,7 @@ describe('one platform registry', () => {
       expect(second.getByAtomId(type.atomId)).toEqual(type);
       first.recordSuccess(type.name); second.recordSuccess(type.name); second.recordFailure(type.name);
       expect(first.getByName(type.name)).toMatchObject({ successes: 2, failures: 1 });
-      expect(projectCounters(readLedger(db)).get(type.name)).toEqual({ successes: 2, failures: 1 });
+      expect(projectCounters(readLedger(db)).get(type.atomId)).toEqual({ successes: 2, failures: 1 });
       second.patch(type.name, { systemPromptAppend: 'shared coaching' }, 'validator', 'reason');
       expect(first.getByName(type.name)?.systemPrompt).toContain('shared coaching');
       expect(first.listVersions(type.name)).toHaveLength(1);
