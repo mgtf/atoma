@@ -190,7 +190,7 @@ that every generated application is ready for production.
 
 | Read out of this checkout | |
 | --- | --- |
-| Version | `0.3.0` |
+| Version | `0.4.0` |
 | Node | 24.20+ (`.nvmrc` 24.20.0, `engines` >=24) |
 | Subsystems under their own contract | 18 |
 | MCP tools | 38 |
