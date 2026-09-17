@@ -10,8 +10,8 @@ import Database from 'better-sqlite3';
 import { SkillRegistry } from '../skills/registry.js';
 import { readBoundedRunFile, sortRunIndex, summarizeTraceFile } from './runIndex.js';
 import type { VizRunIndexEntry } from './trace.js';
-import { openStoreHandle, skillsDirPath, storeDbPath } from '../core/stores.js';
-import { LEDGER_TABLE_DDL, readLedgerTail } from '../core/ledger.js';
+import { skillsDirPath, storeDbPath } from '../core/stores.js';
+import { openLedgerHandle, readLedgerTail } from '../core/ledger.js';
 import { LAUNCHABLE_PROFILES } from '../run/profiles/index.js';
 import { assessShareability, type ShareAssessment } from '../skills/shareability.js';
 import { taxonomyForTier, type AgentRank } from '../core/taxonomy.js';
@@ -3332,7 +3332,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         // `readLedgerTail` is bounded, newest-first and fail-open: a store
         // without the table reads empty rather than 500-ing the admin surface.
         sendJson(res, 200, {
-          events: readLedgerTail(limit, openStoreHandle(DBS[0]!.path, LEDGER_TABLE_DDL)),
+          events: readLedgerTail(limit, openLedgerHandle(DBS[0]!.path)),
         });
         return;
       }

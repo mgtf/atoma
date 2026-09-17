@@ -11,6 +11,7 @@
  */
 
 import { openDb } from '../registry/db.js';
+import { setLedgerScope } from '../core/ledger.js';
 import { skillsDirPath, storeDbPath } from '../core/stores.js';
 import { SkillRegistry } from '../skills/registry.js';
 import { parseCliArgs } from './args.js';
@@ -524,6 +525,8 @@ function main(): void {
   const db = openDb(dbPath);
   const registry = new AtomRegistry(db);
   const skills = new SkillRegistry(skillsDirPath());
+  // Whatever this process appends to the lifecycle ledger, the CLI did it.
+  setLedgerScope({ actorType: 'cli' });
 
   switch (args.command) {
     case 'list':

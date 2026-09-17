@@ -109,7 +109,7 @@ Current resource scopes:
 | Retrieval corpus | project | Only the project's own passages are searchable (`ownPassages` stays 0 for another project). A validator's paraphrase of a passage, written into a prompt or a description, is platform knowledge. |
 | Atom bodies and trust | platform | `atom_types` has no owner column; `AtomRegistry` takes a database and nothing else, and refuses an unfolded store. Readers keep `unfoldedRegistryPredicate` as a guard. |
 | Skill bodies and counters | platform filesystem | Learning, promotion, deterministic dispatch, drop and merge are available to every run. Counters live in `_meta.json`, whole-file read-modify-write. NOT single-writer: `atoma_skill_reset`, `_drop` and `_merge` are platform-tier MCP tools that take no run lease (`src/mcp/writes.ts` imports none), and the production viz server enables them (`operatorRuns: true`). A bearer token can mutate counters while a run is in flight. |
-| Lifecycle ledger | platform SQLite table | `lifecycle_events(seq, at, kind, entity, detail)`. Type counters are keyed by name again; the atom-id-keyed project events of the partitioned period stay as byte-honest history and are not compared. |
+| Lifecycle ledger | platform SQLite table | `lifecycle_events(seq, at, kind, entity, detail, org_id, project_id, run_id, actor_type, actor_id)`; the five scope columns are nullable and additive (2026-09-18), a row without them is a platform-level event. Type counters are keyed by name again; the atom-id-keyed project events of the partitioned period stay as byte-honest history and are not compared. |
 | Platform events | organisation/project/run-aware | The control-plane audit journal carries nullable scope ids and a retention window (`ATOMA_EVENTS_RETENTION_DAYS`, default 90). |
 | Prefilter decisions | platform SQLite table | Content-addressed, transactional, read and written across every organisation's runs. The existence/volume oracle is accepted (Layer 4). |
 | Provider credentials | organisation or host, injected per run | Organisation keys encrypted at rest. Selection is account pin → organisation default → host default; the run receives only its credential snapshot. |
@@ -321,9 +321,12 @@ transaction is deferred, and `create` reads `usedOrdinals` before its INSERT —
 this is STORE concurrency and is fixed without Gate 0 (W4a).*
 
 **T7 — Every lifecycle event is attributable.** It carries a stable entity id
-plus project, run and actor when it arises in those scopes. *Deviation: the
-table is `lifecycle_events(seq, at, kind, entity, detail)` — no organisation,
-project, run or actor column, and type entities are name-keyed.*
+plus project, run and actor when it arises in those scopes. *Since 2026-09-18
+the row carries organisation, project, run and a typed actor (the
+`platform_events` vocabulary): a run child sets the scope once from the record
+`assertProjectRunAuthority` proves, operator writes over the MCP carry the
+bearer's principal per request, the CLI carries `cli`. Remaining deviation:
+type entities are name-keyed (T4).*
 
 **T8 — Raw traces never become learning input.** Traces contain prompts, tool
 I/O and workspace excerpts; only distilled bodies enter the catalogue.
@@ -434,8 +437,8 @@ Decision 6 settles it.
 | **W3** | Launcher-managed workspaces | not started | W1; Gate 0 only if leases persist in the product store (decision 6) | Workspace handles are volumes, not host paths; lease, TTL, bounded stop, reverse teardown and orphan reconciliation are launcher operations (D3, D4). |
 | **W4** | Skill counters out of `_meta.json` | not started | Gate 0 | Every counter, promotion and demotion mutation is one statement in one transaction with its ledger event (T6, R4). Gate 0 decides dialect and transaction mode, not placement — T6 already forces the counters into the store holding `lifecycle_events`. `save`, `promoteToScript`, `demoteToLlm` and `merge` become file+DB pairs no transaction covers, so the crash ordering must be re-derived, not ported. |
 | **W4a** | Registry write-transaction correctness | **done** (`8a4f2ff`) | — | All eleven registry write transactions are `.immediate()`; both product-store open paths set `busy_timeout` explicitly instead of inheriting the driver default; a regression allocates ordinals across connections and processes. This is R8 for the STORE, owed under either Gate 0 branch. It does NOT close `_meta.json` file concurrency — that is W4. |
-| **W5** | Durable payer ledger for every run | subscription-touching runs only, as a capped JSON blob in `platform_events` | — (the org-scoped cost READ surface waits on decision 3) | The three-row `RunPayerLedger` is persisted for API-key-only runs too, in the same transaction as the queued→running transition (T10). The coordinator resolves payers THROUGH `payerForSelector` — the contract's canonical rule, which today has no caller while the coordinator open-codes a copy. Removing the duplication means adopting the contract, not deleting it. |
-| **W6** | Scoped lifecycle attribution | not started | — for the additive columns; a backfill rule for the entity re-key | `lifecycle_events` carries organisation, project, run and actor; type counters stop being name-keyed; integrity projections group by the same keys (T4, T7). ORDERING CONSTRAINT: the migration lands on BOTH open paths at once — `appendLedger` swallows its own failure, so a column added on one path turns every append on the other into silent loss. |
+| **W5** | Durable payer ledger for every run | **done** (`5154832`): `project_run_payers`, three immutable rows per run, written in the queued→running transaction; the coordinator resolves payers through `payerForSelector` | — (the org-scoped cost READ surface waits on decision 3) | The three-row `RunPayerLedger` is persisted for API-key-only runs too, in the same transaction as the queued→running transition (T10). The coordinator resolves payers THROUGH `payerForSelector`, the contract's canonical rule. The synthetic benchmark control (`retrievalProjectAttempt`) transitions its accounting run directly and records no payer; it spends nothing. |
+| **W6** | Scoped lifecycle attribution | **scope columns done** (2026-09-18): `lifecycle_events` carries `org_id`, `project_id`, `run_id`, `actor_type`, `actor_id`; one `ensureLedgerSchema` on both open paths; the runner, the MCP writes and the CLI set the scope. The entity re-key is NOT done | a backfill rule for the entity re-key (name → `atom_id` for type events; skill entities are already id-keyed) | Type counters stop being name-keyed and integrity projections group by the stable id (T4). The ordering constraint held: the migration is one function called from `openDb` and from the cached handle, and `tests/ledger.test.ts` drives a legacy-shaped store through each path first. A read-only reader on an unmigrated snapshot still reads it, without scope. |
 | **W7** | Web, launcher images and a reference stack | worker/preview/mender images exist; no `.dockerignore`, so the worker build sends the whole working tree as context | W1 for the web image — `src/viz/server.ts` constructs `DockerLauncher` in-process for previews, so a web container honouring D1 loses previews until W1 lands | Two more image definitions, one compose/stack file, digest pins, a `.dockerignore`; boots on a clean Linux host. |
 | **W8-a** | A restore drill valid on the deployed shape | **done for the fixture** (`bdb6bf9`); NOT yet run against a snapshot from the real host | — | The drill distinguishes a tier NOT APPLICABLE to a deployment from one expected and lost — ignoring `skipped` wholesale would make it falsely reassuring. It passes on a production-shaped fixture, which proves the fix; a real snapshot from the host is verified separately and proves more. The manifest records that `store.db` needs an externally held `ATOMA_SECRET_ENCRYPTION_KEY` to yield usable organisation keys, without containing it. |
 | **W8-b** | Hosted backup and disaster recovery | `npm run backup` (dated, pruned, off-machine); the 2026-09-14 drill ([recovery-drill-2026-09-14.md](recovery-drill-2026-09-14.md)) covers the local store only | W8-a, W7 | A restore drill on the packaged stack and documented RPO/RTO. Proving recovery requires retrieving the encryption key separately and decrypting under control; documenting the dependency is not that proof. Secret ROTATION is distinct from restoration and is its own work: there is no re-encryption implementation in `src/auth/`, and the AAD binds the key identity, so rotation means decrypt-under-old then re-encrypt-under-new for every row plus the GitHub token wrapping key. |
@@ -446,10 +449,12 @@ Decision 6 settles it.
 | **W13** | Packaged-stack acceptance | `auth-release-smoke.mjs` (loopback IdP, temp store) | W1, W7 | Boots the stack; proves founder login, invitation, role enforcement, Element-workload isolation, delivery, restart, backup/restore and denied control-plane reachability from the worker network. |
 | **W14** | Shared-learning acceptance | `tests/project-retrieval-privacy.test.ts` characterises the corpus side; nothing asserts cross-org skill reuse | W13 for the isolation half only | Two organisations on one stack: no cross-org trace/workspace/corpus read. The SHARED half — a recipe learned by one organisation dispatched by the other's next run — is assertable in one process since 2026-09-15 and needs no stack; it is the only mechanical proof that the decision was implemented and not merely documented. |
 
-Order: ~~W8-a~~ → ~~W4a~~ → **W5 → W6** → Gate 0 → W4 → W0 → W1 → W2 → W3 → W7 →
-W13 → W14. W8-a and W4a landed on 2026-09-17; W5 and W6 likewise need no
-owner decision, and together the four give Gate 0 a measured writer topology
-and a proven restore to decide against.
+Order: ~~W8-a~~ → ~~W4a~~ → ~~W5~~ → ~~W6 (scope)~~ → Gate 0 → W4 → W0 → W1 →
+W2 → W3 → W7 → W13 → W14. W8-a and W4a landed on 2026-09-17, W5 and the scope
+half of W6 on 2026-09-18; none needed an owner decision, and together they
+give Gate 0 a measured writer topology, a proven restore, and two more
+additive migrations that landed on SQLite without incident. The entity re-key
+half of W6 waits on its backfill rule and is not on Gate 0's path.
 
 What W4a measured, and what Gate 0 should read from it: reverting only the
 eleven `.immediate()` calls, with the explicit `busy_timeout` left in place,

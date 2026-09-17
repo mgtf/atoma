@@ -1,5 +1,7 @@
 import Database from 'better-sqlite3';
 import { resolve } from 'node:path';
+import type { z } from 'zod';
+import type { platformEventActorTypeSchema } from '../contracts/platformEvents.js';
 import { closeStoreHandles, openStoreHandle, storeDbPath } from './stores.js';
 
 /**
@@ -45,7 +47,44 @@ import { closeStoreHandles, openStoreHandle, storeDbPath } from './stores.js';
  * Fail-open by design: a ledger write must NEVER take down a run — telemetry
  * that crashes production is worse than no telemetry. Errors are swallowed
  * after a single console.warn.
+ *
+ * SCOPE (T7, 2026-09-18). Every event can also say WHERE it arose: the
+ * organisation, project and run, and WHO caused it, in the actor vocabulary
+ * `platform_events` already uses in this same file. The columns are nullable
+ * and additive — a row written before them, or by a process with nothing to
+ * say, reads with no scope. Two consequences worth stating:
+ *
+ *  1. THE MIGRATION LANDS ON BOTH OPEN PATHS OR ON NEITHER. `appendLedger`
+ *     swallows its own failure, so a column added by `openDb` alone would
+ *     turn every append through the cached `openStoreHandle` path into
+ *     silent loss, and the reverse. `ensureLedgerSchema` is the one
+ *     definition and both paths call it.
+ *  2. THE SCOPE IS PROCESS STATE, NOT A PARAMETER. The choke points that
+ *     append (`AtomRegistry.note`, `SkillRegistry.recordEvent`) are called
+ *     from deep inside the supervise loop, which knows nothing about
+ *     organisations — and must not, per the platform-trust decision. A run
+ *     child is one run, so the runner sets the scope once after
+ *     `assertProjectRunAuthority` proved which run it is; a multi-tenant
+ *     process (the viz server's MCP write tools) wraps each SYNCHRONOUS
+ *     operator write in `withLedgerScope`. Nothing infers a scope: an event
+ *     with none is a platform event, and that is the honest default.
  */
+
+/** The actor vocabulary is the platform journal's; one shape, one home. */
+export type LedgerActorType = z.infer<typeof platformEventActorTypeSchema>;
+
+/**
+ * Where an event arose and who caused it. Every field optional: a run child
+ * knows all of them, an operator CLI knows only that it is the CLI, the
+ * bootstrap knows nothing.
+ */
+export interface LedgerScope {
+  readonly orgId?: string;
+  readonly projectId?: string;
+  readonly runId?: string;
+  readonly actorType?: LedgerActorType;
+  readonly actorId?: string;
+}
 
 export type LedgerEventKind =
   | 'type-success'
@@ -85,6 +124,8 @@ export interface LedgerEvent {
   /** `Water` for an L1 molecule, `Water/web-build-loop` for its skills. */
   readonly entity: string;
   readonly detail?: Record<string, unknown>;
+  /** Absent when the event carries no organisation, project, run or actor. */
+  readonly scope?: LedgerScope;
 }
 
 /** Minimal surface we need from a better-sqlite3 handle. Keeps `db.ts` free. */
@@ -103,10 +144,68 @@ CREATE TABLE IF NOT EXISTS lifecycle_events (
   at      TEXT NOT NULL,
   kind    TEXT NOT NULL,
   entity  TEXT NOT NULL,
-  detail  TEXT
+  detail  TEXT,
+  -- Scope (T7). Nullable: a platform-level event has none. On a store older
+  -- than these columns they are ADDED by ensureLedgerSchema; keep this list
+  -- and LEDGER_SCOPE_COLUMNS in step.
+  org_id     TEXT,
+  project_id TEXT,
+  run_id     TEXT,
+  actor_type TEXT,
+  actor_id   TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_lifecycle_entity ON lifecycle_events(entity);
 `;
+
+/** The scope columns, in the order the DDL declares them. */
+export const LEDGER_SCOPE_COLUMNS = ['org_id', 'project_id', 'run_id', 'actor_type', 'actor_id'] as const;
+
+/**
+ * Indexes over the scope columns live here rather than in the table DDL: on a
+ * store created before the columns existed, `CREATE INDEX` on them would fail
+ * before the ALTER that adds them had run.
+ */
+const LEDGER_SCOPE_INDEX_DDL = `
+CREATE INDEX IF NOT EXISTS idx_lifecycle_run ON lifecycle_events(run_id);
+CREATE INDEX IF NOT EXISTS idx_lifecycle_org ON lifecycle_events(org_id);
+`;
+
+function ledgerColumns(db: LedgerDb): Set<string> {
+  const rows = db.prepare('PRAGMA table_info(lifecycle_events)').all() as { name: string }[];
+  return new Set(rows.map((row) => row.name));
+}
+
+/**
+ * Add the scope columns to a table created before them. Idempotent, and
+ * re-checked inside the write lock because two processes (a run child and the
+ * viz server, say) can open one store within the same second.
+ */
+function migrateLedgerScopeColumns(db: LedgerDb): void {
+  const missing = LEDGER_SCOPE_COLUMNS.filter((column) => !ledgerColumns(db).has(column));
+  if (missing.length > 0) {
+    db.transaction(() => {
+      const present = ledgerColumns(db);
+      for (const column of LEDGER_SCOPE_COLUMNS) {
+        if (!present.has(column)) db.exec(`ALTER TABLE lifecycle_events ADD COLUMN ${column} TEXT`);
+      }
+    }).immediate();
+  }
+  db.exec(LEDGER_SCOPE_INDEX_DDL);
+}
+
+/**
+ * THE ONE ledger schema step, for every writable open of the store.
+ *
+ * `openDb` (the registry's handle) and `openLedgerHandle` (the cached handle
+ * the skill choke points and the viz use) both call this, which is what makes
+ * "the migration lands on both paths at once" a structural property rather
+ * than a discipline. A caller with its own handle to a store that may predate
+ * the scope columns calls it before the first `insertEvent`.
+ */
+export function ensureLedgerSchema(db: LedgerDb): void {
+  db.exec(LEDGER_TABLE_DDL);
+  migrateLedgerScopeColumns(db);
+}
 
 
 /**
@@ -142,13 +241,71 @@ function warnOnce(err: unknown): void {
   console.warn(`[ledger] write failed (further failures silent): ${(err as Error).message}`);
 }
 
-/** Handle for callers with no store of their own (`SkillRegistry`). */
+/**
+ * The cached, writable ledger handle on `path` — table created and scope
+ * columns present. For callers with no store handle of their own
+ * (`SkillRegistry`, the viz admin journal, the CLI).
+ */
+export function openLedgerHandle(path: string): LedgerDb {
+  return openStoreHandle(path, LEDGER_TABLE_DDL, migrateLedgerScopeColumns);
+}
+
 function handleFor(path: string): LedgerDb {
-  return openStoreHandle(path, LEDGER_TABLE_DDL);
+  return openLedgerHandle(path);
 }
 
 /** Drop cached handles. For tests that repoint `ATOMA_LEDGER_DB` mid-suite. */
 export const closeLedgerHandles = closeStoreHandles;
+
+let processScope: LedgerScope | null = null;
+
+/**
+ * The scope every append in this process carries unless the event names its
+ * own. A run child sets it once, after `assertProjectRunAuthority` said which
+ * run it is; `null` clears it. Fields are merged over by an event's explicit
+ * `scope`, so a run can still name a different actor for one event.
+ */
+export function setLedgerScope(scope: LedgerScope | null): void {
+  processScope = scope;
+}
+
+export function ledgerScope(): LedgerScope | null {
+  return processScope;
+}
+
+/**
+ * Run one SYNCHRONOUS operation under a scope, restoring the previous one
+ * afterwards — the shape a multi-tenant process needs, where the process
+ * scope would attribute one request's write to another's principal.
+ *
+ * Synchronous is load-bearing, not a convenience: a promise returned from
+ * `fn` would resolve AFTER the scope was restored, and every append inside it
+ * would carry the wrong actor with no error anywhere. better-sqlite3 is
+ * synchronous and so is every registry write, so the guard costs nothing.
+ */
+export function withLedgerScope<T>(scope: LedgerScope, fn: () => T): T {
+  const previous = processScope;
+  processScope = { ...previous, ...scope };
+  try {
+    const result = fn();
+    if (isThenable(result)) {
+      throw new Error('withLedgerScope needs a synchronous operation: a promise would outlive the scope');
+    }
+    return result;
+  } finally {
+    processScope = previous;
+  }
+}
+
+function isThenable(value: unknown): boolean {
+  return typeof value === 'object' && value !== null && typeof (value as { then?: unknown }).then === 'function';
+}
+
+function effectiveScope(event: Omit<LedgerEvent, 'at'>): LedgerScope | undefined {
+  if (!processScope && !event.scope) return undefined;
+  const merged: LedgerScope = { ...processScope, ...event.scope };
+  return Object.values(merged).some((value) => value !== undefined) ? merged : undefined;
+}
 
 /**
  * Append one event. Fail-open: never throws.
@@ -159,10 +316,17 @@ export const closeLedgerHandles = closeStoreHandles;
 export function appendLedger(event: Omit<LedgerEvent, 'at'>, db?: LedgerDb): void {
   try {
     const target = db ?? handleFor(ledgerDbPath());
-    insertEvent(target, { at: new Date().toISOString(), ...event });
+    insertEvent(target, stamped(event));
   } catch (err) {
     warnOnce(err);
   }
+}
+
+/** Timestamp the event and resolve its scope (own fields over the process scope). */
+function stamped(event: Omit<LedgerEvent, 'at'>): LedgerEvent {
+  const scope = effectiveScope(event);
+  const { scope: _own, ...rest } = event;
+  return { at: new Date().toISOString(), ...rest, ...(scope ? { scope } : {}) };
 }
 
 /**
@@ -183,16 +347,28 @@ export function appendLedger(event: Omit<LedgerEvent, 'at'>, db?: LedgerDb): voi
  */
 export function appendLedgerStrict(event: Omit<LedgerEvent, 'at'>, db?: LedgerDb): void {
   const target = db ?? handleFor(ledgerDbPath());
-  insertEvent(target, { at: new Date().toISOString(), ...event });
+  insertEvent(target, stamped(event));
 }
 
-/** The raw insert, so a caller inside a transaction can reuse it. THROWS. */
+/**
+ * The raw insert, so a caller inside a transaction can reuse it. THROWS.
+ * Writes the event's OWN scope as given: the process scope is applied by
+ * `appendLedger`/`appendLedgerStrict`, not here.
+ */
 export function insertEvent(db: LedgerDb, ev: LedgerEvent): void {
-  db.prepare('INSERT INTO lifecycle_events (at, kind, entity, detail) VALUES (?, ?, ?, ?)').run(
+  db.prepare(
+    `INSERT INTO lifecycle_events (at, kind, entity, detail, org_id, project_id, run_id, actor_type, actor_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
     ev.at,
     ev.kind,
     ev.entity,
-    ev.detail === undefined ? null : JSON.stringify(ev.detail)
+    ev.detail === undefined ? null : JSON.stringify(ev.detail),
+    ev.scope?.orgId ?? null,
+    ev.scope?.projectId ?? null,
+    ev.scope?.runId ?? null,
+    ev.scope?.actorType ?? null,
+    ev.scope?.actorId ?? null
   );
 }
 
@@ -201,6 +377,34 @@ interface EventRow {
   kind: string;
   entity: string;
   detail: string | null;
+  org_id?: string | null;
+  project_id?: string | null;
+  run_id?: string | null;
+  actor_type?: string | null;
+  actor_id?: string | null;
+}
+
+/**
+ * The SELECT list a reader can use on this handle. A READ-ONLY handle on a
+ * store nobody has opened writably since the scope columns arrived (a backup
+ * snapshot, `ledger tail --db`) has no such columns, and selecting them would
+ * throw — which the fail-open readers would turn into an empty ledger.
+ */
+function selectList(db: LedgerDb): string {
+  const present = ledgerColumns(db);
+  const scoped = LEDGER_SCOPE_COLUMNS.every((column) => present.has(column));
+  return scoped ? `at, kind, entity, detail, ${LEDGER_SCOPE_COLUMNS.join(', ')}` : 'at, kind, entity, detail';
+}
+
+function rowScope(r: EventRow): LedgerScope | undefined {
+  const scope: LedgerScope = {
+    ...(r.org_id ? { orgId: r.org_id } : {}),
+    ...(r.project_id ? { projectId: r.project_id } : {}),
+    ...(r.run_id ? { runId: r.run_id } : {}),
+    ...(r.actor_type ? { actorType: r.actor_type as LedgerActorType } : {}),
+    ...(r.actor_id ? { actorId: r.actor_id } : {}),
+  };
+  return Object.keys(scope).length > 0 ? scope : undefined;
 }
 
 function rowToEvent(r: EventRow): LedgerEvent {
@@ -214,11 +418,13 @@ function rowToEvent(r: EventRow): LedgerEvent {
       detail = undefined;
     }
   }
+  const scope = rowScope(r);
   return {
     at: r.at,
     kind: r.kind as LedgerEventKind,
     entity: r.entity,
     ...(detail ? { detail } : {}),
+    ...(scope ? { scope } : {}),
   };
 }
 
@@ -227,7 +433,7 @@ export function readLedger(db?: LedgerDb): LedgerEvent[] {
   try {
     const target = db ?? handleFor(ledgerDbPath());
     const rows = target
-      .prepare('SELECT at, kind, entity, detail FROM lifecycle_events ORDER BY seq ASC')
+      .prepare(`SELECT ${selectList(target)} FROM lifecycle_events ORDER BY seq ASC`)
       .all() as EventRow[];
     return rows.map(rowToEvent);
   } catch (err) {
@@ -250,9 +456,7 @@ export function readLedgerTail(limit: number, db?: LedgerDb): LedgerEvent[] {
   try {
     const target = db ?? handleFor(ledgerDbPath());
     const rows = target
-      .prepare(
-        'SELECT at, kind, entity, detail FROM lifecycle_events ORDER BY seq DESC LIMIT ?'
-      )
+      .prepare(`SELECT ${selectList(target)} FROM lifecycle_events ORDER BY seq DESC LIMIT ?`)
       .all(bounded) as EventRow[];
     return rows.map(rowToEvent);
   } catch (err) {

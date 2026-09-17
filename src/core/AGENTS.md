@@ -96,6 +96,15 @@ Neighbours:
 - Ledger writes are fail-open for run execution but attributable and ordered.
   A ledger failure cannot take down the product; impossible counter directions
   must be surfaced by `ledger check`.
+- The ledger table has TWO writable open paths (`openDb`, the cached
+  `openLedgerHandle`) and ONE schema step, `ensureLedgerSchema`. Never add a
+  column to one path: `appendLedger` swallows its failure, so the other path
+  loses every event silently. Read-only readers never migrate and must read
+  an older table shape without inventing values.
+- Scope is process state, set once per process (`setLedgerScope`) or per
+  synchronous operation (`withLedgerScope`), never a parameter threaded into
+  the supervise loop. A multi-tenant process uses the latter only; a promise
+  inside it is refused because it would outlive the scope.
 
 ## Metrics and traces
 

@@ -1,4 +1,5 @@
 import { assertProjectRunAuthority } from '../projects/runAuthority.js';
+import { setLedgerScope, type LedgerScope } from '../core/ledger.js';
 import { dirname, resolve } from 'node:path';
 import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { setMaxListeners } from 'node:events';
@@ -653,6 +654,13 @@ export async function startTask(
   const tenantRun = process.env['ATOMA_TENANT_RUN'] === '1';
   const projectPaths = { dbPath, runId: requestedRunId ?? '', workspacePath: workspaceRoot,
     skillsPath: skillsDirPath(), runsPath: runsDir };
+  // WHO THIS RUN IS, for the lifecycle ledger (T7). Every counter bump this
+  // process makes carries it, from choke points that know nothing about
+  // organisations. A tenant run is the organisation, project and principal
+  // the host recorded — the record `assertProjectRunAuthority` proves and
+  // used to discard; an operator run is the CLI on this machine. The run id
+  // joins once `beginRun` has fixed it.
+  let runScope: LedgerScope = { actorType: 'cli' };
   if (tenantRun) {
     // Container isolation is the one precondition of a tenant launch. The
     // lifecycle — learning, promotion, dispatch, the prefilter cache — is the
@@ -661,9 +669,13 @@ export async function startTask(
     // The registry and the skills catalog are the platform's, shared by every
     // run; what a tenant run still has to prove is that it IS the registered
     // run the host launched, on the exact paths the host recorded.
-    try { assertProjectRunAuthority(projectPaths); }
+    let authority;
+    try { authority = assertProjectRunAuthority(projectPaths); }
     catch { throw new RunnerConfigError('project run launch is unavailable or denied'); }
+    runScope = { orgId: authority.orgId, projectId: authority.projectId,
+      actorType: 'principal', actorId: authority.requestedByPrincipalId };
   }
+  setLedgerScope(runScope);
   let recordedRetrieval = false;
   if (tenantRun) {
     try { recordedRetrieval = projectRunHasRetrievalReceipt(dbPath, projectPaths.runId); }
@@ -916,7 +928,7 @@ export async function startTask(
     }
   };
 
-  recorder.beginRun(task, `${profile.traceLabelPrefix}${runLabelFromGoal(goal, 80)}`, {
+  const vizRun = recorder.beginRun(task, `${profile.traceLabelPrefix}${runLabelFromGoal(goal, 80)}`, {
     ...(requestedRunId ? { runId: requestedRunId } : {}),
     initialTypes: [
       ...registry.listByTier(1),
@@ -924,6 +936,10 @@ export async function startTask(
       ...registry.listByTier(3),
     ],
   });
+  // The trace run id IS the project run id for a tenant run (the coordinator
+  // passes it as ATOMA_RUN_ID); for an operator run it is the one the recorder
+  // just minted. Either way it is the id `platform_events.run_id` uses.
+  setLedgerScope({ ...runScope, runId: vizRun.id });
   // LAST-RESORT WATCHDOG. `AbortSignal.timeout` above is ADVISORY — it
   // cancels work that OBSERVES it, and a transport wedged on a dropped
   // connection observes nothing, leaving `l3.handle` pending forever with

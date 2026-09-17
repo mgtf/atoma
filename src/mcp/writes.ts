@@ -24,10 +24,18 @@ import { unfoldedRegistryPredicate } from '../registry/db.js';
  * WRITE HANDLES. The readers open `{ readonly: true }` handles on purpose;
  * these open the store through `openDb` — the one path that runs the schema
  * and migrations — exactly as the CLI does, and close it before returning.
+ *
+ * LEDGER SCOPE (T7). The lifecycle rows those store methods append carry the
+ * actor too, through `withLedgerScope` around each SYNCHRONOUS write: this
+ * process serves every organisation, so a process-wide scope would attribute
+ * one request's write to another's principal. The scope names the principal
+ * and organisation of a bearer, or `cli` for the loopback operator — the same
+ * mapping `journal` applies to the platform event.
  */
 
 import { existsSync } from 'node:fs';
 import { type PlatformEventInput, type PlatformEventSink, eventLabel } from '../contracts/platformEvents.js';
+import { withLedgerScope, type LedgerScope } from '../core/ledger.js';
 import { skillsDirPath, storeDbPath } from '../core/stores.js';
 import { AtomRegistry } from '../registry/atomRegistry.js';
 import { openDb } from '../registry/db.js';
@@ -72,6 +80,13 @@ function journal(emit: PlatformEventSink | undefined, actor: OperatorActor, even
   return true;
 }
 
+/** The lifecycle-ledger scope of a write: who did it, and for which organisation. */
+export function ledgerScopeOf(actor: OperatorActor): LedgerScope {
+  return actor.kind === 'principal'
+    ? { orgId: actor.orgId, actorType: 'principal', actorId: actor.principalId }
+    : { actorType: 'cli' };
+}
+
 function resolveSkill(l1: string, id: string) {
   const dir = skillsDirPath();
   const reg = new SkillRegistry(dir);
@@ -85,7 +100,7 @@ function resolveSkill(l1: string, id: string) {
 export function skillReset(input: { l1: string; id: string; actor: OperatorActor; emit?: PlatformEventSink }): unknown {
   const { dir, reg, ref, skill } = resolveSkill(input.l1, input.id);
   if (!skill) throw new WriteRefused(`no skill "${input.id}" for molecule "${input.l1}" under ${dir}`);
-  reg.resetCounters(ref.atomId, input.id);
+  withLedgerScope(ledgerScopeOf(input.actor), () => reg.resetCounters(ref.atomId, input.id));
   const journaled = journal(input.emit, input.actor, {
     kind: 'skill.reset',
     summary: `skill ${eventLabel(ref.name)}/${eventLabel(input.id)} counters reset by ${input.actor.label}`,
@@ -110,7 +125,7 @@ export function skillDrop(input: { l1: string; id: string; force?: boolean; acto
       `refusing to drop ${ref.name}/${input.id}: it has ${skill.successes} recorded success(es) — proven knowledge. Pass force to drop it anyway.`
     );
   }
-  reg.drop(ref.atomId, input.id);
+  withLedgerScope(ledgerScopeOf(input.actor), () => reg.drop(ref.atomId, input.id));
   const journaled = journal(input.emit, input.actor, {
     kind: 'skill.dropped',
     summary: `skill ${eventLabel(ref.name)}/${eventLabel(input.id)} dropped by ${input.actor.label}`,
@@ -139,7 +154,7 @@ export function skillMerge(input: { l1: string; keep: string; absorb: string; fo
       `refusing to absorb ${ref.name}/${input.absorb}: its body has ${absorb.successes} recorded success(es) and would be DELETED. If that body is the one worth keeping, merge in the other direction; otherwise pass force.`
     );
   }
-  const merged = reg.merge(ref.atomId, input.keep, input.absorb);
+  const merged = withLedgerScope(ledgerScopeOf(input.actor), () => reg.merge(ref.atomId, input.keep, input.absorb));
   if (!merged) throw new WriteRefused('merge failed (a skill vanished mid-operation)');
   const journaled = journal(input.emit, input.actor, {
     kind: 'skill.merged',
@@ -168,7 +183,8 @@ export function registryRollback(input: { name: string; toVersion: number; actor
     if (!before) throw new WriteRefused(`no agent type named "${input.name}"`);
     let after;
     try {
-      after = registry.rollback(input.name, input.toVersion, input.actor.label);
+      after = withLedgerScope(ledgerScopeOf(input.actor), () =>
+        registry.rollback(input.name, input.toVersion, input.actor.label));
     } catch (error: unknown) {
       // The registry's own refusals (unknown version, already live) become
       // tool refusals the host can show; they are domain answers, not faults.

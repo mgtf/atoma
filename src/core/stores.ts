@@ -80,7 +80,18 @@ const handles = new Map<string, { db: Database.Database; applied: Set<string> }>
  */
 export const STORE_BUSY_TIMEOUT_MS = 5000;
 
-export function openStoreHandle(path: string, ddl: string): Database.Database {
+/**
+ * `migrate`, when given, runs right after the DDL and under the same
+ * once-per-(handle, table) rule: it is where a table that has GROWN columns
+ * since some stores were created adds them (`ALTER TABLE ... ADD COLUMN` has
+ * no IF NOT EXISTS, so it cannot live in the DDL string). Callers that share
+ * one DDL must share one migrate too — the first open on a handle decides.
+ */
+export function openStoreHandle(
+  path: string,
+  ddl: string,
+  migrate?: (db: Database.Database) => void
+): Database.Database {
   let h = handles.get(path);
   if (!h) {
     const db = new Database(path);
@@ -91,6 +102,7 @@ export function openStoreHandle(path: string, ddl: string): Database.Database {
   }
   if (!h.applied.has(ddl)) {
     h.db.exec(ddl);
+    migrate?.(h.db);
     h.applied.add(ddl);
   }
   return h.db;

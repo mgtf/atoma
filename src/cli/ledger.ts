@@ -26,7 +26,7 @@ import { unfoldedRegistryPredicate } from '../registry/db.js';
  */
 import Database from 'better-sqlite3';
 import { existsSync } from 'node:fs';
-import { ledgerDbPath, projectCounters, readLedger } from '../core/ledger.js';
+import { ledgerDbPath, projectCounters, readLedger, type LedgerScope } from '../core/ledger.js';
 import { skillsDirPath } from '../core/stores.js';
 import { SkillRegistry } from '../skills/registry.js';
 import { parseCliArgs } from './args.js';
@@ -67,6 +67,20 @@ function displayNamesByAtomId(db: Database.Database): Map<string, string> {
   return out;
 }
 
+/**
+ * The scope, compactly: `@org/project run:<id> by principal:<id>`, or nothing
+ * for a platform-level row. A row with no scope predates the columns or was
+ * written by a process with nothing to say; both are shown as they are.
+ */
+function renderScope(scope: LedgerScope | undefined): string {
+  if (!scope) return '';
+  const where = scope.orgId ? `@${scope.orgId}${scope.projectId ? `/${scope.projectId}` : ''}` : '';
+  const run = scope.runId ? `run:${scope.runId}` : '';
+  const actor = scope.actorType ? `by ${scope.actorType}${scope.actorId ? `:${scope.actorId}` : ''}` : '';
+  const parts = [where, run, actor].filter(Boolean);
+  return parts.length > 0 ? `  [${parts.join(' ')}]` : '';
+}
+
 function main(): void {
   const { command, positional, flags } = parseCliArgs(process.argv);
   const cmd = command ?? 'tail';
@@ -94,7 +108,7 @@ function main(): void {
     for (const ev of events.slice(-n)) {
       const detail = ev.detail ? `  ${JSON.stringify(ev.detail)}` : '';
       console.log(
-        `${ev.at}  ${ev.kind.padEnd(24)}  ${renderEntity(ev.entity, labels)}${detail}`
+        `${ev.at}  ${ev.kind.padEnd(24)}  ${renderEntity(ev.entity, labels)}${detail}${renderScope(ev.scope)}`
       );
     }
     console.log(`\n${events.length} event(s) total — ${dbPath}`);

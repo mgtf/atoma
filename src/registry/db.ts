@@ -1,7 +1,7 @@
 import { existsSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
-import { LEDGER_TABLE_DDL } from '../core/ledger.js';
+import { ensureLedgerSchema } from '../core/ledger.js';
 import { STORE_BUSY_TIMEOUT_MS } from '../core/stores.js';
 
 export type DB = Database.Database;
@@ -103,8 +103,10 @@ export function openDb(path: string): DB {
     db.exec(SCHEMA);
     // The lifecycle ledger is a table in this same file, so that an event and
     // the counter it records can share a transaction and so that an in-memory
-    // registry cannot append to the real store. See src/core/ledger.ts.
-    db.exec(LEDGER_TABLE_DDL);
+    // registry cannot append to the real store. See src/core/ledger.ts. The
+    // ONE schema step, shared with the cached-handle path: a scope column
+    // added here alone would make every append over there silent loss.
+    ensureLedgerSchema(db);
     migrateConsecutiveSuccesses(db);
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_atom_types_atom_id ON atom_types(atom_id)');
     return db;

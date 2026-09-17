@@ -8,6 +8,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthStore, sha256Hex, type Viewer } from '../src/auth/store.js';
 import { closeStoreHandles } from '../src/core/stores.js';
+import { readLedger } from '../src/core/ledger.js';
 import { SkillRegistry } from '../src/skills/registry.js';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
@@ -451,6 +452,21 @@ describe('operator writes over MCP — attributed and journaled', () => {
         kind: 'registry.rolled_back', actorId: admin.principalId,
         detail: expect.objectContaining({ trustBefore: { successes: 5, failures: 1, consecutiveSuccesses: 4 } }),
       })]);
+      // The LIFECYCLE row the registry appended names the same principal (T7):
+      // the write ran under the request's ledger scope in a process that
+      // serves every organisation and therefore has no process-wide one.
+      {
+        const store = openDb(join(dir, 'atoma.db'));
+        try {
+          // The fixture's own `patch` above also reset trust; only the rollback ran under the request.
+          const reset = readLedger(store).filter((event) => event.kind === 'type-trust-reset' && event.detail?.['reason'] === 'rollback');
+          expect(reset).toEqual([expect.objectContaining({
+            entity: type.name,
+            detail: expect.objectContaining({ reason: 'rollback' }),
+            scope: { orgId: admin.orgId, actorType: 'principal', actorId: admin.principalId },
+          })]);
+        } finally { store.close(); }
+      }
       const history = await client.callTool({ name: 'atoma_registry_history', arguments: { name: type.name } });
       expect(history.structuredContent).toMatchObject({ trustThreshold: 4, trust: { successes: 5, failures: 1, consecutiveSuccesses: 0, trusted: false } });
     } finally {

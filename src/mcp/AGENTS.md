@@ -190,7 +190,10 @@ Neighbours:
   `atoma_skill_drop`, `atoma_skill_merge`, `atoma_registry_rollback`. They
   call the SAME store methods the CLI calls (`SkillRegistry.resetCounters/
   drop/merge`, `AtomRegistry.rollback`), so the lifecycle ledger rows are the
-  CLI's rows and `ledger check` projects the same counters.
+  CLI's rows and `ledger check` projects the same counters. Each call runs
+  under `withLedgerScope(ledgerScopeOf(actor), …)`: this process serves every
+  organisation, so the lifecycle row names the bearer's principal per request
+  rather than a process-wide scope (T7).
 - THE CLI'S REFUSALS, IN THE CLI'S WORDS: dropping or absorbing a skill with
   recorded successes is refused without `force`; a rollback to the live
   version is a no-op the registry itself reports. A second door must never be

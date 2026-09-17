@@ -23,6 +23,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { SkillRegistry } from '../skills/registry.js';
 import { resolveMoleculeRef } from '../skills/namespace.js';
+import { setLedgerScope } from '../core/ledger.js';
 import { skillsDirPath, storeDbPath } from '../core/stores.js';
 import { assessShareability } from '../skills/shareability.js';
 import { exportSkillToSpec } from '../skills/exportSpec.js';
@@ -537,6 +538,9 @@ function main(): void {
     return;
   }
   const registry = new SkillRegistry(dirFrom(args.flags));
+  // Whatever this process appends to the lifecycle ledger, the CLI did it:
+  // possession of the machine is the identity, as the MCP writes note.
+  setLedgerScope({ actorType: 'cli' });
   const moleculeFilter = args.flags['molecule'] ?? args.flags['l1'];
 
   switch (args.command) {

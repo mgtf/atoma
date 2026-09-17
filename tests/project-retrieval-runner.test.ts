@@ -8,6 +8,7 @@ import { HAYSTACK_LAUNCH_ENV } from '../src/contracts/retrievalHaystack.js';
 import { parseRunStatsEpilogue } from '../src/contracts/runStats.js';
 import { MockLlmClient } from '../src/core/llm.js';
 import { resetHostLifecycleSnapshotForTests, startTask } from '../src/run/runner.js';
+import { ledgerScope, setLedgerScope } from '../src/core/ledger.js';
 import { buildProfile } from '../src/run/profiles/build.js';
 import { containerToolBackend, localToolBackend } from '../src/run/toolBackend.js';
 import { buildTierClients } from '../src/run/providers.js';
@@ -31,6 +32,7 @@ vi.mock('../src/run/providers.js', async original => ({
 const roots: string[] = [];
 afterEach(() => {
   vi.unstubAllEnvs(); vi.restoreAllMocks(); resetHostLifecycleSnapshotForTests();
+  setLedgerScope(null);
   closeStoreHandles();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
@@ -79,6 +81,14 @@ describe('trusted retrieval injection through startTask', () => {
     vi.mocked(containerToolBackend).mockImplementation(async opts => localToolBackend({ workspaceRoot: opts.workspaceRoot, logger: silentLogger() }));
     const handle = await startTask(buildProfile, ['--container', '--baseline', '--no-learn-skills', '--no-promote-skills', '--no-direct-skills', 'Consult the source.']);
     try {
+      // T7: the run proved which registered run it is, and every lifecycle
+      // event this process appends from here on carries that organisation,
+      // project, run and requesting principal — the record the authority
+      // check used to return and discard.
+      expect(ledgerScope()).toEqual({
+        orgId: current.run.orgId, projectId: current.run.projectId, runId: current.run.projectRunId,
+        actorType: 'principal', actorId: current.run.requestedByPrincipalId,
+      });
       if (mode === 'cancelled-warmup') {
         await vi.waitFor(() => expect(existsSync(join(root, 'haystack.pid'))).toBe(true), { timeout: 3000 });
         await handle.shutdown();
