@@ -356,13 +356,39 @@ export class AtomRegistry {
     return compactAtomCatalog(this.listByTier(tier), exclude);
   }
 
+  /**
+   * EVERY WRITE TRANSACTION BELOW IS `.immediate()`, AND THAT IS LOAD-BEARING.
+   *
+   * A deferred transaction takes its read snapshot at the first SELECT and
+   * only asks for the write lock at the first write. `create` reads
+   * `usedOrdinals` and `takenNames` before it INSERTs, so between those two
+   * moments another connection can commit — and the late lock upgrade then
+   * fails with `SQLITE_BUSY` even though `busy_timeout` is set, measured in
+   * `tests/registry-concurrent-writers.test.ts`. Waiting cannot rescue it:
+   * under WAL a stale-snapshot upgrade does not invoke the busy handler at
+   * all, because the snapshot is out of date rather than merely contended.
+   * Retrying inside the transaction is not the fix either — the allocation
+   * was computed against rows that no longer describe the table.
+   *
+   * `BEGIN IMMEDIATE` takes the write lock up front, so the read happens
+   * under it and read-then-write is atomic against every other connection on
+   * the file — which is the shape this store actually runs in: the viz
+   * server, the run child it hands `ATOMA_DB_PATH`, the mender as its own
+   * host service, and the operator CLIs all write here. R8, and the reason
+   * `migrateRegistryToPlatform` was already immediate.
+   *
+   * The cost of taking the lock earlier is bounded by construction:
+   * better-sqlite3 transactions are synchronous, so no LLM call, no await and
+   * no I/O wait can ever sit inside one. Nested calls (`createOrReuse` into
+   * `create`) become savepoints and inherit the outermost mode.
+   */
   /** Automatic creation reuses existing behavior without changing its history. */
   createOrReuse(tier: Tier, seed: CreateSeed): AtomType {
     return this.db.transaction((): AtomType => {
       const key = atomBehaviorKey(tier, seed);
       return this.listCapabilities(tier).find(type => atomBehaviorKey(tier, type) === key)
         ?? this.create(tier, seed);
-    })();
+    }).immediate();
   }
 
   /** Automatic repair allocates only when it actually introduces new behavior. */
@@ -379,7 +405,7 @@ export class AtomRegistry {
       if (key === atomBehaviorKey(source.tier, source)) return source;
       return this.listCapabilities(source.tier).find(type => atomBehaviorKey(source.tier, type) === key)
         ?? this.branch(fromName, mods, createdBy, overrideName);
-    })();
+    }).immediate();
   }
 
   getByName(name: string): AtomType | null {
@@ -510,7 +536,7 @@ export class AtomRegistry {
         failures: 0,
         consecutiveSuccesses: 0,
       };
-    })();
+    }).immediate();
   }
 
   patch(
@@ -588,7 +614,7 @@ export class AtomRegistry {
       if (behaviorChanged) this.note({ kind: 'type-trust-reset', entity: name, detail: { reason: 'patch', by: modifiedBy } });
 
       return { ...merged, version: nextVersion, consecutiveSuccesses };
-    })();
+    }).immediate();
   }
 
   /**
@@ -720,7 +746,7 @@ export class AtomRegistry {
       const restored = this.getByName(name);
       if (!restored) throw new RegistryNotFoundError(name);
       return restored;
-    })();
+    }).immediate();
   }
 
   branch(
@@ -847,7 +873,7 @@ export class AtomRegistry {
         failures: 0,
         consecutiveSuccesses: 0,
       };
-    })();
+    }).immediate();
   }
 
   /**
@@ -892,7 +918,7 @@ export class AtomRegistry {
         .prepare(`DELETE FROM atom_types WHERE tier = ? AND ordinal = ?`)
         .run(current.tier, current.ordinal);
       return current;
-    })();
+    }).immediate();
   }
 
   /**
@@ -921,7 +947,7 @@ export class AtomRegistry {
       this.prepare(`UPDATE atom_types SET successes = successes + 1,
         consecutive_successes = consecutive_successes + CASE WHEN ? OR version = ? THEN 1 ELSE 0 END
         WHERE name = ?`).run(expectedVersion === undefined ? 1 : 0, expectedVersion ?? null, name);
-    })();
+    }).immediate();
   }
 
   /**
@@ -938,7 +964,7 @@ export class AtomRegistry {
       });
       this.prepare(`UPDATE atom_types SET failures = failures + 1,
         consecutive_successes = 0 WHERE name = ?`).run(name);
-    })();
+    }).immediate();
   }
 
   /**
@@ -985,7 +1011,7 @@ export class AtomRegistry {
         )
         .run(successes, failures, name);
       return this.getByName(name)!;
-    })();
+    }).immediate();
   }
 
   /**
@@ -1209,7 +1235,7 @@ export class AtomRegistry {
       const refreshed = this.getByName(winnerName);
       if (!refreshed) throw new Error('mergeInto: winner vanished after merge');
       return refreshed;
-    })();
+    }).immediate();
   }
 
   /** Light variant of `listVersions`: metadata only, `[]` for a missing name. */

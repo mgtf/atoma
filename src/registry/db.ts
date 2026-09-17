@@ -2,6 +2,7 @@ import { existsSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
 import { LEDGER_TABLE_DDL } from '../core/ledger.js';
+import { STORE_BUSY_TIMEOUT_MS } from '../core/stores.js';
 
 export type DB = Database.Database;
 
@@ -94,6 +95,9 @@ export function openDb(path: string): DB {
   const db = new Database(path);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
+  // The registry's own connection, separate from `openStoreHandle`'s cached
+  // one and contending with it on the same file.
+  db.pragma(`busy_timeout = ${STORE_BUSY_TIMEOUT_MS}`);
   try {
     migrateRegistryToPlatform(db);
     db.exec(SCHEMA);

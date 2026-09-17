@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { openStoreHandle } from '../core/stores.js';
+import { openStoreHandle, STORE_BUSY_TIMEOUT_MS } from '../core/stores.js';
 import { runStatsSchema, type RunStats } from '../contracts/runStats.js';
 import {
   artifactManifestSchema,
@@ -491,7 +491,7 @@ export class ProjectStore {
     this.db = db;
     this.closeOnClose = options.closeOnClose ?? false;
     this.db.pragma('foreign_keys = ON');
-    this.db.pragma('busy_timeout = 5000');
+    this.db.pragma(`busy_timeout = ${STORE_BUSY_TIMEOUT_MS}`);
     if (options.initialize !== false) {
       this.db.exec(PROJECT_TABLES_DDL);
       // ADDITIVE MIGRATION. `CREATE TABLE IF NOT EXISTS` does nothing to a

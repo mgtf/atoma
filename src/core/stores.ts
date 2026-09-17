@@ -67,11 +67,25 @@ export function skillsDirPath(explicit?: string, env: NodeJS.ProcessEnv = proces
  */
 const handles = new Map<string, { db: Database.Database; applied: Set<string> }>();
 
+/**
+ * How long a product-store writer waits for another writer's lock before it
+ * gives up. ONE definition: better-sqlite3 applies a default of the same
+ * value that is invisible at these call sites, so a driver upgrade changing
+ * it would silently change this store's contention contract. The stores that
+ * already spelled the number (projects, preview) now read it from here.
+ *
+ * Deliberately NOT shared with the lease probes: `codexHomeLease` and
+ * `retrievalLaunch` set `busy_timeout = 0` because for them a wait is a
+ * wrong answer, not a slow one.
+ */
+export const STORE_BUSY_TIMEOUT_MS = 5000;
+
 export function openStoreHandle(path: string, ddl: string): Database.Database {
   let h = handles.get(path);
   if (!h) {
     const db = new Database(path);
     db.pragma('journal_mode = WAL');
+    db.pragma(`busy_timeout = ${STORE_BUSY_TIMEOUT_MS}`);
     h = { db, applied: new Set() };
     handles.set(path, h);
   }

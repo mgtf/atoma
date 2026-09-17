@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { openStoreHandle } from '../core/stores.js';
+import { openStoreHandle, STORE_BUSY_TIMEOUT_MS } from '../core/stores.js';
 import {
   previewDescriptorSchema,
   previewEgressHostSchema,
@@ -203,7 +203,7 @@ export class PreviewStore {
   constructor(db: Database.Database, options: PreviewStoreOptions = {}) {
     this.db = db;
     this.db.pragma('foreign_keys = ON');
-    this.db.pragma('busy_timeout = 5000');
+    this.db.pragma(`busy_timeout = ${STORE_BUSY_TIMEOUT_MS}`);
     if (options.initialize !== false) {
       this.db.exec(PREVIEW_TABLES_DDL);
       // ADDITIVE MIGRATION, the AuthStore pattern: `CREATE TABLE IF NOT
