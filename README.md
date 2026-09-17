@@ -78,6 +78,12 @@ model quota or incur API charges.
 
 <p align="center"><em>See what ran, what was checked, and where model usage went.</em></p>
 
+<p align="center">
+  <img src="docs/atoma-run-llm-filter.png" width="640" alt="The same run timeline narrowed to LLM calls, each step showing its agent, model, tokens, cache use, duration and cost">
+</p>
+
+<p align="center"><em>Filter the timeline to LLM calls: the model, tokens and cost behind each step.</em></p>
+
 ## How it works
 
 atoma assigns planning, supervision and execution to different AI agents and
