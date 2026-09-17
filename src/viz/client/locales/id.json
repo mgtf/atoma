@@ -1129,5 +1129,6 @@
   "depth.deepening": "Sel awal telah menghabiskan semua percobaan ulangnya. Mulai ulang dengan supervisi jaringan.",
   "depth.coverage": "{{covered}} dari {{total}} kewajiban pengiriman tercakup",
   "welcome.handheld.blocked": "Belum tersedia di perangkat seluler",
-  "welcome.handheld.hint": "Atoma masih disempurnakan untuk ponsel dan tablet. Buka Atoma melalui browser desktop."
+  "welcome.handheld.hint": "Atoma masih dalam tahap penyempurnaan untuk ponsel dan tablet. Anda dapat melanjutkan dengan akses penuh, tetapi beberapa layar mungkin belum berfungsi dengan baik di perangkat seluler.",
+  "welcome.handheld.continue": "Setidaknya izinkan saya mengakses akun saya"
 }

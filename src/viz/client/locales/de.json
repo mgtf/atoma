@@ -1129,5 +1129,6 @@
   "depth.deepening": "Die Einstiegszelle hat ihre Wiederholungsversuche ausgeschöpft. Mit Gewebeüberwachung neu starten.",
   "depth.coverage": "{{covered}} von {{total}} Lieferverpflichtungen abgedeckt",
   "welcome.handheld.blocked": "Auf Mobilgeräten noch nicht verfügbar",
-  "welcome.handheld.hint": "Atoma wird noch für Smartphones und Tablets optimiert. Öffne es in einem Desktop-Browser."
+  "welcome.handheld.hint": "atoma wird noch für Smartphones und Tablets optimiert. Sie können mit vollem Zugriff fortfahren, aber einige Ansichten funktionieren auf Mobilgeräten möglicherweise noch nicht richtig.",
+  "welcome.handheld.continue": "Zumindest auf mein Konto zugreifen"
 }

@@ -1129,5 +1129,6 @@
   "depth.deepening": "入口细胞已用尽重试次数。改由组织监督重新开始。",
   "depth.coverage": "{{total}}项交付义务中已覆盖{{covered}}项",
   "welcome.handheld.blocked": "暂不支持移动设备",
-  "welcome.handheld.hint": "Atoma 的手机和平板版本仍在完善中。请使用桌面浏览器打开。"
+  "welcome.handheld.hint": "Atoma 的手机和平板版本仍在完善中。你可以继续使用全部功能，但部分页面在移动设备上可能尚未正常适配。",
+  "welcome.handheld.continue": "至少让我访问我的账户"
 }
