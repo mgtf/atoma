@@ -126,6 +126,19 @@ ATOMA_ACCOUNT_PROFILES_ROOT=/home/atoma/state/account-profiles
 ATOMA_BUILD_WORKSPACE=/home/atoma/state/workspaces/build
 ATOMA_MCP_RUN_LOCK=/home/atoma/state/mcp-run-lock.db
 ATOMA_DEPLOY_LOCK_PATH=/home/atoma/state/deploy.lock
+# The analyst resident in the viz server and the mender service must resolve
+# the SAME verdict directory. `supervisorDirPath` otherwise defaults to the
+# cwd-relative `./supervisor`, which under systemd is a release symlink
+# swapped on every deploy. `install-mender.sh` already hard-requires this
+# variable; the web service needs it for the same reason.
+ATOMA_SUPERVISOR_DIR=/home/atoma/state/supervisor
+# Which backup tiers this host does NOT have. `~/.atoma/archive` holds
+# pre/post-benchmark store archives and a server runs no benchmarks, so the
+# tier is a shape fact here rather than a loss. Every tier left out of this
+# list is mandatory: missing, the snapshot reports it as a loss and
+# `restore-drill.py` fails. Never add `skills`, `runs`, `projects` or
+# `supervisor` here to quiet a red drill — that is the drill working.
+ATOMA_BACKUP_OPTIONAL_TIERS=archive
 ```
 
 ### ChatGPT subscription on all three tiers

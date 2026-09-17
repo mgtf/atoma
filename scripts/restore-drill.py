@@ -94,6 +94,22 @@ def drill(snapshot, destination):
         raise ValueError("Missing captured inventory")
     if len(captured) != len(set(captured)) or set(captured) - set(TIERS.values()) or "store.db" not in captured:
         raise ValueError("Invalid captured inventory or missing store")
+    # WHICH ABSENCES THIS DEPLOYMENT DECLARED. A tier absent from a host is
+    # either a shape fact (no ~/.atoma/archive on a server that runs no
+    # benchmarks) or a loss (no skills/ on that same server). Requiring all
+    # six made every deployed-shape snapshot exit 2; forgiving every skip
+    # would make this drill reassuring about exactly the case it exists to
+    # catch. So the snapshot declares, and everything undeclared stays
+    # mandatory — an old manifest with no declaration still requires all six.
+    optional = manifest.get("optionalTiers", [])
+    if not isinstance(optional, list) or not all(isinstance(x, str) for x in optional):
+        raise ValueError("Invalid optionalTiers declaration")
+    optional = set(optional)
+    if optional - set(TIERS):
+        raise ValueError("Unknown tier in optionalTiers declaration")
+    if "store" in optional:
+        raise ValueError("The store tier cannot be declared optional")
+    expected = set(TIERS) - optional
     verified = {}
     # Verify ALL archives before creating the destination, then copy only verified bytes.
     for tier, filename in TIERS.items():
@@ -116,6 +132,8 @@ def drill(snapshot, destination):
     destination.mkdir(mode=0o700)
     report = {"schema": "atoma.restore-drill/v1", "manifestSha256": digest(manifest_path),
               "verified": verified, "skipped": manifest.get("skipped", []),
+              "expectedTiers": sorted(expected), "notApplicableTiers": sorted(optional),
+              "missingExpectedTiers": sorted(expected - set(verified)),
               "excluded": {tier: manifest[tier].get("excluded", []) for tier in verified},
               "servicesStarted": False}
     # Copy the input to pin it against later source changes; recheck before extraction.
@@ -143,7 +161,10 @@ def drill(snapshot, destination):
                     os.chmod(path, member.mode & 0o777)
     report["store"] = inspect_store(destination / "store.db", destination / "projects")
     report["elapsedSeconds"] = round(time.monotonic() - started, 3)
-    report["completeInventory"] = len(verified) == len(TIERS) and not report["skipped"]
+    # Every EXPECTED tier restored, and nothing the snapshot itself reported
+    # as expected-and-missing. A declared-optional tier that turned out to be
+    # present is verified above and counts for the deployment, not against it.
+    report["completeInventory"] = not report["missingExpectedTiers"] and not report["skipped"]
     report["status"] = "incomplete" if report["store"]["issues"] or not report["completeInventory"] else "verified"
     (destination / "restore-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, indent=2))

@@ -48,9 +48,10 @@ describe.skipIf(!hasPython)('offline recovery through real backup archives and a
   });
   afterEach(() => { db.close(); rmSync(root, { recursive: true, force: true }); });
 
-  const backup = () => runBackup({ dest: join(root, 'snapshots'), keep: 2, storeDb: join(root, 'source.db'),
+  const backupOpts = () => ({ dest: join(root, 'snapshots'), keep: 2, storeDb: join(root, 'source.db'),
     skillsDir: join(root, 'skills'), runsDir: join(root, 'runs'), archiveDir: join(root, 'archive'),
     projectsRoot: join(root, 'projects'), supervisorDir: join(root, 'supervisor'), repoRoot: join(root, 'checkout'), log: () => {} });
+  const backup = () => runBackup(backupOpts());
   const restore = (snapshot: string, dest = join(root, 'recovered')) => spawnSync(python, [script, snapshot, '--dest', dest], { encoding: 'utf8', timeout: 30000 });
 
   it('restores six tiers and reconciles real ProjectStore rows without rewriting source paths or starting a service', async () => {
@@ -64,6 +65,46 @@ describe.skipIf(!hasPython)('offline recovery through real backup archives and a
       store: { integrity: 'ok', issues: [], projectRuns: [{ runId, status: 'delivered', workspace: true, log: true, trace: true }] } });
     expect(readFileSync(join(root, 'recovered', 'projects', 'orgs', '11111111-1111-4111-8111-111111111111', 'projects', projectId, 'runs', runId, 'workspace', 'index.html'), 'utf8')).toBe('<p>restored</p>');
     expect(store.getProjectRun('11111111-1111-4111-8111-111111111111', runId)?.status).toBe('delivered');
+  });
+
+  it('verifies a deployment that declares the tier it does not have', async () => {
+    // THE DEPLOYED SHAPE. A server keeps no ~/.atoma/archive: that tier holds
+    // pre/post-benchmark store archives and it runs no benchmarks. The drill
+    // required all six tiers, so every snapshot of this shape reported
+    // incomplete and exited 2 — the only disaster-recovery check the product
+    // owns, calibrated to a developer machine.
+    //
+    // This fixture proves the FIX. A snapshot taken from the real host would
+    // prove the host, and the two are not the same claim.
+    rmSync(join(root, 'archive'), { recursive: true, force: true });
+    const snapshot = await runBackup({ ...backupOpts(), optionalTiers: ['archive'] });
+    const result = restore(snapshot.snapshotDir);
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({ status: 'verified',
+      expectedTiers: ['projects', 'runs', 'skills', 'store', 'supervisor'],
+      notApplicableTiers: ['archive'], missingExpectedTiers: [] });
+  });
+
+  it('still fails when the same tier vanishes undeclared', async () => {
+    // The other half of the fix: forgiving every skip would have made the
+    // drill reassuring about exactly the case it exists to catch.
+    rmSync(join(root, 'archive'), { recursive: true, force: true });
+    const snapshot = await backup();
+    const result = restore(snapshot.snapshotDir);
+    expect(result.status).toBe(2);
+    expect(JSON.parse(result.stdout)).toMatchObject({ status: 'incomplete',
+      missingExpectedTiers: ['archive'] });
+  });
+
+  it('refuses a manifest that declares the store optional', async () => {
+    const snapshot = await backup();
+    const manifestPath = join(snapshot.snapshotDir, 'manifest.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
+    manifest['optionalTiers'] = ['store'];
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+    const result = restore(snapshot.snapshotDir);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('store tier cannot be declared optional');
   });
 
   it('refuses corruption before allocating the recovery destination', async () => {

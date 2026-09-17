@@ -5,6 +5,8 @@ import { isAbsolute, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import Database from 'better-sqlite3';
 import {
+  OPTIONAL_TIERS_ENV,
+  parseOptionalTiers,
   PROJECTS_TAR_EXCLUDES,
   runBackup,
   sha256File,
@@ -257,6 +259,82 @@ describe('state backup CLI', () => {
     const res = await runBackup(opts({ storeDb: join(root, 'nope.db') }));
     expect(res.captured).not.toContain('store.db');
     expect(res.skipped.join(',')).toMatch(/store/);
+  });
+
+  it('separates a tier this deployment does not have from one expected and lost', async () => {
+    // The deployed shape has no ~/.atoma/archive: it holds pre/post-benchmark
+    // store archives and a server runs no benchmarks. DECLARED, that absence
+    // is a shape fact. Undeclared, the identical absence is the only signal
+    // that earned state went missing — so the two must not share a list.
+    const lines: string[] = [];
+    const res = await runBackup(
+      opts({ optionalTiers: ['archive'], log: (line: string) => lines.push(line) })
+    );
+    expect(res.skipped).toEqual([]);
+    expect(res.notApplicable).toEqual([
+      expect.stringMatching(/^archive \(.*declared not applicable\)$/),
+    ]);
+    expect(lines.join('\n')).toContain('✓ backup complete');
+
+    const manifest = readManifest(res.snapshotDir);
+    expect(manifest['optionalTiers']).toEqual(['archive']);
+    expect(manifest['notApplicable']).toEqual(res.notApplicable);
+    expect(manifest.skipped).toEqual([]);
+  });
+
+  it('reports an undeclared missing tier as a loss and never calls that complete', async () => {
+    const lines: string[] = [];
+    const res = await runBackup(
+      opts({
+        supervisorDir: join(root, 'supervisor-gone'),
+        optionalTiers: ['archive'],
+        log: (line: string) => lines.push(line),
+      })
+    );
+    expect(res.skipped).toEqual([
+      expect.stringMatching(/^supervisor \(.*supervisor-gone missing\)$/),
+    ]);
+    const summary = lines.join('\n');
+    expect(summary).toContain('backup INCOMPLETE');
+    expect(summary).not.toContain('✓ backup complete');
+    // The message has to say how a real shape fact gets declared, or the next
+    // operator silences the tier the only way left to them.
+    expect(summary).toContain(OPTIONAL_TIERS_ENV);
+  });
+
+  it('reads the declaration from the deployment env', async () => {
+    const saved = process.env[OPTIONAL_TIERS_ENV];
+    process.env[OPTIONAL_TIERS_ENV] = 'archive';
+    try {
+      const res = await runBackup({ ...opts(), optionalTiers: undefined });
+      expect(res.skipped).toEqual([]);
+      expect(res.notApplicable).toHaveLength(1);
+    } finally {
+      if (saved === undefined) delete process.env[OPTIONAL_TIERS_ENV];
+      else process.env[OPTIONAL_TIERS_ENV] = saved;
+    }
+  });
+
+  it('refuses an unknown tier name and refuses to make the store optional', () => {
+    expect(parseOptionalTiers('archive, supervisor')).toEqual(['archive', 'supervisor']);
+    expect(parseOptionalTiers(undefined)).toEqual([]);
+    // A typo must fail loudly: silently ignored, it would leave the tier the
+    // operator meant to declare mandatory, and they would read the next red
+    // drill as the bug rather than as their own typo.
+    expect(() => parseOptionalTiers('archives')).toThrow(/unknown tier/);
+    expect(() => parseOptionalTiers('store')).toThrow(/cannot be optional/);
+  });
+
+  it('records the host-held key the copied store still needs, and never the key', async () => {
+    const res = await runBackup(opts());
+    const secrets = readManifest(res.snapshotDir)['secrets'] as Record<string, unknown>;
+    expect(secrets['keyMaterialIncluded']).toBe(false);
+    expect(secrets['keyEnvVars']).toContain('ATOMA_SECRET_ENCRYPTION_KEY');
+    // Naming the dependency is not proving recovery, and the note says so.
+    expect(String(secrets['note'])).toMatch(/does not do that and does not prove it/);
+    // This fixture's store has no auth tables, so the dependency does not bite
+    // here — which is the fact a reader needs, not a boilerplate warning.
+    expect(secrets['encryptedOrgProviderKeys']).toBe(0);
   });
 
   it('is import-safe: loading the module never runs main()', async () => {

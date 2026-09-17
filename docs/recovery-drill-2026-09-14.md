@@ -1,5 +1,17 @@
 # Offline recovery exercise — 2026-09-14
 
+> **Amended 2026-09-17.** As written, this exercise could not pass on the
+> deployed shape. It required all six tiers, while `~/.atoma/archive` holds
+> pre/post-benchmark store archives and does not exist on a server that runs
+> no benchmarks — so a snapshot taken there reported `incomplete` and exited
+> 2. Forgiving every skip would have made the drill silent about real loss,
+> which is the failure the archive tier itself recorded. The deployment now
+> DECLARES the tiers it does not have (`ATOMA_BACKUP_OPTIONAL_TIERS`) and
+> everything undeclared stays mandatory. The manifest also names the
+> host-held key the restored store still needs. A production-shaped fixture
+> proves the fix in `tests/restore-drill.test.ts`; a snapshot from the real
+> host is a separate claim and is not made here.
+
 The backup now includes store, skills, operator runs, archives, project corpus
 and supervisor records. [`scripts/restore-drill.py`](../scripts/restore-drill.py)
 adds a repeatable **offline exercise**, without starting the viz, applying
@@ -20,7 +32,9 @@ SQLite and directory writers; the exercise cannot make a torn capture atomic.
 ## What is verified
 
 1. The manifest's captured inventory agrees with its tier records. `store.db`
-   is required; missing optional tiers remain visible as incomplete coverage.
+   is required and can never be declared optional. Every other tier the
+   deployment did not declare in `ATOMA_BACKUP_OPTIONAL_TIERS` must be
+   present: a declared absence is a shape fact, an undeclared one is a loss.
 2. Every captured file's byte size and SHA-256 match before destination
    allocation. Only known snapshot basenames are accepted.
 3. Archives contain only regular files/directories beneath their recorded
@@ -40,7 +54,9 @@ SQLite and directory writers; the exercise cannot make a torn capture atomic.
 
 `restore-report.json` records manifest digest, tier digests, skipped/excluded
 coverage, per-run file presence, integrity, elapsed seconds and the fact that
-no service started. Exit 0 means these checks passed with all six tiers;
+no service started. Exit 0 means these checks passed for every tier this
+deployment expects (`expectedTiers` in the report, with `notApplicableTiers`
+naming what it declared it does not have);
 exit 2 means the exercise produced a report with incomplete inventory or
 unresolved run/file correspondence; exit 1 means an invalid/unsafe input or
 an operational failure. A partial destination after failure remains evidence

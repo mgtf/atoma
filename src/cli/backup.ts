@@ -23,7 +23,9 @@
  *                          its git base; `node_modules` excluded)
  *     supervisor.tar.gz  — analyst verdicts and mend records
  *     manifest.json      — what was captured, from where, how big, its SHA-256,
- *                          and what was skipped
+ *                          what was EXPECTED AND MISSING, which tiers this
+ *                          deployment declares it does not have, and which
+ *                          host-held key the copied store still needs
  *
  * The two gated corpora (projects, supervisor) were missing until 2026-09-14:
  * the value audit of that day found `npm run backup` described as a state
@@ -39,6 +41,7 @@
  * same-disk path that looks like a backup and protects nothing. A dest
  * inside the repository is refused for the same reason.
  */
+import Database from 'better-sqlite3';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
@@ -52,6 +55,7 @@ import {
 } from 'node:fs';
 import { hostname, homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { SECRET_ENCRYPTION_ENV } from '../auth/secretEncryption.js';
 import { skillsDirPath, storeDbPath } from '../core/stores.js';
 import { snapshotSqliteStore } from '../core/sqliteBackup.js';
 import { DEFAULT_PROJECTS_ROOT } from '../projects/coordinator.js';
@@ -59,6 +63,110 @@ import { supervisorDirPath } from '../supervisor/paths.js';
 
 export const SNAPSHOT_PREFIX = 'atoma-state-';
 const DEFAULT_KEEP = 14;
+
+/** Every tier a snapshot can carry, in manifest order. */
+export const BACKUP_TIERS = [
+  'store',
+  'skills',
+  'runs',
+  'archive',
+  'projects',
+  'supervisor',
+] as const;
+export type BackupTier = (typeof BACKUP_TIERS)[number];
+/** The five directory tiers. `store` is captured through the online backup. */
+type DirectoryTier = Exclude<BackupTier, 'store'>;
+
+export const OPTIONAL_TIERS_ENV = 'ATOMA_BACKUP_OPTIONAL_TIERS' as const;
+
+/**
+ * WHICH TIERS THIS DEPLOYMENT ACTUALLY HAS.
+ *
+ * A tier absent from a host is either a shape fact or a loss, and only the
+ * deployment knows which. `~/.atoma/archive` holds pre/post-benchmark store
+ * archives and never exists on a server that runs no benchmarks; a missing
+ * `skills/` on that same server is months of earned state gone. The snapshot
+ * recorded both as `skipped`, and the restore drill required all six tiers —
+ * so every production snapshot reported `incomplete` and exited 2, and the
+ * only way to make it pass would have been to stop reading skips at all,
+ * which is precisely the silence the 2026-09-14 archive-tier incident was
+ * about.
+ *
+ * So the deployment DECLARES its absences and everything else stays
+ * mandatory. Default: nothing is optional — the developer machine this drill
+ * was calibrated on, and the fail-closed answer for a host that has declared
+ * nothing yet.
+ */
+export function parseOptionalTiers(
+  raw: string | readonly string[] | undefined
+): DirectoryTier[] {
+  const items = (typeof raw === 'string' ? raw.split(',') : (raw ?? []))
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+  const out: DirectoryTier[] = [];
+  for (const item of items) {
+    if (item === 'store') {
+      throw new Error(
+        `${OPTIONAL_TIERS_ENV}: the store tier cannot be optional — a snapshot without it has nothing to restore.`
+      );
+    }
+    if (!(BACKUP_TIERS as readonly string[]).includes(item)) {
+      throw new Error(
+        `${OPTIONAL_TIERS_ENV}: unknown tier ${item} (known: ${BACKUP_TIERS.filter((t) => t !== 'store').join(', ')})`
+      );
+    }
+    if (!out.includes(item as DirectoryTier)) out.push(item as DirectoryTier);
+  }
+  return out;
+}
+
+/**
+ * WHAT THIS SNAPSHOT CANNOT RESTORE ON ITS OWN.
+ *
+ * Organisation provider keys sit encrypted in the store, and the key that
+ * unlocks them is host configuration resolved from the operator's environment
+ * (`src/auth/secretEncryption.ts`). It is deliberately absent here: a backup
+ * carrying both the ciphertext and its key would be one copied file away from
+ * being the plaintext. So the manifest NAMES the dependency and counts the
+ * rows it bites, letting a reader tell whether it matters for this snapshot.
+ *
+ * Naming it is not proving it. Recovering those rows means retrieving that
+ * key separately and decrypting under control — an exercise this snapshot
+ * neither performs nor attests. Key ROTATION is a third thing again, and is
+ * not this function's subject.
+ */
+function secretDependency(snapshotStore: string): Record<string, unknown> {
+  let encryptedOrgProviderKeys: number | null = null;
+  let db: Database.Database | null = null;
+  try {
+    db = new Database(snapshotStore, { readonly: true, fileMustExist: true });
+    const present = db
+      .prepare(
+        `SELECT count(*) AS n FROM sqlite_master WHERE type='table' AND name='auth_org_provider_keys'`
+      )
+      .get() as { n: number };
+    encryptedOrgProviderKeys =
+      present.n > 0
+        ? (db.prepare('SELECT count(*) AS n FROM auth_org_provider_keys').get() as { n: number }).n
+        : 0;
+  } catch {
+    // The count is a courtesy. The DEPENDENCY is the load-bearing part and is
+    // stated whether or not the copied store can be read from here.
+    encryptedOrgProviderKeys = null;
+  } finally {
+    db?.close();
+  }
+  return {
+    note:
+      'store.db carries organisation provider keys encrypted at rest. The key that unlocks them is ' +
+      'host configuration and is NOT in this snapshot, by design: restoring the store without it ' +
+      'leaves those rows undecryptable. Proving recovery means retrieving that key separately and ' +
+      'decrypting under control — this snapshot does not do that and does not prove it.',
+    keyEnvVars: [SECRET_ENCRYPTION_ENV, 'ATOMA_GITHUB_TOKEN_ENCRYPTION_KEY'],
+    keyMaterialIncluded: false,
+    encryptedOrgProviderKeys,
+  };
+}
 
 /**
  * Directory names left out of the projects tar. A project run's workspace is
@@ -81,6 +189,11 @@ export interface BackupOptions {
   /** The projects ROOT (the `orgs/` child is what gets captured). */
   readonly projectsRoot?: string;
   readonly supervisorDir?: string;
+  /**
+   * Tiers this deployment does not have. Absent here, a missing tier is a
+   * loss. Defaults to `ATOMA_BACKUP_OPTIONAL_TIERS`, then to nothing.
+   */
+  readonly optionalTiers?: readonly string[];
   /** Refused-destination guard root (the repository). */
   readonly repoRoot?: string;
   readonly log?: (line: string) => void;
@@ -89,7 +202,10 @@ export interface BackupOptions {
 export interface BackupResult {
   readonly snapshotDir: string;
   readonly captured: string[];
+  /** Tiers that were EXPECTED and are not in the snapshot. Each one is a loss. */
   readonly skipped: string[];
+  /** Tiers this deployment declared it does not have. Not a loss. */
+  readonly notApplicable: string[];
   readonly pruned: string[];
 }
 
@@ -171,8 +287,10 @@ export async function runBackup(opts: BackupOptions): Promise<BackupResult> {
   const snapshotDir = join(dest, `${SNAPSHOT_PREFIX}${stamp}`);
   mkdirSync(snapshotDir, { recursive: true });
 
+  const optional = parseOptionalTiers(opts.optionalTiers ?? process.env[OPTIONAL_TIERS_ENV]);
   const captured: string[] = [];
   const skipped: string[] = [];
+  const notApplicable: string[] = [];
   const manifest: Record<string, unknown> = {
     createdAt: new Date().toISOString(),
     host: hostname(),
@@ -201,7 +319,7 @@ export async function runBackup(opts: BackupOptions): Promise<BackupResult> {
   const projectsRoot =
     opts.projectsRoot ?? process.env['ATOMA_PROJECTS_ROOT'] ?? DEFAULT_PROJECTS_ROOT;
   const dirs: Array<
-    [label: string, source: string | undefined, out: string, excludes: readonly string[]]
+    [label: DirectoryTier, source: string | undefined, out: string, excludes: readonly string[]]
   > = [
     ['skills', opts.skillsDir ?? skillsDirPath(), 'skills.tar.gz', []],
     ['runs', opts.runsDir ?? process.env['ATOMA_RUNS_DIR'] ?? './runs', 'runs.tar.gz', []],
@@ -224,8 +342,14 @@ export async function runBackup(opts: BackupOptions): Promise<BackupResult> {
   ];
   for (const [label, source, outName, excludes] of dirs) {
     if (!source || !existsSync(source) || !statSync(source).isDirectory()) {
-      skipped.push(`${label} (${source ?? 'unset'} missing)`);
-      log(`⚠ ${label} missing at ${source ?? '(unset)'} — skipped`);
+      const where = source ?? 'unset';
+      if (optional.includes(label)) {
+        notApplicable.push(`${label} (${where} — declared not applicable)`);
+        log(`· ${label} not applicable to this deployment (${where})`);
+      } else {
+        skipped.push(`${label} (${where} missing)`);
+        log(`⚠ ${label} missing at ${where} — skipped`);
+      }
       continue;
     }
     const out = join(snapshotDir, outName);
@@ -247,6 +371,12 @@ export async function runBackup(opts: BackupOptions): Promise<BackupResult> {
   // only has the destination can tell a partial capture from a complete one.
   manifest['captured'] = [...captured];
   manifest['skipped'] = [...skipped];
+  manifest['notApplicable'] = [...notApplicable];
+  // The DECLARATION, machine-readable, is what the restore drill reads to
+  // decide which absences it may forgive. The human lists above say what
+  // happened; this says what the deployment said would happen.
+  manifest['optionalTiers'] = [...optional];
+  manifest['secrets'] = secretDependency(join(snapshotDir, 'store.db'));
   writeFileSync(join(snapshotDir, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf8');
 
   // Prune: keep the newest N snapshots. Name-sorted equals time-sorted
@@ -263,16 +393,33 @@ export async function runBackup(opts: BackupOptions): Promise<BackupResult> {
     log(`✂ pruned old snapshot ${victim}`);
   }
 
-  log(
-    `\n✓ backup complete: ${snapshotDir} (${captured.length} captured, ${skipped.length} skipped, ${pruned.length} pruned)`
-  );
-  return { snapshotDir, captured, skipped, pruned };
+  // A summary line that says "complete" over a missing tier is the exact
+  // failure the archive-tier incident recorded, so the word is earned here or
+  // it is not printed.
+  const shape = notApplicable.length > 0 ? `, ${notApplicable.length} not applicable` : '';
+  if (skipped.length > 0) {
+    log(
+      `\n⚠ backup INCOMPLETE: ${snapshotDir} (${captured.length} captured, ` +
+        `${skipped.length} EXPECTED AND MISSING${shape}, ${pruned.length} pruned)\n` +
+        `  missing: ${skipped.join('; ')}\n` +
+        `  A tier this deployment does not have belongs in ${OPTIONAL_TIERS_ENV}. Anything left ` +
+        `here is state that was expected and is not in the snapshot.`
+    );
+  } else {
+    log(
+      `\n✓ backup complete: ${snapshotDir} (${captured.length} captured${shape}, ${pruned.length} pruned)`
+    );
+  }
+  return { snapshotDir, captured, skipped, notApplicable, pruned };
 }
 
 const USAGE =
   'usage: npm run backup -- --dest <dir> [--keep N]\n' +
   'Roots follow the running product: ATOMA_DB_PATH, ATOMA_SKILLS_DIR, ATOMA_RUNS_DIR,\n' +
-  'ATOMA_PROJECTS_ROOT (its orgs/ child) and ATOMA_SUPERVISOR_DIR, with the same defaults.';
+  'ATOMA_PROJECTS_ROOT (its orgs/ child) and ATOMA_SUPERVISOR_DIR, with the same defaults.\n' +
+  'ATOMA_BACKUP_OPTIONAL_TIERS names the tiers this deployment does not have (e.g. "archive"\n' +
+  'on a server that runs no benchmarks). Every tier left out of it is mandatory: missing, it\n' +
+  'is reported as a loss and the restore drill fails.';
 
 function main(): void {
   const argv = process.argv.slice(2);

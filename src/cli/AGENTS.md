@@ -89,13 +89,20 @@ can only report that it cannot be.
   [value audit](../../docs/value-audit-2026-09-14.md) found the corpus it had
   to reconcile outside every captured tier.
 - The manifest is an inventory, not a completeness claim: per-tier source,
-  SHA-256, top-level entries and recursive file count, plus the `captured`
-  and `skipped` lists. Read them before calling a snapshot complete. Each
-  artefact is consistent with itself; nothing makes the set atomic across
-  roots, so the operator captures while no run, publication or analyst pass
-  mutates them — without touching the run lease to make room.
-- The destination is required and refused inside the repository. A missing
-  tier is a loud skip that names the resolved path, never a silent success.
+  SHA-256, top-level entries and recursive file count, the `captured`,
+  `skipped` and `notApplicable` lists, the `optionalTiers` declaration, and
+  the host-held key the copied store still needs to be usable. Each artefact
+  is consistent with itself; nothing makes the set atomic across roots, so the
+  operator captures while no run, publication or analyst pass mutates them —
+  without touching the run lease to make room.
+- A tier absent from a host is either a shape fact or a loss, and only the
+  deployment knows which, so it DECLARES its absences in
+  `ATOMA_BACKUP_OPTIONAL_TIERS`. A server runs no benchmarks and has no
+  `~/.atoma/archive`; the same server missing `skills/` has lost months.
+  Everything undeclared is mandatory: missing, it is a loud skip naming the
+  resolved path, the summary refuses the word complete, and the restore drill
+  fails. The store can never be declared optional.
+- The destination is required and refused inside the repository.
 - The offline recovery exercise is `python3 scripts/restore-drill.py <snapshot>
   --dest <new-directory>`, not a service start or a compiled product command.
   It verifies hashes, extracts regular files into an isolated destination and
