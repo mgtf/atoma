@@ -1127,5 +1127,7 @@
   "depth.entry.deep": "从一个监督细胞和分子的组织开始。",
   "depth.entry.short": "从一个监督分子的细胞开始。",
   "depth.deepening": "入口细胞已用尽重试次数。改由组织监督重新开始。",
-  "depth.coverage": "{{total}}项交付义务中已覆盖{{covered}}项"
+  "depth.coverage": "{{total}}项交付义务中已覆盖{{covered}}项",
+  "welcome.handheld.blocked": "暂不支持移动设备",
+  "welcome.handheld.hint": "Atoma 的手机和平板版本仍在完善中。请使用桌面浏览器打开。"
 }

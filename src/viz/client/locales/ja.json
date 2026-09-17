@@ -1127,5 +1127,7 @@
   "depth.entry.deep": "細胞と分子を監督する組織から開始します。",
   "depth.entry.short": "分子を監督する細胞から開始します。",
   "depth.deepening": "開始細胞が再試行回数を使い切りました。組織による監督で再開します。",
-  "depth.coverage": "デリバリー義務{{total}}件中{{covered}}件をカバー"
+  "depth.coverage": "デリバリー義務{{total}}件中{{covered}}件をカバー",
+  "welcome.handheld.blocked": "モバイルではまだご利用いただけません",
+  "welcome.handheld.hint": "Atomaは現在、スマートフォンとタブレット向けに仕上げ中です。デスクトップのブラウザから開いてください。"
 }

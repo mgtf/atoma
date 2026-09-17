@@ -1127,5 +1127,7 @@
   "depth.entry.deep": "Mit einem Gewebe beginnen, das Zellen und Moleküle überwacht.",
   "depth.entry.short": "Mit einer Zelle beginnen, die Moleküle überwacht.",
   "depth.deepening": "Die Einstiegszelle hat ihre Wiederholungsversuche ausgeschöpft. Mit Gewebeüberwachung neu starten.",
-  "depth.coverage": "{{covered}} von {{total}} Lieferverpflichtungen abgedeckt"
+  "depth.coverage": "{{covered}} von {{total}} Lieferverpflichtungen abgedeckt",
+  "welcome.handheld.blocked": "Auf Mobilgeräten noch nicht verfügbar",
+  "welcome.handheld.hint": "Atoma wird noch für Smartphones und Tablets optimiert. Öffne es in einem Desktop-Browser."
 }

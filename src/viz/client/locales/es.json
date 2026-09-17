@@ -1127,5 +1127,7 @@
   "depth.entry.deep": "Comienza con un tejido que supervise células y moléculas.",
   "depth.entry.short": "Comienza con una célula que supervise moléculas.",
   "depth.deepening": "La célula de entrada agotó sus reintentos. Reinicia con supervisión de tejido.",
-  "depth.coverage": "{{covered}} de {{total}} obligaciones de entrega cubiertas"
+  "depth.coverage": "{{covered}} de {{total}} obligaciones de entrega cubiertas",
+  "welcome.handheld.blocked": "Aún no disponible en dispositivos móviles",
+  "welcome.handheld.hint": "Atoma todavía se está adaptando para teléfonos y tabletas. Ábrelo desde un navegador de escritorio."
 }
