@@ -630,6 +630,8 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 0, docs: 0, admin: 0, journal: 0, ledger: 0, sentinel: 0, announce: 0, settings: 0 },
     entered: true,
     handheld: false,
+    handheldAccepted: false,
+    acceptHandheld: noop,
     handheldBlocked: false,
     accountMenuOpen: false,
     localeMenuOpen: false,

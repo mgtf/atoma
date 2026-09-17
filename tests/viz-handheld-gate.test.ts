@@ -205,12 +205,15 @@ describe('the handheld white-out', () => {
   });
 
   function Probe() {
-    const { phase, begin, floodRef } = useHandheldWhiteout();
+    const { phase, begin, dismiss, floodRef } = useHandheldWhiteout();
     return createElement(
       'div',
       null,
       createElement('button', { onClick: () => { begin(); } }, 'go'),
-      createElement(HandheldVeilLayer, { phase, floodRef, notice: t('welcome.handheld.hint') }),
+      createElement(HandheldVeilLayer, {
+        phase, floodRef, notice: t('welcome.handheld.hint'),
+        continueLabel: t('welcome.handheld.continue'), onContinue: dismiss,
+      }),
       createElement('span', { 'data-testid': 'phase' }, phase)
     );
   }
