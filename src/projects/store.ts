@@ -4,6 +4,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { openStoreHandle, STORE_BUSY_TIMEOUT_MS } from '../core/stores.js';
 import { runStatsSchema, type RunStats } from '../contracts/runStats.js';
+import { ledgerRows, runPayerLedgerSchema, type RunPayerLedger } from '../contracts/runPayers.js';
 import {
   artifactManifestSchema,
   commitShaSchema,
@@ -170,6 +171,47 @@ WHEN NEW.project_id <> OLD.project_id
   OR NEW.log_path <> OLD.log_path
 BEGIN
   SELECT RAISE(ABORT, 'project run identity and host paths are immutable');
+END;
+
+/*
+ * WHO PAID FOR THIS RUN, DURABLY, FOR EVERY RUN.
+ *
+ * The three-row RunPayerLedger is built for every run, but it only ever
+ * survived the process when a run touched a CLI subscription: the
+ * onSubscriptionTransport hook journals it, and nothing else did. A run
+ * funded entirely by an organisation or host API key left no payer record at
+ * all, so the one question a hosted platform must answer about a finished run
+ * — who paid for it — had no answer for exactly the runs a bill depends on.
+ *
+ * Three rows per run, written in the SAME transaction as the queued->running
+ * transition (startProjectRun), so a tenant run cannot be observed as running
+ * while nobody knows who pays for it. NOT a universal invariant of the table:
+ * the synthetic retrieval-benchmark harness in cli/retrievalProjectAttempt.ts
+ * transitions its own rows directly, and its bookkeeping source run has no
+ * payer because it spends nothing. Every run the coordinator starts has one.
+ * The rows are immutable: the ledger describes a decision already taken, and
+ * a payer that could be edited afterwards would be worth nothing as evidence.
+ *
+ * NO SECRETS. A row names a selector, a transport, a payer KIND and which
+ * level chose it — never a credential, and never tenant-supplied text.
+ */
+CREATE TABLE IF NOT EXISTS project_run_payers (
+  project_run_id TEXT NOT NULL REFERENCES project_runs(project_run_id),
+  tier           TEXT NOT NULL CHECK (tier IN ('l1','l2','l3')),
+  org_id         TEXT NOT NULL REFERENCES auth_organisations(org_id),
+  selection      TEXT NOT NULL,
+  provider       TEXT NOT NULL,
+  payer          TEXT NOT NULL CHECK (payer IN ('host-subscription','principal-subscription','org-key','host-key','host-selfhosted')),
+  source         TEXT NOT NULL CHECK (source IN ('account','org','host')),
+  recorded_at    TEXT NOT NULL,
+  PRIMARY KEY (project_run_id, tier)
+);
+CREATE INDEX IF NOT EXISTS project_run_payers_org_idx ON project_run_payers(org_id, payer);
+
+CREATE TRIGGER IF NOT EXISTS project_run_payers_immutable
+BEFORE UPDATE ON project_run_payers
+BEGIN
+  SELECT RAISE(ABORT, 'a recorded payer is immutable');
 END;
 
 CREATE TRIGGER IF NOT EXISTS project_publications_identity_immutable
@@ -1257,6 +1299,80 @@ export class ProjectStore {
       ).changes;
     if (changed !== 1) throw new ProjectStateConflict('run CAS lost to a concurrent transition');
     return this.getProjectRun(orgId, projectRunId)!;
+  }
+
+  /**
+   * A run starts and its payer ledger become visible together — the mirror of
+   * `completeProjectRun`. Anything that reads `running` can therefore read
+   * who pays for it, and a crash between the two is not a reachable state.
+   */
+  startProjectRun(input: {
+    readonly orgId: string;
+    readonly projectRunId: string;
+    readonly payers: RunPayerLedger;
+  }): ProjectRun | null {
+    const orgId = organisationIdSchema.parse(input.orgId);
+    const projectRunId = projectRunIdSchema.parse(input.projectRunId);
+    const payers = runPayerLedgerSchema.parse(input.payers);
+    return this.db.transaction(() => {
+      const started = this.transitionProjectRun({
+        orgId,
+        projectRunId,
+        from: 'queued',
+        to: 'running',
+      });
+      if (!started) return null;
+      // `transitionProjectRun` treats a same-status transition as an
+      // idempotent replay, so a second start must be one here too — but only
+      // a replay that says the same thing. A start that renamed the payer
+      // would rewrite evidence through the back door the immutability trigger
+      // exists to close.
+      const existing = this.getRunPayers(orgId, projectRunId);
+      if (existing) {
+        if (JSON.stringify(existing) !== JSON.stringify(payers)) {
+          throw new ProjectStateConflict('run start replay carries different payers');
+        }
+        return started;
+      }
+      const now = new Date().toISOString();
+      const insert = this.db.prepare(
+        `INSERT INTO project_run_payers
+           (project_run_id, tier, org_id, selection, provider, payer, source, recorded_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      );
+      for (const [tier, row] of ledgerRows(payers)) {
+        insert.run(projectRunId, tier, orgId, row.selection, row.provider, row.payer, row.source, now);
+      }
+      return started;
+    }).immediate();
+  }
+
+  /**
+   * The payer rows of one run, in tier order. A per-run read, deliberately
+   * NOT an org-wide cost surface: what a tenant may be shown about spend is
+   * an open product decision, and this is the evidence underneath it.
+   */
+  getRunPayers(orgIdInput: string, projectRunIdInput: string): RunPayerLedger | null {
+    const orgId = organisationIdSchema.parse(orgIdInput);
+    const projectRunId = projectRunIdSchema.parse(projectRunIdInput);
+    const rows = this.db
+      .prepare(
+        `SELECT tier, selection, provider, payer, source
+         FROM project_run_payers WHERE project_run_id = ? AND org_id = ?`
+      )
+      .all(projectRunId, orgId) as Array<{
+      tier: string;
+      selection: string;
+      provider: string;
+      payer: string;
+      source: string;
+    }>;
+    if (rows.length === 0) return null;
+    const byTier = Object.fromEntries(
+      rows.map((row) => [row.tier, { selection: row.selection, provider: row.provider, payer: row.payer, source: row.source }])
+    );
+    const parsed = runPayerLedgerSchema.safeParse(byTier);
+    return parsed.success ? parsed.data : null;
   }
 
   /** Delivery and its immutable file inventory become visible together. */

@@ -19,12 +19,12 @@ import { LLM_PROVIDER_CATALOG, findProvider } from '../core/providerCatalog.js';
 import {
   ledgerTouchesAnySubscription,
   ledgerTouchesSubscription,
+  payerForSelector,
   principalSubscriptionTiers,
   runPayerLedgerSchema,
   subscriptionTiers,
   subscriptionTransports,
   tierPayerRow,
-  type PayerKind,
   type RunPayerLedger,
   type TierPayer,
 } from '../contracts/runPayers.js';
@@ -525,15 +525,23 @@ export function projectRunEnvironment(input: {
     }
     const selector = parseModelSelector(chosen.value, variable);
     environment[variable] = chosen.value;
-    let payer: PayerKind;
-    if (selector.mode === 'sub') payer = 'host-subscription';
-    else if (selector.mode === 'own') payer = 'principal-subscription';
-    else {
+    // THE PAYER RULE IS THE CONTRACT'S, NOT THIS FUNCTION'S. This block used
+    // to re-derive it, which left `payerForSelector` with no caller anywhere
+    // and two definitions of "who paid" free to drift apart unobserved. Only
+    // the second fact it needs is local: whether the organisation brought the
+    // key for this vendor. The `vendorSources` entry is a separate output —
+    // the credential injection below reads it — so it is still recorded here.
+    let orgBroughtKey = false;
+    if (selector.mode === 'api') {
       const source = vendorCredentialSource(selector.vendor, orgKeys, input.hostEnv);
       vendorSources.set(selector.vendor, source);
-      payer = source === 'selfhosted' ? 'host-selfhosted' : source === 'org' ? 'org-key' : 'host-key';
+      orgBroughtKey = source === 'org';
     }
-    ledger[key] = tierPayerRow({ selection: chosen.value, payer, source: chosen.level });
+    ledger[key] = tierPayerRow({
+      selection: chosen.value,
+      payer: payerForSelector(selector, orgBroughtKey),
+      source: chosen.level,
+    });
   }
   const payers: RunPayerLedger = runPayerLedgerSchema.parse(ledger);
 
@@ -1140,11 +1148,15 @@ export class ProjectRunCoordinator {
           payers: built.payers,
         });
       }
-      this.store.transitionProjectRun({
+      // The run starts and its payer ledger lands in one transaction. A run
+      // observed as `running` therefore always says who pays for it, whatever
+      // funded it — the subscription hook above journals only the runs that
+      // touch a CLI login, and an organisation- or host-key run used to leave
+      // no durable payer record at all.
+      this.store.startProjectRun({
         orgId: input.orgId,
         projectRunId: run.projectRunId,
-        from: 'queued',
-        to: 'running',
+        payers: built.payers,
       });
     } catch (error) {
       try {
