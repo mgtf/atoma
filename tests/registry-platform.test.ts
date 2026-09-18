@@ -9,6 +9,7 @@ import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb, registryIsPartitioned } from '../src/registry/db.js';
+import { SkillRegistry } from '../src/skills/registry.js';
 import { projectCounters, readLedger } from '../src/core/ledger.js';
 
 /**
@@ -272,4 +273,62 @@ describe('folding the per-owner partition back into the platform', () => {
     } finally { db.close(); }
     expect(readdirSync(root).filter((file) => file.includes('before-'))).toEqual([]);
   });
+
+  it('serves a merged identity\'s historical skill URLs through the kept namespace', async () => {
+    // THE PRODUCTION FAILURE, 2026-09-18. The fold absorbs a project atom,
+    // reconcilePlatformSkills moves its recipes under the kept identity, and
+    // every trace and bookmark still carrying the absorbed id answered
+    // /api/skills/<absorbed>/<skill> with 404 —
+    // 5412001e-43f6-439c-b6ce-95bd4f41c21b/recover-missing-live-browser-proof
+    // on atoma.run. Traces stay byte-honest, so the typed viz boundary must
+    // resolve the alias. The merge is seeded two hops deep (absorbed → mid →
+    // kept) to hold the chain-follow, not just the single rename.
+    const root = directory();
+    const path = join(root, 'atoma.db');
+    const db = openDb(path);
+    let keptId = '';
+    try {
+      const registry = new AtomRegistry(db);
+      keptId = registry.create(1, seed).atomId;
+      const absorbed = '5412001e-43f6-439c-b6ce-95bd4f41c21b';
+      const mid = randomUUID();
+      const merge = db.prepare(`INSERT INTO atom_id_merges (absorbed_atom_id, kept_atom_id, absorbed_name, absorbed_owner, merged_at)
+        VALUES (?, ?, 'Water', ?, ?)`);
+      merge.run(absorbed, mid, `project:${randomUUID()}:${randomUUID()}`, '2026-09-15T18:00:00.000Z');
+      merge.run(mid, keptId, `project:${randomUUID()}:${randomUUID()}`, '2026-09-16T18:00:00.000Z');
+    } finally { db.close(); }
+    // The post-fold catalog: the recipe lives under the KEPT identity, nothing
+    // remains under the absorbed one (foldMergedNamespaces set it aside).
+    const skillId = 'recover-missing-live-browser-proof';
+    new SkillRegistry(join(root, 'skills')).save(keptId, {
+      id: skillId,
+      description: 'Restore browser proof',
+      whenToUse: 'When live browser proof is missing',
+      kind: 'llm',
+      body: 'Inspect the browser probe result and re-run the browser phase.',
+    });
+    mkdirSync(join(root, 'runs'), { recursive: true });
+
+    const port = await freePort();
+    const child = spawn(
+      process.execPath,
+      ['--import', 'tsx', 'src/viz/server.ts', '--host', '127.0.0.1', '--port', String(port),
+        '--dir', join(root, 'runs'), '--db', path, '--skills-dir', join(root, 'skills'), '--no-sentinel'],
+      { cwd: process.cwd(), env: { ...process.env }, stdio: ['ignore', 'pipe', 'pipe'] }
+    );
+    try {
+      await waitForJson(`http://127.0.0.1:${port}/api/registry/atoma`);
+      // The historical URL resolves through both hops to the kept namespace.
+      const detail = await fetch(`http://127.0.0.1:${port}/api/skills/5412001e-43f6-439c-b6ce-95bd4f41c21b/${skillId}`);
+      expect(detail.status).toBe(200);
+      expect(await detail.json()).toMatchObject({ id: skillId, body: 'Inspect the browser probe result and re-run the browser phase.' });
+      const list = await fetch(`http://127.0.0.1:${port}/api/skills/5412001e-43f6-439c-b6ce-95bd4f41c21b`);
+      expect(await list.json()).toEqual([expect.objectContaining({ id: skillId })]);
+      // An identity with no folder and no merge row keeps its ordinary 404.
+      const missing = await fetch(`http://127.0.0.1:${port}/api/skills/${randomUUID()}/no-such-recipe`);
+      expect(missing.status).toBe(404);
+    } finally {
+      child.kill('SIGKILL');
+    }
+  }, 60_000);
 });

@@ -515,6 +515,10 @@ npm run viz:mark-turn:analyze
   2026-09-15): ONE registry and ONE catalog for every run, so a member reads what their own
   runs earn on ([src/skills](../skills/AGENTS.md)). `/api/registries` and `/api/registry/:id`
   redact the store's host path for non-admins; `/api/skills` uses public namespace metadata.
+  `/api/skills` also resolves an ABSORBED atom id through `atom_id_merges` to the kept
+  namespace (chain-followed): the fold moves recipes under the kept identity while traces and
+  bookmarks keep carrying the old one, so the typed boundary answers the historical URL —
+  traces are never rewritten to do it (2026-09-18).
 - `/mcp` is the ONE MCP (contract in [src/mcp](../mcp/AGENTS.md)): OAuth or
   API bearer token behind the gate, the operator on the ungated loopback, Host
   pinned either way. `/api/tokens` mints (POST, same-origin, journaled

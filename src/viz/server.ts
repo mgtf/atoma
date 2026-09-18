@@ -1956,7 +1956,7 @@ function listSkillNamespaces(): SkillNamespaceSummary[] {
 }
 
 function listSkillsForL1(l1Name: string): SkillSummary[] {
-  const skills = skillRegistry.loadFor(l1Name);
+  const skills = skillRegistry.loadFor(resolveSkillNamespace(l1Name));
   return skills.map((s) => ({
     id: s.id,
     description: s.description,
@@ -1967,6 +1967,53 @@ function listSkillsForL1(l1Name: string): SkillSummary[] {
     failures: s.failures,
     updatedAt: s.updatedAt,
   }));
+}
+
+/**
+ * The kept identity an absorbed atom id folded into, from whichever exposed
+ * registry records the merge. Null when no registry knows the fold.
+ */
+function keptNamespaceFor(absorbedAtomId: string): string | null {
+  for (const reg of listRegistries()) {
+    if (!reg.exists) continue;
+    let db: Database.Database | null = null;
+    try {
+      db = new Database(reg.path, { readonly: true, fileMustExist: true });
+      if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='atom_id_merges'").get()) continue;
+      const row = db.prepare('SELECT kept_atom_id FROM atom_id_merges WHERE absorbed_atom_id = ?').get(absorbedAtomId) as
+        | { kept_atom_id: string }
+        | undefined;
+      if (row) return row.kept_atom_id;
+    } catch {
+      /* unreadable registry — try the next one */
+    } finally {
+      db?.close();
+    }
+  }
+  return null;
+}
+
+/**
+ * Follow atom_id_merges to the namespace a request's identity reads under NOW.
+ * A trace or bookmark carries the identity an atom HAD when the skill was
+ * learned; once the registry fold absorbed that identity, the recipes moved
+ * under the kept one and the historical URL dangles. Traces stay byte-honest,
+ * so the typed viz boundary resolves the alias rather than asking history to
+ * be rewritten. Chain-follows (A→B→C) behind a seen-set; an id with no folder
+ * and no merge row is returned unchanged so the caller answers its ordinary
+ * not-found.
+ */
+function resolveSkillNamespace(requested: string): string {
+  if (existsSync(join(SKILLS_DIR, requested))) return requested;
+  const seen = new Set([requested]);
+  let current = requested;
+  for (;;) {
+    const kept = keptNamespaceFor(current);
+    if (!kept || seen.has(kept)) return current;
+    seen.add(kept);
+    if (existsSync(join(SKILLS_DIR, kept))) return kept;
+    current = kept;
+  }
 }
 
 /**
@@ -2021,7 +2068,12 @@ function getSkillById(
   l1Name: string,
   skillId: string
 ): (SkillSummary & { body: string; shareability: ShareAssessment }) | null {
-  const skills = skillRegistry.loadFor(l1Name);
+  // The namespace is resolved ONCE and drives every lookup below: the body
+  // lives under the kept identity, and so do the declared tools the
+  // shareability check judges the body against — an absorbed id has neither
+  // its folder nor its registry row anymore.
+  const namespace = resolveSkillNamespace(l1Name);
+  const skills = skillRegistry.loadFor(namespace);
   const found = skills.find((s) => s.id === skillId);
   if (!found) return null;
   return {
@@ -2038,7 +2090,7 @@ function getSkillById(
     // reads a skill. Same data as `npm run skills -- review`; surfacing the
     // verdict here follows the viz's own rule that a card should show the
     // DECISION, not just the artefact.
-    shareability: assessShareability({ skill: found, ownerToolNames: toolNamesForAtomId(l1Name) }),
+    shareability: assessShareability({ skill: found, ownerToolNames: toolNamesForAtomId(namespace) }),
   };
 }
 
