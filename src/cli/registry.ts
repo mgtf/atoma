@@ -524,7 +524,8 @@ function main(): void {
   const dbPath = dbPathFrom(args.flags);
   const db = openDb(dbPath);
   const registry = new AtomRegistry(db);
-  const skills = new SkillRegistry(skillsDirPath());
+  // Skill trust lives in the same store as the atoms (W4): one `--db`, one file.
+  const skills = new SkillRegistry(skillsDirPath(), { db });
   // Whatever this process appends to the lifecycle ledger, the CLI did it.
   setLedgerScope({ actorType: 'cli' });
 

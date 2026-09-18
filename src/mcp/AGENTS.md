@@ -209,7 +209,9 @@ Neighbours:
   to name.
 - Writes open the store through `openDb` (schema and migrations), exactly as
   the CLI does, and close it before returning. The readers' readonly handles
-  are not a write path and must not become one.
+  are not a write path and must not become one; a reader that needs skill
+  trust (`ledgerCheck`) hands its readonly handle to `SkillRegistry`, which
+  only checks for the `skill_meta` table there and never creates it.
 
 ## Prompts and completions
 

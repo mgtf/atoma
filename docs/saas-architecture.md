@@ -84,7 +84,7 @@ resource but **mandatory for every persisted product run**.
 ```text
 Platform — shared by every run
 ├── Atom registry (atom_types, atom_type_versions, trust counters)
-├── Skill catalogue (skills/<atom-id>/…, counters in _meta.json)
+├── Skill catalogue (bodies in skills/<atom-id>/…, trust in skill_meta)
 ├── Lifecycle ledger (lifecycle_events)
 ├── Prefilter cache
 └── Organisation
@@ -108,7 +108,7 @@ Current resource scopes:
 | Traces, workspaces, manifests | project/run | `projectRunHostLayout` stores them below `orgs/<org>/projects/<project>/runs/<run>`. |
 | Retrieval corpus | project | Only the project's own passages are searchable (`ownPassages` stays 0 for another project). A validator's paraphrase of a passage, written into a prompt or a description, is platform knowledge. |
 | Atom bodies and trust | platform | `atom_types` has no owner column; `AtomRegistry` takes a database and nothing else, and refuses an unfolded store. Readers keep `unfoldedRegistryPredicate` as a guard. |
-| Skill bodies and counters | platform filesystem | Learning, promotion, deterministic dispatch, drop and merge are available to every run. Counters live in `_meta.json`, whole-file read-modify-write. NOT single-writer: `atoma_skill_reset`, `_drop` and `_merge` are platform-tier MCP tools that take no run lease (`src/mcp/writes.ts` imports none), and the production viz server enables them (`operatorRuns: true`). A bearer token can mutate counters while a run is in flight. |
+| Skill bodies and counters | bodies on the platform filesystem, trust in the platform SQLite table `skill_meta` (W4, 2026-09-18) | Learning, promotion, deterministic dispatch, drop and merge are available to every run. Every counter mutation is one statement in one `.immediate()` transaction with its lifecycle event; legacy `_meta.json` sidecars are imported once and retired as `_meta.imported.json`. Before W4, NOT single-writer: `atoma_skill_reset`, `_drop` and `_merge` are platform-tier MCP tools that take no run lease (`src/mcp/writes.ts` imports none), and the production viz server enables them (`operatorRuns: true`). A bearer token can mutate counters while a run is in flight. |
 | Lifecycle ledger | platform SQLite table | `lifecycle_events(seq, at, kind, entity, detail, org_id, project_id, run_id, actor_type, actor_id)`; the five scope columns are nullable and additive (2026-09-18), a row without them is a platform-level event. Type counters are keyed by name again; the atom-id-keyed project events of the partitioned period stay as byte-honest history and are not compared. |
 | Platform events | organisation/project/run-aware | The control-plane audit journal carries nullable scope ids and a retention window (`ATOMA_EVENTS_RETENTION_DAYS`, default 90). |
 | Prefilter decisions | platform SQLite table | Content-addressed, transactional, read and written across every organisation's runs. The existence/volume oracle is accepted (Layer 4). |
@@ -318,12 +318,15 @@ Model-authored artifact paths are relative, `ToolSandbox`-mediated and confined
 to the workspace.
 
 **T6 — Every counter mutation is one atomic statement inside the required
-transaction.** *Two distinct deviations. (a) Skill counters in `_meta.json`
-are whole-file read/modify/write, and the run lease does not cover the
-platform-tier skill write tools, so a second writer is reachable today — this
-is FILE concurrency and Gate 0 does not fix it (W4). (b) Every registry write
-transaction is deferred, and `create` reads `usedOrdinals` before its INSERT —
-this is STORE concurrency and is fixed without Gate 0 (W4a).*
+transaction.** *Both deviations closed. (a) Skill counters moved from
+`_meta.json` (whole-file read/modify/write, reachable by a second writer the
+run lease never covered) into `skill_meta` rows on 2026-09-18: one statement,
+one `.immediate()` transaction, the lifecycle event inserted in it (W4).
+(b) Every registry write transaction is `.immediate()` since 2026-09-17 (W4a).
+The file+row pairs the skills subsystem still has (`save`, `promoteToScript`,
+`demoteToLlm`, `merge`, `drop`) each state their crash order at the call
+site; the shared rule is body first, row second, and a body that outlives its
+row never inherits trust.*
 
 **T7 — Every lifecycle event is attributable.** It carries a stable entity id
 plus project, run and actor when it arises in those scopes. *Since 2026-09-18
@@ -453,7 +456,7 @@ Decision 6 settles it.
 | **W1** | Separate launcher service | contract + in-process backend done | W0 | `DockerLauncher` runs in its own container behind a permissioned socket; the web image holds no `docker.sock` (D1). |
 | **W2** | Worker transport behind the launcher | not started | W1; possibly W3 — a socket preserving `--network none` must be bind-mounted on a path both sides see, which is the workspace story (unverified) | The Element worker speaks a socket/network protocol issued by the launcher; `containerExecutor.ts` no longer owns attach/remove; `workerRunArgs` isolation assertions still pass (D2, D4). |
 | **W3** | Launcher-managed workspaces | not started | W1 (decision 6: leases stay in a machine-local file, so no store writer) | Workspace handles are volumes, not host paths; lease, TTL, bounded stop, reverse teardown and orphan reconciliation are launcher operations (D3, D4). |
-| **W4** | Skill counters out of `_meta.json` | not started; unblocked by Gate 0 (SQLite), deferred as heavy under the stabilisation mandate | — | Every counter, promotion and demotion mutation is one statement in one transaction with its ledger event (T6, R4). Gate 0 decides dialect and transaction mode, not placement — T6 already forces the counters into the store holding `lifecycle_events`. `save`, `promoteToScript`, `demoteToLlm` and `merge` become file+DB pairs no transaction covers, so the crash ordering must be re-derived, not ported. |
+| **W4** | Skill counters out of `_meta.json` | **done** (2026-09-18): `skill_meta` in the product store, created by the one schema step both open paths share; `SkillRegistry` mutations are one `.immediate()` transaction each, event included; legacy sidecars imported once by the first mutation or `reconcilePlatformSkills`, then retired as `_meta.imported.json`; the folds re-key rows with the folders they move; `save` zeroes the row when it CREATES a body, and the projection zeroes on `skill-drop`/`skill-merge`, so a folder that outlives its row can neither inherit nor contradict trust; backup takes the store LAST so rows are never older than bodies | — | Every counter, promotion and demotion mutation is one statement in one transaction with its ledger event (T6, R4). Gate 0 decides dialect and transaction mode, not placement — T6 already forces the counters into the store holding `lifecycle_events`. `save`, `promoteToScript`, `demoteToLlm` and `merge` become file+DB pairs no transaction covers, so the crash ordering must be re-derived, not ported. |
 | **W4a** | Registry write-transaction correctness | **done** (`8a4f2ff`) | — | All eleven registry write transactions are `.immediate()`; both product-store open paths set `busy_timeout` explicitly instead of inheriting the driver default; a regression allocates ordinals across connections and processes. This is R8 for the STORE, owed under either Gate 0 branch. It does NOT close `_meta.json` file concurrency — that is W4. |
 | **W5** | Durable payer ledger for every run | **done** (`5154832`): `project_run_payers`, three immutable rows per run, written in the queued→running transaction; the coordinator resolves payers through `payerForSelector` | — (the org-scoped cost READ surface waits on decision 3) | The three-row `RunPayerLedger` is persisted for API-key-only runs too, in the same transaction as the queued→running transition (T10). The coordinator resolves payers THROUGH `payerForSelector`, the contract's canonical rule. The synthetic benchmark control (`retrievalProjectAttempt`) transitions its accounting run directly and records no payer; it spends nothing. |
 | **W6** | Scoped lifecycle attribution | **done** (2026-09-18): `lifecycle_events` carries `org_id`, `project_id`, `run_id`, `actor_type`, `actor_id` and `entity_id`; one `ensureLedgerSchema` on both open paths; the runner, the MCP writes and the CLI set the scope; `ledger check` compares types by `atom_id` | — | Backfill rule taken by the owner: resolve each label against the current store, leave NULL what does not resolve, rewrite nothing. The ordering constraint held: the migration is one function called from `openDb` and from the cached handle, and `tests/ledger.test.ts` drives a legacy-shaped store through each path first, then a pre-column store through the backfill. A read-only reader on an unmigrated snapshot still reads it, without scope or id. |
@@ -467,11 +470,12 @@ Decision 6 settles it.
 | **W13** | Packaged-stack acceptance | `auth-release-smoke.mjs` (loopback IdP, temp store) | W1, W7 | Boots the stack; proves founder login, invitation, role enforcement, Element-workload isolation, delivery, restart, backup/restore and denied control-plane reachability from the worker network. |
 | **W14** | Shared-learning acceptance | `tests/project-retrieval-privacy.test.ts` characterises the corpus side; nothing asserts cross-org skill reuse | W13 for the isolation half only | Two organisations on one stack: no cross-org trace/workspace/corpus read. The SHARED half — a recipe learned by one organisation dispatched by the other's next run — is assertable in one process since 2026-09-15 and needs no stack; it is the only mechanical proof that the decision was implemented and not merely documented. |
 
-Order: ~~W8-a~~ → ~~W4a~~ → ~~W5~~ → ~~W6~~ → ~~Gate 0~~ → W4 → W0 → W1 → W2 →
-W3 → W7 → W13 → W14. W8-a and W4a landed on 2026-09-17, W5 and W6 on
+Order: ~~W8-a~~ → ~~W4a~~ → ~~W5~~ → ~~W6~~ → ~~Gate 0~~ → ~~W4~~ → W0 → W1 →
+W2 → W3 → W7 → W13 → W14. W8-a and W4a landed on 2026-09-17, W5, W6 and W4 on
 2026-09-18, and Gate 0 was decided the same day on what they measured. What
-remains is engineering under a stabilisation mandate: W4 first when it is
-taken up, none of it urgent, none of it a migration.
+remains is engineering under a stabilisation mandate: the launcher line
+(W0–W3, W7) and the acceptance runs (W13, W14), none of it urgent, none of it
+a migration.
 
 What W4a measured, and what Gate 0 should read from it: reverting only the
 eleven `.immediate()` calls, with the explicit `busy_timeout` left in place,
@@ -634,8 +638,8 @@ oracle is accepted as a consequence of the commons.
   payer contract.
 - **Accepted, not implemented:** the separate launcher service, worker
   transport migration, launcher-managed volumes, web/launcher images and a
-  reference stack (W1–W3, W7); atomic skill counters (W4). The durable payer
-  ledger and scoped lifecycle attribution (W5, W6) are implemented.
+  reference stack (W1–W3, W7). Atomic skill counters, the durable payer
+  ledger and scoped lifecycle attribution (W4, W5, W6) are implemented.
 - **Superseded:** the body/trust split, organisation-local trust, the
   platform body offer/approval workflow, the per-owner registry and the
   per-project skill trust. Their records stay as evidence.

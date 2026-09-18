@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { SkillRegistry } from '../src/skills/registry.js';
 import {
   closeLedgerHandles,
+  openLedgerHandle,
   projectCounters,
   readLedger,
   type LedgerEvent,
@@ -79,20 +80,26 @@ describe('SkillRegistry.compensateCounters (skills forgive)', () => {
     expect(row!.detail).toMatchObject({ failures: -2, reason: expect.stringContaining('budget-killed') });
   });
 
-  it('JOURNALS FIRST and fails CLOSED: an unwritable ledger aborts with the store untouched', () => {
-    // Point the ledger at a DIRECTORY — sqlite cannot open it, so the strict
-    // append throws. The original ordering mutated _meta.json first and then
-    // swallowed the append failure (appendLedger is fail-open), leaving the
-    // store BELOW the ledger — the exact direction `ledger check` reports as
-    // IMPOSSIBLE — while the CLI printed "audited as a … ledger event".
-    closeLedgerHandles();
-    const dirAsDb = join(dir, 'not-a-db');
-    mkdirSync(dirAsDb);
-    process.env['ATOMA_LEDGER_DB'] = dirAsDb;
-    expect(() =>
-      reg.compensateCounters('Water', 'widget', { failures: -2, reason: 'env failure' })
-    ).toThrow();
+  it('the audit row and the counter are ONE transaction: a ledger that refuses the row leaves the store untouched', () => {
+    // The sidecar era could only ORDER the two writes (journal first, fail
+    // closed): mutating the file first and swallowing the append failure had
+    // left the store BELOW the ledger — the direction `ledger check` reports
+    // as IMPOSSIBLE — while the CLI printed "audited as a … ledger event".
+    // Since W4 the row and the event share one immediate transaction, so a
+    // ledger that refuses the row rolls the counter back with it. Refuse it
+    // from INSIDE the store, the only failure the transaction can see.
+    const db = openLedgerHandle(process.env['ATOMA_LEDGER_DB']!);
+    db.exec(`CREATE TRIGGER refuse_events BEFORE INSERT ON lifecycle_events
+             BEGIN SELECT RAISE(ABORT, 'ledger refused'); END`);
+    try {
+      expect(() =>
+        reg.compensateCounters('Water', 'widget', { failures: -2, reason: 'env failure' })
+      ).toThrow(/ledger refused/);
+    } finally {
+      db.exec('DROP TRIGGER refuse_events');
+    }
     expect(counters()).toEqual({ s: 7, f: 2 }); // store untouched
+    expect(readLedger().some((e) => e.kind === 'skill-counter-compensation')).toBe(false);
   });
 
   it('requires a reason and at least one negative integer delta', () => {

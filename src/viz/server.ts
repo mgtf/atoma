@@ -357,7 +357,6 @@ function loadBurnin(): {
   return { rows, csvPath: BURNIN_CSV };
 }
 const SKILLS_DIR = resolve(skillsDirPath(cli.skillsDir));
-const skillRegistry = new SkillRegistry(SKILLS_DIR);
 
 /**
  * Resolve the list of DB paths we'll serve: the explicit `--db` flags if any
@@ -392,6 +391,10 @@ function resolveDbs(): { id: string; label: string; path: string; exists: boolea
 }
 
 const DBS = resolveDbs();
+// Skill bodies from `--skills-dir`, their trust from the primary store this
+// server serves — the cached writable handle the admin ledger already uses,
+// so the Skills tab and `/api/admin/ledger` read one file (W4).
+const skillRegistry = new SkillRegistry(SKILLS_DIR, { db: openLedgerHandle(DBS[0]!.path) });
 
 /**
  * FOLD BEFORE SERVING.

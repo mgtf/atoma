@@ -419,10 +419,10 @@ export function ledgerCheck(): unknown {
         }
       }
     }
-    // The skill half of the pairing is still conventional — skills live on the
-    // filesystem, so the caller has to name the right tree. Same known gap
-    // `ledger check --skills-dir` carries.
-    const skills = new SkillRegistry(skillsDirPath());
+    // Skill trust is rows in THIS store (W4), read through the same readonly
+    // handle; only the bodies' tree is still named by convention. A store
+    // from before the move has no table and reads its legacy sidecars.
+    const skills = new SkillRegistry(skillsDirPath(), { db });
     let skillsChecked = 0;
     for (const ns of skills.listNamespaces()) {
       for (const sk of skills.loadFor(ns)) {

@@ -29,8 +29,9 @@ async function main(): Promise<void> {
   // The demo's registry is ephemeral (:memory:) and its ledger now follows it
   // there automatically — `AtomRegistry` writes events through its own handle
   // — so the pin below no longer covers the case it was written for. It is
-  // kept for the SKILL choke points, which have no store handle and still
-  // resolve a default: a demo built on an EMPTY registry allocates the FIRST
+  // kept for the SKILL choke points, whose registry resolves the ledger's
+  // store by default (bodies on disk, trust rows in that store since W4):
+  // a demo built on an EMPTY registry allocates the FIRST
   // taxonomy names (Hydrogen, Water), which collide with the real canonicals,
   // and three demo invocations once put 6 phantom type-success events in the
   // production ledger with `ledger check` reporting IMPOSSIBLE counters on

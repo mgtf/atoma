@@ -78,10 +78,15 @@ can only report that it cannot be.
   and has no tsx, so a source-path default silently made the documented
   collection impossible there until 2026-09-14. `backup:dev` is the source
   path; `release:check` runs the compiled `--help` smoke.
-- It snapshots six tiers into one dated directory: the store
-  (SQLite online backup, never a raw copy), skills, operator runs, the
-  `~/.atoma/archive` tier, the org-scoped project corpus and the supervisor
-  records. The projects tier is the `orgs/` child of `ATOMA_PROJECTS_ROOT`,
+- It snapshots six tiers into one dated directory: skills, operator runs, the
+  `~/.atoma/archive` tier, the org-scoped project corpus, the supervisor
+  records, and the store LAST (SQLite online backup, never a raw copy). Last
+  on purpose since W4 (2026-09-18): skill trust is rows in the store while
+  skill bodies are files in the skills tier, every file+row mutation writes
+  its file before its row, so rows that are never older than the bodies can
+  only pair a body with a state the registry already tolerates — the reverse
+  could restore a freshly compiled script with the llm recipe's earned trust.
+  The projects tier is the `orgs/` child of `ATOMA_PROJECTS_ROOT`,
   not the root — the default root is `~/.atoma`, which also holds the build
   workspace and the MCP lease — and it excludes `node_modules`, recorded in
   the manifest under `excluded`. The supervisor tier follows

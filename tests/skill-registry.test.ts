@@ -1,10 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
-  closeSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
-  openSync,
   readdirSync,
   readFileSync,
   rmSync,
@@ -12,14 +10,19 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import Database from 'better-sqlite3';
 import {
+  IMPORTED_META_FILENAME,
+  LEGACY_META_FILENAME,
   SkillRegistry,
   parseFrontmatter,
   renderFrontmatter,
+  writeMetaAtomic,
   REFUSAL_REASON_MAX_CHARS,
 } from '../src/skills/registry.js';
+import { readMetaRow } from '../src/skills/metaStore.js';
 import { L1Atom } from '../src/atoms/L1Atom.js';
-import { closeLedgerHandles, readLedger } from '../src/core/ledger.js';
+import { closeLedgerHandles, openLedgerHandle, projectCounters, readLedger } from '../src/core/ledger.js';
 
 /**
  * Tests for the SKILLS foundation (commit 1):
@@ -196,12 +199,12 @@ describe('SkillRegistry', () => {
     expect(skill!.description).toBe('d refreshed');
   });
 
-  it('initializes _meta.json on first bump for a hand-written skill (no save() pre-call)', async () => {
+  it('seeds a trust row on first bump for a hand-written skill (no save() pre-call)', async () => {
     // Reproduces the live regression: a SKILL.md created via a
-    // shell heredoc (no SkillRegistry.save call) had no _meta.json,
+    // shell heredoc (no SkillRegistry.save call) had no counter record,
     // so the first recordSuccess no-op'd and the counter never
-    // accumulated. The fix initialises the meta file lazily on
-    // first bump.
+    // accumulated. The first bump seeds the record lazily — a row in the
+    // store since W4, never a sidecar file.
     const { writeFileSync, mkdirSync, existsSync: exists } = await import('node:fs');
     const skillDir = join(dir, 'Water', 'hand-written');
     mkdirSync(skillDir, { recursive: true });
@@ -218,9 +221,10 @@ describe('SkillRegistry', () => {
       ].join('\n'),
       'utf8'
     );
-    expect(exists(join(skillDir, '_meta.json'))).toBe(false);
+    expect(exists(join(skillDir, LEGACY_META_FILENAME))).toBe(false);
     reg.recordSuccess('Water', 'hand-written');
-    expect(exists(join(skillDir, '_meta.json'))).toBe(true);
+    expect(exists(join(skillDir, LEGACY_META_FILENAME))).toBe(false);
+    expect(readMetaRow(openLedgerHandle(process.env['ATOMA_LEDGER_DB']!), 'Water', 'hand-written')).toMatchObject({ successes: 1, failures: 0 });
     const [skill] = reg.loadFor('Water');
     expect(skill!.successes).toBe(1);
     expect(skill!.failures).toBe(0);
@@ -331,11 +335,8 @@ describe('SkillRegistry', () => {
       // trust through the validated loop first.
       expect(promoted.successes).toBe(0);
       expect(promoted.failures).toBe(0);
-      // And the reset is on DISK, not just in the returned object.
-      const metaAfter = JSON.parse(
-        readFileSync(join(dir, 'Methane', 'scaffold-node-ssr', '_meta.json'), 'utf8')
-      );
-      expect(metaAfter.successes).toBe(0);
+      // And the reset is in the STORE, not just in the returned object.
+      expect(reg.loadFor('Methane').find((s) => s.id === 'scaffold-node-ssr')!.successes).toBe(0);
 
       // Disk state: SKILL.md frontmatter says script + node, sidecar holds llm body.
       const skillFile = join(dir, 'Methane', 'scaffold-node-ssr', 'SKILL.md');
@@ -596,21 +597,25 @@ describe('L1Atom.skills() integration', () => {
 });
 
 /**
- * A counter we cannot read is not a counter at zero.
+ * A counter we cannot read is not a counter at zero — and since W4 a counter
+ * lives in a store row that cannot be torn.
  *
- * Every `_meta.json` write used to be a whole-object non-atomic
- * `writeFileSync`, so a crash mid-write left a torn file. `readMeta` then
- * answered 0/0, SILENTLY, and the next mutation persisted those fake zeroes —
- * months of earned trust replaced by a plausible number with no error and no
- * trace. All metadata writers now share one strict, atomic mutation path.
+ * The sidecar era: every `_meta.json` write was a whole-object non-atomic
+ * `writeFileSync`, a crash mid-write left a torn file, `readMeta` answered
+ * 0/0 SILENTLY, and the next mutation persisted those fake zeroes — months of
+ * earned trust replaced by a plausible number with no error and no trace.
+ * Two things survive the move to rows: a torn LEGACY sidecar is never
+ * imported (every mutation refuses, writes nothing, journals nothing), and
+ * once a row exists the sidecar is evidence, not a source. What is new is
+ * what a row makes possible: the counter and its event are one transaction,
+ * and a folder that outlives its row can never carry trust it did not earn.
  */
-describe('a torn _meta.json never becomes a confident zero', () => {
+describe('trust in the store: legacy sidecars, one transaction, body-bound rows', () => {
   let dir: string;
   let savedLedger: string | undefined;
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'atoma-tornmeta-'));
-    // Own ledger: the suite-wide default is shared, so a delta count taken
-    // against it could be moved by another test file's writes.
+    // Own store: the delta counts below must not be moved by another test.
     savedLedger = process.env['ATOMA_LEDGER_DB'];
     process.env['ATOMA_LEDGER_DB'] = join(dir, 'store.db');
     closeLedgerHandles();
@@ -623,11 +628,21 @@ describe('a torn _meta.json never becomes a confident zero', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  function seedAt(successes: number): { reg: SkillRegistry; metaPath: string } {
-    const reg = new SkillRegistry(dir);
-    reg.save('Water', { id: 'earned', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
-    for (let i = 0; i < successes; i++) reg.recordSuccess('Water', 'earned');
-    return { reg, metaPath: join(dir, 'Water', 'earned', '_meta.json') };
+  const store = (): Database.Database => openLedgerHandle(process.env['ATOMA_LEDGER_DB']!);
+
+  /** A hand-written body with a LEGACY sidecar and no row: a tree from before the move. */
+  function legacySkill(successes: number, sidecar?: string): { reg: SkillRegistry; metaPath: string } {
+    const skillDir = join(dir, 'Water', 'earned');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(
+      join(skillDir, 'SKILL.md'),
+      '---\nname: earned\ndescription: d\nwhen_to_use: w\nkind: llm\n---\nbody\n',
+      'utf8'
+    );
+    const metaPath = join(skillDir, LEGACY_META_FILENAME);
+    if (sidecar !== undefined) writeFileSync(metaPath, sidecar, 'utf8');
+    else writeMetaAtomic(metaPath, { successes, failures: 0, updatedAt: '2026-09-10T00:00:00.000Z' });
+    return { reg: new SkillRegistry(dir), metaPath };
   }
 
   function snapshotSkillTree(root: string): string[] {
@@ -649,63 +664,45 @@ describe('a torn _meta.json never becomes a confident zero', () => {
     return snapshot;
   }
 
-  it('refuses the bump instead of overwriting the earned counters with 1', () => {
-    const { reg, metaPath } = seedAt(9);
-    expect(reg.loadFor('Water')[0]!.successes).toBe(9);
-    // Torn write: valid prefix, no closing brace — what a crash leaves.
-    writeFileSync(metaPath, '{"successes": 9, "failures": 0, "updat', 'utf8');
+  it('imports a readable legacy sidecar ONCE, on the first mutation, and retires it as evidence', () => {
+    const { reg, metaPath } = legacySkill(5);
+    const original = readFileSync(metaPath, 'utf8');
+    // Before any write, a reader sees the sidecar's counters.
+    expect(reg.loadFor('Water')[0]).toMatchObject({ successes: 5, failures: 0 });
     reg.recordSuccess('Water', 'earned');
-    // The file is UNCHANGED, so the 9 are still recoverable by hand.
-    expect(readFileSync(metaPath, 'utf8')).toBe('{"successes": 9, "failures": 0, "updat');
+    expect(reg.loadFor('Water')[0]).toMatchObject({ successes: 6, failures: 0 });
+    expect(readMetaRow(store(), 'Water', 'earned')).toMatchObject({ successes: 6 });
+    // The file is renamed, not rewritten: same bytes, never a source again.
+    expect(existsSync(metaPath)).toBe(false);
+    expect(readFileSync(join(dir, 'Water', 'earned', IMPORTED_META_FILENAME), 'utf8')).toBe(original);
+    // A second mutation adds to the row; nothing re-imports.
+    reg.recordFailure('Water', 'earned');
+    expect(reg.loadFor('Water')[0]).toMatchObject({ successes: 6, failures: 1 });
   });
 
-  it('and records no ledger event for a bump that never landed', () => {
-    const { reg, metaPath } = seedAt(3);
-    writeFileSync(metaPath, 'not json at all', 'utf8');
+  it('refuses every mutation on a torn legacy sidecar: no row, no event, bytes untouched', () => {
+    const torn = '{"successes": 9, "failures": 0, "updat';
+    const { reg, metaPath } = legacySkill(0, torn);
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const before = readLedger().length;
     reg.recordSuccess('Water', 'earned');
     reg.recordFailure('Water', 'earned');
+    expect(readFileSync(metaPath, 'utf8')).toBe(torn);
+    expect(readMetaRow(store(), 'Water', 'earned')).toBeNull();
     expect(readLedger().length).toBe(before);
+    // The tolerant reader still shows the body, at zero, and says so once.
+    expect(reg.loadFor('Water')[0]).toMatchObject({ id: 'earned', successes: 0, failures: 0 });
   });
 
   it('treats valid JSON with an invalid counter schema as corruption', () => {
-    const { reg, metaPath } = seedAt(9);
-    const malformed = JSON.stringify({
-      successes: '9',
-      failures: 0,
-      updatedAt: '2026-08-14T00:00:00.000Z',
-    });
-    writeFileSync(metaPath, malformed, 'utf8');
-    const before = readLedger().length;
+    const malformed = JSON.stringify({ successes: '9', failures: 0, updatedAt: '2026-08-14T00:00:00.000Z' });
+    const { reg, metaPath } = legacySkill(0, malformed);
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-
+    const before = readLedger().length;
     reg.markMatched('Water', 'earned');
-
     expect(readFileSync(metaPath, 'utf8')).toBe(malformed);
+    expect(readMetaRow(store(), 'Water', 'earned')).toBeNull();
     expect(readLedger().length).toBe(before);
-  });
-
-  it('replaces a valid sidecar atomically and leaves no temporary file behind', () => {
-    const { reg, metaPath } = seedAt(2);
-    const fd = openSync(metaPath, 'r');
-    try {
-      reg.markMatched('Water', 'earned');
-
-      // An fd opened before rename still addresses the old inode. A direct
-      // truncate/write would make this descriptor observe the new `matches`
-      // field and therefore fail the incident regression.
-      const replacedBytes = JSON.parse(readFileSync(fd, 'utf8')) as { matches?: number };
-      const liveBytes = JSON.parse(readFileSync(metaPath, 'utf8')) as { matches?: number };
-      expect(replacedBytes.matches).toBeUndefined();
-      expect(liveBytes.matches).toBe(1);
-      expect(
-        readdirSync(join(dir, 'Water', 'earned')).filter(
-          (name) => name.startsWith('_meta.json.') && name.endsWith('.tmp')
-        )
-      ).toEqual([]);
-    } finally {
-      closeSync(fd);
-    }
   });
 
   type CorruptMutationCase = {
@@ -729,21 +726,13 @@ describe('a torn _meta.json never becomes a confident zero', () => {
       name: 'promotion-refusal stamping',
       run: (reg) => reg.markPromotionRefused('Water', 'earned', 'not script-shaped', 'g2'),
     },
-    {
-      name: 'promotion-refusal clearing',
-      prepare: (reg) => {
-        reg.markPromotionRefused('Water', 'earned', 'not script-shaped', 'g1');
-      },
-      run: (reg) => reg.clearPromotionRefusal('Water', 'earned'),
-    },
-    {
-      name: 'direct-failure clearing',
-      prepare: (reg) => {
-        reg.markDirectFailure('Water', 'earned');
-      },
-      run: (reg) => reg.clearDirectFailures('Water', 'earned'),
-    },
+    { name: 'promotion-refusal clearing', run: (reg) => reg.clearPromotionRefusal('Water', 'earned') },
+    { name: 'direct-failure clearing', run: (reg) => reg.clearDirectFailures('Water', 'earned') },
     { name: 'operator counter reset', run: (reg) => reg.resetCounters('Water', 'earned') },
+    {
+      name: 'counter compensation',
+      run: (reg) => reg.compensateCounters('Water', 'earned', { successes: -1, reason: 'test' }),
+    },
     {
       name: 'body save',
       run: (reg) =>
@@ -782,24 +771,24 @@ describe('a torn _meta.json never becomes a confident zero', () => {
     },
     {
       name: 'demotion',
-      prepare: (reg) => {
-        reg.promoteToScript({
-          l1Name: 'Water',
-          skillId: 'earned',
-          language: 'node',
-          scriptBody: 'console.log("compiled")',
-        });
+      prepare: () => {
+        // A script body with a fallback, as promotion would have left them.
+        writeFileSync(
+          join(dir, 'Water', 'earned', 'SKILL.md'),
+          '---\nname: earned\ndescription: d\nwhen_to_use: w\nkind: script\nlanguage: node\n---\nconsole.log(1)\n',
+          'utf8'
+        );
+        writeFileSync(join(dir, 'Water', 'earned', '_fallback.md'), 'the llm body\n', 'utf8');
       },
       run: (reg) => reg.demoteToLlm('Water', 'earned'),
     },
   ];
 
   it.each(corruptMutationCases)(
-    '$name leaves torn metadata, skill artefacts, and the ledger untouched',
+    '$name on a torn legacy sidecar leaves the tree, the store and the ledger untouched',
     ({ prepare, run, throws }) => {
-      const { reg, metaPath } = seedAt(9);
+      const { reg } = legacySkill(0, '{"successes": 9, "failures": 0, "updat');
       prepare?.(reg);
-      writeFileSync(metaPath, '{"successes": 9, "failures": 0, "updat', 'utf8');
       const beforeTree = snapshotSkillTree(join(dir, 'Water'));
       const beforeLedger = readLedger().length;
       vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -809,8 +798,123 @@ describe('a torn _meta.json never becomes a confident zero', () => {
 
       expect(snapshotSkillTree(join(dir, 'Water'))).toEqual(beforeTree);
       expect(readLedger().length).toBe(beforeLedger);
+      expect(readMetaRow(store(), 'Water', 'earned')).toBeNull();
     }
   );
+
+  it('a row, once present, is the truth: a sidecar written beside it later is never read', () => {
+    const reg = new SkillRegistry(dir);
+    reg.save('Water', { id: 'earned', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
+    for (let i = 0; i < 9; i++) reg.recordSuccess('Water', 'earned');
+    const metaPath = join(dir, 'Water', 'earned', LEGACY_META_FILENAME);
+    writeFileSync(metaPath, '{"successes": 1, "failures": 0, "updat', 'utf8');
+    reg.recordSuccess('Water', 'earned');
+    expect(reg.loadFor('Water')[0]).toMatchObject({ successes: 10, failures: 0 });
+    expect(readFileSync(metaPath, 'utf8')).toBe('{"successes": 1, "failures": 0, "updat');
+  });
+
+  it('the counter and its event are one transaction; a positive bump is fail-open, a compensation fail-closed', () => {
+    const reg = new SkillRegistry(dir);
+    reg.save('Water', { id: 'earned', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
+    for (let i = 0; i < 3; i++) reg.recordSuccess('Water', 'earned');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const db = store();
+    db.exec(`CREATE TRIGGER refuse_events BEFORE INSERT ON lifecycle_events
+             BEGIN SELECT RAISE(ABORT, 'ledger refused'); END`);
+    try {
+      // A lost POSITIVE increment leaves the store ABOVE the ledger, the
+      // direction `check` tolerates: the counter commits, the event is lost
+      // and reported once, the run is never taken down (AtomRegistry's rule).
+      reg.recordSuccess('Water', 'earned');
+      expect(reg.loadFor('Water')[0]!.successes).toBe(4);
+      expect(warn).toHaveBeenCalledTimes(1);
+      // A NEGATIVE delta inverts the safe-loss direction, so it fails closed:
+      // the same transaction rolls the counter back with the refused event.
+      expect(() =>
+        reg.compensateCounters('Water', 'earned', { successes: -2, reason: 'misattributed' })
+      ).toThrow(/ledger refused/);
+      expect(reg.loadFor('Water')[0]!.successes).toBe(4);
+    } finally {
+      db.exec('DROP TRIGGER refuse_events');
+    }
+    expect(readLedger().filter((e) => e.kind === 'skill-success')).toHaveLength(3);
+    expect(readLedger().some((e) => e.kind === 'skill-counter-compensation')).toBe(false);
+  });
+
+  it('refuses to run inside a caller transaction, where .immediate() would silently become a savepoint', () => {
+    const reg = new SkillRegistry(dir);
+    reg.save('Water', { id: 'earned', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
+    const db = store();
+    expect(() => db.transaction(() => reg.recordSuccess('Water', 'earned'))()).toThrow(/immediate transaction/);
+    expect(reg.loadFor('Water')[0]!.successes).toBe(0);
+  });
+
+  it('a body that outlives its row never inherits trust: a creating save zeroes the row and the projection', () => {
+    const reg = new SkillRegistry(dir);
+    reg.save('Water', { id: 'earned', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
+    for (let i = 0; i < 5; i++) reg.recordSuccess('Water', 'earned');
+    // The crash window of `drop`: the folder is gone, the row is not — the
+    // orphan a racing run's credit can leave too.
+    rmSync(join(dir, 'Water', 'earned'), { recursive: true, force: true });
+    expect(readMetaRow(store(), 'Water', 'earned')).toMatchObject({ successes: 5 });
+    // A run re-learns a recipe under the same id: a body that did not exist
+    // earned nothing.
+    const created = reg.save('Water', { id: 'earned', description: 'd', whenToUse: 'w', kind: 'llm', body: 'new body' });
+    expect(created).toMatchObject({ successes: 0, failures: 0 });
+    expect(reg.loadFor('Water')[0]).toMatchObject({ successes: 0, failures: 0 });
+    // …and the ledger agrees, so `check` does not read a false IMPOSSIBLE.
+    expect(projectCounters(readLedger()).get('Water/earned')).toEqual({ successes: 0, failures: 0 });
+    // A REWRITE of an existing body keeps what it earned.
+    reg.recordSuccess('Water', 'earned');
+    reg.save('Water', { id: 'earned', description: 'd2', whenToUse: 'w', kind: 'llm', body: 'revised' });
+    expect(reg.loadFor('Water')[0]).toMatchObject({ successes: 1, failures: 0 });
+  });
+
+  it('drop and merge delete the row with the folder, and the projection follows', () => {
+    const reg = new SkillRegistry(dir);
+    reg.save('Water', { id: 'earned', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
+    reg.save('Water', { id: 'other', description: 'd', whenToUse: 'x', kind: 'llm', body: 'c' });
+    reg.recordSuccess('Water', 'earned');
+    reg.recordSuccess('Water', 'other');
+    reg.recordSuccess('Water', 'other');
+    expect(reg.drop('Water', 'other')).toBe(true);
+    expect(readMetaRow(store(), 'Water', 'other')).toBeNull();
+    expect(projectCounters(readLedger()).get('Water/other')).toEqual({ successes: 0, failures: 0 });
+    reg.save('Water', { id: 'twin', description: 'd', whenToUse: 'y', kind: 'llm', body: 'e' });
+    reg.recordFailure('Water', 'twin');
+    expect(reg.merge('Water', 'earned', 'twin')).toMatchObject({ id: 'earned', successes: 1, failures: 0 });
+    expect(readMetaRow(store(), 'Water', 'twin')).toBeNull();
+    expect(projectCounters(readLedger()).get('Water/twin')).toEqual({ successes: 0, failures: 0 });
+    expect(projectCounters(readLedger()).get('Water/earned')).toEqual({ successes: 1, failures: 0 });
+  });
+
+  it('a read-only handle on a store from before the table reads the legacy sidecars and never writes', () => {
+    const { metaPath } = legacySkill(7);
+    const snapshot = join(dir, 'snapshot.db');
+    new Database(snapshot).close(); // a store with no skill_meta table
+    const ro = new Database(snapshot, { readonly: true, fileMustExist: true });
+    try {
+      const reader = new SkillRegistry(dir, { db: ro });
+      expect(reader.loadFor('Water')[0]).toMatchObject({ successes: 7, failures: 0 });
+      expect(ro.prepare(`SELECT 1 FROM sqlite_master WHERE name = 'skill_meta'`).get()).toBeUndefined();
+      expect(existsSync(metaPath)).toBe(true);
+    } finally {
+      ro.close();
+    }
+  });
+
+  it('re-resolves its default store on every call, so a repointed environment is honoured mid-life', () => {
+    const reg = new SkillRegistry(dir);
+    reg.save('Water', { id: 'earned', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
+    reg.recordSuccess('Water', 'earned');
+    closeLedgerHandles();
+    process.env['ATOMA_LEDGER_DB'] = join(dir, 'elsewhere.db');
+    // A fresh store: no row, no sidecar — the body reads at zero and the
+    // next bump seeds there, on the same instance.
+    expect(reg.loadFor('Water')[0]).toMatchObject({ successes: 0 });
+    reg.recordSuccess('Water', 'earned');
+    expect(reg.loadFor('Water')[0]).toMatchObject({ successes: 1 });
+  });
 
   it('an ABSENT sidecar still initialises at zero — hand-written skills keep working', () => {
     const reg = new SkillRegistry(dir);

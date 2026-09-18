@@ -814,8 +814,8 @@ export class SkillLifecycle {
    * skill stays as `kind: 'llm'`. We do NOT retry on the next success
    * either — the eligibility gate (`successes >= threshold`) keeps
    * firing forever once the threshold is crossed, so to prevent
-   * Sonnet-call thrash on un-promotable skills we mark the attempt in
-   * a sidecar `_meta.json` field. Future runs see it and skip.
+   * Sonnet-call thrash on un-promotable skills we stamp the attempt on
+   * the skill's trust row (`promotionRefusedAt`). Future runs see it and skip.
    */
   async tryPromoteSkill(args: {
     l1Name: SkillNamespace;

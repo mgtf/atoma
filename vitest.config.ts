@@ -54,7 +54,9 @@ export class DiscoveryReporter implements Reporter {
 export default defineConfig({
   test: {
     include: ['tests/**/*.test.ts'],
-    setupFiles: ['tests/setup-tier-pins.ts'],
+    // Order matters: the store isolation hooks below register at file level
+    // and must be in place before any test file's own hooks.
+    setupFiles: ['tests/setup-tier-pins.ts', 'tests/setup-store-isolation.ts'],
     reporters: ['default', new DiscoveryReporter()],
     // Isolate the lifecycle ledger: without this, every registry-touching
     // test appends events to the developer's real ./atoma-ledger.jsonl

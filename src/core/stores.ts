@@ -28,7 +28,7 @@ import Database from 'better-sqlite3';
 /** The store. Trust counters, version history and the lifecycle ledger. */
 export const DEFAULT_DB_PATH = './atoma.db';
 
-/** Learned recipe bodies. Still filesystem-backed — see AGENTS.md for why. */
+/** Learned recipe BODIES, filesystem-backed; their trust is `skill_meta` in the store (W4). */
 export const DEFAULT_SKILLS_DIR = './skills';
 
 /**

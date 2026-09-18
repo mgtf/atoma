@@ -100,7 +100,10 @@ Neighbours:
   `openLedgerHandle`) and ONE schema step, `ensureLedgerSchema`. Never add a
   column to one path: `appendLedger` swallows its failure, so the other path
   loses every event silently. Read-only readers never migrate and must read
-  an older table shape without inventing values.
+  an older table shape without inventing values. The skill trust table
+  (`skill_meta`, W4) is created in that same step and nowhere else; a
+  `SkillRegistry` handed a bare handle only checks for it, and a read-only
+  handle on a store without it reads the legacy sidecars.
 - Scope is process state, set once per process (`setLedgerScope`) or per
   synchronous operation (`withLedgerScope`), never a parameter threaded into
   the supervise loop. A multi-tenant process uses the latter only; a promise

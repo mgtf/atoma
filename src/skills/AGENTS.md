@@ -18,24 +18,48 @@ Neighbours:
 Skills follow learn → match/inject → earn credit → compile → trusted dispatch.
 
 - ONE catalog, ONE trust, for every run on the platform — a run is a run
-  ([platform trust record](../../docs/platform-trust-2026-09-15.md)). Bodies
-  AND counters live in the platform `ATOMA_SKILLS_DIR`, under stable atom-id
-  namespaces (`skills/<atom-id>/`), with one `_meta.json` per recipe that
-  every run reads and bumps. `_namespace.json` publishes the molecule label
-  and tool names (schema in `contracts/skillCatalog.ts`) so a reader resolves
-  a namespace without the registry. `SkillRegistry` takes a root and nothing
-  else: no trust scope, no per-project refusal. `reconcilePlatformSkills`
-  (coordinator startup, runner before a run) folds the earlier partitions in,
-  each idempotent and each setting aside what it displaces beside the catalog:
-  `.trust/<project>/<sha>/` sidecars are added into the public sidecar;
-  recipes under an atom identity the registry fold absorbed (`atom_id_merges`)
-  move under the kept identity, duplicates summed. `migratePlatformSkills`
-  imports the 2026-09-09 per-project trees once, counters added, originals
-  and a backup kept; conflicting bodies at one identity refuse migration.
-  All signed-in users can browse the catalog. Operator and MCP arguments go through
-  `resolveMoleculeRef` (name or id → `{ atomId, name }`). Metadata
-  sidecars are data: read them strictly before mutation and write
-  atomically. Never turn corruption into valid zero counters.
+  ([platform trust record](../../docs/platform-trust-2026-09-15.md)). BODIES
+  live in the platform `ATOMA_SKILLS_DIR`, under stable atom-id namespaces
+  (`skills/<atom-id>/`); TRUST (counters, stamps, matches, provenance) is one
+  row per recipe in the product store, `skill_meta`, since 2026-09-18 (W4,
+  `metaStore.ts`). Every mutation is ONE `.immediate()` transaction that
+  writes the row and inserts its lifecycle event on the same handle; the
+  increment is computed by SQLite, never read-then-written. `_namespace.json`
+  publishes the molecule label and tool names (schema in
+  `contracts/skillCatalog.ts`) so a reader resolves a namespace without the
+  registry. `SkillRegistry` takes a root and, optionally, the store handle:
+  the runner passes its `openDb` handle, the viz its primary store, the CLIs
+  their `--db`; handle-less readers resolve the ledger's store and never
+  create one. Rows are keyed by namespace and skill id — one store pairs with
+  one catalog; a legacy per-project tree is read `sidecarsOnly`.
+  `reconcilePlatformSkills` (coordinator startup, runner before a run) first
+  imports every legacy `_meta.json` that has no row and retires it as
+  `_meta.imported.json` (bytes untouched, never a source again), then folds
+  the earlier partitions in, each idempotent and each setting aside what it
+  displaces beside the catalog: `.trust/<project>/<sha>/` sidecars are added
+  into the recipe's row; recipes under an atom identity the registry fold
+  absorbed (`atom_id_merges`) move under the kept identity WITH their rows
+  re-keyed, duplicates summed and journaled as a `skill-merge` naming the
+  absorbed entity and the counters moved. `migratePlatformSkills` imports the
+  2026-09-09 per-project trees once, counters added, originals and a backup
+  kept; conflicting bodies at one identity refuse migration. All signed-in
+  users can browse the catalog. Operator and MCP arguments go through
+  `resolveMoleculeRef` (name or id → `{ atomId, name }`). A legacy sidecar
+  that will not parse is never imported: every mutation refuses, writes
+  nothing and journals nothing. Never turn corruption into valid zero counters.
+- FILE + ROW PAIRS have no transaction across them, so each states its crash
+  order at the call site, and the shared rule is: body first, row second, and
+  a body that outlives its row never inherits trust. `save` zeroes the row
+  when it CREATES a body (`skill-save` with `created: true`, which the
+  projection zeroes on); `drop`, `merge` and `dropNamespace` remove the folder
+  before the row, as the sidecar era did — the reverse was reviewed and
+  rejected because a body that outlives its row reads below the ledger, the
+  IMPOSSIBLE direction; `promoteToScript` writes the fallback, then the zeroed
+  row with its `promote` event, then SKILL.md as the commit point.
+  `projectCounters` zeroes an entity on `skill-drop` and the absorbed entity on
+  `skill-merge`, so a re-created id never reads IMPOSSIBLE. Mutations refuse
+  to run inside a caller's transaction, where `.immediate()` would silently
+  become a savepoint.
 - Match against reusable `when_to_use` capability language, not task theme or
   hidden workspace state the prefilter cannot inspect.
 - The skill prefilter runs only when candidates exist. Injection is guidance;
@@ -58,7 +82,7 @@ Skills follow learn → match/inject → earn credit → compile → trusted dis
 - Output intent is STRUCTURED first: plans declare `outputs` on every
   file-mutating subtask (threaded onto the child Task) and compilers declare
   `writes` in the promotion envelope, cross-checked once against the static
-  resolver and persisted in `_meta.json`. The lexical grammar in
+  resolver and persisted on the recipe's trust row. The lexical grammar in
   `scriptTargets.ts` is the FALLBACK for legacy plans/scripts — never grow it
   a new clause for a phrasing the declared field would have carried.
 - Script stdout ends with exactly one JSON envelope containing non-null `output`
@@ -97,11 +121,14 @@ Skills follow learn → match/inject → earn credit → compile → trusted dis
 - `skills drop`, `merge`, `reset`, `forgive`, and review are operator-only
   lifecycle actions. Preserve provenance and emit ledger events. `forgive`
   retracts MISATTRIBUTED increments surgically (negative integer deltas,
-  mandatory reason, floor at zero). It JOURNALS FIRST through the fail-closed
-  `appendLedgerStrict` — for a negative delta the safe-loss direction
-  inverts: mutate-then-lose-the-append leaves the store BELOW the ledger,
-  the direction `check` reports as IMPOSSIBLE — and `projectCounters` folds
-  the `skill-counter-compensation` event clamped at zero; refusal stamps
+  mandatory reason, floor at zero). Its event and its row write are ONE
+  transaction, and the event is appended STRICTLY (fail-closed): for a
+  negative delta the safe-loss direction inverts — a counter that moved
+  without its event would sit BELOW the ledger, the direction `check`
+  reports as IMPOSSIBLE — so a ledger that refuses the row rolls the counter
+  back with it, while positive bumps stay fail-open (a lost positive event
+  leaves the store ABOVE the ledger, which `check` tolerates). `projectCounters`
+  folds the `skill-counter-compensation` event clamped at zero; refusal stamps
   stay untouched — clearing them remains `reset`'s job. Measured 2026-08-21:
   an environment failure is not evidence against a recipe, yet erasing 2
   budget-kill failures via all-or-nothing `reset` cost 7 earned successes. `registry remove` and

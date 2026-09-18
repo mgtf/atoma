@@ -10,6 +10,7 @@ import { baseExecutorOf } from '../src/core/attestation.js';
 import { ensureCanonicalFullStack } from '../src/atoms/capability.js';
 import { SKILL_PREFILTER_SYSTEM_PROMPT } from '../src/atoms/cost.js';
 import { SkillRegistry } from '../src/skills/registry.js';
+import { closeStoreHandles } from '../src/core/stores.js';
 import type { AtomRegistry } from '../src/registry/atomRegistry.js';
 import type { LlmCompletionRequest, ToolExecutor } from '../src/core/types.js';
 import type { VizRun } from '../src/viz/trace.js';
@@ -33,7 +34,9 @@ describe('runner supervision depth, concrete L3/L2/L1 and real backend', () => {
     const runs = join(root, 'runs');
     const skillRoot = join(root, 'skills');
     for (const [key, value] of Object.entries({ ...OLLAMA_PINS,
-      ATOMA_DB_PATH: join(root, 'store.db'), ATOMA_SKILLS_DIR: skillRoot, ATOMA_RUNS_DIR: runs,
+      // One store for the run's handle and the test's handle-less registry
+      // (W4: skill trust is rows in the store the ledger resolves).
+      ATOMA_DB_PATH: join(root, 'store.db'), ATOMA_LEDGER_DB: join(root, 'store.db'), ATOMA_SKILLS_DIR: skillRoot, ATOMA_RUNS_DIR: runs,
       ATOMA_BUILD_WORKSPACE: join(root, 'workspace'), ATOMA_BUILD_TIMEOUT_MS: '60000',
       ATOMA_CONTAINER: '0', ATOMA_REQUIRE_ISOLATION: '0', ATOMA_PREFILTER_CACHE: '0',
       ATOMA_SKILL_LEARN: '1', ATOMA_SKILL_PROMOTE: '0', ATOMA_SKILL_DIRECT: '1',
@@ -110,6 +113,9 @@ describe('runner supervision depth, concrete L3/L2/L1 and real backend', () => {
       expect(skills.loadFor(leafId)).toHaveLength(1);
     } finally {
       await handle?.shutdown();
+      // The test's registry holds the cached handle on the store (W4);
+      // Windows will not remove a directory holding an open database file.
+      closeStoreHandles();
       rmSync(root, { recursive: true, force: true });
     }
   });

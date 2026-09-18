@@ -120,12 +120,14 @@ describe('state backup CLI', () => {
 
   it('produces a snapshot whose store COPY opens and answers queries', async () => {
     const res = await runBackup(opts());
+    // Directory tiers first, the store LAST: rows are never older than the
+    // bodies they describe (see runBackup).
     expect(res.captured).toEqual([
-      'store.db',
       'skills.tar.gz',
       'runs.tar.gz',
       'projects.tar.gz',
       'supervisor.tar.gz',
+      'store.db',
     ]);
     expect(res.skipped.join(',')).toMatch(/archive/);
 

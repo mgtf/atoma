@@ -2,8 +2,9 @@
  * State backup — `npm run backup -- --dest <off-machine mount>`.
  *
  * Everything that makes this system cheap is EARNED STATE that no artefact
- * in the repository can regenerate: the trust counters in `atoma.db`, the
- * learned skill bodies with their compile provenance, and the run traces
+ * in the repository can regenerate: the atom AND skill trust counters in
+ * `atoma.db` (skill trust moved there from `_meta.json` on 2026-09-18), the
+ * learned skill bodies, and the run traces
  * cited as evidence for the rule system. All of it lives gitignored on one
  * machine, the archives sit on the same disk, and the 2026-08-14 review
  * measured the class already firing once (round 2's 19 traces destroyed by
@@ -296,26 +297,17 @@ export async function runBackup(opts: BackupOptions): Promise<BackupResult> {
     host: hostname(),
   };
 
-  // 1. The store — ONLINE backup, never a raw copy: WAL pages of committed
-  // transactions may not be in the main file yet, and a raw copy taken
-  // mid-write is a plausible-looking corrupt database.
-  const storeDb = opts.storeDb ?? storeDbPath();
-  if (existsSync(storeDb)) {
-    const out = join(snapshotDir, 'store.db');
-    await snapshotSqliteStore(storeDb, out);
-    manifest['store'] = {
-      source: resolve(storeDb),
-      bytes: statSync(out).size,
-      sha256: await sha256File(out),
-    };
-    captured.push('store.db');
-    log(`✓ store: ${storeDb} → store.db (${statSync(out).size} bytes)`);
-  } else {
-    skipped.push(`store (${storeDb} missing)`);
-    log(`⚠ store missing at ${storeDb} — skipped`);
-  }
-
-  // 2..6. The directory roots.
+  // 1..5. The directory roots FIRST, the store LAST (W4, 2026-09-18). Skill
+  // trust is rows in the store while skill bodies are files in the skills
+  // tier, and nothing makes the two captures simultaneous. Every file+row
+  // mutation in `SkillRegistry` writes its file before its row (a body, then
+  // its zeroed counters on promotion; a folder removal, then its row
+  // deletion), so a snapshot whose rows are never OLDER than its bodies can
+  // only pair a body with the state it had before its row moved — the crash
+  // states the registry already tolerates. The reverse order could pair a
+  // freshly compiled script body with the llm recipe's earned counters: a
+  // never-executed script armed for the no-validator dispatch, the exact
+  // state `promoteToScript`'s crash ordering exists to rule out.
   const projectsRoot =
     opts.projectsRoot ?? process.env['ATOMA_PROJECTS_ROOT'] ?? DEFAULT_PROJECTS_ROOT;
   const dirs: Array<
@@ -365,6 +357,25 @@ export async function runBackup(opts: BackupOptions): Promise<BackupResult> {
     manifest[label] = tier;
     captured.push(outName);
     log(`✓ ${label}: ${source} → ${outName} (${tier.files} files, ${tier.bytes} bytes)`);
+  }
+
+  // 6. The store — ONLINE backup, never a raw copy: WAL pages of committed
+  // transactions may not be in the main file yet, and a raw copy taken
+  // mid-write is a plausible-looking corrupt database.
+  const storeDb = opts.storeDb ?? storeDbPath();
+  if (existsSync(storeDb)) {
+    const out = join(snapshotDir, 'store.db');
+    await snapshotSqliteStore(storeDb, out);
+    manifest['store'] = {
+      source: resolve(storeDb),
+      bytes: statSync(out).size,
+      sha256: await sha256File(out),
+    };
+    captured.push('store.db');
+    log(`✓ store: ${storeDb} → store.db (${statSync(out).size} bytes)`);
+  } else {
+    skipped.push(`store (${storeDb} missing)`);
+    log(`⚠ store missing at ${storeDb} — skipped`);
   }
 
   // The manifest names what is and is not in the snapshot, so a reader who

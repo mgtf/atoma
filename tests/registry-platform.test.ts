@@ -11,6 +11,7 @@ import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb, registryIsPartitioned } from '../src/registry/db.js';
 import { SkillRegistry } from '../src/skills/registry.js';
 import { projectCounters, readLedger } from '../src/core/ledger.js';
+import { closeStoreHandles } from '../src/core/stores.js';
 
 /**
  * ONE registry, ONE trust, for every run on the platform
@@ -28,7 +29,10 @@ const seed = { description: 'Reads documented constraints', systemPrompt: 'Read 
   tools: [{ name: 'read_file', description: 'Read a file', inputSchema: { type: 'object', properties: {} } }],
   params: { temperature: 0 }, createdBy: 'seed' };
 const roots: string[] = [];
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+// Skill trust is rows in the store (W4): a test's handle-less registry keeps
+// the cached handle open, and Windows will not remove a directory holding an
+// open database file.
+afterEach(() => { closeStoreHandles(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function directory() { const root = mkdtempSync(join(tmpdir(), 'atoma-registry-platform-')); roots.push(root); return root; }
 
 // The 2026-09-09 partitioned schema, deliberately frozen rather than derived.

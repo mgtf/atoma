@@ -20,9 +20,12 @@ import { unfoldedRegistryPredicate } from '../registry/db.js';
  * same file. That closes half of the ledger's old KNOWN LIMIT by
  * construction: you can no longer project one store's history against a
  * different store's counters, which is exactly how this command once reported
- * `IMPOSSIBLE  Helium: store 2 < ledger 6` for a week. The SKILL half of the
- * pairing is still conventional — bodies and counters live under
- * `--skills-dir` — so that flag still has to name the right tree.
+ * `IMPOSSIBLE  Helium: store 2 < ledger 6` for a week. Since 2026-09-18 the
+ * skill counters are rows in that same file too (W4), read through the same
+ * handle; only the skill BODIES live under `--skills-dir`, so that flag names
+ * which recipes exist, not where their trust is. The handle is READ-ONLY: a
+ * `--db` may be a backup snapshot, and a store from before the skill table
+ * reads its legacy sidecars instead of gaining a table.
  */
 import Database from 'better-sqlite3';
 import { existsSync } from 'node:fs';
@@ -95,7 +98,9 @@ function main(): void {
     console.log(`(no store at ${dbPath} — nothing to read)`);
     return;
   }
-  const db = new Database(dbPath);
+  // READ-ONLY: `--db` may name a backup snapshot, and a reader never migrates
+  // one — a store from before the skill_meta table reads its legacy sidecars.
+  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   const events = readLedger(db);
 
   if (cmd === 'tail') {
@@ -140,11 +145,10 @@ function main(): void {
     }
   }
   console.log(`types checked: ${rows.length} (db: ${dbPath})`);
-  db.close();
 
-  // Skills (_meta.json) — still a separate store, so this pairing is still
-  // the caller's responsibility.
-  const skills = new SkillRegistry(skillsDirPath(flags['skills-dir']));
+  // Skills: trust rows in the SAME store, read through the same handle (W4);
+  // only the bodies' tree is still named by the caller.
+  const skills = new SkillRegistry(skillsDirPath(flags['skills-dir']), { db });
   let skillCount = 0;
   for (const ns of skills.listNamespaces()) {
     for (const sk of skills.loadFor(ns)) {
@@ -162,6 +166,7 @@ function main(): void {
     }
   }
   console.log(`skills checked: ${skillCount} (dir: ${skills.rootDir})`);
+  db.close();
 
   console.log('');
   if (impossible > 0) {

@@ -1,5 +1,5 @@
 import { assertProjectRunAuthority } from '../projects/runAuthority.js';
-import { setLedgerScope, type LedgerScope } from '../core/ledger.js';
+import { ledgerDbPath, setLedgerScope, type LedgerScope } from '../core/ledger.js';
 import { dirname, resolve } from 'node:path';
 import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { setMaxListeners } from 'node:events';
@@ -787,13 +787,23 @@ export async function startTask(
     const initialL3Type = args.depth ? undefined : profile.seedL3(seedCtx);
     profile.seedCatalog(seedCtx);
 
-    // Skill store — shared by every atom in the run. Skills are
-    // filesystem-backed under ATOMA_SKILLS_DIR (default ./skills) so
-    // they survive across invocations. L1 atoms hydrate their `skills()`
-    // accessor from this registry on demand; L2 runs a Haiku
-    // skill-prefilter against the matched L1's skills before entering
-    // each supervise loop.
-    const skillRegistry = new SkillRegistry(skillsDirPath());
+    // Skill store — shared by every atom in the run. Bodies are
+    // filesystem-backed under ATOMA_SKILLS_DIR (default ./skills); their
+    // trust is rows in THIS store, on the registry's own handle, so a skill
+    // counter and its lifecycle event share one connection and one
+    // transaction (W4). L1 atoms hydrate their `skills()` accessor from this
+    // registry on demand; L2 runs a Haiku skill-prefilter against the matched
+    // L1's skills before entering each supervise loop.
+    const skillRegistry = new SkillRegistry(skillsDirPath(), { db });
+    if (resolve(ledgerDbPath()) !== resolve(dbPath)) {
+      // Every handle-less reader (CLIs, MCP readers) resolves the ledger's
+      // store; this run writes the registry's. Equal in production by
+      // configuration, and loud when they are not, because the split would
+      // otherwise show as counters that "never move".
+      console.warn(
+        `⚠ ATOMA_LEDGER_DB (${ledgerDbPath()}) differs from the run store (${dbPath}): skill trust and its events are written to the run store`
+      );
+    }
     reconcilePlatformSkills({ db, skillsRoot: skillRegistry.rootDir });
     console.log(`skills root: ${skillRegistry.rootDir}`);
 

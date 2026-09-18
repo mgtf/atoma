@@ -13,9 +13,11 @@
  * `kind: 'script'` variant is reserved as a placeholder so storage
  * stays forward-compatible without adding migration churn later.
  *
- * Layout on disk (filesystem-first for diffability + git):
+ * Layout (bodies filesystem-first for diffability + git, trust in the store):
  *   ./skills/<atom-id>/<skill-id>/SKILL.md     — frontmatter + body
- *   ./skills/<atom-id>/<skill-id>/_meta.json   — runtime counters
+ *   skill_meta(namespace, skill_id, …)        — runtime counters and stamps
+ *                                               (a `_meta.json` sidecar before
+ *                                               2026-09-18, imported once)
  *
  * The atom id is the skill namespace (T4). The molecule name is a
  * display label only — two L1s never share a namespace just because
@@ -111,7 +113,7 @@ export interface Skill {
   readonly fallbackBody?: string;
   /**
    * Cumulative successes — incremented when a supervise-loop run
-   * using this skill is approved. Persisted in `_meta.json`.
+   * using this skill is approved. Persisted in the store (`skill_meta`).
    */
   readonly successes: number;
   /** Cumulative failures — incremented on rejection / escalation. */
@@ -140,8 +142,8 @@ export interface Skill {
 
 /**
  * Frontmatter + body shape persisted to SKILL.md. The runtime
- * counters live in `_meta.json` so a hand-written skill never needs
- * its frontmatter rewritten just because counters bumped.
+ * counters live in the store (`skill_meta`) so a hand-written skill never
+ * needs its frontmatter rewritten just because counters bumped.
  */
 export interface SkillFrontmatter {
   readonly id: string;
@@ -165,8 +167,8 @@ export interface SkillMeta {
    * value short-circuits before the Sonnet call). Cleared on the
    * next `save()` of the skill body — a freshly distilled or
    * `improveSkillBody`-revised recipe is a new candidate and
-   * deserves a fresh compile attempt. Operator can manually clear
-   * by deleting the field from `_meta.json`.
+   * deserves a fresh compile attempt. An operator clears it with
+   * `skills reset` (which also zeroes the counters), never by hand.
    */
   readonly promotionRefusedAt?: string;
   /**

@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { resolve } from 'node:path';
 import type { z } from 'zod';
 import type { platformEventActorTypeSchema } from '../contracts/platformEvents.js';
+import { SKILL_META_TABLE_DDL } from '../skills/metaStore.js';
 import { closeStoreHandles, openStoreHandle, storeDbPath } from './stores.js';
 
 /**
@@ -12,10 +13,11 @@ import { closeStoreHandles, openStoreHandle, storeDbPath } from './stores.js';
  * SkillRegistry lifecycle methods) — so the ledger sees exactly what the
  * mutable stores see, with zero extra call sites to maintain.
  *
- * Stage 1 is DUAL-WRITE: the SQLite counters and `_meta.json` sidecars remain
- * authoritative for runtime decisions, and the ledger is the durable record
- * that lets `npm run ledger -- check` recompute what the counters SHOULD be
- * and flag drift.
+ * Stage 1 is DUAL-WRITE: the SQLite counters (atom types in `atom_types`,
+ * skills in `skill_meta` since 2026-09-18) remain authoritative for runtime
+ * decisions, and the ledger is the durable record that lets
+ * `npm run ledger -- check` recompute what the counters SHOULD be and flag
+ * drift.
  *
  * IT LIVES IN THE STORE ITSELF (table `lifecycle_events`), and used to be a
  * sibling `atoma-ledger.jsonl`. Two things the move fixes, both measured
@@ -40,9 +42,11 @@ import { closeStoreHandles, openStoreHandle, storeDbPath } from './stores.js';
  *     integrity checker could be made to lie by an ill-timed SIGKILL, and
  *     runs get SIGKILLed (burn-in group-kills at the wall-clock budget).
  *
- * The skill half of the pairing stays conventional while skill bodies live on
- * disk: `check` still takes a `--skills-dir`. That is the honest remaining
- * gap, and the main structural argument for eventually moving skills in too.
+ * Skill trust joined the store on 2026-09-18 (W4, `skill_meta`, see
+ * src/skills/metaStore.ts): a skill counter and its event are one transaction
+ * on one handle too. Only the skill BODIES stay on disk, so `check` still
+ * takes a `--skills-dir` to know which recipes exist — a naming convention,
+ * no longer a second store of counters.
  *
  * Fail-open by design: a ledger write must NEVER take down a run — telemetry
  * that crashes production is worse than no telemetry. Errors are swallowed
@@ -255,6 +259,9 @@ function migrateLedgerScopeColumns(db: LedgerDb): void {
   }
   db.exec(LEDGER_SCOPE_INDEX_DDL);
   backfillEntityIds(db);
+  // Skill trust lives beside the ledger it is journaled in (W4, T6): the
+  // table is created here, on both open paths, and nowhere else.
+  db.exec(SKILL_META_TABLE_DDL);
 }
 
 /**
@@ -589,8 +596,14 @@ export function projectCounters(events: LedgerEvent[]): Map<string, ProjectedCou
     }
     return c;
   };
+  const zero = (key: string): void => {
+    const c = get(key);
+    c.successes = 0;
+    c.failures = 0;
+  };
   for (const ev of events) {
-    const c = get(ledgerEntityKey(ev));
+    const key = ledgerEntityKey(ev);
+    const c = get(key);
     switch (ev.kind) {
       case 'type-success':
       case 'skill-success':
@@ -605,6 +618,40 @@ export function projectCounters(events: LedgerEvent[]): Map<string, ProjectedCou
         c.successes = 0;
         c.failures = 0;
         break;
+      case 'skill-save': {
+        // A save that CREATED the body starts its trust at zero (W4): the
+        // row it may have found was an orphan's. A rewrite preserves.
+        if (ev.detail?.['created'] === true) zero(key);
+        break;
+      }
+      case 'skill-drop': {
+        // The entity's trust is gone with its body. Without this, a recipe
+        // re-created under a dropped id read IMPOSSIBLE (store 0 < ledger N)
+        // for as long as the ledger remembered the first life. A namespace
+        // drop takes every recipe under it.
+        if (ev.detail?.['namespace'] === true) {
+          for (const k of map.keys()) if (k.startsWith(`${key}/`)) zero(k);
+        } else {
+          zero(key);
+        }
+        break;
+      }
+      case 'skill-merge': {
+        // The absorbed body is gone. When the merge MOVED counters (a
+        // namespace fold, `absorbedEntity` + numbers) they join the keeper,
+        // exactly as `type-merge` does; a plain `skills merge` moves none.
+        const d = ev.detail ?? {};
+        const absorbedKey =
+          typeof d['absorbedEntity'] === 'string'
+            ? d['absorbedEntity']
+            : typeof d['absorbed'] === 'string'
+              ? `${key.slice(0, key.lastIndexOf('/') + 1)}${d['absorbed']}`
+              : undefined;
+        if (absorbedKey) zero(absorbedKey);
+        if (typeof d['successes'] === 'number') c.successes += d['successes'];
+        if (typeof d['failures'] === 'number') c.failures += d['failures'];
+        break;
+      }
       case 'type-merge': {
         // The absorbed totals really were added to this entity's counters, so
         // adding them here keeps the projection exact rather than merely
