@@ -125,7 +125,10 @@ function foundOrganisation(): void {
   db.close();
 }
 
-describe('the preview demo harness', () => {
+// Every test here runs the real harness as a child with a 60–120s budget of
+// its own; the default 15s test timeout expired first under full parallelism
+// (2026-09-17/18, never in isolation). The test budget now covers the child's.
+describe('the preview demo harness', { timeout: 180_000 }, () => {
   it('refuses to invent an organisation, and says how to get one', async () => {
     // The organisation is founded by the FIRST LOGIN. A harness that created
     // one would seed into an org the browser session does not belong to, and

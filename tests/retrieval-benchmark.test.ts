@@ -285,7 +285,9 @@ describe('maintenance scorer — actual behavior with immutable evaluator code',
 describe('retrieval benchmark CLI — actual child process', { timeout: 90_000 }, () => {
   function cli(args: string[]) {
     return spawnSync(process.execPath, ['--import', 'tsx', 'src/cli/benchmark.ts', 'retrieval', ...args], {
-      cwd: repo, encoding: 'utf8', timeout: 20_000,
+      // A tsx-loaded CLI cold-starts in ~2s alone and in 20s+ beside the
+      // rest of the suite; the budget is against a hang, not a slow machine.
+      cwd: repo, encoding: 'utf8', timeout: 60_000,
       env: { ...process.env, ATOMA_MODEL_L1: '', ATOMA_MODEL_L2: '', ATOMA_MODEL_L3: '' },
     });
   }
@@ -317,7 +319,7 @@ describe('retrieval benchmark CLI — actual child process', { timeout: 90_000 }
       'src/cli/retrievalBenchmark.ts', '--outDir', out, '--rootDir', 'src',
       '--module', 'NodeNext', '--moduleResolution', 'NodeNext', '--target', 'ES2022',
       '--strict', '--skipLibCheck', '--esModuleInterop',
-    ], { cwd: repo, encoding: 'utf8', timeout: 30_000 });
+    ], { cwd: repo, encoding: 'utf8', timeout: 90_000 });
     // The clean emitted closure uses the actual installed dependencies.
     writeFileSync(join(out, 'package.json'), '{"type":"module"}');
     symlinkSync(join(repo, 'node_modules'), join(out, 'node_modules'), 'dir');
