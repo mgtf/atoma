@@ -27,7 +27,7 @@ export function HandheldVeilLayer({
       setCanContinue(false);
       return;
     }
-    const timer = window.setTimeout(() => setCanContinue(true), 500);
+    const timer = window.setTimeout(() => setCanContinue(true), 2_000);
     return () => window.clearTimeout(timer);
   }, [phase]);
   if (phase === 'idle') return null;
