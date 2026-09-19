@@ -112,7 +112,7 @@ describe.skipIf(process.platform === 'win32')('launcher worker transport', () =>
     expect(run.has('write_file')).toBe(true);
     await run.execute('write_file', { path: 'value.txt', content: 'été 日本語' });
     let shellDone = false;
-    const shell = run.execute('run_shell', { cmd: 'sleep 2' }).then(() => { shellDone = true; });
+    const shell = run.execute('run_shell', { command: 'node', args: ['-e', 'setTimeout(() => {}, 2000)'] }).then(() => { shellDone = true; });
     const read = await run.execute('read_file', { path: 'value.txt' });
     expect(JSON.stringify(read)).toContain('été 日本語');
     expect(shellDone).toBe(false);
