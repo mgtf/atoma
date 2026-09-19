@@ -1,0 +1,6 @@
+{
+  "name": "atoma-launcher-runtime",
+  "private": true,
+  "type": "module",
+  "dependencies": { "zod": "^3.23.8" }
+}

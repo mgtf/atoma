@@ -1,0 +1,8 @@
+{$ATOMA_PUBLIC_HOST} {
+    tls /certs/web.crt /certs/web.key
+    reverse_proxy 127.0.0.1:4111
+}
+*.{$ATOMA_PREVIEW_DOMAIN} {
+    tls /certs/preview.crt /certs/preview.key
+    reverse_proxy 127.0.0.1:4311
+}

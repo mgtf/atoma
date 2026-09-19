@@ -1,7 +1,10 @@
+import type { WorkspaceVolumes } from './volumes.js';
+import { launcherObjectId, launcherNetworkName, launcherUnitName } from './names.js';
+export { launcherObjectId } from './names.js';
 import { execFile, execFileSync } from 'node:child_process';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
-import { mkdirSync, rmSync } from 'node:fs';
+import { chownSync, mkdirSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isIPv4 } from 'node:net';
 import path from 'node:path';
@@ -11,6 +14,7 @@ import type {
   LauncherNetworkHandle,
   LauncherNetworkSpec,
   LauncherOwnerId,
+  LauncherPreviewOwnership,
   LauncherStopReason,
   LauncherUnitHandle,
   LauncherUnitKind,
@@ -29,15 +33,10 @@ import type {
  * written down, and `tests/egress-sidecar-lifecycle.test.ts` asserts the exact
  * command sequence rather than trusting this comment.
  *
- * IN-PROCESS FOR NOW, AND THAT IS A STATED HALFWAY POINT. The recorded target
- * is a launcher running as its own container under its own OS identity, with
- * the socket mounted only there, reached over a permissioned Unix socket. Two
- * things had to come first: a contract narrow enough that the transport can
- * change without any caller changing, and one implementation proving the
- * contract against behaviour that already works. Until the move happens, "the
- * launcher owns the images and the flags" is a code-organisation property
- * rather than a security boundary — it becomes the boundary the day this class
- * runs somewhere else. `src/launcher/AGENTS.md` records what that will take.
+ * This backend runs either inside the separate launcher service or in the
+ * legacy local mode. `connectContainerLauncher` selects the service when a
+ * socket is configured, without falling back. Worker lifecycle and socket transport live
+ * in this subsystem; the service image is not a full web-stack acceptance.
  */
 
 const run = promisify(execFile);
@@ -95,13 +94,6 @@ export function hostContainerUser(): string | undefined {
   const gid = process.getgid?.();
   if (uid === undefined || gid === undefined || uid === 0) return undefined;
   return `${uid}:${gid}`;
-}
-
-/** Docker-safe, collision-resistant suffix for every per-owner object name. */
-export function launcherObjectId(ownerId: string): string {
-  const readable = ownerId.replace(/[^A-Za-z0-9_.-]/g, '-').slice(0, 30) || 'run';
-  const hash = createHash('sha256').update(ownerId).digest('hex').slice(0, 10);
-  return `${readable}-${hash}`;
 }
 
 export type AsyncDockerRunner = (args: string[]) => Promise<string>;
@@ -381,6 +373,9 @@ export interface DockerLauncherOptions {
   readonly previewUser?: string;
   /** Where preview workspaces live. The launcher owns the location. */
   readonly workspaceRoot?: string;
+  readonly volumes?: WorkspaceVolumes;
+  /** Service-only ownership for a directory filled by the separate copy writer. */
+  readonly workspaceOwnership?: LauncherPreviewOwnership;
   /** Injectable Docker boundary for command-level lifecycle tests. */
   readonly runDocker?: AsyncDockerRunner;
   /** Readiness is log-based in production; tests can acknowledge it directly. */
@@ -391,19 +386,27 @@ export interface DockerLauncherOptions {
   readonly now?: () => number;
 }
 
+/** Host-side composition seam; consumers receive only the closed contract. */
+export function createContainerLauncher(options: DockerLauncherOptions): ContainerLauncher {
+  return new DockerLauncher(options);
+}
+
 export class DockerLauncher implements ContainerLauncher {
+  private readonly volumes?: WorkspaceVolumes;
   private readonly image: string;
   private readonly previewImage: string;
   private readonly previewRuntime: string;
   private readonly previewUser: string;
   private readonly runningAsRoot: boolean;
   private readonly workspaceRoot: string;
+  private readonly workspaceOwnership: LauncherPreviewOwnership | undefined;
   private readonly runDocker: AsyncDockerRunner;
   private readonly waitUntilReady: ((name: string) => Promise<void>) | undefined;
   private readonly sleep: (delayMs: number) => Promise<void>;
   private readonly now: () => number;
 
   constructor(options: DockerLauncherOptions) {
+    this.volumes = options.volumes;
     this.image = options.image;
     this.previewImage = options.previewImage ?? options.image;
     this.previewRuntime = options.previewRuntime ?? 'runsc';
@@ -414,6 +417,7 @@ export class DockerLauncher implements ContainerLauncher {
     // chowned to it instead.
     this.previewUser = options.previewUser ?? hostContainerUser() ?? '10001:10001';
     this.runningAsRoot = process.getuid?.() === 0;
+    this.workspaceOwnership = options.workspaceOwnership;
     this.workspaceRoot = options.workspaceRoot ?? path.join(homedir(), '.atoma', 'previews');
     this.runDocker = options.runDocker ?? defaultDocker;
     this.waitUntilReady = options.waitUntilReady;
@@ -432,27 +436,11 @@ export class DockerLauncher implements ContainerLauncher {
   }
 
   networkName(spec: LauncherNetworkSpec): string {
-    const id = launcherObjectId(spec.ownerId);
-    if (spec.family === 'preview') {
-      // TWO networks, and the relay is the only thing on both. MEASURED: a
-      // container attached ONLY to an `--internal` network gets no published
-      // port at all — `docker port` answers "No public port published" — so a
-      // relay without a publishable leg listens where nothing can reach it.
-      return spec.kind === 'internal' ? `atoma-preview-net-${id}` : `atoma-preview-pub-${id}`;
-    }
-    return spec.kind === 'internal' ? `atoma-egress-${id}` : `atoma-uplink-${id}`;
+    return launcherNetworkName(spec);
   }
 
   unitName(kind: LauncherUnitKind, ownerId: LauncherOwnerId): string {
-    const id = launcherObjectId(ownerId);
-    // One name per kind. `egress-proxy` keeps its historical spelling, which
-    // is also the hostname the run reaches it by — and is what the app
-    // container resolves its relay by, so these names are wire contracts
-    // between two containers, not cosmetics.
-    if (kind === 'egress-proxy') return `atoma-proxy-${id}`;
-    if (kind === 'preview-egress-proxy') return `atoma-preview-proxy-${id}`;
-    if (kind === 'preview-app') return `atoma-preview-app-${id}`;
-    return `atoma-preview-relay-${id}`;
+    return launcherUnitName(kind, ownerId);
   }
 
   /** The objects one owner in one family can leave behind, in removal order. */
@@ -494,6 +482,29 @@ export class DockerLauncher implements ContainerLauncher {
     }
   }
 
+  /** Service-side counterpart of hard-exit cleanup, scoped to one dead caller. */
+  async reapDisconnectedOwner(family: LauncherFamily, ownerId: LauncherOwnerId): Promise<void> {
+    const owned = this.ownedObjects(family, ownerId);
+    for (const container of owned.containers) await quiet(this.runDocker, ['rm', '-f', container]);
+    const deadline = this.cleanupDeadline();
+    let gone = true;
+    for (const network of owned.networks) {
+      try {
+        const members = await this.runDocker([
+          'network', 'inspect', '--format', '{{range .Containers}}{{.Name}} {{end}}', network,
+        ]);
+        // A legacy attached worker may still exist; a dead caller must not
+        // leave it alive on this private network. These are engine observations.
+        for (const member of members.split(/\s+/).filter(Boolean)) {
+          await quiet(this.runDocker, ['rm', '-f', member]);
+        }
+      } catch { /* absence and daemon errors are distinguished by removal below */ }
+      const removed = await removeNetworkWithRetry(network, this.runDocker, this.sleep, deadline, this.now);
+      gone = gone && removed;
+    }
+    if (!gone) throw new Error('Disconnected owner cleanup incomplete');
+    this.disarmHardExitCleanup(family, ownerId);
+  }
   armHardExitCleanup(family: LauncherFamily, ownerId: LauncherOwnerId): void {
     exitRegistry.track(`${family}:${ownerId}`, this.ownedObjects(family, ownerId));
   }
@@ -714,8 +725,8 @@ export class DockerLauncher implements ContainerLauncher {
         ] : []),
         // The single mount: the filtered copy, writable because the app may
         // keep state — on the COPY, which is deleted at teardown.
-        '-v',
-        `${toEnginePath(workspace)}:/workspace`,
+        ...(this.volumes ? ['--mount', `type=volume,src=${this.volumes.get('preview', spec.ownerId).volume},dst=/workspace,volume-nocopy`]
+          : ['-v', `${toEnginePath(workspace)}:/workspace`]),
         '-w',
         '/workspace',
         this.previewImage,
@@ -785,11 +796,12 @@ export class DockerLauncher implements ContainerLauncher {
   }
 
   private workspacePath(ownerId: LauncherOwnerId): string {
+    if (this.volumes) return this.volumes.get('preview', ownerId).hostPath;
     return path.join(this.workspaceRoot, launcherObjectId(ownerId));
   }
 
   /** The numeric identity a preview container runs as, for a root-side chown. */
-  previewOwnership(): { readonly uid: number; readonly gid: number } | null {
+  previewOwnership(): LauncherPreviewOwnership | null {
     if (!this.runningAsRoot) return null;
     const [uid = '', gid = ''] = this.previewUser.split(':');
     const parsed = { uid: Number(uid), gid: Number(gid) };
@@ -797,16 +809,22 @@ export class DockerLauncher implements ContainerLauncher {
   }
 
   async createWorkspace(ownerId: LauncherOwnerId): Promise<LauncherWorkspaceHandle> {
+    if (this.volumes) {
+      const row = await this.volumes.create('preview', ownerId);
+      return { ownerId, id: row.id, volume: row.volume, hostPath: row.hostPath };
+    }
     const hostPath = this.workspacePath(ownerId);
     // Fresh, always. A directory left by a crashed predecessor would be
     // mounted into the next generation, which is how a preview would serve
     // bytes the run that owns it never produced.
     rmSync(hostPath, { recursive: true, force: true });
-    mkdirSync(hostPath, { recursive: true });
+    mkdirSync(hostPath, { recursive: true, ...(this.workspaceOwnership ? { mode: 0o700 } : {}) });
+    if (this.workspaceOwnership) chownSync(hostPath, this.workspaceOwnership.uid, this.workspaceOwnership.gid);
     return { ownerId, id: launcherObjectId(ownerId), hostPath };
   }
 
   async removeWorkspace(handle: LauncherWorkspaceHandle): Promise<void> {
+    if (this.volumes) { await this.volumes.release('preview', handle.ownerId); return; }
     rmSync(this.workspacePath(handle.ownerId), { recursive: true, force: true });
   }
 

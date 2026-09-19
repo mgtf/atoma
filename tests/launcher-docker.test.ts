@@ -1,11 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
+  type ContainerLauncher,
   EXAMPLE_EGRESS_PROXY_SPEC,
   launcherNetworkSpecSchema,
   launcherUnitSpecSchema,
 } from '../src/contracts/launcher.js';
 import {
-  DockerLauncher,
+  createContainerLauncher,
   isIsolatedGatewayUnsupported,
   launcherObjectId,
   LauncherExitRegistry,
@@ -21,9 +22,9 @@ import {
 
 function recordingLauncher(
   reply: (args: string[]) => string = () => ''
-): { launcher: DockerLauncher; calls: string[][] } {
+): { launcher: ContainerLauncher; calls: string[][] } {
   const calls: string[][] = [];
-  const launcher = new DockerLauncher({
+  const launcher = createContainerLauncher({
     image: 'worker-image',
     runDocker: async (args) => {
       calls.push(args);
@@ -36,6 +37,10 @@ function recordingLauncher(
 }
 
 describe('launcher contract shapes', () => {
+  it('exposes only ContainerLauncher from the host composition seam', () => {
+    expectTypeOf(createContainerLauncher).returns.toEqualTypeOf<ContainerLauncher>();
+  });
+
   it('parses its own example', () => {
     expect(EXAMPLE_EGRESS_PROXY_SPEC.kind).toBe('egress-proxy');
     expect(launcherUnitSpecSchema.safeParse(EXAMPLE_EGRESS_PROXY_SPEC).success).toBe(true);
@@ -157,7 +162,7 @@ describe('launcher unit start', () => {
 describe('launcher purge and reconciliation', () => {
   it('purges an owner best-effort, in unit-then-networks order', async () => {
     const calls: string[][] = [];
-    const launcher = new DockerLauncher({
+    const launcher = createContainerLauncher({
       image: 'worker-image',
       runDocker: async (args) => {
         calls.push(args);
@@ -228,9 +233,9 @@ describe('launcher purge and reconciliation', () => {
 });
 
 describe('launcher preview profiles', () => {
-  function previewLauncher(): { launcher: DockerLauncher; calls: string[][] } {
+  function previewLauncher(): { launcher: ContainerLauncher; calls: string[][] } {
     const calls: string[][] = [];
-    const launcher = new DockerLauncher({
+    const launcher = createContainerLauncher({
       image: 'worker-image',
       previewImage: 'preview-image@sha256:abc',
       previewRuntime: 'runsc',
@@ -377,7 +382,7 @@ describe('launcher preview profiles', () => {
 describe('launcher network removal', () => {
   it('treats an already-absent network as removed rather than retrying to the budget', async () => {
     let attempts = 0;
-    const launcher = new DockerLauncher({
+    const launcher = createContainerLauncher({
       image: 'worker-image',
       runDocker: async () => {
         attempts += 1;
@@ -392,7 +397,7 @@ describe('launcher network removal', () => {
   });
 
   it('reports failure instead of claiming a durable object is gone', async () => {
-    const launcher = new DockerLauncher({
+    const launcher = createContainerLauncher({
       image: 'worker-image',
       runDocker: async () => {
         throw new Error('network is in use');
@@ -406,9 +411,11 @@ describe('launcher network removal', () => {
 
   it('shares ONE deadline across several removals in a teardown', async () => {
     let clock = 0;
-    const launcher = new DockerLauncher({
+    let calls = 0;
+    const launcher = createContainerLauncher({
       image: 'worker-image',
       runDocker: async () => {
+        calls += 1;
         clock += 10_000; // blow past the budget on the first attempt
         throw new Error('network is in use');
       },
@@ -428,6 +435,8 @@ describe('launcher network removal', () => {
         deadline
       )
     ).resolves.toBe(false);
+    // The second network gets no new budget or engine call.
+    expect(calls).toBe(2);
   });
 });
 

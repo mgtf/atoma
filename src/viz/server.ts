@@ -117,7 +117,7 @@ import {
 import { PreviewManager } from '../preview/manager.js';
 import { PreviewHttpService } from '../preview/httpService.js';
 import { previewOpenOptionsSchema } from '../contracts/preview.js';
-import { DockerLauncher } from '../launcher/docker.js';
+import { connectContainerLauncher } from '../launcher/connect.js';
 import { DEFAULT_WORKER_IMAGE } from '../tools/containerExecutor.js';
 import { PushStore } from './push/store.js';
 import { PushNotifier } from './push/notifier.js';
@@ -974,7 +974,7 @@ const PREVIEW_RUNTIME_PROMISE: Promise<PreviewRuntime | null> = (async () => {
   previewStore.reconcileInterrupted();
   const claims = new PreviewClaimRegistry();
   const routes = new PreviewRouteTable();
-  const launcher = new DockerLauncher({
+  const launcher = await connectContainerLauncher({
     image: DEFAULT_WORKER_IMAGE,
     previewImage: config.image,
     previewRuntime: config.runtime,

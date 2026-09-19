@@ -1,3 +1,4 @@
+import { projectWorkspaceRelative } from '../contracts/launcherVolumes.js';
 import { randomUUID } from 'node:crypto';
 import { migratePlatformSkills, reconcilePlatformSkills } from '../skills/migratePlatform.js';
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
@@ -249,6 +250,7 @@ const FORWARDED_HOST_ENV = [
   'DOCKER_HOST',
   'DOCKER_CONFIG',
   'ATOMA_EGRESS_ALLOWLIST',
+  'ATOMA_LAUNCHER_SOCKET', 'ATOMA_LAUNCHER_WORKSPACE_ID', 'ATOMA_WORKER_IMAGE',
   'HTTPS_PROXY',
   'HTTP_PROXY',
   'NO_PROXY',
@@ -846,14 +848,15 @@ export function projectRunHostLayout(
   root: string,
   orgId: string,
   projectId: string,
-  runId: string
+  runId: string,
+  workspaceRoot?: string
 ) {
   const projectRoot = path.join(path.resolve(root), 'orgs', orgId, 'projects', projectId);
   const runRoot = path.join(projectRoot, 'runs', runId);
   return {
     projectRoot,
     runRoot,
-    workspacePath: path.join(runRoot, 'workspace'),
+    workspacePath: workspaceRoot ? path.join(path.resolve(workspaceRoot), projectWorkspaceRelative({ orgId, projectId, runId })) : path.join(runRoot, 'workspace'),
     runsPath: path.join(runRoot, 'traces'),
     logPath: path.join(runRoot, 'run.log'),
     skillsPath: path.join(projectRoot, 'skills'),
@@ -1045,12 +1048,14 @@ export class ProjectRunCoordinator {
     catch (error) {
       throw new ProjectRunConfigurationError((error as Error).message);
     }
+    if (this.hostEnv['ATOMA_LAUNCHER_SOCKET'] && !this.hostEnv['ATOMA_LAUNCHER_WORKSPACE_ROOT']) throw new ProjectRunConfigurationError('Launcher workspace root is required for project runs');
     const candidateRunId = randomUUID();
     const candidatePaths = projectRunHostLayout(
       this.root,
       input.orgId,
       input.projectId,
-      candidateRunId
+      candidateRunId,
+      this.hostEnv['ATOMA_LAUNCHER_SOCKET'] ? this.hostEnv['ATOMA_LAUNCHER_WORKSPACE_ROOT'] : undefined
     );
     let lease: RunLease;
     try {

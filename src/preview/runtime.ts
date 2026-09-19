@@ -1,6 +1,7 @@
 import type {
   ContainerLauncher,
   LauncherNetworkHandle,
+  LauncherPreviewOwnership,
   LauncherUnitHandle,
   LauncherWorkspaceHandle,
 } from '../contracts/launcher.js';
@@ -59,7 +60,7 @@ export interface PreviewRuntimeDeps {
    * Who must own the copy so the container can read it. Null where the
    * container already runs as this process's uid, which is the ordinary case.
    */
-  readonly copyOwnership?: { readonly uid: number; readonly gid: number } | null;
+  readonly copyOwnership?: LauncherPreviewOwnership | null;
   /** Readiness budget for the application's own marker. Design D8: 60 s. */
   readonly readyTimeoutMs?: number;
   readonly log?: (line: string) => void;
@@ -146,7 +147,7 @@ export async function teardownPreview(
   // later step left it running with no handle for teardown to remove. Purging
   // by owner is exactly the operation that does not depend on our bookkeeping.
   await attempt('remaining objects', () => deps.launcher.purgeOwner('preview', ownerId));
-  deps.launcher.disarmHardExitCleanup('preview', ownerId);
+  await attempt('hard-exit registration', async () => deps.launcher.disarmHardExitCleanup('preview', ownerId));
 }
 
 /**
@@ -174,7 +175,7 @@ export async function startPreview(
   await launcher.purgeOwner('preview', input.ownerId);
   // Armed BEFORE creation: if the purge raced the engine's endpoint teardown,
   // creation itself can fail while the old objects are still durable.
-  launcher.armHardExitCleanup('preview', input.ownerId);
+  await launcher.armHardExitCleanup('preview', input.ownerId);
 
   if ((input.sourceWorkspace === undefined) === (input.preparedWorkspace === undefined)) {
     return fail('internal', 'a preview starts from exactly one of a source workspace or a prepared copy');

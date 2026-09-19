@@ -70,6 +70,13 @@ const config: PreviewConfig = {
 
 /** A launcher that only has to issue workspaces: the static path uses no unit. */
 class WorkspaceOnlyLauncher implements ContainerLauncher {
+  previewOwnership(): null {
+    return null;
+  }
+  async removeNetworkBefore(): Promise<boolean> {
+    return true;
+  }
+
   constructor(private readonly rootDir: string) {}
   networkName(spec: LauncherNetworkSpec): string {
     return `net-${spec.ownerId}`;

@@ -126,7 +126,7 @@ export default tseslint.config(
   },
   {
     // Plain-Node analysis scripts: no TS project, no type information.
-    files: ['benchmark/**/*.mjs', 'scripts/**/*.mjs'],
+    files: ['benchmark/**/*.mjs', 'scripts/**/*.mjs', 'docker/**/*.mjs'],
     ...tseslint.configs.disableTypeChecked,
     rules: {
       // Spread FIRST. A bare `rules:` key replaces the spread's own rules

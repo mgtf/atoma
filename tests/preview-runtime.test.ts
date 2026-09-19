@@ -62,6 +62,10 @@ interface FakeOptions {
 }
 
 class FakeLauncher implements ContainerLauncher {
+  previewOwnership(): null {
+    return null;
+  }
+
   readonly calls: string[] = [];
   armed = false;
 

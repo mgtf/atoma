@@ -61,7 +61,7 @@ The supported claim today is:
 
 The following claims are **not** supported:
 
-- production hosted SaaS (no separate launcher, no web/launcher images, no
+- production hosted SaaS (separate launcher implementation awaits acceptance; no web image, no
   reference stack, no packaged-stack acceptance);
 - isolation between mutually untrusted organisations;
 - a dedicated one-organisation deployment (self-signup creates organisations);
@@ -164,26 +164,22 @@ cloning.
 
 ### Missing production substrate
 
-The model-authored Element worker has an OS boundary. The
-control-plane/launcher boundary does not. `ContainerLauncher` is a closed
-typed contract and `DockerLauncher` implements it for egress and preview
-profiles, with workspace issuance and orphan-removal primitives — but the
-backend runs **inside the viz server process**, workspace handles are host
-directories, and the worker's attached stdio transport stays in
-`src/tools/containerExecutor.ts`, outside the contract
-([`src/launcher/AGENTS.md`](../src/launcher/AGENTS.md), *What is IN-PROCESS
-today*). "The launcher owns the images and the flags" is a code-organisation
-property, not yet a security boundary.
+The model-authored Element worker has an OS boundary. W1 now implements an
+optional separate launcher service over a private socket, with its own image
+([setup](launcher-service.md)); runtime and deployment acceptance are deferred.
+Without `ATOMA_LAUNCHER_SOCKET`, `DockerLauncher` remains in-process.
+The service issues named volumes with a shared file projection. W2 adds a launcher-issued
+worker socket transport; W3 adds named volumes and automatic project workspace provisioning.
+The [launcher contract](../src/launcher/AGENTS.md) records both modes and their
+limitations. The complete deployment boundary is not yet accepted.
 
-Decided target ([launcher decision](deployment-docker-launcher-2026-08-28.md)):
-Linux, Docker images, one separate launcher service. The web container never
-mounts `docker.sock`; the launcher is the only Docker API holder; callers use
-closed profiles; workspaces are launcher-managed volumes; leases, TTLs, orphan
-reconciliation and reverse teardown live behind the launcher; the same boundary
-launches Element workers, egress sidecars and preview workloads. Images that
-exist: `worker`, `preview`, `mender`. Images that do not: `web`, `launcher`.
-There is no reference stack.
-
+The decided target remains Linux, Docker images and one separate launcher
+([decision](deployment-docker-launcher-2026-08-28.md)). The web container never
+mounts `docker.sock`; closed profiles cover workers, egress and previews;
+W3 implements volumes, leases, TTLs and orphan recovery; runtime acceptance remains deferred.
+Image definitions exist for worker, preview, mender, launcher and web. W7 adds
+the [reference stack](packaged-stack.md), digest validation and a restricted build
+context. Image builds and clean-host boot remain unverified.
 ### The next code decision
 
 **Gate 0: hardened SQLite versus PostgreSQL.** Decided for hardened SQLite on
@@ -264,23 +260,23 @@ what bounds a hostile body, and it bounds blast radius, not authorship.
 
 **D1 — The web/control plane never holds the Docker socket.** The launcher is
 the only component allowed to create or destroy workloads. *Not satisfied:
-`DockerLauncher` runs in the viz server process.*
+`DockerLauncher` remains the default in-process backend; the optional W1 service is not yet deployment-accepted, and W2 worker socket acceptance is deferred.*
 
 **D2 — The launcher accepts closed profiles, not Docker syntax.** A caller
 cannot choose an image, mount, network, command, capability or arbitrary
 environment entry. *Satisfied at the contract level for egress and preview;
-the worker path bypasses the contract for its stdio transport.*
+W2 service workers use a closed workspace-key profile (runtime acceptance deferred).*
 
 **D3 — Every run's model-authored Element workload receives its own boundary.**
 Its only writable product mount is its workspace. Stores, skills,
 credentials, other workspaces and the control plane are unreachable from it.
 Egress is deny-by-default. *Satisfied for the worker container; workspaces
-are host directories, not launcher volumes.*
+use named local-driver volumes with a shared file projection (W3; acceptance deferred).*
 
 **D4 — Lifecycle ownership follows workload ownership.** The launcher owns
 heartbeat, deadlines, bounded stop, reverse teardown and orphan
 reconciliation. *Partially satisfied: primitives exist in-process; the worker
-lifecycle is in `containerExecutor.ts`.*
+lifecycle and operational recovery are launcher-owned (W3; acceptance deferred).*
 
 ### Testable invariants
 
@@ -452,15 +448,15 @@ Decision 6 settles it.
 
 | # | Item | Status | Blocked by | Done when |
 |---|---|---|---|---|
-| **W0** | Close the launcher contract leak | not started | — | `src/tools/egressSidecar.ts` and `src/viz/server.ts` construct and call through `ContainerLauncher` only; `removeNetworkBefore` and `previewOwnership` are on the contract or gone. Until then W1 cannot be a transport swap. |
-| **W1** | Separate launcher service | contract + in-process backend done | W0 | `DockerLauncher` runs in its own container behind a permissioned socket; the web image holds no `docker.sock` (D1). |
-| **W2** | Worker transport behind the launcher | not started | W1; possibly W3 — a socket preserving `--network none` must be bind-mounted on a path both sides see, which is the workspace story (unverified) | The Element worker speaks a socket/network protocol issued by the launcher; `containerExecutor.ts` no longer owns attach/remove; `workerRunArgs` isolation assertions still pass (D2, D4). |
-| **W3** | Launcher-managed workspaces | not started | W1 (decision 6: leases stay in a machine-local file, so no store writer) | Workspace handles are volumes, not host paths; lease, TTL, bounded stop, reverse teardown and orphan reconciliation are launcher operations (D3, D4). |
+| **W0** | Close the launcher contract leak | **implemented** (2026-09-19): `createContainerLauncher` returns only `ContainerLauncher`; egress and viz use that seam, and shared-deadline removal plus preview copy ownership are explicit contract operations | — | `src/tools/egressSidecar.ts` and `src/viz/server.ts` construct and call through `ContainerLauncher` only; `removeNetworkBefore` and `previewOwnership` are on the contract or gone. Until then W1 cannot be a transport swap. |
+| **W1** | Separate launcher service | **implemented, acceptance deferred** (2026-09-19): optional private socket service, typed client, connection-owned cleanup and launcher image; see [setup](launcher-service.md). Not activated on production; worker transport implemented in W2 | W0 implemented | `DockerLauncher` runs in its own container behind a permissioned socket; the web image holds no `docker.sock` (D1). |
+| **W2** | Worker transport behind the launcher | **implemented, acceptance deferred** (2026-09-19): closed workspace-key profile, private socket-file transport, concurrent tool calls and confirmed launcher-owned removal; local stdio lives in the launcher. [Setup and limits](launcher-service.md#boundary) | W1 implemented; W3 now provisions project volumes automatically | The Element worker speaks a socket/network protocol issued by the launcher; `containerExecutor.ts` no longer owns attach/remove; `workerRunArgs` isolation assertions still pass (D2, D4). Runtime and Docker acceptance have not been run. |
+| **W3** | Launcher-managed workspaces | **implemented, acceptance deferred** (2026-09-19): named local-driver volumes with a shared file projection, automatic project provisioning, operational lease journal/process lock, heartbeat/TTL, reverse teardown and boot recovery; run evidence is retained. [Setup](launcher-service.md#workspaces-and-recovery-w3) | W1/W2 implemented | Workspace handles carry volume identities; lease, TTL, bounded stop, reverse teardown and orphan reconciliation are launcher operations (D3, D4). Docker/restart acceptance remains deferred. |
 | **W4** | Skill counters out of `_meta.json` | **done** (2026-09-18): `skill_meta` in the product store, created by the one schema step both open paths share; `SkillRegistry` mutations are one `.immediate()` transaction each, event included; legacy sidecars imported once by the first mutation or `reconcilePlatformSkills`, then retired as `_meta.imported.json`; the folds re-key rows with the folders they move; `save` zeroes the row when it CREATES a body, and the projection zeroes on `skill-drop`/`skill-merge`, so a folder that outlives its row can neither inherit nor contradict trust; backup takes the store LAST so rows are never older than bodies | — | Every counter, promotion and demotion mutation is one statement in one transaction with its ledger event (T6, R4). Gate 0 decides dialect and transaction mode, not placement — T6 already forces the counters into the store holding `lifecycle_events`. `save`, `promoteToScript`, `demoteToLlm` and `merge` become file+DB pairs no transaction covers, so the crash ordering must be re-derived, not ported. |
 | **W4a** | Registry write-transaction correctness | **done** (`8a4f2ff`) | — | All eleven registry write transactions are `.immediate()`; both product-store open paths set `busy_timeout` explicitly instead of inheriting the driver default; a regression allocates ordinals across connections and processes. This is R8 for the STORE, owed under either Gate 0 branch. It does NOT close `_meta.json` file concurrency — that is W4. |
 | **W5** | Durable payer ledger for every run | **done** (`5154832`): `project_run_payers`, three immutable rows per run, written in the queued→running transaction; the coordinator resolves payers through `payerForSelector` | — (the org-scoped cost READ surface waits on decision 3) | The three-row `RunPayerLedger` is persisted for API-key-only runs too, in the same transaction as the queued→running transition (T10). The coordinator resolves payers THROUGH `payerForSelector`, the contract's canonical rule. The synthetic benchmark control (`retrievalProjectAttempt`) transitions its accounting run directly and records no payer; it spends nothing. |
 | **W6** | Scoped lifecycle attribution | **done** (2026-09-18): `lifecycle_events` carries `org_id`, `project_id`, `run_id`, `actor_type`, `actor_id` and `entity_id`; one `ensureLedgerSchema` on both open paths; the runner, the MCP writes and the CLI set the scope; `ledger check` compares types by `atom_id` | — | Backfill rule taken by the owner: resolve each label against the current store, leave NULL what does not resolve, rewrite nothing. The ordering constraint held: the migration is one function called from `openDb` and from the cached handle, and `tests/ledger.test.ts` drives a legacy-shaped store through each path first, then a pre-column store through the backfill. A read-only reader on an unmigrated snapshot still reads it, without scope or id. |
-| **W7** | Web, launcher images and a reference stack | worker/preview/mender images exist; no `.dockerignore`, so the worker build sends the whole working tree as context | W1 for the web image — `src/viz/server.ts` constructs `DockerLauncher` in-process for previews, so a web container honouring D1 loses previews until W1 lands | Two more image definitions, one compose/stack file, digest pins, a `.dockerignore`; boots on a clean Linux host. |
+| **W7** | Web, launcher images and a reference stack | **Implemented locally, acceptance deferred (2026-09-19):** web image with Haystack, Linux Compose with TLS gateway, shared paths, worker pin propagation, digest checker and `.dockerignore`; [setup and limitations](packaged-stack.md) | W1–W3 runtime acceptance; real published image refs, Linux Engine 28+, runsc, OAuth and TLS provisioning | Image builds and clean Linux boot remain unexecuted; W13 must prove the assembled stack. |
 | **W8-a** | A restore drill valid on the deployed shape | **done for the fixture** (`bdb6bf9`); NOT yet run against a snapshot from the real host | — | The drill distinguishes a tier NOT APPLICABLE to a deployment from one expected and lost — ignoring `skipped` wholesale would make it falsely reassuring. It passes on a production-shaped fixture, which proves the fix; a real snapshot from the host is verified separately and proves more. The manifest records that `store.db` needs an externally held `ATOMA_SECRET_ENCRYPTION_KEY` to yield usable organisation keys, without containing it. |
 | **W8-b** | Hosted backup and disaster recovery | `npm run backup` (dated, pruned, off-machine); the 2026-09-14 drill ([recovery-drill-2026-09-14.md](recovery-drill-2026-09-14.md)) covers the local store only | W8-a, W7 | A restore drill on the packaged stack and documented RPO/RTO. Proving recovery requires retrieving the encryption key separately and decrypting under control; documenting the dependency is not that proof. Secret ROTATION is distinct from restoration and is its own work: there is no re-encryption implementation in `src/auth/`, and the AAD binds the key identity, so rotation means decrypt-under-old then re-encrypt-under-new for every row plus the GitHub token wrapping key. |
 | **W9** | Trace and workspace retention | platform events only (90 d); nothing sweeps run traces, workspaces or `lifecycle_events` | W8-a (decision 2: 90 days for finished runs' traces and workspaces; `lifecycle_events` never swept) | A retention window for `orgs/<org>/projects/<project>/runs/<run>/` traces and workspaces, enforced by a job the operator can run and audit. The preview TTL (`idleMs`, `hardMs`) is a precedent for the shape, not an implementation. Strictly after W8-a: deleting run bytes before restoration is proven destroys the evidence the snapshot exists to keep. Decision 2 must also settle whether expiry drops the `project_runs` row or only the bytes — publications, verdicts and the run index reference it. |
@@ -470,12 +466,11 @@ Decision 6 settles it.
 | **W13** | Packaged-stack acceptance | `auth-release-smoke.mjs` (loopback IdP, temp store) | W1, W7 | Boots the stack; proves founder login, invitation, role enforcement, Element-workload isolation, delivery, restart, backup/restore and denied control-plane reachability from the worker network. |
 | **W14** | Shared-learning acceptance | `tests/project-retrieval-privacy.test.ts` characterises the corpus side; nothing asserts cross-org skill reuse | W13 for the isolation half only | Two organisations on one stack: no cross-org trace/workspace/corpus read. The SHARED half — a recipe learned by one organisation dispatched by the other's next run — is assertable in one process since 2026-09-15 and needs no stack; it is the only mechanical proof that the decision was implemented and not merely documented. |
 
-Order: ~~W8-a~~ → ~~W4a~~ → ~~W5~~ → ~~W6~~ → ~~Gate 0~~ → ~~W4~~ → W0 → W1 →
-W2 → W3 → W7 → W13 → W14. W8-a and W4a landed on 2026-09-17, W5, W6 and W4 on
-2026-09-18, and Gate 0 was decided the same day on what they measured. What
-remains is engineering under a stabilisation mandate: the launcher line
-(W0–W3, W7) and the acceptance runs (W13, W14), none of it urgent, none of it
-a migration.
+Order: ~~W8-a~~ → ~~W4a~~ → ~~W5~~ → ~~W6~~ → ~~Gate 0~~ → ~~W4~~ → ~~W0~~ → ~~W1~~ →
+~~W2~~ → ~~W3~~ → ~~W7~~ → W13 → W14. W8-a and W4a landed on 2026-09-17, W5, W6 and W4 on
+2026-09-18, and Gate 0 was decided the same day on what they measured. The launcher line (W1–W3, W7) is implemented locally on 2026-09-19, with
+execution verification deferred. The acceptance runs (W13, W14) remain; this
+does not close the other operational items in the table or constitute a migration.
 
 What W4a measured, and what Gate 0 should read from it: reverting only the
 eleven `.immediate()` calls, with the explicit `busy_timeout` left in place,
@@ -636,10 +631,8 @@ oracle is accepted as a consequence of the commons.
   per-run egress topology; the closed launcher contract with an in-process
   egress/preview backend; principal-owned Codex on all tiers and the three-row
   payer contract.
-- **Accepted, not implemented:** the separate launcher service, worker
-  transport migration, launcher-managed volumes, web/launcher images and a
-  reference stack (W1–W3, W7). Atomic skill counters, the durable payer
-  ledger and scoped lifecycle attribution (W4, W5, W6) are implemented.
+- **Implemented, acceptance deferred (2026-09-19):** separate launcher service, worker transport and managed volumes (W1–W3), plus web image and reference stack (W7); see [launcher setup](launcher-service.md) and [stack setup](packaged-stack.md).
+- **Also implemented:** atomic skill counters, the durable payer ledger and scoped lifecycle attribution (W4, W5, W6).
 - **Superseded:** the body/trust split, organisation-local trust, the
   platform body offer/approval workflow, the per-owner registry and the
   per-project skill trust. Their records stay as evidence.

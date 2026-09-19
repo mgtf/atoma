@@ -754,6 +754,9 @@ export async function startTask(
         egress: args.egress,
         ...(egressAllowlist ? { egressAllowlist } : {}),
         runId: `${profile.id}-${process.pid}`,
+        ...(tenantRun && runScope.orgId && runScope.projectId && requestedRunId ? {
+          projectWorkspace: { orgId: runScope.orgId, projectId: runScope.projectId, runId: requestedRunId },
+        } : {}),
       })
     : localToolBackend({ workspaceRoot, logger: consoleLogger });
     return retrievalBinding

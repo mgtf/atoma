@@ -143,6 +143,8 @@ describe('project run environment', () => {
         OPENAI_API_KEY: 'unreferenced-must-not-cross',
         ATOMA_GITHUB_APP_PRIVATE_KEY: 'must-not-cross',
         ATOMA_AUTH_GITHUB_CLIENT_SECRET: 'must-not-cross-either',
+        ATOMA_LAUNCHER_SOCKET: '/run/atoma/launcher.sock',
+        ATOMA_WORKER_IMAGE: 'registry.example/worker@sha256:' + 'a'.repeat(64),
       },
     });
     expect(env['ANTHROPIC_API_KEY']).toBe('model-key');
@@ -150,6 +152,8 @@ describe('project run environment', () => {
     expect(env['ATOMA_REQUIRE_ISOLATION']).toBe('1');
     expect(env['ATOMA_CONTAINER']).toBe('1');
     expect(env['ATOMA_EGRESS']).toBe('1');
+    expect(env['ATOMA_LAUNCHER_SOCKET']).toBe('/run/atoma/launcher.sock');
+    expect(env['ATOMA_WORKER_IMAGE']).toBe('registry.example/worker@sha256:' + 'a'.repeat(64));
     expect(env['ATOMA_GITHUB_APP_PRIVATE_KEY']).toBeUndefined();
     expect(env['ATOMA_AUTH_GITHUB_CLIENT_SECRET']).toBeUndefined();
     // No `ATOMA_LLM`: every tier carries its own selector.
