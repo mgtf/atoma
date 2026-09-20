@@ -346,3 +346,13 @@ list. These values come from the host snapshot, never a tenant prompt.
   publication uses that exact base and persists a PR URL when applicable.
   Old projects retain their existing publication and seed behaviour. The source
   choice is immutable; imported visibility is inherited, never chosen locally.
+
+## Retention and admission
+
+Finished run bytes are eligible after 90 days; current active-project seeds
+and unfinished publications hold them. Offline maintenance preserves run
+metadata, payers and lifecycle_events; expiry never changes delivery status.
+Per-org admission defaults to one (zero suspends), with the global lease still
+limiting the host to one run. Recheck inside reservation after idempotency.
+The operator commands and offline prerequisites live in
+[W9/W10](../../docs/project-maintenance.md).

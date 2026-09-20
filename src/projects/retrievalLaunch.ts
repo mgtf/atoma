@@ -62,7 +62,7 @@ export class ProjectRetrievalLaunchStore {
             receipt.scope.generation !== retrievalGeneration(canonicalRetrievalManifest(receipt.manifest), retrievalConfigForManifest(receipt.manifest))) return null;
         if (receipt.sourceRunId) {
           const source = this.projects.getProjectRun(run.orgId, receipt.sourceRunId);
-          if (!source || source.projectId !== run.projectId || source.status !== 'delivered' ||
+          if (!source || source.bytesExpiredAt || source.projectId !== run.projectId || source.status !== 'delivered' ||
               source.artifactManifestHash !== receipt.sourceManifestHash) return null;
         }
         return receipt;
@@ -86,7 +86,7 @@ export class ProjectRetrievalLaunchStore {
       const run = this.eligibleRun(runId);
       if (!run) throw new Error('denied');
       const source = sourceRunId ? this.projects.getProjectRun(run.orgId, sourceRunId) : null;
-      if (sourceRunId && (!source || source.projectId !== run.projectId || source.status !== 'delivered')) throw new Error('invalid source run');
+      if (sourceRunId && (!source || source.bytesExpiredAt || source.projectId !== run.projectId || source.status !== 'delivered')) throw new Error('invalid source run');
       if (source?.artifactManifest && artifactManifestHash(source.artifactManifest) !== source.artifactManifestHash) throw new Error('invalid source manifest');
       const documents = (source?.artifactManifest?.files ?? [])
         .filter(file => projectDocumentFormat(file.path) !== null && file.mode === '100644')

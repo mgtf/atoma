@@ -54,12 +54,20 @@ def inspect_store(store, projects):
         if "project_runs" not in tables:
             return result
         db.row_factory = sqlite3.Row
-        for row in db.execute("SELECT project_run_id,project_id,org_id,status,trace_id,started_at,ended_at FROM project_runs ORDER BY created_at,project_run_id"):
+        for row in db.execute("SELECT * FROM project_runs ORDER BY created_at,project_run_id"):
             run_id = component(row["project_run_id"])
             relative = Path("orgs") / component(row["org_id"]) / "projects" / component(row["project_id"]) / "runs" / run_id
             folder = projects / relative
             found = {"runId": run_id, "status": row["status"], "workspace": (folder / "workspace").is_dir(),
                      "log": (folder / "run.log").is_file(), "trace": None}
+            if "bytes_deleted_at" in row.keys() and row["bytes_deleted_at"]:
+                if row["bytes_expired_at"] and row["status"] in ("delivered", "failed", "cancelled"):
+                    found["retention"] = "expired"
+                    result["projectRuns"].append(found)
+                    continue
+                result["issues"].append({"runId": run_id, "reason": "invalid-retention-receipt"})
+            elif "bytes_expired_at" in row.keys() and row["bytes_expired_at"]:
+                result["issues"].append({"runId": run_id, "reason": "interrupted-retention"})
             if row["trace_id"]:
                 trace_id = component(row["trace_id"])
                 found["trace"] = (folder / "traces" / (trace_id + ".json")).is_file()

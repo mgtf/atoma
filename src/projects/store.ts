@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { orgRunLimitSchema, type OrgRunCapacity } from '../contracts/projects.js';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
@@ -49,6 +50,10 @@ import { artifactManifestHash } from './artifacts.js';
  * control-plane UUID has been allocated.
  */
 export const PROJECT_TABLES_DDL = `
+CREATE TABLE IF NOT EXISTS org_run_limits (
+  org_id TEXT PRIMARY KEY REFERENCES auth_organisations(org_id),
+  max_concurrent INTEGER NOT NULL CHECK (max_concurrent IN (0, 1))
+);
 CREATE TABLE IF NOT EXISTS projects (
   project_id                    TEXT PRIMARY KEY,
   org_id                        TEXT NOT NULL REFERENCES auth_organisations(org_id),
@@ -292,6 +297,7 @@ interface ProjectRunRow {
   runs_path: string;
   log_path: string;
   skills_path?: string | null;
+  bytes_expired_at?: string | null;
   trace_id: string | null;
   stats_json: string | null;
   artifact_manifest_json: string | null;
@@ -389,6 +395,7 @@ function runFromRow(row: ProjectRunRow): ProjectRun {
     requestedByPrincipalId: row.requested_by_principal_id,
     requestKey: row.request_key,
     goal: row.goal,
+    bytesExpiredAt: row.bytes_expired_at ?? null,
     status: row.status,
     hostPaths: {
       workspacePath: row.workspace_path,
@@ -556,6 +563,8 @@ export class ProjectStore {
         ['projects', 'repository_source_json'],
         ['project_runs', 'repository_base_json'],
         ['project_runs', 'skills_path'],
+        ['project_runs', 'bytes_expired_at'],
+        ['project_runs', 'bytes_deleted_at'],
         ['project_publications', 'pull_request_url'],
         ['project_publications', 'seed_commit_sha'],
       ]) {
@@ -774,6 +783,7 @@ export class ProjectStore {
 
   listAllRunTraces(): Array<{
     id: string;
+    orgId: string;
     file: string;
     projectId: string;
     projectName: string;
@@ -781,12 +791,13 @@ export class ProjectStore {
   }> {
     const rows = this.db
       .prepare(
-        `SELECT r.project_run_id, r.trace_id, r.runs_path, r.project_id, p.name AS project_name, p.slug AS project_slug
+        `SELECT r.org_id, r.project_run_id, r.trace_id, r.runs_path, r.project_id, p.name AS project_name, p.slug AS project_slug
          FROM project_runs r
          JOIN projects p ON p.project_id = r.project_id AND p.org_id = r.org_id
          ORDER BY r.created_at DESC, r.project_run_id ASC`
       )
       .all() as Array<{
+      org_id: string;
       project_run_id: string;
       trace_id: string | null;
       runs_path: string;
@@ -796,6 +807,7 @@ export class ProjectStore {
     }>;
     const out: Array<{
       id: string;
+      orgId: string;
       file: string;
       projectId: string;
       projectName: string;
@@ -810,6 +822,7 @@ export class ProjectStore {
       if (!file) continue;
       out.push({
         id: row.project_run_id,
+        orgId: row.org_id,
         file,
         projectId: row.project_id,
         projectName: row.project_name,
@@ -925,24 +938,25 @@ export class ProjectStore {
     }));
   }
 
-  findAnyRunTraceFile(idInput: string): string | null {
+  findAnyRunTraceFile(idInput: string, onRead?: (orgId: string) => void): string | null {
     if (!isRunLookupId(idInput)) return null;
     const asUuid = projectRunIdSchema.safeParse(idInput);
     const row = (
       asUuid.success
         ? this.db
             .prepare(
-              `SELECT project_run_id, trace_id, runs_path FROM project_runs
+              `SELECT org_id, project_run_id, trace_id, runs_path FROM project_runs
                WHERE project_run_id = ? OR trace_id = ?`
             )
             .get(asUuid.data, asUuid.data)
         : this.db
             .prepare(
-              `SELECT project_run_id, trace_id, runs_path FROM project_runs WHERE trace_id = ?`
+              `SELECT org_id, project_run_id, trace_id, runs_path FROM project_runs WHERE trace_id = ?`
             )
             .get(idInput)
-    ) as { project_run_id: string; trace_id: string | null; runs_path: string } | undefined;
+    ) as { org_id: string; project_run_id: string; trace_id: string | null; runs_path: string } | undefined;
     if (!row) return null;
+    onRead?.(row.org_id);
     return resolveProjectRunTraceFile({
       projectRunId: row.project_run_id,
       runsPath: row.runs_path,
@@ -1042,6 +1056,31 @@ export class ProjectStore {
     return runFromRow(existing);
   }
 
+  runCapacity(orgIdInput: string): OrgRunCapacity {
+    const orgId = organisationIdSchema.parse(orgIdInput);
+    const limit = this.db.prepare('SELECT max_concurrent AS value FROM org_run_limits WHERE org_id = ?')
+      .get(orgId) as { value: number } | undefined;
+    const count = this.db.prepare("SELECT COUNT(*) AS value FROM project_runs WHERE org_id = ? AND status IN ('queued','running')")
+      .get(orgId) as { value: number };
+    return { maxConcurrent: orgRunLimitSchema.parse(limit?.value ?? 1), active: count.value, globalMaxConcurrent: 1 };
+  }
+
+  setRunLimit(orgIdInput: string, value: number): void {
+    const orgId = organisationIdSchema.parse(orgIdInput);
+    const limit = orgRunLimitSchema.parse(value);
+    this.db.prepare(`INSERT INTO org_run_limits (org_id, max_concurrent) VALUES (?, ?)
+      ON CONFLICT(org_id) DO UPDATE SET max_concurrent = excluded.max_concurrent`).run(orgId, limit);
+  }
+
+  assertRunCapacity(orgId: string): void {
+    const capacity = this.runCapacity(orgId);
+    if (capacity.active >= capacity.maxConcurrent) {
+      throw new ProjectStateConflict(capacity.maxConcurrent === 0
+        ? 'New runs are suspended for this organisation'
+        : 'Organisation concurrent run limit reached');
+    }
+  }
+
   createProjectRun(input: {
     readonly orgId: string;
     readonly projectId: string;
@@ -1049,6 +1088,7 @@ export class ProjectStore {
     readonly request: CreateProjectRunInput;
     readonly hostPaths: ProjectRunHostPaths;
     readonly projectRunId?: string;
+    readonly enforceCapacity?: boolean;
   }): { readonly run: ProjectRun; readonly created: boolean } | null {
     const orgId = organisationIdSchema.parse(input.orgId);
     const projectId = projectIdSchema.parse(input.projectId);
@@ -1065,6 +1105,7 @@ export class ProjectStore {
       if (existing) {
         return { run: existing, created: false } as const;
       }
+      if (input.enforceCapacity) this.assertRunCapacity(orgId);
       const now = new Date().toISOString();
       this.db
         .prepare(

@@ -2144,3 +2144,62 @@ describe('viz auth gate (process level)', () => {
     expect(await listed.json()).toEqual([expect.objectContaining({ installationId: '99887766' })]);
   });
 });
+
+it('audits all four HTTP cross-org read paths and refuses reads if the journal fails', async () => {
+  const instance = tempInstance();
+  const provider = await startFakeProvider({ port: await freePort(), subject: 7707 });
+  const port = await freePort();
+  const base = `http://127.0.0.1:${port}`;
+  const running = startViz([...instance.args, '--port', String(port)], providerEnv(provider, base));
+  await waitReady(running, `${base}/auth/whoami`);
+  const jar = new CookieJar();
+  expect((await fetchWithJar(jar, `${base}/auth/login?provider=github`)).status).toBe(200);
+  const cookie = { cookie: jar.header(base)! };
+  const db = new Database(instance.dbPath);
+  try {
+    const auth = new AuthStore(db);
+    const adminId = db.prepare('SELECT principal_id FROM auth_principals LIMIT 1').pluck().get() as string;
+    auth.grantPlatformAdmin(adminId);
+    const foreign = auth.completeLogin({ provider: 'github', subject: 'foreign-audit-owner',
+      displayName: 'Foreign owner', email: null, emailVerified: false }, null)!.viewer;
+    const projects = new ProjectStore(db);
+    const project = projects.createProject({ orgId: foreign.orgId, principalId: foreign.principalId,
+      project: { name: 'Audit fixture', slug: 'audit-fixture', repositoryTarget: {
+        installationId: '123', owner: 'owner', name: 'audit-fixture', visibility: 'private',
+      } } });
+    const runId = randomUUID();
+    const layout = projectRunHostLayout(join(instance.root, 'projects'), foreign.orgId, project.projectId, runId);
+    projects.createProjectRun({ orgId: foreign.orgId, projectId: project.projectId, principalId: foreign.principalId,
+      projectRunId: runId, request: { idempotencyKey: runId, goal: 'Audit fixture' }, hostPaths: {
+        workspacePath: layout.workspacePath, runsPath: layout.runsPath, logPath: layout.logPath,
+      } });
+    mkdirSync(layout.runsPath, { recursive: true });
+    writeFileSync(join(layout.runsPath, `${runId}.json`), JSON.stringify({ id: runId,
+      label: 'Audit fixture', startedAt: '2026-09-20T12:00:00Z', events: [] }));
+    const paths = [
+      ['/api/projects', 'projects.index'],
+      [`/api/projects/${project.projectId}/runs`, 'projects.detail'],
+      ['/api/runs', 'runs.index'],
+      [`/api/runs/${runId}`, 'runs.trace'],
+    ];
+    for (const [path, surface] of paths) {
+      // Isolate each wiring seam; a previous receipt must not hide a missing hook.
+      db.prepare("DELETE FROM platform_events WHERE kind = 'admin.cross_org_read'").run();
+      expect((await fetch(`${base}${path}`, { headers: cookie })).status).toBe(200);
+      const row = db.prepare("SELECT actor_id, org_id, detail FROM platform_events WHERE kind = 'admin.cross_org_read'").get() as {
+        actor_id: string; org_id: string; detail: string;
+      };
+      expect(row).toMatchObject({ actor_id: adminId, org_id: foreign.orgId });
+      expect(JSON.parse(row.detail)).toMatchObject({ surface });
+      expect((await fetch(`${base}${path}`, { headers: cookie })).status).toBe(200);
+      expect(db.prepare("SELECT count(*) AS n FROM platform_events WHERE kind = 'admin.cross_org_read'").get()).toEqual({ n: 1 });
+      db.prepare("DELETE FROM platform_events WHERE kind = 'admin.cross_org_read'").run();
+      db.exec("CREATE TRIGGER refuse_read_audit BEFORE INSERT ON platform_events WHEN NEW.kind = 'admin.cross_org_read' BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END");
+      try { expect((await fetch(`${base}${path}`, { headers: cookie })).status).toBe(503); }
+      finally { db.exec('DROP TRIGGER refuse_read_audit'); }
+    }
+    auth.revokePlatformAdmin(adminId);
+    expect((await fetch(`${base}/api/runs/${runId}`, { headers: cookie })).status).toBe(404);
+    expect((await fetch(`${base}/auth/whoami`, { headers: cookie })).status).toBe(200);
+  } finally { db.close(); }
+}, 120_000);

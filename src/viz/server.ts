@@ -897,6 +897,10 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
   }
   const projects = new ProjectService({
     store: projectStore,
+    auditRead: (read) => {
+      if (!EVENTS) throw new Error('Cross-organisation audit unavailable');
+      return EVENTS.recordCrossOrgRead(read);
+    },
     coordinator,
     github: githubStore,
     events: emit,
@@ -1662,10 +1666,11 @@ function listOrganisationRunIndex(orgId: string): VizRunIndexEntry[] {
   return sortRunIndex(entries);
 }
 
-function listAllRunIndex(): VizRunIndexEntry[] {
+function listAllRunIndex(viewer: Viewer): VizRunIndexEntry[] {
   if (!PROJECTS_RUNTIME) return [];
   const entries: VizRunIndexEntry[] = [];
   for (const row of PROJECTS_RUNTIME.store.listAllRunTraces()) {
+    PROJECTS_RUNTIME.projects.auditRead(viewer, row.orgId, 'runs.index');
     const summary = summarizeTraceFile(row.file);
     if (!summary) continue;
     entries.push({
@@ -1683,7 +1688,7 @@ function listIndex(viewer: Viewer | null): VizRunIndexEntry[] {
   if (AUTH) {
     if (!PROJECTS_RUNTIME || !viewer) return [];
     // The platform admin reads every organisation's project traces.
-    return viewer.platformAdmin ? sortRunIndex([...listAllRunIndex(), ...BENCHMARK_RUNS.list(true)]) : listOrganisationRunIndex(viewer.orgId);
+    return viewer.platformAdmin ? sortRunIndex([...listAllRunIndex(viewer), ...BENCHMARK_RUNS.list(true)]) : listOrganisationRunIndex(viewer.orgId);
   }
   return sortRunIndex([...listOperatorRunIndex(), ...BENCHMARK_RUNS.list(true)]);
 }
@@ -1692,7 +1697,7 @@ function resolveRunFile(id: string, viewer: Viewer | null): string | null {
   if (AUTH) {
     if (!PROJECTS_RUNTIME || !viewer) return null;
     return viewer.platformAdmin
-      ? PROJECTS_RUNTIME.store.findAnyRunTraceFile(id) ?? BENCHMARK_RUNS.resolve(id, true)
+      ? PROJECTS_RUNTIME.store.findAnyRunTraceFile(id, (orgId) => PROJECTS_RUNTIME.projects.auditRead(viewer, orgId, 'runs.trace')) ?? BENCHMARK_RUNS.resolve(id, true)
       : PROJECTS_RUNTIME.store.findOrgRunTraceFile(viewer.orgId, id);
   }
   const primary = join(RUNS_DIR, `${id}.json`);
@@ -3213,6 +3218,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         name: organisation.name,
         createdAt: organisation.createdAt,
         viewerRole: viewer.role,
+        runCapacity: PROJECTS_RUNTIME?.store.runCapacity(viewer.orgId) ?? null,
         members: organisation.members.map((member) => ({
           principalId: member.principalId,
           displayName: member.displayName,
@@ -4078,7 +4084,11 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
   }
 
   if (pathname === '/api/runs') {
-    sendJson(res, 200, listIndex(AUTH?.resolve(req) ?? null));
+    try { sendJson(res, 200, listIndex(AUTH?.resolve(req) ?? null)); }
+    catch (error) {
+      if (!(error instanceof ProjectHttpError)) throw error;
+      sendJson(res, error.status, { error: error.message });
+    }
     return;
   }
 
@@ -4088,7 +4098,13 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       sendJson(res, 400, { error: 'bad id' });
       return;
     }
-    const file = resolveRunFile(id, AUTH?.resolve(req) ?? null);
+    let file: string | null;
+    try { file = resolveRunFile(id, AUTH?.resolve(req) ?? null); }
+    catch (error) {
+      if (!(error instanceof ProjectHttpError)) throw error;
+      sendJson(res, error.status, { error: error.message });
+      return;
+    }
     if (!file) {
       sendJson(res, 404, { error: 'not found' });
       return;

@@ -300,6 +300,15 @@ export function OrgModelsForm({
                 <dt>{t('settings.projects')}</dt>
                 <dd>{organisation.projectCount}</dd>
               </div>
+              {organisation.runCapacity ? (
+                <div>
+                  <dt>{t('settings.runCapacity')}</dt>
+                  <dd>{t('settings.runCapacityValue', {
+                    active: organisation.runCapacity.active,
+                    limit: organisation.runCapacity.maxConcurrent,
+                  })}</dd>
+                </div>
+              ) : null}
               {organisation.pendingInvitations !== null ? (
                 <div>
                   <dt>{t('settings.pendingInvitations')}</dt>

@@ -206,3 +206,11 @@ can only report that it cannot be.
   helper both hosts share. Armed by default because the rule exists to collect
   calibration rows; `off` disarms it. `--once` prints, per corpus, how many
   finished runs and credited trajectories the reference held.
+
+## Project maintenance
+
+`projects:maintenance` is compiled; `projects:maintenance:dev` uses source.
+Retention plans are read-only. Apply requires stopped services, a restorable
+backup and the existing global run lease without recovery. Limits are
+operator-owned and updated atomically with their audit receipt.
+[Commands and preconditions](../../docs/project-maintenance.md).

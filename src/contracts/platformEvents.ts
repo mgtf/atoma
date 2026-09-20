@@ -52,6 +52,8 @@ export const PLATFORM_EVENT_DETAIL_MAX_CHARS = 2_000;
 export const platformEventKindSchema = z.enum([
   // --- Client-facing: the run and its delivery.
   'run.started',
+  'run.retention',
+  'org.run_limit_changed',
   'run.finished',
   'run.cancelled',
   'publication.published',
@@ -125,6 +127,7 @@ export const platformEventKindSchema = z.enum([
   /** Self-care connection lifecycle; detail names only the provider. */
   'principal.subscription_connected',
   'principal.subscription_disconnected',
+  'admin.cross_org_read',
   'admin.granted',
   'admin.revoked',
   'invitation.created',
@@ -313,6 +316,8 @@ export function eventLabel(value: string, maxChars = EVENT_LABEL_MAX_CHARS): str
 /** One declarative table: kind → severity. Exhaustive by construction. */
 export const PLATFORM_EVENT_SEVERITY: Record<PlatformEventKind, PlatformEventSeverity> = {
   'run.started': 'info',
+  'run.retention': 'info',
+  'org.run_limit_changed': 'security',
   'run.finished': 'info',
   'run.cancelled': 'info',
   'publication.published': 'info',
@@ -348,6 +353,7 @@ export const PLATFORM_EVENT_SEVERITY: Record<PlatformEventKind, PlatformEventSev
   'principal.subscription_pin': 'security',
   'principal.subscription_connected': 'security',
   'principal.subscription_disconnected': 'security',
+  'admin.cross_org_read': 'security',
   'admin.granted': 'security',
   'admin.revoked': 'security',
   'invitation.created': 'security',
@@ -417,3 +423,13 @@ export const EXAMPLE_PLATFORM_EVENT: PlatformEvent = platformEventSchema.parse({
   summary: 'New organisation created by its first login',
   detail: { provider: 'github' },
 });
+
+/** The five existing platform-admin read widenings; never a permission grant. */
+export const crossOrgReadSchema = z.object({
+  actorId: z.string().min(1).max(200),
+  orgId: z.string().min(1).max(200),
+  surface: z.enum(['projects.index', 'projects.detail', 'runs.index', 'runs.trace', 'mcp.trace']),
+}).strict();
+export type CrossOrgRead = z.infer<typeof crossOrgReadSchema>;
+/** Synchronous: a failed audit must refuse the foreign read before bytes leave. */
+export type CrossOrgReadSink = (read: CrossOrgRead) => true;

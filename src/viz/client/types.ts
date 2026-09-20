@@ -313,6 +313,7 @@ export interface VizOrganisationMember {
  * attributes and GitHub's is not a verified-email assertion.
  */
 export interface VizOrganisation {
+  runCapacity?: import('../../contracts/projects.js').OrgRunCapacity | null;
   id: string;
   name: string;
   createdAt: string;

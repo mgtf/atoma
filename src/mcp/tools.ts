@@ -334,6 +334,7 @@ export const MCP_TOOLS: readonly McpToolSpec[] = [
             const { store, viewer } = tenant(ctx);
             const run = store.getProjectRun(viewer.orgId, args.runId) ?? (viewer.platformAdmin ? store.getProjectRunAnyOrg(args.runId) : null);
             if (!run) throw new ProjectHttpError(404, 'project run not found');
+            ctx.deps.projects!.service.auditRead(viewer, run.orgId, 'mcp.trace');
             const path = resolveProjectRunTraceFile({ projectRunId: run.projectRunId, runsPath: run.hostPaths.runsPath, traceId: run.traceId });
             if (!path) throw new ProjectHttpError(404, 'this run has no trace yet');
             return runTraceFile(path, { ...(args.offset !== undefined ? { offset: args.offset } : {}), ...(args.limit !== undefined ? { limit: args.limit } : {}) });

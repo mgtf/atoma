@@ -1,4 +1,6 @@
 {
+  "settings.runCapacity": "Concurrent runs",
+  "settings.runCapacityValue": "{{active}} active / {{limit}} allowed (one run at a time on this host)",
   "skillReason.successNotFollowed": "Success not credited — the validator observed that the run did not follow the recipe",
   "skillReason.failureNotFollowed": "Failure not attributed — the validator observed that the run did not follow the recipe",
   "lang.name": "English",

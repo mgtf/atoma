@@ -66,9 +66,9 @@ The following claims are **not** supported:
 - isolation between mutually untrusted organisations;
 - a dedicated one-organisation deployment (self-signup creates organisations);
 - durable payer attribution for runs funded by API keys only;
-- platform-enforced run quotas or budgets, metered rebilling, or a retention
-  policy for traces and workspaces (preview admission is bounded per
-  organisation; runs are not).
+- financial run budgets or metered rebilling. Per-org concurrency admission and
+  offline run-byte retention are implemented in W9/W10; their execution
+  acceptance remains deferred.
 
 ### Ownership model
 
@@ -459,12 +459,12 @@ Decision 6 settles it.
 | **W7** | Web, launcher images and a reference stack | **Implemented locally, acceptance deferred (2026-09-19):** web image with Haystack, Linux Compose with TLS gateway, shared paths, worker pin propagation, digest checker and `.dockerignore`; [setup and limitations](packaged-stack.md) | W1–W3 runtime acceptance; real published image refs, Linux Engine 28+, runsc, OAuth and TLS provisioning | Image builds and clean Linux boot remain unexecuted; W13 must prove the assembled stack. |
 | **W8-a** | A restore drill valid on the deployed shape | **done for the fixture** (`bdb6bf9`); NOT yet run against a snapshot from the real host | — | The drill distinguishes a tier NOT APPLICABLE to a deployment from one expected and lost — ignoring `skipped` wholesale would make it falsely reassuring. It passes on a production-shaped fixture, which proves the fix; a real snapshot from the host is verified separately and proves more. The manifest records that `store.db` needs an externally held `ATOMA_SECRET_ENCRYPTION_KEY` to yield usable organisation keys, without containing it. |
 | **W8-b** | Hosted backup and disaster recovery | `npm run backup` (dated, pruned, off-machine); the 2026-09-14 drill ([recovery-drill-2026-09-14.md](recovery-drill-2026-09-14.md)) covers the local store only | W8-a, W7 | A restore drill on the packaged stack and documented RPO/RTO. Proving recovery requires retrieving the encryption key separately and decrypting under control; documenting the dependency is not that proof. Secret ROTATION is distinct from restoration and is its own work: there is no re-encryption implementation in `src/auth/`, and the AAD binds the key identity, so rotation means decrypt-under-old then re-encrypt-under-new for every row plus the GitHub token wrapping key. |
-| **W9** | Trace and workspace retention | platform events only (90 d); nothing sweeps run traces, workspaces or `lifecycle_events` | W8-a (decision 2: 90 days for finished runs' traces and workspaces; `lifecycle_events` never swept) | A retention window for `orgs/<org>/projects/<project>/runs/<run>/` traces and workspaces, enforced by a job the operator can run and audit. The preview TTL (`idleMs`, `hardMs`) is a precedent for the shape, not an implementation. Strictly after W8-a: deleting run bytes before restoration is proven destroys the evidence the snapshot exists to keep. Decision 2 must also settle whether expiry drops the `project_runs` row or only the bytes — publications, verdicts and the run index reference it. |
-| **W10** | Quotas and cost ceilings per organisation | bounded admission exists for PREVIEWS only (`maxPerOrg: 2`, `maxGlobal: 4`, enforced in `PreviewManager.assertCapacity`) — a precedent for the shape, not an implementation of this item: there is no financial budget and no per-organisation run limit | W5 (budget half), decision 3 | Per-organisation budget and concurrency limits enforced at run admission, visible in the console. The budget half needs a durable payer record; the run-concurrency half has nothing to divide while the machine-global lease allows one run at a time. |
-| **W11** | Break-glass cross-organisation read | ordinary `platform:admin` power at five widening paths (`src/projects/service.ts:157,182`, `src/viz/server.ts:1679,1688`, `src/mcp/tools.ts:335`); none writes a journal row, `src/contracts/platformEvents.ts` has no cross-org read kind, and `auth_platform_admins` has no expiry column | decision 1 | Explicit, attributable, journaled, time-bounded, with the customer-notification policy the owner chooses. The capability is in use with no record today; decision 1 is independent of Gate 0 and does not wait for the sequence below. |
+| **W9** | Trace and workspace retention | **implemented locally; execution deferred** | W8-a; real purge requires a verified host backup | Operator-run 90-day retention, dry-run default, offline apply under the global lease, canonical path checks, durable deletion receipts and retained run metadata. Current project seeds and unfinished publications are held. [Contract and commands](project-maintenance.md). |
+| **W10** | Per-organisation run admission | **implemented locally; execution deferred** | Decision 3: concurrency only, no financial budget | Persistent per-org limit (one by default, zero suspends), checked before the global lease and inside reservation; idempotent retries preserved. Operator CLI and organisation settings display. [Contract and commands](project-maintenance.md). |
+| **W11** | Audited cross-organisation admin read | **Implemented locally, execution deferred (2026-09-20):** all five widening paths share a durable per-admin/per-org one-hour receipt, security journal row and owner notification; missing audit refuses the read. [Design and prepared checks](cross-org-read-audit.md) | Decision 1 taken; runtime verification pending | Retained platform-admin read is attributable and journaled without per-poll flooding. No temporary grant or expiry column, per decision 1. |
 | **W12** | Platform terms | none | decision 5 taken: the commons is the product; a legal text to write, no engineering | Terms of use covering what a run contributes to and consumes from the commons; separate from AGPL-3.0. |
 | **W13** | Packaged-stack acceptance | `auth-release-smoke.mjs` (loopback IdP, temp store) | W1, W7 | Boots the stack; proves founder login, invitation, role enforcement, Element-workload isolation, delivery, restart, backup/restore and denied control-plane reachability from the worker network. |
-| **W14** | Shared-learning acceptance | `tests/project-retrieval-privacy.test.ts` characterises the corpus side; nothing asserts cross-org skill reuse | W13 for the isolation half only | Two organisations on one stack: no cross-org trace/workspace/corpus read. The SHARED half — a recipe learned by one organisation dispatched by the other's next run — is assertable in one process since 2026-09-15 and needs no stack; it is the only mechanical proof that the decision was implemented and not merely documented. |
+| **W14** | Shared-learning acceptance | **Shared arm prepared, unexecuted (2026-09-20):** `tests/shared-learning-acceptance.test.ts` covers A distillation/promotion → B deterministic dispatch with shared counters and B attribution; [scope and limits](shared-learning-acceptance.md). Corpus and stack isolation remain separate evidence | W13 for the isolation half only | Two organisations on one stack: no cross-org trace/workspace/corpus read. The SHARED half — a recipe learned by one organisation dispatched by the other's next run — is assertable in one process since 2026-09-15 and needs no stack; it is the only mechanical proof that the decision was implemented and not merely documented. |
 
 Order: ~~W8-a~~ → ~~W4a~~ → ~~W5~~ → ~~W6~~ → ~~Gate 0~~ → ~~W4~~ → ~~W0~~ → ~~W1~~ →
 ~~W2~~ → ~~W3~~ → ~~W7~~ → W13 → W14. W8-a and W4a landed on 2026-09-17, W5, W6 and W4 on
@@ -481,9 +481,10 @@ and SQLite serialises it correctly once the write lock is taken before the
 read.
 
 Outside that sequence: decision 1 was taken on 2026-09-18 (retained,
-journaled); the reads are STILL unjournaled until W11's de-duplication rule
-is designed against a measured poll rate. W9 follows W8-a with its retention
-fixed; W10 is concurrency only; W12 needs a text and no engineering.
+journaled). W11 now implements the shared receipt and notification path;
+its execution checks remain deferred. W9/W10 are implemented locally with
+execution checks deferred: offline retention and concurrency-only admission.
+W12 needs a text and no engineering.
 
 ### Owner decisions, taken 2026-09-18
 

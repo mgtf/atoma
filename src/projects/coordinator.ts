@@ -659,7 +659,7 @@ export function projectRunEnvironment(input: {
   return { environment, payers };
 }
 
-function previousDeliveredRun(
+export function previousDeliveredRun(
   store: ProjectStore,
   orgId: string,
   projectId: string
@@ -668,6 +668,7 @@ function previousDeliveredRun(
   if (!runs) return null;
   for (const run of runs) {
     if (run.status !== 'delivered') continue;
+    if (run.bytesExpiredAt) throw new ProjectStateConflict('The previous delivered workspace has expired; restore it before continuing this project');
     try {
       if (lstatSync(run.hostPaths.workspacePath).isDirectory()) {
         return run;
@@ -1041,6 +1042,7 @@ export class ProjectRunCoordinator {
     );
     const existing = findRetry();
     if (existing) return existing;
+    this.store.assertRunCapacity(input.orgId);
     // Every new project run carries search. Validate before taking the lease or
     // reserving a run; read-only service startup and idempotent retries still work.
     let retrievalLaunch: ReturnType<typeof readHaystackLaunch>;
@@ -1078,6 +1080,7 @@ export class ProjectRunCoordinator {
         principalId: input.principalId,
         request: input.request,
         projectRunId: candidateRunId,
+        enforceCapacity: true,
         hostPaths: {
           workspacePath: candidatePaths.workspacePath,
           runsPath: candidatePaths.runsPath,
@@ -1187,10 +1190,10 @@ export class ProjectRunCoordinator {
       controller,
     });
 
-    const seedRun = previousDeliveredRun(this.store, input.orgId, input.projectId);
-    let seedFrom = seedRun?.hostPaths.workspacePath;
     let driven: Promise<string>;
     try {
+      const seedRun = previousDeliveredRun(this.store, input.orgId, input.projectId);
+      let seedFrom = seedRun?.hostPaths.workspacePath;
       const deadlineAt = Date.now() + this.timeoutMs;
       const launch = () => this.driver({
         goal: run.goal,
@@ -1398,6 +1401,7 @@ export class ProjectRunCoordinator {
     }
     const run = this.store.getProjectRun(orgId, projectRunId);
     if (!run) return null;
+    if (run.bytesExpiredAt) throw new ProjectStateConflict('Run bytes have expired; restore them before publication');
     if (run.status !== 'delivered' || !run.artifactManifest || !run.artifactManifestHash) {
       throw new ProjectStateConflict('publication retry requires a delivered run with artifacts');
     }

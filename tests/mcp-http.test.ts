@@ -1,6 +1,8 @@
+import { PlatformEventLog } from '../src/platform/events.js';
+import { projectRetrievalFixture } from './helpers/projectRetrievalLaunch.js';
 import { haystackTestEnvironment } from './helpers/haystack.js';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -890,4 +892,29 @@ it('exposes registered benchmarks only to platform callers and drives cancellati
     await platform.experimental.tasks.cancelTask(second.task.taskId);
     await vi.waitFor(() => expect(aborted).toBe(true));
   } finally { finish?.(); await member.close(); await platform.close(); }
+});
+
+it('journals a platform-admin MCP trace read under the foreign organisation', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'atoma-mcp-cross-read-'));
+  dirs.push(root);
+  const a = projectRetrievalFixture(root, { subject: 'admin', slug: 'admin' });
+  const b = projectRetrievalFixture(root, { subject: 'foreign', slug: 'foreign' });
+  const run = b.makeRun();
+  mkdirSync(run.layout.runsPath, { recursive: true });
+  writeFileSync(join(run.layout.runsPath, `${run.run.projectRunId}.json`), JSON.stringify({
+    id: run.run.projectRunId, label: 'Foreign trace', startedAt: '2026-09-20T12:00:00Z', events: [],
+  }));
+  const journal = PlatformEventLog.open(a.dbPath);
+  const service = new ProjectService({ store: a.projects, github: null,
+    coordinator: {} as ProjectRunCoordinator, auditRead: read => journal.recordCrossOrgRead(read) });
+  const { url } = await listen(() => ({ kind: 'principal', viewer: { ...a.viewer, platformAdmin: true }, tokenId: 'admin' }),
+    { ...NO_TENANT, auth: a.auth, projects: { store: a.projects, service }, journal });
+  const client = await connect(url);
+  try {
+    const response = await client.callTool({ name: 'atoma_run_trace', arguments: { runId: run.run.projectRunId } });
+    expect(response.isError).not.toBe(true);
+    const events = journal.list({ kind: 'admin.cross_org_read' }).events;
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ actorId: a.viewer.principalId, orgId: b.viewer.orgId, detail: { surface: 'mcp.trace' } });
+  } finally { await client.close(); }
 });

@@ -1,3 +1,6 @@
+import { applyRetention } from '../src/projects/retention.js';
+import { PlatformEventLog } from '../src/platform/events.js';
+import { closeStoreHandles } from '../src/core/stores.js';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -46,7 +49,7 @@ describe.skipIf(!hasPython)('offline recovery through real backup archives and a
     store.transitionProjectRun({ orgId: '11111111-1111-4111-8111-111111111111', projectRunId: runId, from: 'running', to: 'delivered', traceId: '44444444-4444-4444-8444-444444444444', stats: parseRunLog('✓ build finished') });
     for (const tier of ['skills', 'runs', 'archive', 'supervisor']) mkdirSync(join(root, tier));
   });
-  afterEach(() => { db.close(); rmSync(root, { recursive: true, force: true }); });
+  afterEach(() => { closeStoreHandles(); db.close(); rmSync(root, { recursive: true, force: true }); });
 
   const backupOpts = () => ({ dest: join(root, 'snapshots'), keep: 2, storeDb: join(root, 'source.db'),
     skillsDir: join(root, 'skills'), runsDir: join(root, 'runs'), archiveDir: join(root, 'archive'),
@@ -65,6 +68,25 @@ describe.skipIf(!hasPython)('offline recovery through real backup archives and a
       store: { integrity: 'ok', issues: [], projectRuns: [{ runId, status: 'delivered', workspace: true, log: true, trace: true }] } });
     expect(readFileSync(join(root, 'recovered', 'projects', 'orgs', '11111111-1111-4111-8111-111111111111', 'projects', projectId, 'runs', runId, 'workspace', 'index.html'), 'utf8')).toBe('<p>restored</p>');
     expect(store.getProjectRun('11111111-1111-4111-8111-111111111111', runId)?.status).toBe('delivered');
+  });
+
+  it('restores intentionally expired bytes as metadata, and flags interrupted retention', async () => {
+    db.prepare("UPDATE projects SET status = 'archived' WHERE project_id = ?").run(projectId);
+    db.prepare("UPDATE project_runs SET ended_at = '2025-01-01T00:00:00.000Z' WHERE project_run_id = ?").run(runId);
+    const events = PlatformEventLog.open(join(root, 'source.db'));
+    expect(applyRetention(db, join(root, 'projects'), undefined, event => events.append(event))).toBe(1);
+    const snapshot = await backup();
+    const result = restore(snapshot.snapshotDir);
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout).store).toMatchObject({
+      issues: [], projectRuns: [{ runId, status: 'delivered', retention: 'expired', workspace: false }],
+    });
+    db.prepare('UPDATE project_runs SET bytes_deleted_at = NULL WHERE project_run_id = ?').run(runId);
+    const interrupted = await backup();
+    const retry = restore(interrupted.snapshotDir, join(root, 'interrupted'));
+    expect(retry.status).toBe(2);
+    expect(JSON.parse(retry.stdout).store.issues).toContainEqual({ runId, reason: 'interrupted-retention' });
+    closeStoreHandles();
   });
 
   it('verifies a deployment that declares the tier it does not have', async () => {

@@ -58,3 +58,13 @@ Neighbours:
     `ledger check` consumer, and the two tables are never joined.
   - Design record and the five settled decisions:
     [platform events](../../docs/platform-events-design.md).
+
+## Cross-organisation reads
+
+`recordCrossOrgRead` is the strict exception to fail-open append: a missing
+receipt must commit before foreign payload is returned. The one-hour receipt
+is per principal and target org across HTTP/MCP, never a permission cache.
+Polling hits read the journal; misses recheck and insert under an immediate
+transaction. Publish only after commit, through the existing notification
+router to org owners. Domains receive `CrossOrgReadSink`, not the store.
+Design, polling basis and deferred tests: [W11](../../docs/cross-org-read-audit.md).

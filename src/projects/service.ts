@@ -9,7 +9,7 @@ import {
   type Project,
   type ProjectRun,
 } from '../contracts/projects.js';
-import { eventLabel, type PlatformEventSink } from '../contracts/platformEvents.js';
+import { eventLabel, type CrossOrgRead, type CrossOrgReadSink, type PlatformEventSink } from '../contracts/platformEvents.js';
 import { GitHubStore } from '../github/store.js';
 import { PublicationSupersededError, type GitHubPublisher } from './publisher.js';
 import { ProjectStateConflict, resolveProjectRunTraceFile } from './store.js';
@@ -55,6 +55,7 @@ export interface ProjectServiceDeps {
    * Absent means "no journal", never "broken".
    */
   readonly events?: PlatformEventSink;
+  readonly auditRead?: CrossOrgReadSink;
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
@@ -131,10 +132,12 @@ export class ProjectService {
   private readonly coordinator: ProjectRunCoordinator;
   private readonly github: GitHubStore | null;
   private readonly events: PlatformEventSink;
+  private readonly readAudit?: CrossOrgReadSink;
   private readonly publisher?: Pick<GitHubPublisher, 'inspectTarget'>;
 
   constructor(deps: ProjectServiceDeps) {
     this.store = deps.store;
+    this.readAudit = deps.auditRead;
     this.coordinator = deps.coordinator;
     this.github = deps.github;
     this.publisher = deps.publisher;
@@ -157,14 +160,14 @@ export class ProjectService {
   /** GET /api/projects — a platform admin reads ALL organisations' projects. */
   listProjects(viewer: Viewer): unknown {
     if (viewer.platformAdmin) {
-      return this.store.listAllProjects().map((project) => ({
-        ...publicProject(
-          project,
-          this.store.projectRunSummary(project.orgId, project.projectId)
-        ),
-        orgId: project.orgId,
-        orgName: project.orgName,
-      }));
+      return this.store.listAllProjects().map((project) => {
+        this.auditRead(viewer, project.orgId, 'projects.index');
+        return {
+          ...publicProject(project, this.store.projectRunSummary(project.orgId, project.projectId)),
+          orgId: project.orgId,
+          orgName: project.orgName,
+        };
+      });
     }
     return this.store.listProjects(viewer.orgId).map((project) =>
       publicProject(
@@ -181,9 +184,22 @@ export class ProjectService {
    */
   private readOrgFor(viewer: Viewer, projectId: string): string {
     if (!viewer.platformAdmin) return viewer.orgId;
-    return this.store.getProjectAnyOrg(projectId)?.orgId ?? viewer.orgId;
+    const orgId = this.store.getProjectAnyOrg(projectId)?.orgId ?? viewer.orgId;
+    this.auditRead(viewer, orgId, 'projects.detail');
+    return orgId;
   }
 
+  /** Audit an existing widening; this method never grants platform-admin power. */
+  auditRead(viewer: Viewer, orgId: string, surface: CrossOrgRead['surface']): void {
+    if (orgId === viewer.orgId) return;
+    if (!viewer.platformAdmin) throw new ProjectHttpError(403, 'cross-organisation read denied');
+    try {
+      if (!this.readAudit) throw new Error('audit unavailable');
+      if (this.readAudit({ actorId: viewer.principalId, orgId, surface }) !== true) throw new Error('audit not acknowledged');
+    } catch {
+      throw new ProjectHttpError(503, 'cross-organisation audit unavailable');
+    }
+  }
   /** POST /api/projects — org:member or above. */
   async createProject(req: IncomingMessage, viewer: Viewer): Promise<unknown> {
     return this.createProjectFromInput(viewer, await readJsonBody(req));
