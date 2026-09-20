@@ -1130,5 +1130,7 @@
   "depth.coverage": "تمت تغطية {{covered}} من أصل {{total}} من التزامات التسليم",
   "welcome.handheld.blocked": "غير متاح على الأجهزة المحمولة بعد",
   "welcome.handheld.hint": "لا يزال Atoma قيد الاستكمال للهواتف والأجهزة اللوحية. يمكنك المتابعة بصلاحية وصول كاملة، لكن بعض الشاشات قد لا تعمل جيدًا بعد على الأجهزة المحمولة.",
-  "welcome.handheld.continue": "اسمح لي على الأقل بالوصول إلى حسابي"
+  "welcome.handheld.continue": "اسمح لي على الأقل بالوصول إلى حسابي",
+  "settings.runCapacity": "عمليات run المتزامنة",
+  "settings.runCapacityValue": "{{active}} نشطة / {{limit}} مسموح بها (عملية run واحدة في كل مرة على هذا المضيف)"
 }

@@ -1130,5 +1130,7 @@
   "depth.coverage": "{{total}}টি ডেলিভারি বাধ্যবাধকতার মধ্যে {{covered}}টি পূরণ করা হয়েছে",
   "welcome.handheld.blocked": "এখনও মোবাইলে উপলভ্য নয়",
   "welcome.handheld.hint": "ফোন ও ট্যাবলেটের জন্য atoma-র কাজ এখনও শেষ হচ্ছে। আপনি পূর্ণ অ্যাক্সেস নিয়ে এগিয়ে যেতে পারেন, তবে কিছু স্ক্রিন এখনও মোবাইলে ভালোভাবে কাজ নাও করতে পারে।",
-  "welcome.handheld.continue": "অন্তত আমাকে আমার অ্যাকাউন্টে অ্যাক্সেস করতে দিন"
+  "welcome.handheld.continue": "অন্তত আমাকে আমার অ্যাকাউন্টে অ্যাক্সেস করতে দিন",
+  "settings.runCapacity": "একযোগে run",
+  "settings.runCapacityValue": "{{active}}টি সক্রিয় / {{limit}}টি অনুমোদিত (এই হোস্টে একবারে একটি run)"
 }

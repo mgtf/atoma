@@ -1130,5 +1130,7 @@
   "depth.coverage": "{{covered}} dari {{total}} kewajiban pengiriman tercakup",
   "welcome.handheld.blocked": "Belum tersedia di perangkat seluler",
   "welcome.handheld.hint": "Atoma masih dalam tahap penyempurnaan untuk ponsel dan tablet. Anda dapat melanjutkan dengan akses penuh, tetapi beberapa layar mungkin belum berfungsi dengan baik di perangkat seluler.",
-  "welcome.handheld.continue": "Setidaknya izinkan saya mengakses akun saya"
+  "welcome.handheld.continue": "Setidaknya izinkan saya mengakses akun saya",
+  "settings.runCapacity": "run bersamaan",
+  "settings.runCapacityValue": "{{active}} aktif / {{limit}} diizinkan (satu run setiap kalinya di host ini)"
 }

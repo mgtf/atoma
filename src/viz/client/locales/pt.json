@@ -1130,5 +1130,7 @@
   "depth.coverage": "{{covered}} de {{total}} obrigações de entrega cobertas",
   "welcome.handheld.blocked": "Ainda não disponível em dispositivos móveis",
   "welcome.handheld.hint": "O atoma ainda está a ser aperfeiçoado para telemóveis e tablets. Pode continuar com acesso total, mas alguns ecrãs poderão ainda não funcionar bem em dispositivos móveis.",
-  "welcome.handheld.continue": "Deixar-me pelo menos aceder à minha conta"
+  "welcome.handheld.continue": "Deixar-me pelo menos aceder à minha conta",
+  "settings.runCapacity": "runs simultâneos",
+  "settings.runCapacityValue": "{{active}} ativos / {{limit}} permitidos (um run de cada vez neste host)"
 }
