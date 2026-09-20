@@ -169,6 +169,8 @@
   "settings.mcpClaudeSetup": "Claude Code — run this command, then choose Authenticate in /mcp.",
   "settings.mcpOAuthMigration": "Already using a manual token? Remove its bearer_token_env_var or Authorization header before signing in.",
   "settings.mcpConnections": "Authorized access",
+  "settings.mcpConnectAnother": "Connect another client",
+  "settings.mcpHideSetup": "Hide setup guide",
   "settings.mcpNoConnections": "No agent connected yet. Start the connection from your agent.",
   "settings.mcpAdvancedTokens": "Advanced · API tokens",
   "settings.mcpAdvancedHint": "Only for scripts and clients without browser sign-in. Existing API tokens keep working; you can revoke them in the access list above.",

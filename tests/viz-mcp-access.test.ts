@@ -9,7 +9,7 @@ import { claudeMcpCommand, codexMcpCommand, codexMcpConfig, McpAccess, McpAccess
 
 /**
  * The Settings panel that turns "atoma has an MCP" into a procedure. What it
- * holds: the address and the three steps are always shown; a token is created
+ * holds: the address stays visible and setup hides after first use; a token is created
  * from a label; the minted token and the exact Claude Code line appear ONCE
  * with copy buttons and disappear on dismiss; the list shows live tokens with
  * a revoke button and never the secret.
@@ -45,6 +45,38 @@ async function openManual() {
 }
 
 describe('McpAccessPanel', () => {
+  it('hides setup after first use, allows reopening, and restores it after revocation', async () => {
+    const token = { tokenId: 'used', orgId: 'o', orgName: 'Org', label: 'OAuth: Codex',
+      createdAt: '2026-09-05T10:00:00.000Z', lastUsedAt: '2026-09-05T11:00:00.000Z', revokedAt: null };
+    const { props, rerender } = panel({ tokens: [token] });
+    expect(screen.queryByTestId('mcp-connect-command')).toBeNull();
+    expect(screen.queryByText(/No API token is needed/)).toBeNull();
+    expect(screen.getByTestId('mcp-url')).toBeVisible();
+    expect(screen.getByRole('list')).toBeVisible();
+    expect(screen.getByRole('list').compareDocumentPosition(screen.getByTestId('mcp-url')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'Connect another client' }));
+    expect(screen.getByTestId('mcp-connect-command')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Hide setup guide' })).toHaveAttribute('aria-expanded', 'true');
+    await userEvent.click(screen.getByRole('button', { name: 'Hide setup guide' }));
+    expect(screen.queryByTestId('mcp-connect-command')).toBeNull();
+    rerender(createElement(McpAccessPanel, { ...props, tokens: [{ ...token, revokedAt: token.lastUsedAt }] }));
+    expect(screen.getByTestId('mcp-connect-command')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Connect another client' })).toBeNull();
+  });
+
+  it('keeps setup for unused tokens and hides it once any live token has been used', () => {
+    const token = { tokenId: 'unused', orgId: 'o', orgName: 'Org', label: 'Manual',
+      createdAt: '2026-09-05T10:00:00.000Z', lastUsedAt: null, revokedAt: null };
+    const { props, rerender } = panel({ tokens: [token] });
+    expect(screen.getByTestId('mcp-connect-command')).toBeVisible();
+    rerender(createElement(McpAccessPanel, { ...props,
+      tokens: [token, { ...token, tokenId: 'used', lastUsedAt: token.createdAt }],
+      minted: { tokenId: token.tokenId, token: 'atoma_secret' },
+    }));
+    expect(screen.queryByTestId('mcp-connect-command')).toBeNull();
+    expect(screen.getByTestId('mcp-token')).toBeVisible();
+  });
+
   it('leads with the URL and browser sign-in, keeping client setup and manual tokens collapsed', async () => {
     const onCopy = vi.fn(async () => undefined);
     panel({ onCopy });

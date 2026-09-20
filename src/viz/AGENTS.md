@@ -526,7 +526,10 @@ npm run viz:mark-turn:analyze
   `token.revoked`) the SESSION's principal's tokens for its ACTIVE
   organisation; the plaintext leaves the server once, in the POST response.
   `McpAccessPanel` leads with the URL, browser sign-in and authorized access.
-  Client commands are selectable; config and manual tokens stay collapsed. A minted
+  Client commands are selectable; config and manual tokens stay collapsed. An
+  access with a non-null last-use date and no revocation hides setup by default;
+  authorized access comes first, the URL stays visible, and a connect-another
+  button reopens setup. Unused tokens alone never hide setup. A minted
   token opens its disclosure and is shown once, with copy and revoke. It
   resets when the active identity/org changes and never re-reads a secret.
   GET describes ungated operator access; mutations there return 409. A failed
