@@ -1,8 +1,15 @@
 # Shared-learning service terms
 
-Draft dated 2026-09-20, implementing the owner's commons decision. Before
-publication, identify the service operator and its support/privacy contact in
-the service notice. This draft is not evidence of publication or user acceptance.
+Draft dated 2026-09-20, implementing the owner's commons decision. Operator
+details and contact below were confirmed by the operator. This draft is not
+evidence of publication or user acceptance.
+
+## Service operator and contact
+
+Matthieu Foillard, Pavlou Mela, 1, 15233 Athens, Greece.
+
+For support, privacy, access or removal requests, contact
+[mgf@iotanet.net](mailto:mgf@iotanet.net).
 
 ## Participation in the commons
 
