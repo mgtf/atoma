@@ -9,10 +9,8 @@
  * whose every pointer is coarse and none of them can hover is a phone or a
  * tablet without a trackpad; a touch laptop keeps its mouse and passes.
  *
- * The gate this drives is TEMPORARY (2026-09-18): the mobile journey is not
- * finished or tested, so handheld visitors see the hero crystal and a
- * Continue that closes the door instead of the product. `?atomaHandheld=1`
- * lets a desktop rehearse that path without device emulation.
+ * Used for mobile layout only; authentication and entry are shared with desktop.
+ * `?atomaHandheld=1` lets a desktop rehearse the mobile layout.
  */
 
 const HANDHELD_QUERY = '(any-pointer: coarse) and (any-hover: none)';

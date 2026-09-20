@@ -28,12 +28,10 @@ import { GpuDomBridge, SettingsProfileForm } from './DomBridge.js';
 import { McpAccess } from './McpAccessPanel.js';
 import { OrgModelsForm } from './OrgModelsForm.js';
 import { EntryVeilLayer } from './EntryVeilLayer.js';
-import { HandheldVeilLayer } from './HandheldVeilLayer.js';
 import { PreviewPlane } from './PreviewPlane.js';
 import { usePreviewSession } from './usePreviewSession.js';
 import { useEntryFade } from './entry-fade.js';
 import { handheldMediaQuery, isHandheldDevice } from './handheld.js';
-import { useHandheldWhiteout } from './handheld-whiteout.js';
 import { GpuSurface } from './GpuSurface.js';
 import { SceneCameraPlane } from './SceneCameraPlane.js';
 import { SceneTuningPanel } from './SceneTuningPanel.js';
@@ -154,18 +152,7 @@ function GpuAppContent({
   );
   const metrics = useRef<GpuRenderMetrics>(emptyRenderMetrics());
   const { phase: entryPhase, begin: beginEnter } = useEntryFade();
-  const {
-    phase: handheldPhase,
-    begin: beginHandheldWhiteout,
-    dismiss: dismissHandheldWhiteout,
-    floodRef: handheldFloodRef,
-  } = useHandheldWhiteout();
-  // Continue is ONE gesture with two exits: on a handheld device it closes
-  // the door with light (the white-out takes the activation), everywhere else
-  // it admits the app. The Pixi control and its DOM mirror both call this.
-  const arrive = useCallback(() => {
-    if (!beginHandheldWhiteout()) beginEnter();
-  }, [beginEnter, beginHandheldWhiteout]);
+  const arrive = beginEnter;
 
   // Operator surfaces are admin-only behind the gate: the server 403s them
   // for ordinary members, and a 403'd query would poison the global data
@@ -502,11 +489,6 @@ function GpuAppContent({
     query.addEventListener('change', refresh);
     return () => query.removeEventListener('change', refresh);
   }, []);
-
-  // Mobile visitors acknowledge the disclaimer before ordinary admission.
-  useEffect(() => {
-    if (state.handheld && !state.handheldAccepted && state.entered) useGpuStore.setState({ entered: false });
-  }, [state.entered, state.handheld, state.handheldAccepted]);
 
   useEffect(() => {
     const runs = runsQuery.data ?? [];
@@ -1055,11 +1037,6 @@ function GpuAppContent({
           cannot land on a GL control the member cannot see, and a screen
           reader is not read two surfaces at once. `aria-hidden` alone would
           have done only the last of the three. */}
-      {/* Once the handheld white-out is complete the scene host UNMOUNTS: the
-          page is a white veil and a notice, and a phone must not keep
-          rendering a hero crystal, its offscreen passes and its caustic
-          trace under a page nobody can see through. */}
-      {handheldPhase === 'white' ? null : (
       <div className="gpu-scene-host" inert={previewOpen}>
       <SceneCameraPlane mode={state.sceneCameraMode} onSettled={cameraSettled}>
         <GpuSurface
@@ -1140,7 +1117,6 @@ function GpuAppContent({
         <SceneTuningPanel />
       </SceneCameraPlane>
       </div>
-      )}
       <PreviewPlane
         open={previewOpen}
         summary={previewSummary}
@@ -1159,13 +1135,6 @@ function GpuAppContent({
       />
       <AtomaCursor />
       <EntryVeilLayer phase={entryPhase} />
-      <HandheldVeilLayer
-        phase={handheldPhase}
-        floodRef={handheldFloodRef}
-        notice={t('welcome.handheld.hint')}
-        continueLabel={t('welcome.handheld.continue')}
-        onContinue={dismissHandheldWhiteout}
-      />
     </main>
   );
 }

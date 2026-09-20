@@ -35,8 +35,8 @@
  *                        exercising the real return transition.
  *   --tuning             Open the floating Scene Tuning window.
  *   --handheld           A phone (390x844, touch as the only pointer): the
- *                        handheld gate, its pressed control and the white-out
- *                        as three PNGs (-gate, -flare, -white beside --out).
+ *                        direct login or authenticated entry (-gate and
+ *                        -projects PNGs beside --out).
  *   --out <path>         PNG destination. Default:
  *                        screenshots/<view>-<auth-mode>-<camera>.png
  *   --url <base>         Attach to an already-running UI server instead of
@@ -444,78 +444,44 @@ function fixtureTrace() {
   };
 }
 
-/**
- * The handheld gate, end to end, on Chrome's OWN touch emulation: the hero
- * crystal with one Continue, the pressed control re-labelled and disabled
- * mid white-out, and the white page with its notice. Three PNGs beside
- * `--out` (`-gate`, `-flare`, `-white`). Fails when the pointer media query
- * the gate's predicate reads did not match (the proof would be void), when a
- * provider anchor rendered, or when the tap admitted the app.
- */
+/** Prove the real touch entry: provider login or direct authenticated admission. */
 async function captureHandheldGate(page) {
-  const predicate = await page.evaluate(
-    () => matchMedia('(any-pointer: coarse) and (any-hover: none)').matches
-  );
-  if (!predicate) {
-    throw new Error(
-      '--handheld: Chrome touch emulation did not make the handheld media query match; ' +
-        'the gate cannot be proven on this run'
-    );
+  if (!await page.evaluate(() => matchMedia('(any-pointer: coarse) and (any-hover: none)').matches)) {
+    throw new Error('--handheld: touch media query did not match');
   }
-  await page.waitForFunction(
-    () =>
-      Array.from(document.querySelectorAll('.gpu-a11y-bridge button')).some(
-        (button) => button.textContent?.trim() === 'Continue' && !button.disabled
-      ),
-    { timeout: READY_TIMEOUT_MS }
-  );
-  if (await page.$('.gpu-a11y-bridge a')) {
-    throw new Error('--handheld: provider anchors rendered on a handheld device');
-  }
-  await page.waitForFunction(
-    () => globalThis.__ATOMA_GPU__?.hitTargets().some((entry) => entry.id === 'welcome.continue'),
-    { timeout: READY_TIMEOUT_MS }
-  );
-  await page.evaluate(() => new Promise((resolveWait) => setTimeout(resolveWait, 900)));
+  await page.waitForFunction(() => globalThis.__ATOMA_GPU__?.hitTargets().some(entry => entry.id === 'welcome.continue' || entry.id.startsWith('login.provider.')), { timeout: READY_TIMEOUT_MS });
   const stem = outPath.replace(/\.png$/i, '');
   await mkdir(dirname(outPath), { recursive: true });
-  await page.screenshot({ path: `${stem}-gate.png` });
-  // Tap the CANVAS control, not its DOM mirror: the Pixi button is what a
-  // thumb lands on, and `touchscreen.tap` is a real touch sequence.
-  const spot = await page.evaluate(() => {
+  await page.screenshot({ path: stem + '-gate.png' });
+  const target = await page.evaluate(() => {
     const handle = globalThis.__ATOMA_GPU__;
-    const row = handle.hitTargets().find((entry) => entry.id === 'welcome.continue');
-    return handle.projectRendererPoint(row.x + row.width / 2, row.y + row.height / 2);
+    const row = handle.hitTargets().find(entry => entry.id === 'welcome.continue' || entry.id.startsWith('login.provider.'));
+    return { id: row.id, ...handle.projectRendererPoint(row.x + row.width / 2, row.y + row.height / 2) };
   });
-  if (has('--debug')) console.error('[handheld] tapping Continue');
-  await page.touchscreen.tap(spot.x, spot.y);
-  await page.waitForSelector('.gpu-handheld-veil[data-phase="flare"]', { timeout: READY_TIMEOUT_MS });
-  if (has('--debug')) console.error('[handheld] flare began');
-  await page.waitForFunction(
-    () => Array.from(document.querySelectorAll('.gpu-a11y-bridge button')).some((button) => button.disabled),
-    { timeout: READY_TIMEOUT_MS }
-  );
-  await page.evaluate(() => new Promise((resolveWait) => setTimeout(resolveWait, 1_100)));
-  await page.screenshot({ path: `${stem}-flare.png` });
-  await page.waitForSelector('.gpu-handheld-veil[data-phase="white"]', { timeout: READY_TIMEOUT_MS });
-  if (has('--debug')) console.error('[handheld] white: scene host unmounted');
-  await page.evaluate(() => new Promise((resolveWait) => setTimeout(resolveWait, 1_200)));
-  await page.screenshot({ path: `${stem}-white.png` });
-  const state = await page.evaluate(() => ({
-    tabs: document.querySelectorAll('[role="tab"]').length,
-    entered: localStorage.getItem('atoma.viz.entered'),
-    canvases: document.querySelectorAll('canvas').length,
-    notice: document.querySelector('.gpu-handheld-veil__notice')?.textContent?.trim() ?? '',
-  }));
-  if (state.tabs > 0 || state.entered !== null) {
-    throw new Error(`--handheld: the tap admitted the app: ${JSON.stringify(state)}`);
+  if (target.id.startsWith('login.provider.')) {
+    const provider = target.id.slice('login.provider.'.length);
+    const href = await page.$eval('.gpu-a11y-bridge a', node => node.getAttribute('href'));
+    if (!href || !href.includes(encodeURIComponent(provider))) throw new Error('Missing mobile login link');
+    // Stop at the OAuth boundary: this proof must not sign into a real account.
+    await page.setRequestInterception(true);
+    let reachedLogin = false;
+    page.on('request', request => {
+      if (request.isInterceptResolutionHandled()) return;
+      if (request.isNavigationRequest() && new URL(request.url()).pathname.startsWith('/auth/')) {
+        reachedLogin = true;
+        void request.respond({ status: 200, contentType: 'text/html', body: '<p>OAuth entry reached</p>' });
+      } else { void request.continue().catch(() => {}); }
+    });
+    await Promise.all([page.waitForNavigation({ timeout: READY_TIMEOUT_MS }), page.touchscreen.tap(target.x, target.y)]);
+    if (!reachedLogin) throw new Error('Mobile tap did not reach OAuth');
+  } else {
+    await page.touchscreen.tap(target.x, target.y);
+    await page.waitForSelector('.gpu-app[data-entered="true"]', { timeout: READY_TIMEOUT_MS });
+    if (await page.$('.gpu-handheld-veil')) throw new Error('Mobile entry was interrupted');
+    await page.waitForSelector('.gpu-project-form', { timeout: READY_TIMEOUT_MS });
+    await page.screenshot({ path: stem + '-projects.png' });
   }
-  if (!state.notice) throw new Error('--handheld: the white page carries no notice');
-  console.log(
-    `viz screenshot: ${stem}-gate.png, ${stem}-flare.png, ${stem}-white.png ` +
-      `(handheld gate; media query matched, no admission, ${state.canvases} canvas left, ` +
-      `notice "${state.notice}")`
-  );
+  console.log('Mobile touch entry passed: ' + target.id);
 }
 
 /** Spawn the source dev stack on free ports; resolve when the UI answers. */
@@ -632,7 +598,7 @@ try {
       });
 
     if (handheld) {
-      // The gate IS the subject: nothing to navigate behind it on a phone.
+      // Exercise the real mobile entry control.
       await captureHandheldGate(page);
       await browser.close();
       stack.stop();

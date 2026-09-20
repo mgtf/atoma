@@ -1080,50 +1080,13 @@ describe('drawWelcome on a handheld device', () => {
     pinMarkElapsedMs(null);
   });
 
-  it('offers ONE wide Continue instead of the provider buttons, even behind the auth gate', () => {
+  it('offers the real canvas login on mobile, with no disclaimer', () => {
     const ctx = createRecordingCtx();
     drawWelcome(ctx, makeSnapshot({ entered: false, handheld: true }, GATED), WIDTH, HEIGHT);
-    expect(ctx.buttons.map((button) => button.id)).toEqual(['welcome.continue']);
-    const button = ctx.buttons[0]!;
-    expect(button.label).toBe(I18N_CATALOGS.en['welcome.continue']);
-    expect(button.disabled).toBe(false);
-    expect(button.active).toBe(false);
-    const layout = welcomeLayout(WIDTH, HEIGHT, true);
-    expect(button.width).toBe(layout.buttonWidth);
-    expect(button.x).toBe(layout.buttonX);
-    expect(button.x + button.width / 2).toBe(WIDTH / 2);
-    // Wider than the desktop Continue, inside the phone's side margins.
-    expect(layout.buttonWidth).toBeGreaterThan(welcomeLayout(WIDTH, HEIGHT).buttonWidth);
-    expect(layout.buttonX).toBeGreaterThan(0);
-    // The crystal and the tagline stay: the gate is the arrival, not an error page.
+    expect(ctx.buttons.map(button => button.id)).toEqual(['login.provider.github']);
+    expect(ctx.buttons[0]!.disabled).toBe(false);
+    expect(ctx.buttons[0]!.width).toBe(welcomeLayout(WIDTH, HEIGHT, true).buttonWidth);
     expect(ctx.markRoot.children.length).toBe(1);
-    expect(ctx.texts.some((text) => text.value === I18N_CATALOGS.en['welcome.tagline'])).toBe(true);
-    expect(ctx.texts.some((text) => text.value === I18N_CATALOGS.en['welcome.handheld.hint'])).toBe(false);
-  });
-
-  it('re-labels and disables the control once pressed, and says why beneath it', () => {
-    const ctx = createRecordingCtx();
-    drawWelcome(
-      ctx,
-      makeSnapshot({ entered: false, handheld: true, handheldBlocked: true }, GATED),
-      WIDTH,
-      HEIGHT
-    );
-    const button = ctx.buttons.find((item) => item.id === 'welcome.continue');
-    expect(button).toBeTruthy();
-    // The full sentence fits the widened control: no ellipsis.
-    expect(button!.label).toBe(I18N_CATALOGS.en['welcome.handheld.blocked']);
-    expect(button!.disabled).toBe(true);
-    expect(button!.active).toBe(false);
-    expect(button!.spinning).toBe(false);
-    expect(
-      ctx.metrics.hitTargets.find((target) => target.id === 'welcome.continue')?.label
-    ).toBe(I18N_CATALOGS.en['welcome.handheld.blocked']);
-    const hint = ctx.texts.find((text) => text.value === I18N_CATALOGS.en['welcome.handheld.hint']);
-    expect(hint).toBeTruthy();
-    expect(hint!.y).toBeGreaterThan(button!.y + button!.height);
-    expect(hint!.x).toBe(WIDTH / 2);
-    expect(ctx.buttons.map((item) => item.id)).not.toContain('login.provider.github');
   });
 
   it('keeps the widened control inside a narrow phone and unchanged on the desktop', () => {

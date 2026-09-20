@@ -100,80 +100,17 @@ describe('isHandheldDevice', () => {
 });
 
 describe('the store on a handheld device', () => {
-  beforeEach(() => {
-    useGpuStore.setState({ entered: false, handheld: true, handheldBlocked: false });
-  });
-
-  afterEach(() => {
-    useGpuStore.setState({ handheld: false, handheldBlocked: false, entered: false });
-    vi.unstubAllGlobals();
-  });
-
-  it('enter() refuses, flips the blocked flag and persists nothing', () => {
-    const values = new Map<string, string>();
-    vi.stubGlobal('localStorage', {
-      getItem: (key: string) => values.get(key) ?? null,
-      setItem: (key: string, value: string) => values.set(key, value),
-    });
+  afterEach(() => { useGpuStore.setState({ entered: false, handheld: false }); localStorage.clear(); vi.unstubAllGlobals(); });
+  it('admits mobile visitors without a disclaimer and persists entry', () => {
+    useGpuStore.setState({ entered: false, handheld: true });
     useGpuStore.getState().enter();
-    expect(useGpuStore.getState()).toMatchObject({ entered: false, handheldBlocked: true });
-    expect(values.has('atoma.viz.entered')).toBe(false);
-    // Pressing again is idempotent: still blocked, still outside.
-    useGpuStore.getState().enter();
-    expect(useGpuStore.getState()).toMatchObject({ entered: false, handheldBlocked: true });
+    expect(useGpuStore.getState().entered).toBe(true);
+    expect(localStorage.getItem('atoma.viz.entered')).toBe('1');
   });
-
-  it('blockHandheld() is the same transition without the admission attempt', () => {
-    useGpuStore.getState().blockHandheld();
-    expect(useGpuStore.getState()).toMatchObject({ entered: false, handheldBlocked: true });
-  });
-
-  it('a media-query flip to handheld throws the visitor back behind the gate', () => {
+  it('keeps an entered visitor inside when the pointer capability changes', () => {
     useGpuStore.setState({ entered: true, handheld: false });
     useGpuStore.getState().setHandheld(true);
-    expect(useGpuStore.getState()).toMatchObject({ entered: false, handheld: true });
-    useGpuStore.getState().setHandheld(false);
-    expect(useGpuStore.getState().handheld).toBe(false);
-    // Leaving the handheld class does not admit anyone by itself.
-    expect(useGpuStore.getState().entered).toBe(false);
-  });
-
-  it('starts behind the gate on a handheld device even when the arrival bit is persisted', async () => {
-    vi.stubGlobal('localStorage', {
-      getItem: (key: string) => (key === 'atoma.viz.entered' ? '1' : null),
-      setItem() {},
-    });
-    vi.resetModules();
-    const handheld = await import('../src/viz/client-gl/handheld.js');
-    handheld.setHandheldOverrideForTests(true);
-    try {
-      const fresh = await import('../src/viz/client-gl/store.js');
-      expect(fresh.useGpuStore.getState()).toMatchObject({
-        handheld: true,
-        entered: false,
-        handheldBlocked: false,
-      });
-    } finally {
-      handheld.setHandheldOverrideForTests(null);
-      vi.resetModules();
-    }
-  });
-
-  it('still honours the persisted arrival bit on a desktop', async () => {
-    vi.stubGlobal('localStorage', {
-      getItem: (key: string) => (key === 'atoma.viz.entered' ? '1' : null),
-      setItem() {},
-    });
-    vi.resetModules();
-    const handheld = await import('../src/viz/client-gl/handheld.js');
-    handheld.setHandheldOverrideForTests(false);
-    try {
-      const fresh = await import('../src/viz/client-gl/store.js');
-      expect(fresh.useGpuStore.getState()).toMatchObject({ handheld: false, entered: true });
-    } finally {
-      handheld.setHandheldOverrideForTests(null);
-      vi.resetModules();
-    }
+    expect(useGpuStore.getState()).toMatchObject({ entered: true, handheld: true });
   });
 });
 
@@ -327,65 +264,18 @@ describe('the handheld white-out', () => {
   });
 });
 
-describe('the DOM mirror of the handheld gate', () => {
-  beforeEach(() => {
-    useGpuStore.setState({ entered: false, handheld: true, handheldBlocked: false, locale: 'en' });
-  });
-
-  afterEach(() => {
-    cleanup();
-    useGpuStore.setState({ handheld: false, handheldBlocked: false, entered: false });
-  });
-
-  function renderGate(onEnter = vi.fn()) {
-    render(
-      createElement(DomBridge, {
-        runs: [],
-        releaseVersion: '9.8.7',
-        t,
-        onSelectRun: vi.fn(),
-        onEnter,
-        // The auth gate is ON: a desktop would see this provider anchor.
-        loginLinks: [{ id: 'github', label: 'GitHub', href: '/auth/login?provider=github' }],
-      })
-    );
-    return onEnter;
-  }
-
-  it('offers one Continue button and no provider anchor, even when the gate is a login', () => {
-    const onEnter = renderGate();
-    expect(screen.queryAllByRole('link')).toHaveLength(0);
-    expect(screen.queryAllByRole('tab')).toHaveLength(0);
-    const button = screen.getByRole('button', { name: 'Continue' });
-    expect(button).toBeEnabled();
-    expect(screen.getByText('v9.8.7')).toBeInTheDocument();
-    fireEvent.click(button);
-    expect(onEnter).toHaveBeenCalledTimes(1);
-  });
-
-  it('re-labels and disables once blocked, with the reason as plain copy', () => {
-    useGpuStore.setState({ handheldBlocked: true });
-    const onEnter = renderGate();
-    const button = screen.getByRole('button', { name: t('welcome.handheld.blocked') });
-    expect(button).toBeDisabled();
+describe('the mobile arrival', () => {
+  beforeEach(() => useGpuStore.setState({ entered: false, handheld: true, locale: 'en' }));
+  afterEach(() => { cleanup(); useGpuStore.setState({ entered: false, handheld: false }); });
+  it('offers the real provider login directly on mobile', () => {
+    render(createElement(DomBridge, { runs: [], releaseVersion: '9.8.7', t, onSelectRun: vi.fn(), loginLinks: [{ id: 'github', label: 'GitHub', href: '/auth/login?provider=github' }] }));
+    expect(screen.getByRole('link', { name: t('welcome.signInWith', { label: 'GitHub' }) })).toHaveAttribute('href', '/auth/login?provider=github');
     expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
-    expect(screen.getByText(t('welcome.handheld.hint'))).toBeInTheDocument();
-    fireEvent.click(button);
-    expect(onEnter).not.toHaveBeenCalled();
   });
-
-  it('falls back to the store when no arrival callback is wired, which blocks rather than enters', () => {
-    render(
-      createElement(DomBridge, {
-        runs: [],
-        releaseVersion: '9.8.7',
-        t,
-        onSelectRun: vi.fn(),
-      })
-    );
+  it('enters directly when authentication is already satisfied', () => {
+    render(createElement(DomBridge, { runs: [], releaseVersion: '9.8.7', t, onSelectRun: vi.fn() }));
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-    expect(useGpuStore.getState()).toMatchObject({ entered: false, handheldBlocked: true });
-    expect(screen.getByRole('button', { name: t('welcome.handheld.blocked') })).toBeDisabled();
+    expect(useGpuStore.getState().entered).toBe(true);
   });
 });
 
