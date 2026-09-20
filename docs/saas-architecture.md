@@ -460,13 +460,13 @@ Decision 6 settles it.
 | **W11** | Audited cross-organisation admin read | **done; regressions passed in CI at `4788dfd`:** all five widening paths share a durable per-admin/per-org one-hour receipt, security journal row and owner notification; missing audit refuses the read. [Design and executed checks](cross-org-read-audit.md) | Decision 1 taken; HTTP/MCP regression checks passed | Retained platform-admin read is attributable and journaled without per-poll flooding. No temporary grant or expiry column, per decision 1. |
 | **W12** | Platform terms | [Commons terms drafted](platform-commons-terms.md) | Operator identity/contact and publication | Terms of use covering what a run contributes to and consumes from the commons; separate from AGPL-3.0. |
 | **W13** | Packaged-stack acceptance | **done for the deterministic assembled boundary (2026-09-20)**: [scenario, regression and report](saas-stack-acceptance-2026-09-20.md) | — | Boots the stack; proves founder login, invitation, role enforcement, Element-workload isolation, delivery, restart, backup/restore and denied control-plane reachability from the worker network. |
-| **W14** | Shared-learning acceptance | **Shared arm passed in CI at `4788dfd`:** `tests/shared-learning-acceptance.test.ts` covers A distillation/promotion → B deterministic dispatch with shared counters and B attribution; [scope and limits](shared-learning-acceptance.md). Corpus and stack isolation remain separate evidence | W13 for the isolation half only | Two organisations on one stack: no cross-org trace/workspace/corpus read. The SHARED half — a recipe learned by one organisation dispatched by the other's next run — is assertable in one process since 2026-09-15 and needs no stack; it is the only mechanical proof that the decision was implemented and not merely documented. |
+| **W14** | Shared-learning acceptance | **Shared arm passed in CI at `4788dfd`:** `tests/shared-learning-acceptance.test.ts` covers A distillation/promotion → B deterministic dispatch with shared counters and B attribution; [scope and limits](shared-learning-acceptance.md). **Isolation arm passed on the assembled stack on 2026-09-20:** real Python corpus search and scoped full/delta HTTP trace reads; see the same receipt | W13 for the isolation half only | Two organisations on one stack: no cross-org trace/workspace/corpus read. The SHARED half — a recipe learned by one organisation dispatched by the other's next run — is assertable in one process since 2026-09-15 and needs no stack; it is the only mechanical proof that the decision was implemented and not merely documented. |
 
 Order: ~~W8-a~~ → ~~W4a~~ → ~~W5~~ → ~~W6~~ → ~~Gate 0~~ → ~~W4~~ → ~~W0~~ → ~~W1~~ →
-~~W2~~ → ~~W3~~ → ~~W7~~ → ~~W13~~ → W14. W8-a and W4a landed on 2026-09-17, W5, W6 and W4 on
+~~W2~~ → ~~W3~~ → ~~W7~~ → ~~W13~~ → ~~W14~~. W8-a and W4a landed on 2026-09-17, W5, W6 and W4 on
 2026-09-18, and Gate 0 was decided the same day on what they measured. The launcher line (W1–W3, W7) is implemented locally on 2026-09-19, with
 service/worker/volume runtime proof recorded on 2026-09-20. W13 subsequently passed;
-W14 corpus/trace isolation acceptance remains; this
+W14 corpus/trace isolation subsequently passed; this
 does not close the other operational items in the table or constitute a migration.
 
 What W4a measured, and what Gate 0 should read from it: reverting only the
@@ -673,5 +673,5 @@ the compiled viz server and auth CLI — founder login, CLI invitation, member
 admission, PKCE, MCP OAuth, session gating, logout — with a loopback identity
 provider and a temporary store. That verifies the packaged auth path, not a
 hosted container stack or live inference funding. W13 subsequently passed a
-deterministic assembled-stack scenario; W14 corpus/trace isolation remains. See the
+deterministic assembled-stack scenario, followed by W14 corpus/trace isolation. See the
 [current evidence receipt](saas-acceptance-2026-09-20.md).

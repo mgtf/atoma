@@ -50,6 +50,10 @@ rendering, a process crash or production recovery. W13's assembled mechanical
 boundary is accepted; W14 still needs its corpus/HTTP-trace acceptance, and W8-b
 still needs a real hosted backup plus separately retrieved key and recovery timing.
 
+Subsequent extension: W14's corpus/HTTP-trace checks passed later the same day;
+see [shared-learning acceptance](shared-learning-acceptance.md#assembled-isolation-acceptance).
+The original W13 report above remains unchanged historical evidence.
+
 ## Defect found and regression
 
 The web preview startup passed `DEFAULT_WORKER_IMAGE` to the launcher handshake

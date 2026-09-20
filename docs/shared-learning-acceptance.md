@@ -1,8 +1,9 @@
 # Shared-learning acceptance — W14
 
 Status on 2026-09-20: shared-learning test passed in [CI at `4788dfd`](https://github.com/mgtf/atoma/actions/runs/35478666242).
-W13 subsequently proved the assembled stack and workspace separation; corpus
-search and HTTP trace-reader acceptance remain pending. See the [receipt](saas-acceptance-2026-09-20.md).
+W13 subsequently proved the assembled stack and workspace separation. W14's
+remaining corpus and HTTP trace checks passed on the isolated stack later that
+day; see the [machine-readable receipt](saas-w14-report-2026-09-20.json).
 
 ## Executed scenario
 
@@ -45,14 +46,47 @@ No paid model calls, Docker engine or real account credentials are used. The
 local tool backend executes a Node child inside disposable test workspaces.
 Windows skips this execution scenario; typechecking it is not acceptance.
 
-## Remaining acceptance
+## Assembled isolation acceptance
+
+The extended [stack driver](../scripts/packaged-stack-smoke.mjs) executes
+[corpus acceptance](../scripts/packaged-stack-privacy.mjs) inside the real web
+image, using its installed Python BM25 engine and production receipt, authority
+and search implementations. No ranking mock or model call is used.
+
+Each organisation's real worker writes a distinct private document. A subsequent
+synthetic run can search its own delivered artifact through an immutable receipt.
+Both directions reject the other organisation's source run, expose no foreign
+marker in search results, reject a forged scope and model-supplied organisation
+selector, and deny search immediately after receipt revocation. Positive controls
+require a nonempty own result containing the expected private marker.
+
+Over verified HTTPS, ordinary member/viewer sessions in A and an ordinary owner
+in B read their own raw traces with HTTP 200. Foreign traces return 404 without
+the private marker, for both full and incremental (`?after=0`) readers. The
+founder's platform-admin session is deliberately excluded from these refusal
+assertions: cross-organisation administrative reads are an intentional contract.
+
+The same execution passes real worker filesystem/egress checks, gVisor preview,
+backup/restore and graceful restart. Image digests are retained in the receipt;
+the web, launcher and worker images are those validated for W13, while the
+preview image was rebuilt from the same Dockerfile. Two fixture-only setup
+defects were corrected before the passing run: synthetic completion now uses
+`cancelled`, and each synthetic run has the log required by restore verification.
+No product implementation or acceptance threshold changed for W14.
+
+Reproduce with the W13 [isolated stack procedure](saas-stack-acceptance-2026-09-20.md#reproduction),
+including all three `packaged-stack-*.mjs` scripts. The private registry is
+disposable; its digests are evidence identifiers, not public download links.
+
+## Scope limits
 
 This checks the shared-learning arm at the store/lifecycle/tool boundary, not
 full project admission or end-to-end delivery. It does not prove isolation
 against hostile code: the local backend is not an OS boundary. The
 [W13 stack scenario](saas-stack-acceptance-2026-09-20.md) subsequently proved
 two real worker workspaces, denied foreign filesystem access, worker egress
-policy, gVisor previews and scoped HTTP run/preview reads. W14 still needs
-corpus-search and HTTP trace-reader acceptance on that stack; existing retrieval
-tests remain separate evidence for corpus scoping. No production migration or
-model-quality result is claimed.
+policy, gVisor previews and scoped HTTP run/preview reads. The extension above
+closes W14's corpus-search and HTTP trace-reader acceptance on that stack.
+Shared learning remains the earlier deterministic CI proof, not a paid learning
+quality measurement. No production migration, hostile-code security audit or
+hosted-backup recovery result is claimed.

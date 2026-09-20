@@ -131,7 +131,8 @@ restarts help planned updates; engine crash restarts are not a reconnection
 protocol. Follow [launcher-service.md](launcher-service.md) for lease recovery.
 
 W13 passed for the deterministic assembled boundary on 2026-09-20. Hosted
-restore (W8-b) and W14 corpus/trace isolation remain distinct acceptance.
+restore (W8-b) remains outstanding. W14 corpus/trace isolation subsequently
+passed on this stack; see [shared-learning acceptance](shared-learning-acceptance.md).
 See the [measured scope](saas-stack-acceptance-2026-09-20.md); no production
 migration or process-crash recovery is inferred from a graceful restart.
 

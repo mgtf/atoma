@@ -107,6 +107,7 @@ try {
   // The scenario runs inside the actual web container without engine access.
   const scenario = readFileSync(`${root}/scripts/packaged-stack-workload.mjs`, 'utf8');
   writeFileSync(`${state}/product/smoke-scenario.mjs`, scenario);
+  writeFileSync(`${state}/product/packaged-stack-privacy.mjs`, readFileSync(`${root}/scripts/packaged-stack-privacy.mjs`));
   writeFileSync(`${state}/product/smoke-restore.py`, readFileSync(`${root}/scripts/restore-drill.py`));
   await new Promise((resolveRun, rejectRun) => {
     const child = spawn('docker', ['exec', '-i', web, 'node', `${state}/product/smoke-scenario.mjs`],
@@ -136,6 +137,19 @@ try {
       else rejectRun(new Error(`Workload failed (${code}): ${errorText.slice(-3000)}`)); });
   });
   const receipt = JSON.parse(readFileSync(`${state}/product/smoke-workload.json`, 'utf8'));
+  // Founder is platform admin: use ordinary member/viewer sessions for tenant refusals.
+  for (const account of [member, viewer, other]) {
+    assert.equal(account.viewer.platformAdmin, false);
+    for (const run of receipt.runs) {
+      const own = run.orgId === account.viewer.activeOrganisation.id;
+      for (const suffix of ['', '?after=0']) {
+        const response = await request(account.jar, `${base}/api/runs/${run.runId}${suffix}`);
+        assert.equal(response.status, own ? 200 : 404);
+        const body = await response.text();
+        assert.equal(body.includes(`TRACE_PRIVATE_${run.orgId === orgId ? 'a' : 'b'}`), own);
+      }
+    }
+  }
   for (const run of receipt.runs) {
     const own = run.orgId === orgId ? owner : other;
     const foreign = run.orgId === orgId ? other : owner;
@@ -153,7 +167,7 @@ try {
   console.log('authenticated scoped run reads and session persistence after restart passed');
   writeFileSync(`${state}/product/stack-smoke-report.json`, JSON.stringify({
     status: 'passed', auth: 'https-pkce', organisations: 2, roles: ['org:owner','org:member','org:viewer'],
-    workload: receipt, restart: 'graceful', images: Object.fromEntries(['web','launcher','worker','preview','gateway'].map(k => [k,image(k)])),
+    workload: receipt, traceIsolation: 'member-viewer-owner-full-and-delta', restart: 'graceful', images: Object.fromEntries(['web','launcher','worker','preview','gateway'].map(k => [k,image(k)])),
   }, null, 2)+'\n');
 } catch (error) {
   if (started) process.stderr.write(compose('logs', '--no-color', '--tail', '35'));

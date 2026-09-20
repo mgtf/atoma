@@ -1,0 +1,60 @@
+{
+  "status": "passed",
+  "auth": "https-pkce",
+  "organisations": 2,
+  "roles": [
+    "org:owner",
+    "org:member",
+    "org:viewer"
+  ],
+  "workload": {
+    "runs": [
+      {
+        "orgId": "f66a8f2f-f8f5-494e-8052-c9979cf0d38b",
+        "projectId": "c81972d3-9a87-4f25-becb-8f39406bac3d",
+        "runId": "81fd9c88-7887-4f55-96ed-fa6aad7f4350",
+        "workspacePath": "/srv/atoma/workspaces/projects/f66a8f2f-f8f5-494e-8052-c9979cf0d38b/c81972d3-9a87-4f25-becb-8f39406bac3d/81fd9c88-7887-4f55-96ed-fa6aad7f4350/workspace",
+        "tracePath": "/srv/atoma/product/projects/orgs/f66a8f2f-f8f5-494e-8052-c9979cf0d38b/projects/c81972d3-9a87-4f25-becb-8f39406bac3d/runs/81fd9c88-7887-4f55-96ed-fa6aad7f4350/traces/81fd9c88-7887-4f55-96ed-fa6aad7f4350.json"
+      },
+      {
+        "orgId": "75c77f4d-d640-4ed5-9191-9d7e33b4d6e9",
+        "projectId": "50d23826-ad34-4544-b594-85ffc770bda7",
+        "runId": "476115b1-28b7-4a05-a305-2a11f4fb205f",
+        "workspacePath": "/srv/atoma/workspaces/projects/75c77f4d-d640-4ed5-9191-9d7e33b4d6e9/50d23826-ad34-4544-b594-85ffc770bda7/476115b1-28b7-4a05-a305-2a11f4fb205f/workspace",
+        "tracePath": "/srv/atoma/product/projects/orgs/75c77f4d-d640-4ed5-9191-9d7e33b4d6e9/projects/50d23826-ad34-4544-b594-85ffc770bda7/runs/476115b1-28b7-4a05-a305-2a11f4fb205f/traces/476115b1-28b7-4a05-a305-2a11f4fb205f.json"
+      }
+    ],
+    "corpus": {
+      "engine": "packaged-python-bm25",
+      "organisations": [
+        {
+          "orgId": "f66a8f2f-f8f5-494e-8052-c9979cf0d38b",
+          "ownPassages": 1,
+          "foreignSource": "denied",
+          "foreignMarker": "absent",
+          "forgedScope": "denied",
+          "revocation": "denied"
+        },
+        {
+          "orgId": "75c77f4d-d640-4ed5-9191-9d7e33b4d6e9",
+          "ownPassages": 1,
+          "foreignSource": "denied",
+          "foreignMarker": "absent",
+          "forgedScope": "denied",
+          "revocation": "denied"
+        }
+      ]
+    },
+    "preview": "runsc",
+    "restore": "verified"
+  },
+  "traceIsolation": "member-viewer-owner-full-and-delta",
+  "restart": "graceful",
+  "images": {
+    "web": "localhost:5000/web@sha256:82c08fa51d178565f5ad13f929303cfb46b6031d96cc25e8b56de50f052175bc",
+    "launcher": "localhost:5000/launcher@sha256:c43d8ada566501c2e455bf7e150252cd32c0913bb8cebd02f6c93df26008234a",
+    "worker": "localhost:5000/worker@sha256:6a4f8ad90cffaa3990270b20bb3f32a7392b8757324e312372437671b1909db9",
+    "preview": "localhost:5000/preview@sha256:5763975fd3ce593b07f6168ab36ffda2b7841ff08a3c949e945715eaec95cbe1",
+    "gateway": "localhost:5000/gateway@sha256:1bbeef4aae2a0815e51ef2e1675fb8db4e60fa3a2d009fd2127cedbc5f80cd42"
+  }
+}

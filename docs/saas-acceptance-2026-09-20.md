@@ -73,18 +73,18 @@ W13 passed with the preview image-selection fix: [full scenario and limits](saas
 The earlier narrower launcher result above remains historical evidence. The
 new result includes actual Compose boot, HTTPS/OAuth, gVisor, worker egress,
 scoped HTTP reads, backup/restore and graceful restart. It does not close the
-hosted recovery requirement or W14's remaining corpus/HTTP-trace checks.
+hosted recovery requirement. W14 subsequently passed its corpus/HTTP-trace
+extension: [scope and results](shared-learning-acceptance.md#assembled-isolation-acceptance).
+W13 was committed as `5f1a6c2`: [CI passed](https://github.com/mgtf/atoma/actions/runs/35508994558)
+and [production deployment passed](https://github.com/mgtf/atoma/actions/runs/35509259717).
 
 ## Remaining closure conditions
 
-1. **W14 isolation:** complete corpus-search and HTTP trace-reader acceptance
-   for two organisations on the stack. W13 has now proved the assembled stack,
-   worker filesystem separation, scoped run/preview reads and runtime confinement.
-2. **W8-b:** restore a backup actually retrieved from the hosted deployment,
+1. **W8-b:** restore a backup actually retrieved from the hosted deployment,
    retrieve its encryption key separately, verify decryption without printing
    secrets, and record backup age (observed recovery point) and recovery time.
    The admin MCP catalogue does not provide host backup/key retrieval.
-3. **W12:** the [commons terms draft](platform-commons-terms.md) records the
+2. **W12:** the [commons terms draft](platform-commons-terms.md) records the
    commissioned product terms. Operator identity/contact and publication remain
    to be supplied by the operator.
 

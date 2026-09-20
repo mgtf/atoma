@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { once } from 'node:events';
+import { verifyCorpusIsolation } from './packaged-stack-privacy.mjs';
 const { openDb } = await import('/app/dist/registry/db.js');
 const { ProjectStore } = await import('/app/dist/projects/store.js');
 const { projectRunHostLayout } = await import('/app/dist/projects/coordinator.js');
@@ -43,7 +44,7 @@ try {
       proxiedEgress: true, forwardWorkerLogs: false });
     try {
       await worker.start();
-      await worker.execute('write_file', { path: 'private.txt', content: `PRIVATE_${key}` });
+      await worker.execute('write_file', { path: 'private.txt', content: `Private annual price: ${key === 'a' ? 'ASTERFALL_731' : 'BOREALIS_942'}.` });
       const deniedPaths = ['/var/run/docker.sock', endpoint, process.env.ATOMA_DB_PATH,
         ...runs.flatMap(run => [run.workspacePath+'/private.txt', run.tracePath])];
       const filesystem = await worker.execute('run_shell', { command: 'node', args: ['-e',
@@ -58,13 +59,14 @@ try {
 const server=http.createServer(async(req,res)=>{if(req.url==='/probe'){let rootDenied=false,networkDenied=false;try{const fs=await import('node:fs');fs.writeFileSync('/root-write','x')}catch{rootDenied=true}try{await fetch('http://127.0.0.1:4111/auth/whoami',{signal:AbortSignal.timeout(2000)})}catch{networkDenied=true}res.end(JSON.stringify({rootDenied,networkDenied}));return}res.end('DELIVERED_${key}')});server.listen(Number(process.env.PORT),'0.0.0.0',()=>console.log('LISTENING_ON_PORT='+server.address().port));` });
     } finally { await worker.drain(); }
     const tracePath = `${paths.runsPath}/${runId}.json`;
-    writeFileSync(tracePath, JSON.stringify({ id: runId, events: [], metadata: { fixture: true } }));
+    writeFileSync(tracePath, JSON.stringify({ id: runId, events: [], metadata: { fixture: true, privateMarker: `TRACE_PRIVATE_${key}` } }));
     writeFileSync(paths.logPath, 'Deterministic Element acceptance completed\n');
     projects.transitionProjectRun({ orgId, projectRunId: runId, from: 'running', to: 'delivered',
       traceId: runId, stats: parseRunLog('✓ build finished') });
     runs.push({ orgId, projectId, runId, workspacePath: paths.workspacePath, tracePath });
   }
   assert.equal(projects.getProjectRun(runs[1].orgId, runs[0].runId), null);
+  const corpus = await verifyCorpusIsolation(projects, runs);
   launcher = await SocketLauncher.connect(endpoint);
   const preview = await startPreview({ launcher, runtime: 'runsc', imageDigest: process.env.ATOMA_PREVIEW_IMAGE,
     copyOwnership: launcher.previewOwnership(), probe: async port => (await fetch(`http://127.0.0.1:${port}/`)).ok },
@@ -82,7 +84,7 @@ const server=http.createServer(async(req,res)=>{if(req.url==='/probe'){let rootD
   const restored = spawnSync('python3', [`${state}/smoke-restore.py`, backup.snapshotDir, '--dest', `${state}/smoke-restored`],
     { encoding: 'utf8', timeout: 30000 });
   assert.equal(restored.status, 0, restored.stderr || restored.stdout);
-  writeFileSync(`${state}/smoke-workload.json`, JSON.stringify({ runs, preview: 'runsc', restore: JSON.parse(restored.stdout).status }));
+  writeFileSync(`${state}/smoke-workload.json`, JSON.stringify({ runs, corpus, preview: 'runsc', restore: JSON.parse(restored.stdout).status }));
   console.log('real worker delivery, scoped files, egress, gVisor preview and isolated restore passed');
 } finally {
   launcher?.close();
