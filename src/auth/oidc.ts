@@ -48,6 +48,7 @@ export function buildAuthorizeUrl(input: {
   redirectUri: string;
   state: string;
   codeChallenge: string;
+  selectAccount?: boolean;
 }): string {
   const url = safeHttpUrl(input.provider.authorizeUrl, 'authorization endpoint');
   safeHttpUrl(input.redirectUri, 'redirect URI');
@@ -58,6 +59,7 @@ export function buildAuthorizeUrl(input: {
   url.searchParams.set('state', input.state);
   url.searchParams.set('code_challenge', input.codeChallenge);
   url.searchParams.set('code_challenge_method', 'S256');
+  if (input.selectAccount) url.searchParams.set('prompt', 'select_account');
   return url.href;
 }
 

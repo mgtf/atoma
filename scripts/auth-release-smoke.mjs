@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { smokeMcpOAuth } from './mcp-oauth-smoke.mjs';
+import { smokeMcpOAuth, smokeMcpAccountSwitch } from './mcp-oauth-smoke.mjs';
 import { startProvider, CookieJar, request, providerLoginUrl } from './auth-smoke-fixture.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
@@ -358,6 +358,8 @@ try {
   if (provider.verifiedPkce() !== 2) {
     throw new Error('compiled invited flow did not verify a second PKCE exchange');
   }
+
+  await smokeMcpAccountSwitch(baseUrl, memberJar.header(`${baseUrl}/oauth/authorize`));
 
   process.stdout.write(
     'auth release smoke ok: shell login, founder admission, CLI invite, member admission, PKCE, MCP OAuth, session gate, logout\n'

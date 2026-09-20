@@ -1836,6 +1836,12 @@ export class AuthStore {
     }));
   }
 
+  /** Self-scoped display attributes for browser consent; never used to grant access. */
+  listLoginIdentities(principalId: string): Array<{ provider: string; subject: string; email: string | null }> {
+    return this.db.prepare('SELECT provider, provider_subject AS subject, email FROM auth_identities WHERE principal_id = ? ORDER BY linked_at, provider')
+      .all(principalId) as Array<{ provider: string; subject: string; email: string | null }>;
+  }
+
   /** Operator view (`atoma auth list`): every principal with its links. */
   listPrincipals(): Array<{
     principalId: string;

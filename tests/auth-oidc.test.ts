@@ -214,6 +214,9 @@ describe('PKCE authorization request', () => {
     expect(url.searchParams.has('scope')).toBe(false);
     expect(url.searchParams.get('state')).toBe('single-use-state');
     expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+    const switched = new URL(buildAuthorizeUrl({ provider, redirectUri: REDIRECT_URI,
+      state: 'switch-state', codeChallenge: pkceChallenge(RFC_VERIFIER), selectAccount: true }));
+    expect(switched.searchParams.get('prompt')).toBe('select_account');
   });
 });
 

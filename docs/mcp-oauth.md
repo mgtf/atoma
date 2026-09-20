@@ -15,6 +15,14 @@ The browser signs into Atoma if needed, then displays the requesting client,
 account, active organisation, return address and permission implications. The user
 must explicitly approve. Denial returns `access_denied` with the client's state.
 
+Use **Use another account** on that page to sign this browser out of Atoma,
+choose a provider account, and return to a new consent page. The original
+request is invalidated; switching neither grants access nor revokes existing
+MCP connections. The new consent shows the account's provider identity,
+organisation and role. The original expiry and client callback are preserved.
+The provider receives `prompt=select_account` to request its account picker
+([GitHub documentation](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps)).
+
 The client name is self-declared, not a verified brand. Consent includes the
 caller's current MCP rights, including platform administration when applicable.
 Changing active organisation does not move an already-issued grant. Revocation

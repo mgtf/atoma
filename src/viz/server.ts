@@ -1331,10 +1331,10 @@ function avatarUrlFor(store: AuthStore, principalId: string): string | null {
  * without shipping an unauthenticated app shell to an unauthenticated
  * browser. English, no external assets, no scripts.
  */
-function loginPage(message?: string, invitationToken?: string): string {
+function loginPage(message?: string, invitationToken?: string, selectAccount = false): string {
   const inviteParam = invitationToken ? `&amp;invite=${encodeURIComponent(invitationToken)}` : '';
   const providers = (AUTH_RUNTIME?.providers ?? [])
-    .map((p) => `<a class="btn" href="/auth/login?provider=${p.id}${inviteParam}">${escapeHtml(p.label)}</a>`)
+    .map((p) => `<a class="btn" href="/auth/login?provider=${p.id}${inviteParam}${selectAccount ? '&amp;select_account=1' : ''}">${escapeHtml(p.label)}</a>`)
     .join('');
   const notice = message ? `<p class="msg">${escapeHtml(message)}</p>` : '';
   return `<!doctype html>
@@ -2229,7 +2229,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         return;
       }
       if (!providerId) {
-        sendAuthHtml(res, 200, loginPage(undefined, invitationToken ?? undefined));
+        sendAuthHtml(res, 200, loginPage(undefined, invitationToken ?? undefined, url.searchParams.get('select_account') === '1'));
         return;
       }
       const provider = authProvider(providerId);
@@ -2287,6 +2287,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         redirectUri: AUTH_RUNTIME.redirectUri,
         state,
         codeChallenge: pkce.challenge,
+        selectAccount: url.searchParams.get('select_account') === '1',
       });
       writeAuthRedirect(
         res,
