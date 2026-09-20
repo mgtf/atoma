@@ -119,8 +119,8 @@ product directory, workspaces, launcher state and separately escrowed secrets.
 Backups run with `ATOMA_LAUNCHER_WORKSPACE_ROOT` also capture its `projects/`
 projection as a mandatory `workspaces.tar.gz` tier (manifest layout version 2).
 Restore with `scripts/restore-drill.py`; an absent projection fails the drill.
-The hosted backup/restore drill and its RPO/RTO remain W8-b; do not infer them
-from the local backup command. Never copy live SQLite files without the supported
+The [hosted backup/restore drill](saas-hosted-recovery-2026-09-20.md) passed W8-b
+with separately recovered key material and measured offline timings. Never copy live SQLite files without the supported
 backup procedure, and do not restore launcher state over a running daemon.
 
 Compose orders web after the launcher handshake and gateway after web HTTP
@@ -131,7 +131,7 @@ restarts help planned updates; engine crash restarts are not a reconnection
 protocol. Follow [launcher-service.md](launcher-service.md) for lease recovery.
 
 W13 passed for the deterministic assembled boundary on 2026-09-20. Hosted
-restore (W8-b) remains outstanding. W14 corpus/trace isolation subsequently
+restore (W8-b) subsequently passed. W14 corpus/trace isolation also
 passed on this stack; see [shared-learning acceptance](shared-learning-acceptance.md).
 See the [measured scope](saas-stack-acceptance-2026-09-20.md); no production
 migration or process-crash recovery is inferred from a graceful restart.

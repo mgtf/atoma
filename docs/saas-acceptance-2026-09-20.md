@@ -78,15 +78,14 @@ extension: [scope and results](shared-learning-acceptance.md#assembled-isolation
 W13 was committed as `5f1a6c2`: [CI passed](https://github.com/mgtf/atoma/actions/runs/35508994558)
 and [production deployment passed](https://github.com/mgtf/atoma/actions/runs/35509259717).
 
-## Remaining closure conditions
+## Final closure
 
-1. **W8-b:** restore a backup actually retrieved from the hosted deployment,
-   retrieve its encryption key separately, verify decryption without printing
-   secrets, and record backup age (observed recovery point) and recovery time.
-   The admin MCP catalogue does not provide host backup/key retrieval.
-   The [first hosted drill](saas-hosted-recovery-2026-09-20.md) now verifies
-   15 runs and eight encrypted envelopes; a fresh capture declaring the absent
-   benchmark archive optional remains required.
+**W8-b completed:** the [final hosted drill](saas-hosted-recovery-2026-09-20.md#final-capture--w8-b-passed)
+restored a fresh production backup on another machine: complete inventory,
+15 runs without issues and eight envelopes decrypted with the separately
+retrieved key. Observed snapshot age was 42.4 seconds at receipt; offline
+extraction/integrity took 10.99 seconds. No secrets or customer payloads are
+committed. The first incomplete snapshot remains unchanged historical evidence.
 
 **W12 completed:** the [hosted-service terms](platform-commons-terms.md) are
 published in this public repository and linked from the README. They include
@@ -95,5 +94,5 @@ support/privacy contact. Publication is not evidence of individual acceptance;
 the agreed W12 scope adds no consent-recording mechanism.
 
 The owner lifted the test deferral on 2026-09-20 for isolated environments.
-Remaining runtime checks are pending environment execution, not permission to
-test. No real retention purge or production restoration was performed.
+The agreed SaaS work list is complete within the scopes recorded above. No real
+retention purge or restoration over the live production state was performed.

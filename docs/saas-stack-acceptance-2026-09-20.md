@@ -53,6 +53,9 @@ still needs a real hosted backup plus separately retrieved key and recovery timi
 Subsequent extension: W14's corpus/HTTP-trace checks passed later the same day;
 see [shared-learning acceptance](shared-learning-acceptance.md#assembled-isolation-acceptance).
 The original W13 report above remains unchanged historical evidence.
+W8-b also subsequently passed its [hosted recovery drill](saas-hosted-recovery-2026-09-20.md#final-capture--w8-b-passed),
+including retrieval of the real snapshot and its key separately, verified
+decryption and measured offline recovery timings.
 
 ## Defect found and regression
 
