@@ -1,8 +1,7 @@
 # Packaged Linux stack (W7)
 
 Implemented on 2026-09-19. Web and launcher image builds and compiled help
-smokes passed on 2026-09-20; clean-host boot and full W13 acceptance remain
-pending. See the [evidence receipt](saas-acceptance-2026-09-20.md). This is a reference deployment definition,
+smokes passed on 2026-09-20, followed by [W13 deterministic stack acceptance](saas-stack-acceptance-2026-09-20.md). See the [evidence receipt](saas-acceptance-2026-09-20.md). This is a reference deployment definition,
 not evidence that the instance is ready to admit mutually distrusting tenants.
 
 ## Runtime boundary
@@ -131,10 +130,10 @@ operations are never replayed automatically. Explicit Compose dependency
 restarts help planned updates; engine crash restarts are not a reconnection
 protocol. Follow [launcher-service.md](launcher-service.md) for lease recovery.
 
-The owner authorised isolated execution checks on 2026-09-20. Still pending: image builds and
-import closures in containers, founder/invite flow, a delivered project run,
-preview and worker network isolation, crash/restart and hosted restore. Complete
-W13 and W14 before claiming packaged-stack acceptance.
+W13 passed for the deterministic assembled boundary on 2026-09-20. Hosted
+restore (W8-b) and W14 corpus/trace isolation remain distinct acceptance.
+See the [measured scope](saas-stack-acceptance-2026-09-20.md); no production
+migration or process-crash recovery is inferred from a graceful restart.
 
 Compose syntax: [Docker service reference](https://docs.docker.com/reference/compose-file/services/).
 Proxy configuration: [Caddyfile concepts](https://caddyserver.com/docs/caddyfile/concepts).

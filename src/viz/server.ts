@@ -979,7 +979,7 @@ const PREVIEW_RUNTIME_PROMISE: Promise<PreviewRuntime | null> = (async () => {
   const claims = new PreviewClaimRegistry();
   const routes = new PreviewRouteTable();
   const launcher = await connectContainerLauncher({
-    image: DEFAULT_WORKER_IMAGE,
+    image: process.env['ATOMA_WORKER_IMAGE'] ?? DEFAULT_WORKER_IMAGE,
     previewImage: config.image,
     previewRuntime: config.runtime,
   });

@@ -67,12 +67,19 @@ node scripts/launcher-container-smoke.mjs
 The harness requires a short engine volume mountpoint for Unix socket paths,
 refuses existing Atoma resources, and removes its own service and test volume.
 
+## Packaged-stack acceptance, completed later on the same day
+
+W13 passed with the preview image-selection fix: [full scenario and limits](saas-stack-acceptance-2026-09-20.md).
+The earlier narrower launcher result above remains historical evidence. The
+new result includes actual Compose boot, HTTPS/OAuth, gVisor, worker egress,
+scoped HTTP reads, backup/restore and graceful restart. It does not close the
+hosted recovery requirement or W14's remaining corpus/HTTP-trace checks.
+
 ## Remaining closure conditions
 
-1. **W13 and W14 isolation:** execute the reference Compose stack on an isolated
-   Linux Engine 28+ host with gVisor, covering login/invitation/roles, actual
-   Element delivery, foreign workspace/trace/corpus refusal, network isolation,
-   restart and restore. Docker Desktop and the local viz login are narrower checks.
+1. **W14 isolation:** complete corpus-search and HTTP trace-reader acceptance
+   for two organisations on the stack. W13 has now proved the assembled stack,
+   worker filesystem separation, scoped run/preview reads and runtime confinement.
 2. **W8-b:** restore a backup actually retrieved from the hosted deployment,
    retrieve its encryption key separately, verify decryption without printing
    secrets, and record backup age (observed recovery point) and recovery time.

@@ -1,7 +1,8 @@
 # Shared-learning acceptance — W14
 
 Status on 2026-09-20: shared-learning test passed in [CI at `4788dfd`](https://github.com/mgtf/atoma/actions/runs/35478666242).
-The packaged-stack isolation arm remains pending; see the [receipt](saas-acceptance-2026-09-20.md).
+W13 subsequently proved the assembled stack and workspace separation; corpus
+search and HTTP trace-reader acceptance remain pending. See the [receipt](saas-acceptance-2026-09-20.md).
 
 ## Executed scenario
 
@@ -48,8 +49,10 @@ Windows skips this execution scenario; typechecking it is not acceptance.
 
 This checks the shared-learning arm at the store/lifecycle/tool boundary, not
 full project admission or end-to-end delivery. It does not prove isolation
-against hostile code: the local backend is not an OS boundary. W13 and W14's
-packaged-stack arm still need two organisations on the real launcher stack,
-with denied foreign trace/workspace/corpus reads and denied control-plane
-reachability from the workload network. Existing retrieval tests remain
-separate evidence for corpus scoping. No hosted acceptance result is claimed.
+against hostile code: the local backend is not an OS boundary. The
+[W13 stack scenario](saas-stack-acceptance-2026-09-20.md) subsequently proved
+two real worker workspaces, denied foreign filesystem access, worker egress
+policy, gVisor previews and scoped HTTP run/preview reads. W14 still needs
+corpus-search and HTTP trace-reader acceptance on that stack; existing retrieval
+tests remain separate evidence for corpus scoping. No production migration or
+model-quality result is claimed.

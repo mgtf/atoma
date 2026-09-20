@@ -1,0 +1,38 @@
+{
+  "status": "passed",
+  "auth": "https-pkce",
+  "organisations": 2,
+  "roles": [
+    "org:owner",
+    "org:member",
+    "org:viewer"
+  ],
+  "workload": {
+    "runs": [
+      {
+        "orgId": "6ed1202d-01a8-4f65-80bc-c761a0fe8c0c",
+        "projectId": "c8e76e9c-0cf0-490c-a352-2d0e5f09e8c0",
+        "runId": "a10ebe99-45b6-41f7-a8c5-3f79ade7ca08",
+        "workspacePath": "/srv/atoma/workspaces/projects/6ed1202d-01a8-4f65-80bc-c761a0fe8c0c/c8e76e9c-0cf0-490c-a352-2d0e5f09e8c0/a10ebe99-45b6-41f7-a8c5-3f79ade7ca08/workspace",
+        "tracePath": "/srv/atoma/product/projects/orgs/6ed1202d-01a8-4f65-80bc-c761a0fe8c0c/projects/c8e76e9c-0cf0-490c-a352-2d0e5f09e8c0/runs/a10ebe99-45b6-41f7-a8c5-3f79ade7ca08/traces/a10ebe99-45b6-41f7-a8c5-3f79ade7ca08.json"
+      },
+      {
+        "orgId": "191431eb-14e2-4afa-8d4b-5fd88374bbe4",
+        "projectId": "1019b954-92fc-4f4c-a402-18c857311773",
+        "runId": "f3dcdac1-cdfe-4197-8e99-1c0e39cbd314",
+        "workspacePath": "/srv/atoma/workspaces/projects/191431eb-14e2-4afa-8d4b-5fd88374bbe4/1019b954-92fc-4f4c-a402-18c857311773/f3dcdac1-cdfe-4197-8e99-1c0e39cbd314/workspace",
+        "tracePath": "/srv/atoma/product/projects/orgs/191431eb-14e2-4afa-8d4b-5fd88374bbe4/projects/1019b954-92fc-4f4c-a402-18c857311773/runs/f3dcdac1-cdfe-4197-8e99-1c0e39cbd314/traces/f3dcdac1-cdfe-4197-8e99-1c0e39cbd314.json"
+      }
+    ],
+    "preview": "runsc",
+    "restore": "verified"
+  },
+  "restart": "graceful",
+  "images": {
+    "web": "localhost:5000/web@sha256:82c08fa51d178565f5ad13f929303cfb46b6031d96cc25e8b56de50f052175bc",
+    "launcher": "localhost:5000/launcher@sha256:c43d8ada566501c2e455bf7e150252cd32c0913bb8cebd02f6c93df26008234a",
+    "worker": "localhost:5000/worker@sha256:6a4f8ad90cffaa3990270b20bb3f32a7392b8757324e312372437671b1909db9",
+    "preview": "localhost:5000/preview@sha256:42d67a468c33290fc97ed5b9988b4ae315a802f3f33486be264d5c95bf9283f3",
+    "gateway": "localhost:5000/gateway@sha256:1bbeef4aae2a0815e51ef2e1675fb8db4e60fa3a2d009fd2127cedbc5f80cd42"
+  }
+}
