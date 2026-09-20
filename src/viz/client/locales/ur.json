@@ -1132,5 +1132,6 @@
   "welcome.handheld.hint": "Atoma کو فونز اور ٹیبلٹس کے لیے ابھی حتمی شکل دی جا رہی ہے۔ آپ مکمل رسائی کے ساتھ جاری رکھ سکتے ہیں، لیکن کچھ اسکرینیں شاید ابھی موبائل پر اچھی طرح کام نہ کریں۔",
   "welcome.handheld.continue": "کم از کم مجھے اپنے اکاؤنٹ تک رسائی دیں",
   "settings.runCapacity": "بیک وقت runs",
-  "settings.runCapacityValue": "{{active}} فعال / {{limit}} کی اجازت (اس ہوسٹ پر ایک وقت میں ایک run)"
+  "settings.runCapacityValue": "{{active}} فعال / {{limit}} کی اجازت (اس ہوسٹ پر ایک وقت میں ایک run)",
+  "auth.switchAccount": "اکاؤنٹ تبدیل کریں"
 }

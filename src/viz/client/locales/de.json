@@ -1132,5 +1132,6 @@
   "welcome.handheld.hint": "atoma wird noch für Smartphones und Tablets optimiert. Sie können mit vollem Zugriff fortfahren, aber einige Ansichten funktionieren auf Mobilgeräten möglicherweise noch nicht richtig.",
   "welcome.handheld.continue": "Zumindest auf mein Konto zugreifen",
   "settings.runCapacity": "Gleichzeitige runs",
-  "settings.runCapacityValue": "{{active}} aktiv / {{limit}} erlaubt (auf diesem Host jeweils nur ein run)"
+  "settings.runCapacityValue": "{{active}} aktiv / {{limit}} erlaubt (auf diesem Host jeweils nur ein run)",
+  "auth.switchAccount": "Konto wechseln"
 }
