@@ -28,6 +28,7 @@ export type AccountMenuItemKind =
   | 'switch'
   | 'divider'
   | 'settings'
+  | 'switchAccount'
   | 'signOut'
   | 'failure';
 
@@ -59,7 +60,7 @@ export interface AccountMenuAnchor {
 
 /**
  * Pure layout, so the row set can be asserted without a GPU. Ordering is the
- * contract: who you are, where you are, where else you could be, then the two
+ * contract: who you are, where you are, where else you could be, then account
  * actions.
  */
 export function accountMenuLayout(
@@ -88,6 +89,7 @@ export function accountMenuLayout(
   }
   push({ kind: 'divider', height: DIVIDER_HEIGHT });
   push({ kind: 'settings', id: 'account.settings', height: ACTION_HEIGHT });
+  push({ kind: 'switchAccount', id: 'auth.switchAccount', height: ACTION_HEIGHT });
   push({ kind: 'signOut', id: 'auth.signOut', height: ACTION_HEIGHT });
   if (auth.failure) push({ kind: 'failure', height: FAILURE_HEIGHT });
 
@@ -238,19 +240,19 @@ export function drawAccountMenu(
       );
       continue;
     }
-    if (item.kind === 'signOut' && item.id) {
+    if ((item.kind === 'signOut' || item.kind === 'switchAccount') && item.id) {
       ctx.button(
         ctx.root,
         item.id,
         'menuitem',
-        snapshot.t('auth.signOut'),
+        snapshot.t(item.id),
         innerX,
         y,
         innerWidth,
         ACTION_HEIGHT - 4,
         false,
         snapshot.onActivate,
-        GPU_COLORS.warning,
+        item.kind === 'signOut' ? GPU_COLORS.warning : GPU_COLORS.primary,
         false,
         auth.signingOut
       );

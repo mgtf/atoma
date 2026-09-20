@@ -3091,10 +3091,13 @@ describe('GPU account menu', () => {
     expect(ids).toContain('org.switch.org-b');
     expect(ids).not.toContain('org.switch.org-a');
     expect(ids).toContain('account.settings');
+    expect(ids).toContain('auth.switchAccount');
+    const switchAccount = ctx.buttons.find((button) => button.id === 'auth.switchAccount');
+    switchAccount?.onActivate?.(switchAccount.id);
     expect(ids).toContain('auth.signOut');
     const signOut = ctx.buttons.find((button) => button.id === 'auth.signOut');
     signOut?.onActivate?.(signOut.id);
-    expect(activated).toEqual(['auth.signOut']);
+    expect(activated).toEqual(['auth.switchAccount', 'auth.signOut']);
   });
 
   it('clips DOM overlays to the same panel rect the account menu draws', () => {

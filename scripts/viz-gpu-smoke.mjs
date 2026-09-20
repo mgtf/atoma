@@ -2098,9 +2098,15 @@ try {
       };
       let updateBuildAvailable = false;
       let updateProbes = 0;
+      const accountSwitchRequests = [];
       const updateShell = await (await fetch(`http://127.0.0.1:${port}/`)).text();
       accountPage.on('request', (request) => {
         const path = new URL(request.url()).pathname;
+        if (path === '/auth/logout' || path === '/auth/login') {
+          accountSwitchRequests.push({ path, method: request.method(), search: new URL(request.url()).search });
+          void request.respond({ status: 200, contentType: 'text/html', body: '<h1>Choose an account</h1>' });
+          return;
+        }
         if (updateBuildAvailable && path === '/' && !request.isNavigationRequest()) {
           updateProbes += 1;
           void request.respond({ status: 200, contentType: 'text/html', headers: { 'cache-control': 'no-store' },
@@ -2589,6 +2595,19 @@ try {
         filledByHand,
         webgpuErrors: await readWebGpuErrors(accountPage),
       };
+      // Exercise the actual canvas row after a full bundle reload above.
+      await clickUntil('account.menu.toggle', hasTarget('auth.switchAccount'), 'account switch menu did not open');
+      await Promise.all([
+        accountPage.waitForNavigation({ waitUntil: 'load', timeout: READY_TIMEOUT_MS }),
+        clickAccountTarget('auth.switchAccount'),
+      ]);
+      if (JSON.stringify(accountSwitchRequests) !== JSON.stringify([
+        { path: '/auth/logout', method: 'POST', search: '' },
+        { path: '/auth/login', method: 'GET', search: '?select_account=1' },
+      ])) {
+        throw new Error(`canvas account switch did not log out before selecting: ${JSON.stringify(accountSwitchRequests)}`);
+      }
+      console.log('viz account switch ok: canvas action logs out then requests account selection');
     } finally {
       await accountPage.close();
     }

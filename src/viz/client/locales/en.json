@@ -112,6 +112,7 @@
   "auth.account": "Account",
   "auth.signedInAs": "Signed in as {{name}}",
   "auth.signOut": "Sign out",
+  "auth.switchAccount": "Switch account",
   "auth.signOutFailed": "Sign out failed",
   "auth.actionFailed": "Account action failed",
   "auth.organisation": "Organisation: {{name}}",
