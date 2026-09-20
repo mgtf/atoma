@@ -3821,7 +3821,12 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         return;
       }
       if (req.method === 'GET') {
-        sendJson(res, 200, PROJECTS_RUNTIME.projects.listProjects(viewer));
+        try {
+          sendJson(res, 200, PROJECTS_RUNTIME.projects.listProjects(viewer));
+        } catch (error) {
+          if (!(error instanceof ProjectHttpError)) throw error;
+          sendJson(res, error.status, { error: error.message });
+        }
         return;
       }
       if (req.method === 'POST') {

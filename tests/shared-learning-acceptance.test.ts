@@ -1,3 +1,4 @@
+import { parseRunLog } from '../src/cli/burnin.js';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -122,7 +123,8 @@ describe.skipIf(process.platform === 'win32')('W14 shared learning across organi
       skillsA.recordSuccess(namespace, skillId);
       registry.recordSuccess(molecule.name);
     }
-    a.projects.transitionProjectRun({ orgId: a.viewer.orgId, projectRunId: first.runId, from: 'running', to: 'delivered' });
+    a.projects.transitionProjectRun({ orgId: a.viewer.orgId, projectRunId: first.runId, from: 'running', to: 'delivered',
+      traceId: first.runId, stats: parseRunLog('✓ build finished') });
     await first.backend.drain?.();
 
     const second = makeRun(b, 'beta source');

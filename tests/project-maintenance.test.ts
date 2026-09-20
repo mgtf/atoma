@@ -86,9 +86,14 @@ describe('offline run retention', () => {
 
   it('expires the separate launcher projection at the cutoff and keeps the shared catalogue', () => {
     const f = fixture();
-    const item = f.makeRun();
+    const runId = randomUUID();
     const workspaceRoot = join(f.root, 'launcher-workspaces');
-    const layout = projectRunHostLayout(f.root, f.viewer.orgId, f.project.projectId, item.run.projectRunId, workspaceRoot);
+    const layout = projectRunHostLayout(f.root, f.viewer.orgId, f.project.projectId, runId, workspaceRoot);
+    f.projects.createProjectRun({ orgId: f.viewer.orgId, projectId: f.project.projectId,
+      principalId: f.viewer.principalId, projectRunId: runId,
+      request: { idempotencyKey: runId, goal: 'Retention fixture' },
+      hostPaths: { workspacePath: layout.workspacePath, runsPath: layout.runsPath,
+        logPath: layout.logPath, skillsPath: join(f.root, 'shared-skills') } });
     mkdirSync(layout.workspacePath, { recursive: true });
     writeFileSync(join(layout.workspacePath, 'result.txt'), 'result');
     mkdirSync(join(f.root, 'shared-skills'), { recursive: true });
@@ -97,8 +102,8 @@ describe('offline run retention', () => {
     const cutoff = new Date(now.getTime() - 90 * 86_400_000).toISOString();
     const db = new Database(f.dbPath);
     try {
-      db.prepare("UPDATE project_runs SET status = 'failed', workspace_path = ?, skills_path = ?, ended_at = ? WHERE project_run_id = ?")
-        .run(layout.workspacePath, join(f.root, 'shared-skills'), cutoff, item.run.projectRunId);
+      db.prepare("UPDATE project_runs SET status = 'failed', ended_at = ? WHERE project_run_id = ?")
+        .run(cutoff, runId);
       expect(retentionPlan(db, f.root, workspaceRoot, new Date(now.getTime() - 1))).toHaveLength(0);
       expect(retentionPlan(db, f.root, workspaceRoot, now)).toHaveLength(1);
       const log = PlatformEventLog.open(f.dbPath);
@@ -115,8 +120,15 @@ describe('offline run retention', () => {
     try {
       expect(() => applyRetention(db, f.root, undefined, () => null)).toThrow('idle services');
       expect(() => assertRetentionPath(f.root, join(f.root, '..', 'outside'))).toThrow('escapes root');
-      db.prepare("UPDATE project_runs SET status = 'failed', ended_at = '2025-01-01T00:00:00.000Z', workspace_path = ? WHERE project_run_id = ?")
-        .run(join(f.root, 'other'), run.run.projectRunId);
+      db.prepare("UPDATE project_runs SET status = 'failed', ended_at = '2025-01-01T00:00:00.000Z' WHERE project_run_id = ?")
+        .run(run.run.projectRunId);
+      const forgedId = randomUUID();
+      f.projects.createProjectRun({ orgId: f.viewer.orgId, projectId: f.project.projectId,
+        principalId: f.viewer.principalId, projectRunId: forgedId,
+        request: { idempotencyKey: forgedId, goal: 'Unrecognised legacy layout' },
+        hostPaths: { ...run.run.hostPaths, workspacePath: join(f.root, 'other') } });
+      db.prepare("UPDATE project_runs SET status = 'failed', ended_at = '2025-01-01T00:00:00.000Z' WHERE project_run_id = ?")
+        .run(forgedId);
       expect(() => retentionPlan(db, f.root)).toThrow('unrecognised run layout');
     } finally { db.close(); }
   });
