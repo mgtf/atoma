@@ -1,7 +1,7 @@
 # Run retention and organisation admission (W9/W10)
 
-Implemented locally on 2026-09-20. Execution tests remain deferred at the
-owner's request. No production bytes have been deleted and no organisation
+Implemented and regression-tested in CI at `4788dfd` on 2026-09-20.
+No production bytes have been deleted and no organisation
 limit has been changed by this implementation work.
 
 ## W9: offline retention
@@ -87,14 +87,15 @@ The compiled command ships as `projects:maintenance`; checkout use is
 `projects:maintenance:dev`. Both accept `--db`. The compiled help is included
 in `release:check`.
 
-## Prepared evidence
+## Executed evidence
 
 `tests/project-maintenance.test.ts` covers suspended coordinator admission
 before the lease, persistence, transactional reservation and idempotency,
 organisation isolation, dry planning, seed holds, audited byte deletion,
 metadata preservation, repeat application, active-run refusal, forged paths
-and symlink ancestors. These tests have been authored, not executed.
+and symlink ancestors. These checks passed in [CI at `4788dfd`](https://github.com/mgtf/atoma/actions/runs/35478666242).
 
 The cutoff and launcher projection have a dedicated fixture. The restore-drill
-suite also prepares a backup/restore round trip after production retention,
-distinguishing completed expiry from interrupted deletion; execution is deferred.
+suite also passed a backup/restore round trip after production retention,
+distinguishing completed expiry from interrupted deletion. No live purge is
+claimed; see the [receipt](saas-acceptance-2026-09-20.md).

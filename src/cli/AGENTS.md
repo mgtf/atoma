@@ -78,7 +78,7 @@ can only report that it cannot be.
   and has no tsx, so a source-path default silently made the documented
   collection impossible there until 2026-09-14. `backup:dev` is the source
   path; `release:check` runs the compiled `--help` smoke.
-- It snapshots six tiers into one dated directory: skills, operator runs, the
+- It snapshots the legacy six tiers into one dated directory: skills, operator runs, the
   `~/.atoma/archive` tier, the org-scoped project corpus, the supervisor
   records, and the store LAST (SQLite online backup, never a raw copy). Last
   on purpose since W4 (2026-09-18): skill trust is rows in the store while
@@ -93,6 +93,9 @@ can only report that it cannot be.
   `supervisorDirPath`. Both were missing until 2026-09-14, when the
   [value audit](../../docs/value-audit-2026-09-14.md) found the corpus it had
   to reconcile outside every captured tier.
+- With `ATOMA_LAUNCHER_WORKSPACE_ROOT`, it also captures the `projects/`
+  projection as mandatory `workspaces.tar.gz` (layout version 2). Older snapshots
+  retain the six-tier contract; missing projected workspaces fail restoration.
 - The manifest is an inventory, not a completeness claim: per-tier source,
   SHA-256, top-level entries and recursive file count, the `captured`,
   `skipped` and `notApplicable` lists, the `optionalTiers` declaration, and

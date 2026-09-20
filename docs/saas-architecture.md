@@ -1,10 +1,9 @@
 # atoma hosted architecture
 
-> **CURRENT REVIEW: 2026-09-16.** Reconciled against source at `76c041f`
-> after the owner decision of 2026-09-15 (*a run is a run*,
-> [`platform-trust-2026-09-15.md`](platform-trust-2026-09-15.md)). This review
-> records implementation state and available verification coverage, not a new
-> test run or a hosted deployment acceptance.
+> **CURRENT REVIEW: 2026-09-20.** Implementation and executed checks reconciled
+> against `4788dfd`; [acceptance receipt](saas-acceptance-2026-09-20.md) records
+> the green CI/deployment, local admin MCP check and remaining hosted evidence.
+> The owner authorised isolated runtime tests on 2026-09-20.
 >
 > This document is the architecture boundary for hosted atoma. It has four
 > layers on purpose:
@@ -27,7 +26,7 @@
 > to make it one. What remains is the production boundary and the
 > operational substrate for the shape that IS supported.
 
-## 1. Current state — 2026-09-16
+## 1. Current state — 2026-09-20
 
 ### What the product is
 
@@ -61,14 +60,12 @@ The supported claim today is:
 
 The following claims are **not** supported:
 
-- production hosted SaaS (separate launcher implementation awaits acceptance; no web image, no
-  reference stack, no packaged-stack acceptance);
+- production acceptance of the reference Compose stack (launcher, web image
+  and stack are implemented; assembled runtime acceptance remains pending);
 - isolation between mutually untrusted organisations;
 - a dedicated one-organisation deployment (self-signup creates organisations);
-- durable payer attribution for runs funded by API keys only;
 - financial run budgets or metered rebilling. Per-org concurrency admission and
-  offline run-byte retention are implemented in W9/W10; their execution
-  acceptance remains deferred.
+  offline run-byte retention are implemented and regression-tested in W9/W10.
 
 ### Ownership model
 
@@ -78,7 +75,7 @@ service and system principals, although not every non-human writer has been
 migrated to a first-class principal yet.
 
 `Organisation` is the authorization boundary for projects and execution
-rights, and the billing boundary. `Project` is optional as an organisation
+rights and provider-key ownership. `Project` is optional as an organisation
 resource but **mandatory for every persisted product run**.
 
 ```text
@@ -105,11 +102,11 @@ Current resource scopes:
 |---|---|---|
 | Principals, identities, sessions | instance control plane | Provider identities join on `(provider, subject)`, never email. A session names one active organisation. |
 | Projects, project runs and cost | organisation | A run has one project and one requesting principal. `org:viewer` reads but cannot execute. |
-| Traces, workspaces, manifests | project/run | `projectRunHostLayout` stores them below `orgs/<org>/projects/<project>/runs/<run>`. |
+| Traces, workspaces, manifests | project/run | `projectRunHostLayout` stores traces/manifests below `orgs/<org>/projects/<project>/runs/<run>`; service-mode workspaces use the launcher projection `projects/<org>/<project>/<run>/workspace`. |
 | Retrieval corpus | project | Only the project's own passages are searchable (`ownPassages` stays 0 for another project). A validator's paraphrase of a passage, written into a prompt or a description, is platform knowledge. |
 | Atom bodies and trust | platform | `atom_types` has no owner column; `AtomRegistry` takes a database and nothing else, and refuses an unfolded store. Readers keep `unfoldedRegistryPredicate` as a guard. |
 | Skill bodies and counters | bodies on the platform filesystem, trust in the platform SQLite table `skill_meta` (W4, 2026-09-18) | Learning, promotion, deterministic dispatch, drop and merge are available to every run. Every counter mutation is one statement in one `.immediate()` transaction with its lifecycle event; legacy `_meta.json` sidecars are imported once and retired as `_meta.imported.json`. Before W4, NOT single-writer: `atoma_skill_reset`, `_drop` and `_merge` are platform-tier MCP tools that take no run lease (`src/mcp/writes.ts` imports none), and the production viz server enables them (`operatorRuns: true`). A bearer token can mutate counters while a run is in flight. |
-| Lifecycle ledger | platform SQLite table | `lifecycle_events(seq, at, kind, entity, detail, org_id, project_id, run_id, actor_type, actor_id)`; the five scope columns are nullable and additive (2026-09-18), a row without them is a platform-level event. Type counters are keyed by name again; the atom-id-keyed project events of the partitioned period stay as byte-honest history and are not compared. |
+| Lifecycle ledger | platform SQLite table | `lifecycle_events(seq, at, kind, entity, detail, org_id, project_id, run_id, actor_type, actor_id, entity_id)`; scope columns are nullable and additive (2026-09-18), a row without them is a platform-level event. Type counters are compared by atom id; unresolved historical labels remain unchanged. |
 | Platform events | organisation/project/run-aware | The control-plane audit journal carries nullable scope ids and a retention window (`ATOMA_EVENTS_RETENTION_DAYS`, default 90). |
 | Prefilter decisions | platform SQLite table | Content-addressed, transactional, read and written across every organisation's runs. The existence/volume oracle is accepted (Layer 4). |
 | Provider credentials | organisation or host, injected per run | Organisation keys encrypted at rest. Selection is account pin → organisation default → host default; the run receives only its credential snapshot. |
@@ -147,10 +144,9 @@ regression-tested.
 
 Provider construction consumes a per-run environment snapshot. Configuration
 errors throw `RunnerConfigError`. `RunPayerLedger` has exactly three rows —
-L1, L2, L3 — each with selector, transport and payer. That ledger is journaled
-when a run touches the host or requesting principal's subscription
-(`onSubscriptionTransport` in `ProjectRunCoordinator` and the viz server);
-pure organisation-key or host-key attribution remains transient.
+L1, L2, L3 — each with selector, transport and payer. Every project run persists
+these rows in its queued-to-running transaction, including organisation-key
+and host-key runs. Subscription-specific journaling remains additional evidence.
 
 Provider login is identity only and never grants inference entitlement.
 Personal Claude subscription login remains unavailable pending the third-party
@@ -166,7 +162,8 @@ cloning.
 
 The model-authored Element worker has an OS boundary. W1 now implements an
 optional separate launcher service over a private socket, with its own image
-([setup](launcher-service.md)); runtime and deployment acceptance are deferred.
+([setup](launcher-service.md)). The real service/worker/volume smoke passed
+on 2026-09-20; full reference-stack acceptance remains pending.
 Without `ATOMA_LAUNCHER_SOCKET`, `DockerLauncher` remains in-process.
 The service issues named volumes with a shared file projection. W2 adds a launcher-issued
 worker socket transport; W3 adds named volumes and automatic project workspace provisioning.
@@ -176,23 +173,20 @@ limitations. The complete deployment boundary is not yet accepted.
 The decided target remains Linux, Docker images and one separate launcher
 ([decision](deployment-docker-launcher-2026-08-28.md)). The web container never
 mounts `docker.sock`; closed profiles cover workers, egress and previews;
-W3 implements volumes, leases, TTLs and orphan recovery; runtime acceptance remains deferred.
+W3 implements volumes, leases, TTLs and orphan recovery; the real container
+smoke verified graceful restart and retained files. Crash and full-stack acceptance
+remain separate.
 Image definitions exist for worker, preview, mender, launcher and web. W7 adds
 the [reference stack](packaged-stack.md), digest validation and a restricted build
-context. Image builds and clean-host boot remain unverified.
-### The next code decision
+context. Web/launcher image builds and compiled help smokes passed on
+2026-09-20; clean-host boot remains unverified.
+### Storage decision, closed
 
-**Gate 0: hardened SQLite versus PostgreSQL.** Decided for hardened SQLite on
-2026-09-18 (see the gate's record in Layer 3). The dated analysis and the
-migration shape it did not adopt are in
-[PostgreSQL migration analysis — 2026-09-02](postgresql-migration-analysis-2026-09-02.md);
-it stays an input for the day evidence reopens the gate. What it gated had narrowed
-since 2026-09-15: there is no trust split to build on it. It gates (a) moving
-skill counters out of `_meta.json` into atomic statements, (b) durable payer
-attribution for API-key runs, (c) scoped lifecycle attribution, and (d) any
-second writer — a separate launcher service, a second control-plane node, or
-concurrent runs. Every table created before the choice adds a second schema,
-migration, fixture set, backup story and cutover path.
+Gate 0 selected hardened SQLite on 2026-09-18. W4, W5 and W6 now persist skill
+counters, payer attribution and scoped lifecycle events in the product store.
+The launcher keeps only machine-local operational state and is not another
+product-store writer. [The earlier PostgreSQL analysis](postgresql-migration-analysis-2026-09-02.md)
+remains historical input if measured topology or contention reopens the decision.
 
 ## 2. Normative invariants
 
@@ -212,9 +206,9 @@ happens to work this way today" is not such evidence.
 - Provider login is an identity signal, never an inference entitlement.
 - Reading costs is not authority to execute. `org:viewer` cannot start or
   cancel a run.
-- If platform-admin cross-org read survives, it is break-glass: explicit,
-  attributable, audited and subject to a product decision on customer
-  notification. Today it is ordinary operator power.
+- Platform-admin cross-org read is retained operator authority (decision 1).
+  Every widening path requires a durable audit receipt and owner notification;
+  the same administrator/organisation pair shares an hourly receipt (W11).
 
 ### Skills are a commons
 
@@ -235,7 +229,8 @@ trust is earned again by each organisation — is superseded: **a run is a run**
   frontmatter record which run wrote what; that record grants nothing.
 - **Sharing terms belong to the platform, not to the code licence.** The
   terms under which an organisation's runs contribute to and consume the
-  commons are platform terms still to be written (decision 5, Layer 3).
+  commons are defined in the [terms draft](platform-commons-terms.md), pending
+  operator identification and publication (decision 5, Layer 3).
 
 What the amendment did not change: raw trace content is never learning
 input; static scans are hygiene, never authorization; container isolation is
@@ -260,23 +255,23 @@ what bounds a hostile body, and it bounds blast radius, not authorship.
 
 **D1 — The web/control plane never holds the Docker socket.** The launcher is
 the only component allowed to create or destroy workloads. *Not satisfied:
-`DockerLauncher` remains the default in-process backend; the optional W1 service is not yet deployment-accepted, and W2 worker socket acceptance is deferred.*
+`DockerLauncher` remains the default in-process backend; the optional W1 service is not yet deployment-accepted, and W2 worker socket acceptance is pending.*
 
 **D2 — The launcher accepts closed profiles, not Docker syntax.** A caller
 cannot choose an image, mount, network, command, capability or arbitrary
 environment entry. *Satisfied at the contract level for egress and preview;
-W2 service workers use a closed workspace-key profile (runtime acceptance deferred).*
+W2 service workers use a closed workspace-key profile (runtime acceptance pending).*
 
 **D3 — Every run's model-authored Element workload receives its own boundary.**
 Its only writable product mount is its workspace. Stores, skills,
 credentials, other workspaces and the control plane are unreachable from it.
 Egress is deny-by-default. *Satisfied for the worker container; workspaces
-use named local-driver volumes with a shared file projection (W3; acceptance deferred).*
+use named local-driver volumes with a shared file projection (W3; acceptance pending).*
 
 **D4 — Lifecycle ownership follows workload ownership.** The launcher owns
 heartbeat, deadlines, bounded stop, reverse teardown and orphan
 reconciliation. *Partially satisfied: primitives exist in-process; the worker
-lifecycle and operational recovery are launcher-owned (W3; acceptance deferred).*
+lifecycle and operational recovery are launcher-owned (W3; acceptance pending).*
 
 ### Testable invariants
 
@@ -405,9 +400,8 @@ evidence this instance cannot produce today — a second host sharing the
 store, or a measured `SQLITE_BUSY` after the `busy_timeout` with every
 writer `.immediate()`. W4 is therefore unblocked and stays SQLite: one
 statement per counter mutation, in the transaction that appends its ledger
-event, on the store that already holds `lifecycle_events`. It is deferred as
-a matter of size, not of decision. The record below is kept as the evidence
-the decision was taken against.
+event, on the store that already holds `lifecycle_events`. W4 subsequently
+implemented that decision. The record below preserves its evidence.
 
 The gate was a DECISION blocking W4 alone. The earlier claim that it also
 blocked W5, W6 and W8 did not survive verification: W5 is one additive table
@@ -449,27 +443,28 @@ Decision 6 settles it.
 | # | Item | Status | Blocked by | Done when |
 |---|---|---|---|---|
 | **W0** | Close the launcher contract leak | **implemented** (2026-09-19): `createContainerLauncher` returns only `ContainerLauncher`; egress and viz use that seam, and shared-deadline removal plus preview copy ownership are explicit contract operations | — | `src/tools/egressSidecar.ts` and `src/viz/server.ts` construct and call through `ContainerLauncher` only; `removeNetworkBefore` and `previewOwnership` are on the contract or gone. Until then W1 cannot be a transport swap. |
-| **W1** | Separate launcher service | **implemented, acceptance deferred** (2026-09-19): optional private socket service, typed client, connection-owned cleanup and launcher image; see [setup](launcher-service.md). Not activated on production; worker transport implemented in W2 | W0 implemented | `DockerLauncher` runs in its own container behind a permissioned socket; the web image holds no `docker.sock` (D1). |
-| **W2** | Worker transport behind the launcher | **implemented, acceptance deferred** (2026-09-19): closed workspace-key profile, private socket-file transport, concurrent tool calls and confirmed launcher-owned removal; local stdio lives in the launcher. [Setup and limits](launcher-service.md#boundary) | W1 implemented; W3 now provisions project volumes automatically | The Element worker speaks a socket/network protocol issued by the launcher; `containerExecutor.ts` no longer owns attach/remove; `workerRunArgs` isolation assertions still pass (D2, D4). Runtime and Docker acceptance have not been run. |
-| **W3** | Launcher-managed workspaces | **implemented, acceptance deferred** (2026-09-19): named local-driver volumes with a shared file projection, automatic project provisioning, operational lease journal/process lock, heartbeat/TTL, reverse teardown and boot recovery; run evidence is retained. [Setup](launcher-service.md#workspaces-and-recovery-w3) | W1/W2 implemented | Workspace handles carry volume identities; lease, TTL, bounded stop, reverse teardown and orphan reconciliation are launcher operations (D3, D4). Docker/restart acceptance remains deferred. |
+| **W1** | Separate launcher service | **implemented; real container smoke passed** (2026-09-20): optional private socket service, typed client, connection-owned cleanup and launcher image; see [setup](launcher-service.md). Not activated on production; worker transport implemented in W2 | W0 implemented | `DockerLauncher` runs in its own container behind a permissioned socket; the web image holds no `docker.sock` (D1). |
+| **W2** | Worker transport behind the launcher | **implemented; real container smoke passed** (2026-09-20): closed workspace-key profile, private socket-file transport, concurrent tool calls and confirmed launcher-owned removal; local stdio lives in the launcher. [Setup and limits](launcher-service.md#boundary) | W1 implemented; W3 now provisions project volumes automatically | The Element worker speaks a socket/network protocol issued by the launcher; `containerExecutor.ts` no longer owns attach/remove; `workerRunArgs` isolation assertions still pass (D2, D4). The real RPC/worker smoke passed; assembled-stack acceptance remains W13. |
+| **W3** | Launcher-managed workspaces | **implemented; real volumes and graceful restart verified** (2026-09-20): named local-driver volumes with a shared file projection, automatic project provisioning, operational lease journal/process lock, heartbeat/TTL, reverse teardown and boot recovery; run evidence is retained. [Setup](launcher-service.md#workspaces-and-recovery-w3) | W1/W2 implemented | Workspace handles carry volume identities; lease, TTL, bounded stop, reverse teardown and orphan reconciliation are launcher operations (D3, D4). The real container smoke passed for volumes and graceful restart; full stack/crash acceptance remains W13. |
 | **W4** | Skill counters out of `_meta.json` | **done** (2026-09-18): `skill_meta` in the product store, created by the one schema step both open paths share; `SkillRegistry` mutations are one `.immediate()` transaction each, event included; legacy sidecars imported once by the first mutation or `reconcilePlatformSkills`, then retired as `_meta.imported.json`; the folds re-key rows with the folders they move; `save` zeroes the row when it CREATES a body, and the projection zeroes on `skill-drop`/`skill-merge`, so a folder that outlives its row can neither inherit nor contradict trust; backup takes the store LAST so rows are never older than bodies | — | Every counter, promotion and demotion mutation is one statement in one transaction with its ledger event (T6, R4). Gate 0 decides dialect and transaction mode, not placement — T6 already forces the counters into the store holding `lifecycle_events`. `save`, `promoteToScript`, `demoteToLlm` and `merge` become file+DB pairs no transaction covers, so the crash ordering must be re-derived, not ported. |
 | **W4a** | Registry write-transaction correctness | **done** (`8a4f2ff`) | — | All eleven registry write transactions are `.immediate()`; both product-store open paths set `busy_timeout` explicitly instead of inheriting the driver default; a regression allocates ordinals across connections and processes. This is R8 for the STORE, owed under either Gate 0 branch. It does NOT close `_meta.json` file concurrency — that is W4. |
 | **W5** | Durable payer ledger for every run | **done** (`5154832`): `project_run_payers`, three immutable rows per run, written in the queued→running transaction; the coordinator resolves payers through `payerForSelector` | — (the org-scoped cost READ surface waits on decision 3) | The three-row `RunPayerLedger` is persisted for API-key-only runs too, in the same transaction as the queued→running transition (T10). The coordinator resolves payers THROUGH `payerForSelector`, the contract's canonical rule. The synthetic benchmark control (`retrievalProjectAttempt`) transitions its accounting run directly and records no payer; it spends nothing. |
 | **W6** | Scoped lifecycle attribution | **done** (2026-09-18): `lifecycle_events` carries `org_id`, `project_id`, `run_id`, `actor_type`, `actor_id` and `entity_id`; one `ensureLedgerSchema` on both open paths; the runner, the MCP writes and the CLI set the scope; `ledger check` compares types by `atom_id` | — | Backfill rule taken by the owner: resolve each label against the current store, leave NULL what does not resolve, rewrite nothing. The ordering constraint held: the migration is one function called from `openDb` and from the cached handle, and `tests/ledger.test.ts` drives a legacy-shaped store through each path first, then a pre-column store through the backfill. A read-only reader on an unmigrated snapshot still reads it, without scope or id. |
-| **W7** | Web, launcher images and a reference stack | **Implemented locally, acceptance deferred (2026-09-19):** web image with Haystack, Linux Compose with TLS gateway, shared paths, worker pin propagation, digest checker and `.dockerignore`; [setup and limitations](packaged-stack.md) | W1–W3 runtime acceptance; real published image refs, Linux Engine 28+, runsc, OAuth and TLS provisioning | Image builds and clean Linux boot remain unexecuted; W13 must prove the assembled stack. |
+| **W7** | Web, launcher images and a reference stack | **Implemented locally, acceptance pending (2026-09-19):** web image with Haystack, Linux Compose with TLS gateway, shared paths, worker pin propagation, digest checker and `.dockerignore`; [setup and limitations](packaged-stack.md) | W1–W3 runtime acceptance; real published image refs, Linux Engine 28+, runsc, OAuth and TLS provisioning | Web/launcher builds and compiled help smokes passed on 2026-09-20; W13 must still prove clean Linux boot and the assembled stack. |
 | **W8-a** | A restore drill valid on the deployed shape | **done for the fixture** (`bdb6bf9`); NOT yet run against a snapshot from the real host | — | The drill distinguishes a tier NOT APPLICABLE to a deployment from one expected and lost — ignoring `skipped` wholesale would make it falsely reassuring. It passes on a production-shaped fixture, which proves the fix; a real snapshot from the host is verified separately and proves more. The manifest records that `store.db` needs an externally held `ATOMA_SECRET_ENCRYPTION_KEY` to yield usable organisation keys, without containing it. |
 | **W8-b** | Hosted backup and disaster recovery | `npm run backup` (dated, pruned, off-machine); the 2026-09-14 drill ([recovery-drill-2026-09-14.md](recovery-drill-2026-09-14.md)) covers the local store only | W8-a, W7 | A restore drill on the packaged stack and documented RPO/RTO. Proving recovery requires retrieving the encryption key separately and decrypting under control; documenting the dependency is not that proof. Secret ROTATION is distinct from restoration and is its own work: there is no re-encryption implementation in `src/auth/`, and the AAD binds the key identity, so rotation means decrypt-under-old then re-encrypt-under-new for every row plus the GitHub token wrapping key. |
-| **W9** | Trace and workspace retention | **implemented locally; execution deferred** | W8-a; real purge requires a verified host backup | Operator-run 90-day retention, dry-run default, offline apply under the global lease, canonical path checks, durable deletion receipts and retained run metadata. Current project seeds and unfinished publications are held. [Contract and commands](project-maintenance.md). |
-| **W10** | Per-organisation run admission | **implemented locally; execution deferred** | Decision 3: concurrency only, no financial budget | Persistent per-org limit (one by default, zero suspends), checked before the global lease and inside reservation; idempotent retries preserved. Operator CLI and organisation settings display. [Contract and commands](project-maintenance.md). |
-| **W11** | Audited cross-organisation admin read | **Implemented locally, execution deferred (2026-09-20):** all five widening paths share a durable per-admin/per-org one-hour receipt, security journal row and owner notification; missing audit refuses the read. [Design and prepared checks](cross-org-read-audit.md) | Decision 1 taken; runtime verification pending | Retained platform-admin read is attributable and journaled without per-poll flooding. No temporary grant or expiry column, per decision 1. |
-| **W12** | Platform terms | none | decision 5 taken: the commons is the product; a legal text to write, no engineering | Terms of use covering what a run contributes to and consumes from the commons; separate from AGPL-3.0. |
+| **W9** | Trace and workspace retention | **done; regressions passed in CI at `4788dfd`** | W8-a; real purge requires a verified host backup | Operator-run 90-day retention, dry-run default, offline apply under the global lease, canonical path checks, durable deletion receipts and retained run metadata. Current project seeds and unfinished publications are held. [Contract and commands](project-maintenance.md). |
+| **W10** | Per-organisation run admission | **done; regressions passed in CI at `4788dfd`** | Decision 3: concurrency only, no financial budget | Persistent per-org limit (one by default, zero suspends), checked before the global lease and inside reservation; idempotent retries preserved. Operator CLI and organisation settings display. [Contract and commands](project-maintenance.md). |
+| **W11** | Audited cross-organisation admin read | **done; regressions passed in CI at `4788dfd`:** all five widening paths share a durable per-admin/per-org one-hour receipt, security journal row and owner notification; missing audit refuses the read. [Design and executed checks](cross-org-read-audit.md) | Decision 1 taken; HTTP/MCP regression checks passed | Retained platform-admin read is attributable and journaled without per-poll flooding. No temporary grant or expiry column, per decision 1. |
+| **W12** | Platform terms | [Commons terms drafted](platform-commons-terms.md) | Operator identity/contact and publication | Terms of use covering what a run contributes to and consumes from the commons; separate from AGPL-3.0. |
 | **W13** | Packaged-stack acceptance | `auth-release-smoke.mjs` (loopback IdP, temp store) | W1, W7 | Boots the stack; proves founder login, invitation, role enforcement, Element-workload isolation, delivery, restart, backup/restore and denied control-plane reachability from the worker network. |
-| **W14** | Shared-learning acceptance | **Shared arm prepared, unexecuted (2026-09-20):** `tests/shared-learning-acceptance.test.ts` covers A distillation/promotion → B deterministic dispatch with shared counters and B attribution; [scope and limits](shared-learning-acceptance.md). Corpus and stack isolation remain separate evidence | W13 for the isolation half only | Two organisations on one stack: no cross-org trace/workspace/corpus read. The SHARED half — a recipe learned by one organisation dispatched by the other's next run — is assertable in one process since 2026-09-15 and needs no stack; it is the only mechanical proof that the decision was implemented and not merely documented. |
+| **W14** | Shared-learning acceptance | **Shared arm passed in CI at `4788dfd`:** `tests/shared-learning-acceptance.test.ts` covers A distillation/promotion → B deterministic dispatch with shared counters and B attribution; [scope and limits](shared-learning-acceptance.md). Corpus and stack isolation remain separate evidence | W13 for the isolation half only | Two organisations on one stack: no cross-org trace/workspace/corpus read. The SHARED half — a recipe learned by one organisation dispatched by the other's next run — is assertable in one process since 2026-09-15 and needs no stack; it is the only mechanical proof that the decision was implemented and not merely documented. |
 
 Order: ~~W8-a~~ → ~~W4a~~ → ~~W5~~ → ~~W6~~ → ~~Gate 0~~ → ~~W4~~ → ~~W0~~ → ~~W1~~ →
 ~~W2~~ → ~~W3~~ → ~~W7~~ → W13 → W14. W8-a and W4a landed on 2026-09-17, W5, W6 and W4 on
 2026-09-18, and Gate 0 was decided the same day on what they measured. The launcher line (W1–W3, W7) is implemented locally on 2026-09-19, with
-execution verification deferred. The acceptance runs (W13, W14) remain; this
+service/worker/volume runtime proof recorded on 2026-09-20. Full stack and
+isolation acceptance (W13, W14) remain; this
 does not close the other operational items in the table or constitute a migration.
 
 What W4a measured, and what Gate 0 should read from it: reverting only the
@@ -481,10 +476,10 @@ and SQLite serialises it correctly once the write lock is taken before the
 read.
 
 Outside that sequence: decision 1 was taken on 2026-09-18 (retained,
-journaled). W11 now implements the shared receipt and notification path;
-its execution checks remain deferred. W9/W10 are implemented locally with
-execution checks deferred: offline retention and concurrency-only admission.
-W12 needs a text and no engineering.
+journaled). W9/W10/W11 and the shared-learning arm of W14 passed CI at
+`4788dfd`. W12 now has a terms draft. The [acceptance receipt](saas-acceptance-2026-09-20.md)
+is the current list of remaining evidence; completed checks do not need repeating
+without a relevant code change.
 
 ### Owner decisions, taken 2026-09-18
 
@@ -632,7 +627,7 @@ oracle is accepted as a consequence of the commons.
   per-run egress topology; the closed launcher contract with an in-process
   egress/preview backend; principal-owned Codex on all tiers and the three-row
   payer contract.
-- **Implemented, acceptance deferred (2026-09-19):** separate launcher service, worker transport and managed volumes (W1–W3), plus web image and reference stack (W7); see [launcher setup](launcher-service.md) and [stack setup](packaged-stack.md).
+- **Implemented, acceptance pending (2026-09-19):** separate launcher service, worker transport and managed volumes (W1–W3), plus web image and reference stack (W7); see [launcher setup](launcher-service.md) and [stack setup](packaged-stack.md).
 - **Also implemented:** atomic skill counters, the durable payer ledger and scoped lifecycle attribution (W4, W5, W6).
 - **Superseded:** the body/trust split, organisation-local trust, the
   platform body offer/approval workflow, the per-owner registry and the
@@ -675,5 +670,6 @@ BYO and host-subscription control plane. `release:check` runs
 the compiled viz server and auth CLI — founder login, CLI invitation, member
 admission, PKCE, MCP OAuth, session gating, logout — with a loopback identity
 provider and a temporary store. That verifies the packaged auth path, not a
-hosted container stack or live inference funding. W13 and W14 are the
-acceptances this document still lacks.
+hosted container stack or live inference funding. W13 and the isolation arm of
+W14 remain pending; the shared-learning arm passed. See the
+[current evidence receipt](saas-acceptance-2026-09-20.md).

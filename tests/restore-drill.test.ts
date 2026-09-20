@@ -89,6 +89,38 @@ describe.skipIf(!hasPython)('offline recovery through real backup archives and a
     closeStoreHandles();
   });
 
+  it('restores the separate launcher projection and reports its loss', async () => {
+    const workspaceRoot = join(root, 'launcher-workspaces');
+    const id = '55555555-5555-4555-8555-555555555555';
+    const orgId = '11111111-1111-4111-8111-111111111111';
+    const layout = projectRunHostLayout(join(root, 'projects'), orgId, projectId, id, workspaceRoot);
+    mkdirSync(layout.workspacePath, { recursive: true });
+    mkdirSync(layout.runsPath, { recursive: true });
+    writeFileSync(join(layout.workspacePath, 'index.html'), 'projected workspace');
+    writeFileSync(join(layout.runsPath, id + '.json'), JSON.stringify({ id }));
+    writeFileSync(layout.logPath, 'fixture');
+    store.createProjectRun({ orgId, projectId, principalId: '22222222-2222-4222-8222-222222222222',
+      projectRunId: id, request: { idempotencyKey: id, goal: 'Projection restore' }, hostPaths: {
+        workspacePath: layout.workspacePath, runsPath: layout.runsPath, logPath: layout.logPath } });
+    store.transitionProjectRun({ orgId, projectRunId: id, from: 'queued', to: 'running' });
+    store.transitionProjectRun({ orgId, projectRunId: id, from: 'running', to: 'delivered',
+      traceId: id, stats: parseRunLog('✓ build finished') });
+    const snapshot = await runBackup({ ...backupOpts(), workspaceRoot });
+    expect(snapshot.captured).toContain('workspaces.tar.gz');
+    renameSync(workspaceRoot, workspaceRoot + '-offline');
+    const result = restore(snapshot.snapshotDir);
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout).store.projectRuns).toContainEqual(expect.objectContaining({
+      runId: id, workspace: true, workspaceTier: 'workspaces' }));
+    expect(readFileSync(join(root, 'recovered', 'workspaces', 'projects', orgId,
+      projectId, id, 'workspace', 'index.html'), 'utf8')).toBe('projected workspace');
+    const missing = await runBackup({ ...backupOpts(), workspaceRoot });
+    expect(missing.skipped.some(item => item.startsWith('workspaces'))).toBe(true);
+    const failed = restore(missing.snapshotDir, join(root, 'missing-projection'));
+    expect(failed.status).toBe(2);
+    expect(JSON.parse(failed.stdout).missingExpectedTiers).toContain('workspaces');
+  });
+
   it('verifies a deployment that declares the tier it does not have', async () => {
     // THE DEPLOYED SHAPE. A server keeps no ~/.atoma/archive: that tier holds
     // pre/post-benchmark store archives and it runs no benchmarks. The drill

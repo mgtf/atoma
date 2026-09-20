@@ -1,7 +1,7 @@
 # Cross-organisation read audit — W11
 
-Implemented locally on 2026-09-20; execution checks are deferred at the owner's
-request. This implements decision 1 in [the SaaS plan](saas-architecture.md).
+Implemented and regression-tested in CI at `4788dfd` on 2026-09-20.
+This implements decision 1 in [the SaaS plan](saas-architecture.md).
 The platform-admin role remains the authority; this introduces no temporary
 grant and no change to organisation-bound writes.
 
@@ -68,7 +68,7 @@ The two explicit changes to the service contract are the synchronous
 The MCP and trace routes reuse it. Domain code never acquires the event store
 or calls notification delivery directly.
 
-## Verification prepared, not executed
+## Executed verification
 
 - `tests/cross-org-read-audit.test.ts`: all surface names share the durable
   receipt, reopen and expiry, separate principals/organisations, role checks,
@@ -79,6 +79,6 @@ or calls notification delivery directly.
 - `tests/mcp-http.test.ts`: foreign trace read through the real MCP transport
   writes the target organisation's audit receipt.
 
-These are authored regression checks, not reported passes. TypeScript, lint
-and documentation checks are separate static verification. W13/W14 hosted
-acceptance and the remaining SaaS items are unchanged.
+These regression checks passed in [CI at `4788dfd`](https://github.com/mgtf/atoma/actions/runs/35478666242),
+alongside TypeScript, lint and documentation checks. W13/W14 hosted acceptance
+remains separate; see the [receipt](saas-acceptance-2026-09-20.md).

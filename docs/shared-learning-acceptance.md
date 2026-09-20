@@ -1,9 +1,9 @@
 # Shared-learning acceptance — W14
 
-Status on 2026-09-20: test authored and statically checked; execution deferred
-at the owner's request. W14 is not closed by this document.
+Status on 2026-09-20: shared-learning test passed in [CI at `4788dfd`](https://github.com/mgtf/atoma/actions/runs/35478666242).
+The packaged-stack isolation arm remains pending; see the [receipt](saas-acceptance-2026-09-20.md).
 
-## Prepared scenario
+## Executed scenario
 
 [shared-learning-acceptance.test.ts](../tests/shared-learning-acceptance.test.ts)
 uses two authenticated organisations, their registered project runs, one product
@@ -32,7 +32,7 @@ roots. They characterise those fixture paths; their empty-catalog assertions
 are not proof of the production commons. This scenario explicitly supplies
 the common skill path in both run records, as the coordinator does today.
 
-## Running later
+## Reproducing the check
 
 On Linux with the pinned Node version and installed dependencies:
 

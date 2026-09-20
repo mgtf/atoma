@@ -12,7 +12,7 @@ import tarfile
 import time
 
 TIERS = {"store": "store.db", "skills": "skills.tar.gz", "runs": "runs.tar.gz",
-         "archive": "archive.tar.gz", "projects": "projects.tar.gz", "supervisor": "supervisor.tar.gz"}
+         "archive": "archive.tar.gz", "projects": "projects.tar.gz", "supervisor": "supervisor.tar.gz", "workspaces": "workspaces.tar.gz"}
 
 
 def digest(path):
@@ -40,7 +40,7 @@ def component(value):
     return value
 
 
-def inspect_store(store, projects):
+def inspect_store(store, projects, workspaces=None, workspace_source=None):
     # No production open helper: it could apply DDL or reconcile interrupted runs.
     with sqlite3.connect(store.as_uri() + "?mode=ro", uri=True) as db:
         db.execute("PRAGMA query_only=ON")
@@ -60,6 +60,13 @@ def inspect_store(store, projects):
             folder = projects / relative
             found = {"runId": run_id, "status": row["status"], "workspace": (folder / "workspace").is_dir(),
                      "log": (folder / "run.log").is_file(), "trace": None}
+            if workspaces is not None and workspace_source and "workspace_path" in row.keys():
+                expected_workspace = "/".join([workspace_source.replace("\\", "/").rstrip("/"),
+                                               component(row["org_id"]), component(row["project_id"]), run_id, "workspace"])
+                if row["workspace_path"].replace("\\", "/") == expected_workspace:
+                    restored_workspace = workspaces / component(row["org_id"]) / component(row["project_id"]) / run_id / "workspace"
+                    found["workspace"] = restored_workspace.is_dir()
+                    found["workspaceTier"] = "workspaces"
             if "bytes_deleted_at" in row.keys() and row["bytes_deleted_at"]:
                 if row["bytes_expired_at"] and row["status"] in ("delivered", "failed", "cancelled"):
                     found["retention"] = "expired"
@@ -117,7 +124,14 @@ def drill(snapshot, destination):
         raise ValueError("Unknown tier in optionalTiers declaration")
     if "store" in optional:
         raise ValueError("The store tier cannot be declared optional")
+    layout_version = manifest.get("layoutVersion", 1)
+    if layout_version not in (1, 2):
+        raise ValueError("Unsupported backup layout version")
+    if "workspaces" in optional:
+        raise ValueError("The workspaces tier cannot be declared optional")
     expected = set(TIERS) - optional
+    if layout_version == 1:
+        expected.discard("workspaces")
     verified = {}
     # Verify ALL archives before creating the destination, then copy only verified bytes.
     for tier, filename in TIERS.items():
@@ -167,7 +181,10 @@ def drill(snapshot, destination):
                     with archive.extractfile(member) as source, path.open("xb") as output:
                         shutil.copyfileobj(source, output)
                     os.chmod(path, member.mode & 0o777)
-    report["store"] = inspect_store(destination / "store.db", destination / "projects")
+    workspace_info = verified.get("workspaces")
+    report["store"] = inspect_store(destination / "store.db", destination / "projects",
+        destination / "workspaces" / workspace_info["root"] if workspace_info else None,
+        manifest.get("workspaces", {}).get("source"))
     report["elapsedSeconds"] = round(time.monotonic() - started, 3)
     # Every EXPECTED tier restored, and nothing the snapshot itself reported
     # as expected-and-missing. A declared-optional tier that turned out to be

@@ -23,6 +23,7 @@
  *                          (traces, run.log, declared artifacts, workspace with
  *                          its git base; `node_modules` excluded)
  *     supervisor.tar.gz  — analyst verdicts and mend records
+ *     workspaces.tar.gz  — launcher projects/ projection, when configured (layout v2)
  *     manifest.json      — what was captured, from where, how big, its SHA-256,
  *                          what was EXPECTED AND MISSING, which tiers this
  *                          deployment declares it does not have, and which
@@ -73,9 +74,10 @@ export const BACKUP_TIERS = [
   'archive',
   'projects',
   'supervisor',
+  'workspaces',
 ] as const;
 export type BackupTier = (typeof BACKUP_TIERS)[number];
-/** The five directory tiers. `store` is captured through the online backup. */
+/** The directory tiers. `store` is captured through the online backup. */
 type DirectoryTier = Exclude<BackupTier, 'store'>;
 
 export const OPTIONAL_TIERS_ENV = 'ATOMA_BACKUP_OPTIONAL_TIERS' as const;
@@ -190,6 +192,8 @@ export interface BackupOptions {
   /** The projects ROOT (the `orgs/` child is what gets captured). */
   readonly projectsRoot?: string;
   readonly supervisorDir?: string;
+  /** Shared launcher root; its projects/ projection contains retained run bytes. */
+  readonly workspaceRoot?: string;
   /**
    * Tiers this deployment does not have. Absent here, a missing tier is a
    * loss. Defaults to `ATOMA_BACKUP_OPTIONAL_TIERS`, then to nothing.
@@ -289,12 +293,15 @@ export async function runBackup(opts: BackupOptions): Promise<BackupResult> {
   mkdirSync(snapshotDir, { recursive: true });
 
   const optional = parseOptionalTiers(opts.optionalTiers ?? process.env[OPTIONAL_TIERS_ENV]);
+  const workspaceRoot = opts.workspaceRoot ?? process.env['ATOMA_LAUNCHER_WORKSPACE_ROOT'];
+  if (optional.includes('workspaces')) throw new Error('workspaces cannot be optional; omit the launcher root only on a legacy layout');
   const captured: string[] = [];
   const skipped: string[] = [];
   const notApplicable: string[] = [];
   const manifest: Record<string, unknown> = {
     createdAt: new Date().toISOString(),
     host: hostname(),
+    ...(workspaceRoot ? { layoutVersion: 2 } : {}),
   };
 
   // 1..5. The directory roots FIRST, the store LAST (W4, 2026-09-18). Skill
@@ -332,6 +339,7 @@ export async function runBackup(opts: BackupOptions): Promise<BackupResult> {
     ['projects', join(resolve(projectsRoot), 'orgs'), 'projects.tar.gz', PROJECTS_TAR_EXCLUDES],
     ['supervisor', opts.supervisorDir ?? supervisorDirPath(), 'supervisor.tar.gz', []],
   ];
+  if (workspaceRoot) dirs.push(['workspaces', join(resolve(workspaceRoot), 'projects'), 'workspaces.tar.gz', PROJECTS_TAR_EXCLUDES]);
   for (const [label, source, outName, excludes] of dirs) {
     if (!source || !existsSync(source) || !statSync(source).isDirectory()) {
       const where = source ?? 'unset';
@@ -428,6 +436,7 @@ const USAGE =
   'usage: npm run backup -- --dest <dir> [--keep N]\n' +
   'Roots follow the running product: ATOMA_DB_PATH, ATOMA_SKILLS_DIR, ATOMA_RUNS_DIR,\n' +
   'ATOMA_PROJECTS_ROOT (its orgs/ child) and ATOMA_SUPERVISOR_DIR, with the same defaults.\n' +
+  'ATOMA_LAUNCHER_WORKSPACE_ROOT adds its mandatory projects/ projection (layout v2).\n' +
   'ATOMA_BACKUP_OPTIONAL_TIERS names the tiers this deployment does not have (e.g. "archive"\n' +
   'on a server that runs no benchmarks). Every tier left out of it is mandatory: missing, it\n' +
   'is reported as a loss and the restore drill fails.';

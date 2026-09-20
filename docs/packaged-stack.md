@@ -1,7 +1,8 @@
 # Packaged Linux stack (W7)
 
-Implemented locally on 2026-09-19; container builds, clean-host boot and W13
-acceptance have not been executed. This is a reference deployment definition,
+Implemented on 2026-09-19. Web and launcher image builds and compiled help
+smokes passed on 2026-09-20; clean-host boot and full W13 acceptance remain
+pending. See the [evidence receipt](saas-acceptance-2026-09-20.md). This is a reference deployment definition,
 not evidence that the instance is ready to admit mutually distrusting tenants.
 
 ## Runtime boundary
@@ -116,6 +117,9 @@ compiled auth CLI inside web for subsequent invitations.
 Use `docker compose ... exec web npm run deploy:preflight` before an update;
 exit 75 means a run/preview is live and the update must wait. Preserve the
 product directory, workspaces, launcher state and separately escrowed secrets.
+Backups run with `ATOMA_LAUNCHER_WORKSPACE_ROOT` also capture its `projects/`
+projection as a mandatory `workspaces.tar.gz` tier (manifest layout version 2).
+Restore with `scripts/restore-drill.py`; an absent projection fails the drill.
 The hosted backup/restore drill and its RPO/RTO remain W8-b; do not infer them
 from the local backup command. Never copy live SQLite files without the supported
 backup procedure, and do not restore launcher state over a running daemon.
@@ -127,7 +131,7 @@ operations are never replayed automatically. Explicit Compose dependency
 restarts help planned updates; engine crash restarts are not a reconnection
 protocol. Follow [launcher-service.md](launcher-service.md) for lease recovery.
 
-Execution checks remain deferred at the owner's request: image builds and
+The owner authorised isolated execution checks on 2026-09-20. Still pending: image builds and
 import closures in containers, founder/invite flow, a delivered project run,
 preview and worker network isolation, crash/restart and hosted restore. Complete
 W13 and W14 before claiming packaged-stack acceptance.
