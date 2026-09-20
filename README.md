@@ -249,6 +249,10 @@ also commits the project to remaining under an OSI-approved licence.
 Contributions start with [`CONTRIBUTING.md`](CONTRIBUTING.md). Vulnerabilities
 go through [`SECURITY.md`](SECURITY.md), not the issue tracker.
 
+The hosted service at [atoma.run](https://atoma.run) publishes its
+[shared-learning service terms and operator contact](docs/platform-commons-terms.md)
+separately from the software licence.
+
 The model transports are your own accounts under each provider's terms: the
 Anthropic API and Claude Code, OpenAI Codex, Z.ai and Ollama are called with the
 credentials you supply, and the `@anthropic-ai/claude-agent-sdk` dependency is

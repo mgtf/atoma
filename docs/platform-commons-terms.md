@@ -1,8 +1,8 @@
 # Shared-learning service terms
 
-Draft dated 2026-09-20, implementing the owner's commons decision. Operator
-details and contact below were confirmed by the operator. This draft is not
-evidence of publication or user acceptance.
+Service terms dated 2026-09-20 for the hosted service at
+[atoma.run](https://atoma.run), implementing the owner's commons decision.
+Publication of these terms does not itself record any individual user's acceptance.
 
 ## Service operator and contact
 

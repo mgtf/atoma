@@ -87,10 +87,12 @@ and [production deployment passed](https://github.com/mgtf/atoma/actions/runs/35
    The [first hosted drill](saas-hosted-recovery-2026-09-20.md) now verifies
    15 runs and eight encrypted envelopes; a fresh capture declaring the absent
    benchmark archive optional remains required.
-2. **W12:** the [commons terms draft](platform-commons-terms.md) records the
-   commissioned product terms. Matthieu Foillard's operator identity, Athens
-   postal address and `mgf@iotanet.net` contact are confirmed and recorded;
-   publication remains outstanding.
+
+**W12 completed:** the [hosted-service terms](platform-commons-terms.md) are
+published in this public repository and linked from the README. They include
+Matthieu Foillard's confirmed identity, Athens postal address and `mgf@iotanet.net`
+support/privacy contact. Publication is not evidence of individual acceptance;
+the agreed W12 scope adds no consent-recording mechanism.
 
 The owner lifted the test deferral on 2026-09-20 for isolated environments.
 Remaining runtime checks are pending environment execution, not permission to
