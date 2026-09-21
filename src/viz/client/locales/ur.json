@@ -1140,5 +1140,11 @@
   "settings.modelCatalogue.unavailable": "ChatGPT ماڈل کیٹلاگ دستیاب نہیں ہے۔ دوبارہ کوشش کرنے کے لیے تازہ کریں۔",
   "settings.modelUnavailable": "{{model}} — دستیاب نہیں",
   "settings.mcpConnectAnother": "کوئی اور کلائنٹ منسلک کریں",
-  "settings.mcpHideSetup": "سیٹ اپ گائیڈ چھپائیں"
+  "settings.mcpHideSetup": "سیٹ اپ گائیڈ چھپائیں",
+  "auth.subscriptionDelegate": "میزبان کی سبسکرپشن",
+  "settings.subscriptionDelegateHint": "یہ وہ ادارہ ہے جہاں run اس مشین کے اپنے Claude اور ChatGPT لاگ اِن کو استعمال کر سکتے ہیں۔ تفویض کرنے سے کوئی رکن اپنی ترتیبات میں ہر tier کے لیے اسے منتخب کر سکتا ہے؛ اس سے آپریٹر کو کوئی اور اختیار نہیں ملتا۔",
+  "settings.subscriptionDelegateGrant": "میزبان کی سبسکرپشن تفویض کریں",
+  "settings.subscriptionDelegateWithdraw": "میزبان کی سبسکرپشن واپس لیں",
+  "settings.subscriptionDelegated": "میزبان کی سبسکرپشن تفویض کر دی گئی۔",
+  "settings.subscriptionDelegationWithdrawn": "میزبان کی سبسکرپشن کی تفویض واپس لے لی گئی۔"
 }

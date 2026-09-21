@@ -1140,5 +1140,11 @@
   "settings.modelCatalogue.unavailable": "Katalog model ChatGPT tidak tersedia. Segarkan untuk mencoba lagi.",
   "settings.modelUnavailable": "{{model}} — tidak tersedia",
   "settings.mcpConnectAnother": "Hubungkan klien lain",
-  "settings.mcpHideSetup": "Sembunyikan panduan penyiapan"
+  "settings.mcpHideSetup": "Sembunyikan panduan penyiapan",
+  "auth.subscriptionDelegate": "Langganan mesin host",
+  "settings.subscriptionDelegateHint": "Ini adalah organisasi tempat run dapat menggunakan login Claude dan ChatGPT milik mesin ini. Dengan mendelegasikannya, anggota dapat memilihnya per tier di pengaturan mereka sendiri; ini tidak memberikan kewenangan operator lainnya.",
+  "settings.subscriptionDelegateGrant": "Delegasikan langganan mesin host",
+  "settings.subscriptionDelegateWithdraw": "Tarik delegasi langganan mesin host",
+  "settings.subscriptionDelegated": "Langganan mesin host telah didelegasikan.",
+  "settings.subscriptionDelegationWithdrawn": "Delegasi langganan mesin host telah ditarik."
 }

@@ -1140,5 +1140,11 @@
   "settings.modelCatalogue.unavailable": "ChatGPTモデルカタログを利用できません。更新してもう一度お試しください。",
   "settings.modelUnavailable": "{{model}} — 利用不可",
   "settings.mcpConnectAnother": "別のクライアントを接続",
-  "settings.mcpHideSetup": "セットアップガイドを非表示"
+  "settings.mcpHideSetup": "セットアップガイドを非表示",
+  "auth.subscriptionDelegate": "ホストのサブスクリプション",
+  "settings.subscriptionDelegateHint": "この組織では、runがこのマシン自身のClaudeおよびChatGPTログインの利用枠を消費できます。委任すると、メンバーは自身の設定でtierごとにこれを選択できるようになります。他のオペレーター権限は付与されません。",
+  "settings.subscriptionDelegateGrant": "ホストのサブスクリプションを委任",
+  "settings.subscriptionDelegateWithdraw": "ホストのサブスクリプションの委任を取り消す",
+  "settings.subscriptionDelegated": "ホストのサブスクリプションを委任しました。",
+  "settings.subscriptionDelegationWithdrawn": "ホストのサブスクリプションの委任を取り消しました。"
 }

@@ -1140,5 +1140,11 @@
   "settings.modelCatalogue.unavailable": "Der ChatGPT-Modellkatalog ist nicht verfügbar. Aktualisieren Sie ihn, um es erneut zu versuchen.",
   "settings.modelUnavailable": "{{model}} — nicht verfügbar",
   "settings.mcpConnectAnother": "Weiteren Client verbinden",
-  "settings.mcpHideSetup": "Einrichtungsanleitung ausblenden"
+  "settings.mcpHideSetup": "Einrichtungsanleitung ausblenden",
+  "auth.subscriptionDelegate": "Host-Abonnement",
+  "settings.subscriptionDelegateHint": "Dies ist die Organisation, in der runs die eigenen Claude- und ChatGPT-Anmeldungen dieses Rechners nutzen dürfen. Durch die Delegierung kann ein Mitglied das Abonnement in den eigenen Einstellungen je tier auswählen; sie gewährt keine weiteren Betreiberrechte.",
+  "settings.subscriptionDelegateGrant": "Host-Abonnement delegieren",
+  "settings.subscriptionDelegateWithdraw": "Delegierung des Host-Abonnements widerrufen",
+  "settings.subscriptionDelegated": "Host-Abonnement delegiert.",
+  "settings.subscriptionDelegationWithdrawn": "Delegierung des Host-Abonnements widerrufen."
 }

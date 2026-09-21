@@ -1140,5 +1140,11 @@
   "settings.modelCatalogue.unavailable": "Каталог моделей ChatGPT недоступен. Обновите, чтобы повторить попытку.",
   "settings.modelUnavailable": "{{model}} — недоступна",
   "settings.mcpConnectAnother": "Подключить другой клиент",
-  "settings.mcpHideSetup": "Скрыть руководство по настройке"
+  "settings.mcpHideSetup": "Скрыть руководство по настройке",
+  "auth.subscriptionDelegate": "Подписка хоста",
+  "settings.subscriptionDelegateHint": "Это организация, в которой run могут расходовать лимиты учётных записей Claude и ChatGPT этого компьютера. Делегирование позволяет участнику выбирать эту подписку отдельно для каждого tier в собственных настройках; других полномочий оператора оно не предоставляет.",
+  "settings.subscriptionDelegateGrant": "Делегировать подписку хоста",
+  "settings.subscriptionDelegateWithdraw": "Отозвать делегирование подписки хоста",
+  "settings.subscriptionDelegated": "Подписка хоста делегирована.",
+  "settings.subscriptionDelegationWithdrawn": "Делегирование подписки хоста отозвано."
 }

@@ -1140,5 +1140,11 @@
   "settings.modelCatalogue.unavailable": "ChatGPT মডেল ক্যাটালগ উপলভ্য নয়। আবার চেষ্টা করতে রিফ্রেশ করুন।",
   "settings.modelUnavailable": "{{model}} — উপলভ্য নয়",
   "settings.mcpConnectAnother": "অন্য ক্লায়েন্ট সংযুক্ত করুন",
-  "settings.mcpHideSetup": "সেটআপ নির্দেশিকা লুকান"
+  "settings.mcpHideSetup": "সেটআপ নির্দেশিকা লুকান",
+  "auth.subscriptionDelegate": "হোস্ট সাবস্ক্রিপশন",
+  "settings.subscriptionDelegateHint": "এই সংস্থার run-গুলো এই মেশিনের নিজস্ব Claude ও ChatGPT লগইনের ব্যবহারসীমা খরচ করতে পারে। এটি অর্পণ করলে কোনো সদস্য নিজের সেটিংসে প্রতিটি tier-এর জন্য এটি নির্বাচন করতে পারবেন; এতে অপারেটরের অন্য কোনো ক্ষমতা দেওয়া হয় না।",
+  "settings.subscriptionDelegateGrant": "হোস্ট সাবস্ক্রিপশন অর্পণ করুন",
+  "settings.subscriptionDelegateWithdraw": "হোস্ট সাবস্ক্রিপশন প্রত্যাহার করুন",
+  "settings.subscriptionDelegated": "হোস্ট সাবস্ক্রিপশন অর্পণ করা হয়েছে।",
+  "settings.subscriptionDelegationWithdrawn": "হোস্ট সাবস্ক্রিপশনের অর্পণ প্রত্যাহার করা হয়েছে।"
 }

@@ -1140,5 +1140,11 @@
   "settings.modelCatalogue.unavailable": "ChatGPT模型目录不可用。请刷新后重试。",
   "settings.modelUnavailable": "{{model}}—不可用",
   "settings.mcpConnectAnother": "连接其他客户端",
-  "settings.mcpHideSetup": "隐藏设置指南"
+  "settings.mcpHideSetup": "隐藏设置指南",
+  "auth.subscriptionDelegate": "主机订阅",
+  "settings.subscriptionDelegateHint": "这是可让 run 使用本机自有 Claude 和 ChatGPT 登录账号的组织。委派后，成员可在自己的设置中为每个 tier 选择该订阅；除此之外，不会授予任何其他操作员权限。",
+  "settings.subscriptionDelegateGrant": "委派主机订阅",
+  "settings.subscriptionDelegateWithdraw": "撤回主机订阅委派",
+  "settings.subscriptionDelegated": "已委派主机订阅。",
+  "settings.subscriptionDelegationWithdrawn": "已撤回主机订阅委派。"
 }

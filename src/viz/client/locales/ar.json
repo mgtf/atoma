@@ -1140,5 +1140,11 @@
   "settings.modelCatalogue.unavailable": "دليل نماذج ChatGPT غير متاح. حدّث للمحاولة مرة أخرى.",
   "settings.modelUnavailable": "{{model}} — غير متاح",
   "settings.mcpConnectAnother": "ربط عميل آخر",
-  "settings.mcpHideSetup": "إخفاء دليل الإعداد"
+  "settings.mcpHideSetup": "إخفاء دليل الإعداد",
+  "auth.subscriptionDelegate": "اشتراك المضيف",
+  "settings.subscriptionDelegateHint": "هذه هي المؤسسة التي يمكن لعمليات run فيها استخدام بيانات تسجيل الدخول الخاصة بهذا الجهاز إلى Claude وChatGPT. يتيح التفويض لأحد الأعضاء اختياره لكل tier في إعداداته الخاصة، ولا يمنحه أي صلاحيات تشغيلية أخرى.",
+  "settings.subscriptionDelegateGrant": "تفويض اشتراك المضيف",
+  "settings.subscriptionDelegateWithdraw": "سحب تفويض اشتراك المضيف",
+  "settings.subscriptionDelegated": "تم تفويض اشتراك المضيف.",
+  "settings.subscriptionDelegationWithdrawn": "تم سحب تفويض اشتراك المضيف."
 }

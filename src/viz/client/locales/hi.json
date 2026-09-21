@@ -1140,5 +1140,11 @@
   "settings.modelCatalogue.unavailable": "ChatGPT मॉडल कैटलॉग उपलब्ध नहीं है। फिर से प्रयास करने के लिए रीफ़्रेश करें।",
   "settings.modelUnavailable": "{{model}} — उपलब्ध नहीं",
   "settings.mcpConnectAnother": "कोई अन्य क्लाइंट कनेक्ट करें",
-  "settings.mcpHideSetup": "सेटअप गाइड छिपाएँ"
+  "settings.mcpHideSetup": "सेटअप गाइड छिपाएँ",
+  "auth.subscriptionDelegate": "होस्ट सदस्यता",
+  "settings.subscriptionDelegateHint": "यह वह संगठन है जहाँ runs इस मशीन के अपने Claude और ChatGPT लॉगिन का उपयोग कर सकते हैं। प्रत्यायोजन से कोई सदस्य अपनी सेटिंग में हर tier के लिए इसे चुन सकता है; इससे ऑपरेटर का कोई अन्य अधिकार नहीं मिलता।",
+  "settings.subscriptionDelegateGrant": "होस्ट सदस्यता प्रत्यायोजित करें",
+  "settings.subscriptionDelegateWithdraw": "होस्ट सदस्यता का प्रत्यायोजन वापस लें",
+  "settings.subscriptionDelegated": "होस्ट सदस्यता प्रत्यायोजित की गई।",
+  "settings.subscriptionDelegationWithdrawn": "होस्ट सदस्यता का प्रत्यायोजन वापस लिया गया।"
 }

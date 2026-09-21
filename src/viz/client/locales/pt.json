@@ -1140,5 +1140,11 @@
   "settings.modelCatalogue.unavailable": "O catálogo de modelos do ChatGPT não está disponível. Atualize para tentar novamente.",
   "settings.modelUnavailable": "{{model}} — indisponível",
   "settings.mcpConnectAnother": "Ligar outro cliente",
-  "settings.mcpHideSetup": "Ocultar guia de configuração"
+  "settings.mcpHideSetup": "Ocultar guia de configuração",
+  "auth.subscriptionDelegate": "Subscrição do anfitrião",
+  "settings.subscriptionDelegateHint": "Esta é a organização onde os run podem usar os acessos desta máquina ao Claude e ao ChatGPT. A delegação permite que um membro a selecione por tier nas suas configurações; não concede quaisquer outros poderes de operador.",
+  "settings.subscriptionDelegateGrant": "Delegar subscrição do anfitrião",
+  "settings.subscriptionDelegateWithdraw": "Retirar delegação da subscrição do anfitrião",
+  "settings.subscriptionDelegated": "Subscrição do anfitrião delegada.",
+  "settings.subscriptionDelegationWithdrawn": "Delegação da subscrição do anfitrião retirada."
 }
