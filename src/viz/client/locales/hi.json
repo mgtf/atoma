@@ -1132,5 +1132,6 @@
   "welcome.handheld.hint": "फ़ोन और टैबलेट के लिए atoma पर अभी भी काम चल रहा है। आप पूर्ण ऐक्सेस के साथ जारी रख सकते हैं, लेकिन हो सकता है कि कुछ स्क्रीन अभी मोबाइल पर ठीक से काम न करें।",
   "welcome.handheld.continue": "मुझे कम से कम अपने खाते को ऐक्सेस करने दें",
   "settings.runCapacity": "समवर्ती run",
-  "settings.runCapacityValue": "{{active}} सक्रिय / {{limit}} अनुमत (इस होस्ट पर एक बार में एक run)"
+  "settings.runCapacityValue": "{{active}} सक्रिय / {{limit}} अनुमत (इस होस्ट पर एक बार में एक run)",
+  "auth.switchAccount": "खाता बदलें"
 }

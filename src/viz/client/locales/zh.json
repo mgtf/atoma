@@ -1132,5 +1132,6 @@
   "welcome.handheld.hint": "Atoma 的手机和平板版本仍在完善中。你可以继续使用全部功能，但部分页面在移动设备上可能尚未正常适配。",
   "welcome.handheld.continue": "至少让我访问我的账户",
   "settings.runCapacity": "并发 run 数",
-  "settings.runCapacityValue": "{{active}} 个活跃 / 允许 {{limit}} 个（此主机一次只能运行一个 run）"
+  "settings.runCapacityValue": "{{active}} 个活跃 / 允许 {{limit}} 个（此主机一次只能运行一个 run）",
+  "auth.switchAccount": "切换账号"
 }

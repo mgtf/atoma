@@ -1132,5 +1132,6 @@
   "welcome.handheld.hint": "Atoma aún se está terminando de adaptar para teléfonos y tabletas. Puedes continuar con acceso completo, pero es posible que algunas pantallas todavía no funcionen bien en dispositivos móviles.",
   "welcome.handheld.continue": "Permitirme al menos acceder a mi cuenta",
   "settings.runCapacity": "Runs simultáneos",
-  "settings.runCapacityValue": "{{active}} activos / {{limit}} permitidos (un run a la vez en este host)"
+  "settings.runCapacityValue": "{{active}} activos / {{limit}} permitidos (un run a la vez en este host)",
+  "auth.switchAccount": "Cambiar de cuenta"
 }

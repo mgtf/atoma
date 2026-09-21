@@ -1132,5 +1132,6 @@
   "welcome.handheld.hint": "atomaは現在もスマートフォンとタブレット向けに調整中です。すべての機能にアクセスして続行できますが、一部の画面はまだモバイルでは正常に動作しない場合があります。",
   "welcome.handheld.continue": "少なくともアカウントにはアクセスする",
   "settings.runCapacity": "同時run数",
-  "settings.runCapacityValue": "{{active}}件がアクティブ / {{limit}}件まで許可（このホストでは一度に1つのrunのみ）"
+  "settings.runCapacityValue": "{{active}}件がアクティブ / {{limit}}件まで許可（このホストでは一度に1つのrunのみ）",
+  "auth.switchAccount": "アカウントを切り替える"
 }
