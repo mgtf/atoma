@@ -62,6 +62,16 @@ Neighbours:
   set's ONE `servedOrigins` registry, which `fetch_url` and `validate_html`
   read. Do not kill arbitrary process groups; only safe integer PGIDs greater
   than 1 may reach group syscalls.
+- A loopback URL with NO port is refused PRE-FLIGHT by both probe tools
+  (`unservedLoopbackProbeRefusal`, prefix `PROBE_URL_REFUSAL_PREFIX` from
+  [src/contracts](../contracts/AGENTS.md)): the server tools never bind the
+  protocol default, so `http://localhost/` is a request-shape error, and the
+  refusal names the registered origins. An EXPLICIT unregistered port is NOT
+  refused — a `run_shell`-started server is invisible to the registry — but a
+  refused connection there gets the registered origins appended to its error.
+  Measured 2026-09-21 (run `d3098d25`): a final review probing the bare origin
+  read the refusal as a dead service and replayed executions into the 1800 s
+  deadline.
 - `validate_html` treats smoke input as a JS expression, bounds every supplied
   duration, and ignores Chrome's own favicon 404. Browser console errors remain
   evidence but not every one is a mechanical failure.

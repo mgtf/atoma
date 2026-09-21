@@ -1,5 +1,6 @@
 import type { ToolInvocationInfo } from '../core/types.js';
 import {
+  PROBE_URL_REFUSAL_PREFIX,
   SMOKE_PREFLIGHT_REFUSAL_PREFIX,
   isPreflightRefusal,
   type ObservedDocument,
@@ -126,7 +127,11 @@ export function summariseValidateHtml(result: Record<string, unknown>): string {
 function summariseRefusal(result: Record<string, unknown>): string {
   const errors = Array.isArray(result['errors']) ? (result['errors'] as unknown[]) : [];
   const first = errors.find((entry): entry is string => typeof entry === 'string') ?? '';
-  return first.slice(SMOKE_PREFLIGHT_REFUSAL_PREFIX.length, SMOKE_PREFLIGHT_REFUSAL_PREFIX.length + 80);
+  const prefix = [SMOKE_PREFLIGHT_REFUSAL_PREFIX, PROBE_URL_REFUSAL_PREFIX].find((candidate) =>
+    first.startsWith(candidate)
+  );
+  const start = prefix?.length ?? 0;
+  return first.slice(start, start + 80);
 }
 
 const WRITING_TOOLS: ReadonlySet<string> = new Set(['write_file', 'edit_file']);

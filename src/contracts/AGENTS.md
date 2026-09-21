@@ -55,9 +55,12 @@ Neighbours:
   design review with its own evidence, not a schema edit.
 - A `validate_html` PRE-FLIGHT refusal is a statement about the request, not
   an observation of the artefact: no page opened, no document bound. Its
-  error strings carry ONE prefix, `SMOKE_PREFLIGHT_REFUSAL_PREFIX`, and
-  `isPreflightRefusal` is the one predicate over it — the tool writes it, the
-  L1 validation ledger and the sentinel read it. Never grep the literal.
+  error strings carry one of TWO prefixes — `SMOKE_PREFLIGHT_REFUSAL_PREFIX`
+  for the smoke guards, `PROBE_URL_REFUSAL_PREFIX` for a portless loopback URL
+  (2026-09-21: a bound-origin mismatch read as a dead service replayed a run
+  into its deadline) — and `isPreflightRefusal` is the one predicate over
+  both; the tools write them, the L1 validation ledger reads the predicate.
+  Never grep the literals.
 - `Witness` declares its OBSERVER. Never relabel a model-declared witness as
   transport-observed, and never fold transport witnesses into the
   recorded-probe rendering — they are references, and they carry no `cmd`.

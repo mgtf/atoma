@@ -99,6 +99,24 @@ export type BrowserObservation = z.infer<typeof browserObservationSchema>;
  */
 export const SMOKE_PREFLIGHT_REFUSAL_PREFIX = 'smoke rejected pre-flight: ';
 
+/**
+ * The same request-statement semantics for a URL that cannot name a server
+ * this tool set started: a loopback URL with no port. `start_node_server` and
+ * `start_static_server` bind OS-assigned ports and never the protocol
+ * default, so `http://localhost/` is a shape error, not an observation of a
+ * dead service. Measured on project run `d3098d25` (2026-09-21,
+ * docs/incidents/progressive-runs-2026-09-21.md): the final review probed the
+ * bare origin, read the connection refusal as a dead service although the
+ * bound origin was serving, and replayed near-duplicate executions into the
+ * 1800 s deadline — $3.50 recorded, nothing delivered.
+ */
+export const PROBE_URL_REFUSAL_PREFIX = 'url rejected pre-flight: ';
+
+const PREFLIGHT_REFUSAL_PREFIXES: readonly string[] = [
+  SMOKE_PREFLIGHT_REFUSAL_PREFIX,
+  PROBE_URL_REFUSAL_PREFIX,
+];
+
 /** True when a raw `validate_html` result is a pre-flight refusal, not an observation. */
 export function isPreflightRefusal(raw: unknown): boolean {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
@@ -107,7 +125,9 @@ export function isPreflightRefusal(raw: unknown): boolean {
     Array.isArray(errors) &&
     errors.length > 0 &&
     errors.every(
-      (entry) => typeof entry === 'string' && entry.startsWith(SMOKE_PREFLIGHT_REFUSAL_PREFIX)
+      (entry) =>
+        typeof entry === 'string' &&
+        PREFLIGHT_REFUSAL_PREFIXES.some((prefix) => entry.startsWith(prefix))
     )
   );
 }

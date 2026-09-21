@@ -386,6 +386,30 @@ export const PROOF_OBLIGATION_GUIDANCE = [
   `uncovered obligation withholds method credit. Declare it whenever required.`,
 ].join('\n');
 
+/**
+ * RECORDED PROOF IS STANDING PROOF, at plan grain. Run `cc894dad`
+ * (2026-09-21, docs/incidents/progressive-runs-2026-09-21.md) planned
+ * implement → comprehensive re-audit → README as three sequential phases: the
+ * re-audit re-proved what the build phase had already recorded (~$2.51 and
+ * ~1573 s of an 1800 s deadline across three executions of one molecule) and
+ * the README phase timed out before its first tool call, so three credited
+ * phases delivered nothing. The within-phase half of this rule is the
+ * validation ledger (docs/incidents/verification-replay-2026-09-15.md); this
+ * is the between-phases half. Landed on the operator's 2026-09-21 decision
+ * against the collected backlog set, not against a single run.
+ */
+export const STANDING_PROOF_PLANNING_GUIDANCE = [
+  `== RECORDED PROOF IS STANDING PROOF ==`,
+  `Verification belongs INSIDE the phase that builds or changes an artefact,`,
+  `and the probes that phase records stay valid until a later phase mutates`,
+  `that artefact. Do NOT plan a phase whose only purpose is re-running or`,
+  `broadly re-auditing evidence an earlier phase already recorded: it buys no`,
+  `new proof and spends the run's fixed deadline that the remaining phases`,
+  `(documentation, packaging) still need. A later read-only phase may cite the`,
+  `recorded probes instead of re-running them; re-verify ONLY what a mutation`,
+  `since the record invalidated.`,
+].join('\n');
+
 /** Durable HTTP docs must not capture the one port assigned to this run. */
 export const HTTP_PORTABLE_DOC_GUIDANCE = [
   `HTTP DOCUMENTATION USES A PORT PLACEHOLDER. In README/docs and durable`,

@@ -27,7 +27,7 @@ import {
 // them from this module keep working.
 export { appendHttpProbe, mergeProbeManifestWrite, mergeShellProbe, probeManifestWriteRefusal };
 import { elementForTool } from '../contracts/toolTaxonomy.js';
-import { SMOKE_PREFLIGHT_REFUSAL_PREFIX } from '../contracts/attestation.js';
+import { PROBE_URL_REFUSAL_PREFIX, SMOKE_PREFLIGHT_REFUSAL_PREFIX } from '../contracts/attestation.js';
 import puppeteer, { type Browser } from 'puppeteer';
 import { processHoldsListeningPort } from './listeningPorts.js';
 
@@ -79,6 +79,86 @@ export async function servedOriginHoldsPort(
     return undefined;
   }
   return (await processHoldsListeningPort(origin.pid, port)) ? origin : undefined;
+}
+
+/** The loopback spellings both probe tools and the document binding accept. */
+const LOOPBACK_HOSTNAMES: ReadonlySet<string> = new Set([
+  'localhost',
+  '127.0.0.1',
+  '::1',
+  '[::1]',
+  '0.0.0.0',
+]);
+
+/** One sentence naming what this tool set actually serves, for probe errors. */
+export function describeServedOrigins(origins: ServedOrigins | undefined): string {
+  if (!origins || origins.size === 0) {
+    return (
+      'No server is registered by this tool set yet; start one with ' +
+      'start_node_server or start_static_server and probe the bound URL it reports.'
+    );
+  }
+  const rendered = [...origins.entries()]
+    .map(
+      ([port, origin]) =>
+        `http://localhost:${port}/ (${origin.kind}${origin.entry ? `, entry ${origin.entry}` : ''})`
+    )
+    .join(', ');
+  return `Origins this tool set registered: ${rendered}.`;
+}
+
+/**
+ * A loopback URL with NO port can never be a server this tool set started:
+ * `start_static_server` and `start_node_server` bind OS-assigned ports and
+ * never the protocol default. Refusing it pre-flight, with the registered
+ * origins in the message, turns a misleading connection refusal — which a
+ * validator reads as a dead service — into a one-turn correction. Measured on
+ * project run `d3098d25` (2026-09-21): the final review probed bare
+ * `http://localhost/` while `http://localhost:40207/` was serving, treated
+ * the refusal as a dead service, and replayed executions into the 1800 s
+ * deadline. An EXPLICIT port stays permitted even when unregistered — a
+ * server started through `run_shell` is invisible to the registry, and a
+ * refusal there would be a false positive; those get `describeServedOrigins`
+ * appended to their connection errors instead.
+ */
+export function unservedLoopbackProbeRefusal(
+  rawUrl: string,
+  origins: ServedOrigins | undefined
+): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return null; // malformed URLs keep their existing error paths
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+  if (!LOOPBACK_HOSTNAMES.has(parsed.hostname)) return null;
+  if (parsed.port !== '') return null;
+  return (
+    `${rawUrl} names no port, so it cannot be a server this run started: ` +
+    `start_node_server and start_static_server bind OS-assigned ports, never ` +
+    `the protocol default. Probe the exact bound origin. ${describeServedOrigins(origins)}`
+  );
+}
+
+/**
+ * For a failed request to a loopback port the registry does not hold: name
+ * what IS registered, so the model corrects the URL instead of diagnosing a
+ * dead service. Empty for non-loopback URLs, for a registered port (the
+ * server really is unreachable — the origins list would mislead), and when
+ * nothing is registered at all.
+ */
+function servedOriginsHintFor(rawUrl: string, origins: ServedOrigins | undefined): string {
+  if (!origins || origins.size === 0) return '';
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return '';
+  }
+  if (!LOOPBACK_HOSTNAMES.has(parsed.hostname)) return '';
+  if (parsed.port !== '' && origins.has(Number(parsed.port))) return '';
+  return ` ${describeServedOrigins(origins)}`;
 }
 
 export interface BuiltinToolOptions {
@@ -1050,6 +1130,10 @@ export function fetchUrlTool(opts: BuiltinToolOptions): BuiltinTool {
     },
     async execute(args) {
       const url = expectString(args, 'url');
+      const unserved = unservedLoopbackProbeRefusal(url, opts.servedOrigins);
+      if (unserved !== null) {
+        return { ok: false, error: `${PROBE_URL_REFUSAL_PREFIX}${unserved}` };
+      }
       const methodRaw = typeof args['method'] === 'string' ? args['method'].toUpperCase() : 'GET';
       const method = methodRaw;
       const timeoutMs =
@@ -1143,7 +1227,7 @@ export function fetchUrlTool(opts: BuiltinToolOptions): BuiltinTool {
         }
         return result;
       } catch (err) {
-        const e = err as Error & { name?: string };
+        const e = err as Error & { name?: string; cause?: { code?: unknown } };
         if (e.name === 'AbortError') {
           return {
             ok: false,
@@ -1151,7 +1235,11 @@ export function fetchUrlTool(opts: BuiltinToolOptions): BuiltinTool {
             timeout: true,
           };
         }
-        return { ok: false, error: e.message };
+        // Node's fetch says only "fetch failed"; the cause carries the code
+        // (ECONNREFUSED and friends) that tells a dead server from a typo.
+        const code = typeof e.cause?.code === 'string' ? e.cause.code : undefined;
+        const message = code && !e.message.includes(code) ? `${e.message} (${code})` : e.message;
+        return { ok: false, error: `${message}${servedOriginsHintFor(url, opts.servedOrigins)}` };
       } finally {
         clearTimeout(timer);
       }
@@ -1610,25 +1698,35 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
         ignoredInteractions > 0
           ? [DISCARDED_INTERACTIONS_WARNING(ignoredInteractions)]
           : [];
-      if (smoke !== undefined) {
-        const refusals = preflightSmokeRefusals(smoke, interactions);
-        if (refusals.length > 0) {
-          const hint = refusals.find((r) => r.hint !== undefined)?.hint;
-          return {
-            ok: false,
-            url,
-            errors: refusals.map((r) => `${SMOKE_PREFLIGHT_REFUSAL_PREFIX}${r.message}`),
-            warnings: discardWarning,
-            failedRequests: [],
-            interactionLog: [],
-            requestedInteractions,
-            ignoredInteractions,
-            smokeResult: {
-              error: refusals.map((r) => r.message).join(' ALSO: '),
-              ...(hint !== undefined ? { hint } : {}),
-            },
-          };
-        }
+      // Both pre-flight families are consulted and reported together, the
+      // same order-independence the smoke guards settled on: a URL refusal is
+      // a statement about the request's target, a smoke refusal about its
+      // assertion, and neither opens a page.
+      const urlRefusal = unservedLoopbackProbeRefusal(url, opts.servedOrigins);
+      const smokeRefusals = smoke !== undefined ? preflightSmokeRefusals(smoke, interactions) : [];
+      if (urlRefusal !== null || smokeRefusals.length > 0) {
+        const hint = smokeRefusals.find((r) => r.hint !== undefined)?.hint;
+        return {
+          ok: false,
+          url,
+          errors: [
+            ...(urlRefusal !== null ? [`${PROBE_URL_REFUSAL_PREFIX}${urlRefusal}`] : []),
+            ...smokeRefusals.map((r) => `${SMOKE_PREFLIGHT_REFUSAL_PREFIX}${r.message}`),
+          ],
+          warnings: discardWarning,
+          failedRequests: [],
+          interactionLog: [],
+          requestedInteractions,
+          ignoredInteractions,
+          ...(smokeRefusals.length > 0
+            ? {
+                smokeResult: {
+                  error: smokeRefusals.map((r) => r.message).join(' ALSO: '),
+                  ...(hint !== undefined ? { hint } : {}),
+                },
+              }
+            : {}),
+        };
       }
 
       const browser = await getBrowser();
@@ -1939,7 +2037,14 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
           errors: [
             ...mergeConsoleErrors(consoleErrors, url, false),
             ...errors,
-            `navigation failed: ${(err as Error).message}`,
+            // A refused loopback connection on an unregistered port names the
+            // origins this tool set is actually serving, so the reader can
+            // tell a wrong URL from a dead server.
+            `navigation failed: ${(err as Error).message}${
+              /ERR_CONNECTION_REFUSED|ECONNREFUSED/.test((err as Error).message)
+                ? servedOriginsHintFor(url, opts.servedOrigins)
+                : ''
+            }`,
           ],
           warnings,
           failedRequests: failedRequests.filter(
