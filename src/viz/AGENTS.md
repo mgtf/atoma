@@ -344,18 +344,18 @@ npm run viz:mark-turn:analyze
   heading but no body on purpose: it is composed per call from the task, the
   plan and injected skills, so it belongs to a run — the heading points at an
   LLM event in Runs rather than inventing a template nobody ever sent.
-- The run-step detail pane is HIERARCHISED and packs small facts up to THREE
-  per row. Order is a PROJECTION ranked once in `client/structured-detail.ts` —
-  verdict, prose, answer, locator, quantity, nested, identity, bulk — over a
-  TYPE-derived default, so a new key lands mid-list, never first. It sorts
-  OBJECT entries before the `maxNodes` slice, never an array or a document,
-  where position is the evidence, and drops an entry with NO content (`stderr:
-  ''`), never a dull one. `renderer/detail-layout.ts` gives a RUN of adjacent
-  fields one column count, the narrowest any member MEASURES into, and splits
-  it evenly: four are 2+2, not 3+1, one cursor step per ROW.
-- The timeline event card is ONE LINE (`TIMELINE_ROW_HEIGHT` 40, card 30) and
-  sheds columns title > footer > actor > body as width runs out; a `context`
-  step's inject scrolls in the masked layer every other kind uses.
+- The run-step detail pane is HIERARCHISED. Order is a PROJECTION ranked once
+  in `client/structured-detail.ts` — verdict first, bulk last, eight ranks over
+  a TYPE-derived default — so a new key lands mid-list. It sorts OBJECT entries
+  before the `maxNodes` slice, never an array, and drops an entry with NO
+  content (`stderr: ''`). `detail-layout.ts` packs adjacent fields up to THREE
+  per row, at the narrowest count any MEASURES into: 2+2, not 3+1.
+- The timeline event card AND the run's two bookends are ONE LINE
+  (`TIMELINE_ROW_HEIGHT` 40, card 30), shedding title > footer > actor > body
+  as width runs out; a bookend's second line at `y + 28` drew outside its own
+  cartouche. A `context` inject scrolls in the masked layer every other kind
+  uses. `GPU_COLORS.muted` is a LEGIBILITY FLOOR for the 8–9px facts it is
+  mostly spent on (~7.9:1) — do not lower it back.
 - The nav is a LEFT RAIL (`renderer/views/sidebar.ts`), not a header tab strip.
   `visibleViews` remains the ONE definition of which tabs a viewer gets; the
   rail only groups them, and a test holds the group list to it so a new view

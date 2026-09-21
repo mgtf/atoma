@@ -630,7 +630,19 @@ export function drawRuns(
       : 22;
   const railInset = 28;
   const labelGutter = 46;
-  const branchCardOffset = 10;
+  /**
+   * Card indent per branch lane. Ten pixels against a 7px corner radius read
+   * as a misalignment rather than a nesting, and at the 40px row the cards sit
+   * close enough vertically that the step has to carry the hierarchy on its
+   * own (owner request, 2026-09-21). Bounded by a TOTAL indent budget the same
+   * way `laneSpacing` bounds the rail's spread: a deep tree indents less per
+   * lane instead of eating the card's one line, which is the only place the
+   * step could have come from.
+   */
+  const branchCardOffset =
+    timeline.maxLane > 0
+      ? Math.floor(Math.min(16, 72 / timeline.maxLane))
+      : 16;
   const railX = (lane: number) => leftX + railInset + lane * laneSpacing;
   const cardBaseX = railX(timeline.maxLane) + labelGutter;
   const cardBaseWidth = Math.min(
@@ -763,10 +775,24 @@ export function drawRuns(
           second: '2-digit',
         })
       : '';
+  /**
+   * The run's opening and closing cards. They carried a two-line layout —
+   * title at `y + 8`, facts at `y + 28` — from when a row was 64px tall. At
+   * the 40px row the panel is 30px and the facts line was drawn BELOW its own
+   * cartouche, unboxed, over whatever followed (owner report, 2026-09-21).
+   *
+   * One line now, laid out with the event card's geometry and its priority
+   * rule: `facts` is the numeric tail and is always drawn, `prose` is the
+   * flexible part — an abort reason or a task description — and is fitted to
+   * whatever the numbers leave. The reverse dropped the duration, the call
+   * count and the cost exactly on the failed runs whose error was long enough
+   * to be worth reading.
+   */
   const bookend = (
     row: number,
     accent: number,
     title: string,
+    prose: string,
     facts: string
   ): void => {
     const y =
@@ -779,16 +805,32 @@ export function drawRuns(
     panel.stroke({ color: accent, width: 1.2, alpha: 0.75 });
     panel.eventMode = 'none';
     listLayer.addChild(panel);
-    ctx.text(listLayer, title, cardBaseX + 11, y + 8, {
-      size: 11,
-      weight: '700',
-      color: accent,
-    });
-    if (facts) {
-      ctx.text(listLayer, truncate(facts, 150), cardBaseX + 11, y + 28, {
+    const titleLabel = ctx.text(
+      listLayer,
+      title,
+      cardBaseX + EVENT_TITLE_X,
+      y + EVENT_TITLE_TOP,
+      { size: 11, weight: '700', color: accent, singleLine: true }
+    );
+    const detailX =
+      cardBaseX + EVENT_TITLE_X + titleLabel.width + EVENT_COLUMN_GAP;
+    const detailWidth = Math.max(
+      0,
+      cardBaseX + cardBaseWidth - EVENT_TITLE_X - detailX
+    );
+    const factsAdvance = ctx.measureText(facts ? ` · ${facts}` : '', { size: 9 });
+    const detail = [
+      ctx.fitText(prose, Math.max(0, detailWidth - factsAdvance), { size: 9 }),
+      facts,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    if (detail) {
+      ctx.text(listLayer, detail, detailX, y + EVENT_DETAIL_TOP, {
         size: 9,
         color: GPU_COLORS.muted,
-        width: cardBaseWidth - 22,
+        width: detailWidth,
+        singleLine: true,
       });
     }
     const marker = new Graphics();
@@ -804,8 +846,8 @@ export function drawRuns(
     0,
     statusColor,
     `${runOver ? snapshot.t('timeline.runEnded') : snapshot.t('timeline.runUnfinished')} · ${statusLabel}`,
+    run.error ?? '',
     [
-      run.error,
       fmtMs(run.durationMs),
       snapshot.t('runs.calls', { count: run.totals?.calls ?? 0 }),
       fmtCost(run.totals?.costUsd),
@@ -818,9 +860,8 @@ export function drawRuns(
     totalRows - 1,
     GPU_COLORS.primary,
     snapshot.t('timeline.runStarted'),
-    [clockTime(Date.parse(run.startedAt)), run.task?.description ?? '']
-      .filter(Boolean)
-      .join(' · ')
+    run.task?.description ?? '',
+    clockTime(Date.parse(run.startedAt))
   );
 
   timeline.items.slice(itemStart, itemStart + count).forEach((item) => {

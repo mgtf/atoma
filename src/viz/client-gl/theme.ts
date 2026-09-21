@@ -14,7 +14,15 @@ export const GPU_COLORS = {
   panelHover: 0x2b4668,
   border: 0x426386,
   text: 0xe6edf7,
-  muted: 0x8a96ae,
+  /**
+   * Secondary text. Was 0x8a96ae: about 5.5:1 against the card fills, which
+   * passes the WCAG bar for BODY copy and misses badly for what this token is
+   * actually spent on — 8 and 9px facts lines, the densest and most-read text
+   * in the client (owner report, 2026-09-21: "le gris du texte est
+   * illisible"). 0xa8b4cc lifts that to ~7.9:1 while staying clearly below
+   * `text`, so the two-level hierarchy this token exists for survives.
+   */
+  muted: 0xa8b4cc,
   primary: 0x6ea8ff,
   success: 0x4ade80,
   warning: 0xfbbf24,
