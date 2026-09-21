@@ -344,6 +344,18 @@ npm run viz:mark-turn:analyze
   heading but no body on purpose: it is composed per call from the task, the
   plan and injected skills, so it belongs to a run — the heading points at an
   LLM event in Runs rather than inventing a template nobody ever sent.
+- The run-step detail pane is HIERARCHISED and packs small facts two-up. It drew
+  a payload in declaration order, so a tool step opened on its Arguments and a
+  skill step on four cards repeating its own title and subtitle, the verdict and
+  the Result below the fold (2026-09-21). Order is a PROJECTION ranked once in
+  `client/structured-detail.ts` — verdict, prose, answer, locator, quantity,
+  nested, identity, bulk — over a TYPE-derived default, so a new key lands
+  mid-list and no payload talks its way to the top; it sorts OBJECT entries,
+  before the `maxNodes` slice, never an array, a parsed document or the
+  envelope, where position is the evidence. `renderer/detail-layout.ts` pairs
+  two cards only when label AND value MEASURE inside half the node box (never a
+  character count, which once sized a pill narrower than its own text), a toned
+  verdict keeps full width, and the cursor advances once per ROW.
 - The nav is a LEFT RAIL (`renderer/views/sidebar.ts`), not a header tab strip.
   `visibleViews` remains the ONE definition of which tabs a viewer gets; the
   rail only groups them, and a test holds the group list to it so a new view

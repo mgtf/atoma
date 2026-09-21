@@ -54,6 +54,275 @@ const METADATA_TIMESTAMP_KEYS = new Set([
   'updatedAt',
 ]);
 
+/**
+ * Importance bands for ONE sibling list, LOWEST FIRST. The panel used to show
+ * a payload in whatever order the model — or a hand-built payload literal —
+ * happened to declare its keys, so a tool step opened on its Arguments and a
+ * skill step on four cards repeating its own title and subtitle, while the
+ * verdict, the reasoning and the Result sat below the fold (2026-09-21).
+ *
+ * This is a PROJECTION at the typed viz boundary: the rank is never written
+ * back to a trace, and no field is ever dropped for being unranked. Bands are
+ * spaced by 10 so one can be inserted without renumbering.
+ */
+const DETAIL_RANK = {
+  /** The answer and the failure — what the reader came for. */
+  verdict: 10,
+  /** The prose that explains that answer. */
+  prose: 20,
+  /** The container holding what came back. */
+  answer: 30,
+  /** What was acted on: a short scalar, and every unranked value. */
+  locator: 40,
+  /** A count or a measure. */
+  quantity: 50,
+  /** An ordinary nested container. */
+  nested: 60,
+  /** Identity and bookkeeping: ids, actors, timestamps, branch keys. */
+  identity: 70,
+  /** The bulky payload itself: prompts, bodies, stdout, recipes, snapshots. */
+  bulk: 80,
+} as const;
+
+type DetailRank = (typeof DETAIL_RANK)[keyof typeof DETAIL_RANK];
+
+/**
+ * An OVERRIDE LIST over a type-derived default, keyed on the UNTRANSLATED key
+ * — `booleanField` rewrites labels but never keys, so the table is
+ * locale-independent. A key absent here still lands in a defined band; it can
+ * never disappear for being new.
+ */
+const DETAIL_RANKS: ReadonlyMap<string, DetailRank> = new Map<string, DetailRank>([
+  ['error', DETAIL_RANK.verdict],
+  ['errors', DETAIL_RANK.verdict],
+  ['approved', DETAIL_RANK.verdict],
+  ['ok', DETAIL_RANK.verdict],
+  ['match', DETAIL_RANK.verdict],
+  ['outcome', DETAIL_RANK.verdict],
+  ['status', DETAIL_RANK.verdict],
+  ['exitCode', DETAIL_RANK.verdict],
+  ['stopReason', DETAIL_RANK.verdict],
+  ['decision', DETAIL_RANK.verdict],
+  ['disposition', DETAIL_RANK.verdict],
+  ['strategy', DETAIL_RANK.verdict],
+  ['confidence', DETAIL_RANK.verdict],
+  ['scope', DETAIL_RANK.verdict],
+  ['op', DETAIL_RANK.verdict],
+  ['covered', DETAIL_RANK.verdict],
+  ['decomposable', DETAIL_RANK.verdict],
+  ['timeout', DETAIL_RANK.verdict],
+  ['contradiction', DETAIL_RANK.verdict],
+  ['requiresReview', DETAIL_RANK.verdict],
+  ['promotable', DETAIL_RANK.verdict],
+  ['recorded', DETAIL_RANK.verdict],
+  ['activeSkillFollowed', DETAIL_RANK.verdict],
+  ['viaFallback', DETAIL_RANK.verdict],
+  ['viaPrefilter', DETAIL_RANK.verdict],
+  ['smokeResult', DETAIL_RANK.verdict],
+
+  ['reasoning', DETAIL_RANK.prose],
+  ['description', DETAIL_RANK.prose],
+  ['whenToUse', DETAIL_RANK.prose],
+  ['when_to_use', DETAIL_RANK.prose],
+  ['trigger', DETAIL_RANK.prose],
+  ['summary', DETAIL_RANK.prose],
+  ['instruction', DETAIL_RANK.prose],
+  ['proposedAction', DETAIL_RANK.prose],
+  ['expectedOutput', DETAIL_RANK.prose],
+  ['reason', DETAIL_RANK.prose],
+  ['note', DETAIL_RANK.prose],
+  ['message', DETAIL_RANK.prose],
+  ['hint', DETAIL_RANK.prose],
+  ['task', DETAIL_RANK.prose],
+  ['query', DETAIL_RANK.prose],
+  ['constraints', DETAIL_RANK.prose],
+  ['additionalContext', DETAIL_RANK.prose],
+  ['descriptionReplace', DETAIL_RANK.prose],
+  ['paragraph', DETAIL_RANK.prose],
+  ['preview', DETAIL_RANK.prose],
+
+  ['result', DETAIL_RANK.answer],
+  ['probe', DETAIL_RANK.answer],
+  ['probes', DETAIL_RANK.answer],
+  ['verifications', DETAIL_RANK.answer],
+  ['gates', DETAIL_RANK.answer],
+  ['checks', DETAIL_RANK.answer],
+
+  ['name', DETAIL_RANK.locator],
+  ['path', DETAIL_RANK.locator],
+  ['file', DETAIL_RANK.locator],
+  ['filename', DETAIL_RANK.locator],
+  ['url', DETAIL_RANK.locator],
+  ['entry', DETAIL_RANK.locator],
+  ['method', DETAIL_RANK.locator],
+  ['language', DETAIL_RANK.locator],
+  ['title', DETAIL_RANK.locator],
+  ['selector', DETAIL_RANK.locator],
+  ['type', DETAIL_RANK.locator],
+  ['kind', DETAIL_RANK.locator],
+  ['source', DETAIL_RANK.locator],
+  ['target', DETAIL_RANK.locator],
+  ['preferredChild', DETAIL_RANK.locator],
+  ['branchName', DETAIL_RANK.locator],
+  ['label', DETAIL_RANK.locator],
+  ['mode', DETAIL_RANK.locator],
+  ['toolNames', DETAIL_RANK.locator],
+  ['tool', DETAIL_RANK.locator],
+  ['tools', DETAIL_RANK.locator],
+  ['addTools', DETAIL_RANK.locator],
+  ['removeTools', DETAIL_RANK.locator],
+  ['model', DETAIL_RANK.locator],
+  ['servedModel', DETAIL_RANK.locator],
+  ['deliverable', DETAIL_RANK.locator],
+  ['shareability', DETAIL_RANK.locator],
+  ['writes', DETAIL_RANK.locator],
+  ['files', DETAIL_RANK.locator],
+  ['manifest', DETAIL_RANK.locator],
+  ['servedFrom', DETAIL_RANK.locator],
+  // `cmd`/`command` are CODE_KEYS, yet for a shell step the command that ran
+  // is the second thing a reader wants, not part of the payload tail.
+  ['cmd', DETAIL_RANK.locator],
+  ['command', DETAIL_RANK.locator],
+
+  ['successes', DETAIL_RANK.quantity],
+  ['failures', DETAIL_RANK.quantity],
+  ['chars', DETAIL_RANK.quantity],
+  ['bytes', DETAIL_RANK.quantity],
+  ['size', DETAIL_RANK.quantity],
+  ['durationMs', DETAIL_RANK.quantity],
+  ['costUsd', DETAIL_RANK.quantity],
+  ['usage', DETAIL_RANK.quantity],
+  ['index', DETAIL_RANK.quantity],
+  ['total', DETAIL_RANK.quantity],
+  ['attempt', DETAIL_RANK.quantity],
+  ['version', DETAIL_RANK.quantity],
+  ['replacements', DETAIL_RANK.quantity],
+  ['matches', DETAIL_RANK.quantity],
+  ['port', DETAIL_RANK.quantity],
+  ['limit', DETAIL_RANK.quantity],
+  ['score', DETAIL_RANK.quantity],
+  ['consoleErrors', DETAIL_RANK.quantity],
+  ['failedRequests', DETAIL_RANK.quantity],
+  ['params', DETAIL_RANK.quantity],
+
+  ['args', DETAIL_RANK.nested],
+  ['inputs', DETAIL_RANK.nested],
+  ['subtask', DETAIL_RANK.nested],
+  ['subtasks', DETAIL_RANK.nested],
+  ['toolCalls', DETAIL_RANK.nested],
+  ['aggregation', DETAIL_RANK.nested],
+  ['context', DETAIL_RANK.nested],
+  ['contextBlock', DETAIL_RANK.nested],
+  ['item', DETAIL_RANK.nested],
+  ['items', DETAIL_RANK.nested],
+  ['list', DETAIL_RANK.nested],
+  ['entries', DETAIL_RANK.nested],
+  ['interactions', DETAIL_RANK.nested],
+  ['filters', DETAIL_RANK.nested],
+  ['heading', DETAIL_RANK.nested],
+  ['strategyDetails', DETAIL_RANK.nested],
+  ['planDetails', DETAIL_RANK.nested],
+
+  ['id', DETAIL_RANK.identity],
+  ['ts', DETAIL_RANK.identity],
+  ['role', DETAIL_RANK.identity],
+  ['actor', DETAIL_RANK.identity],
+  ['child', DETAIL_RANK.identity],
+  ['tier', DETAIL_RANK.identity],
+  ['ordinal', DETAIL_RANK.identity],
+  ['branchId', DETAIL_RANK.identity],
+  ['parentBranchId', DETAIL_RANK.identity],
+  ['llmEventId', DETAIL_RANK.identity],
+  ['l1Name', DETAIL_RANK.identity],
+  ['l1AtomId', DETAIL_RANK.identity],
+  ['skillId', DETAIL_RANK.identity],
+  ['by', DETAIL_RANK.identity],
+  ['from', DETAIL_RANK.identity],
+  ['createdBy', DETAIL_RANK.identity],
+  ['createdAt', DETAIL_RANK.identity],
+  ['updatedAt', DETAIL_RANK.identity],
+  ['modifiedAt', DETAIL_RANK.identity],
+  ['expiresAt', DETAIL_RANK.identity],
+  ['sha256', DETAIL_RANK.identity],
+  ['citation', DETAIL_RANK.identity],
+  ['headers', DETAIL_RANK.identity],
+
+  ['response', DETAIL_RANK.bulk],
+  ['systemPrompt', DETAIL_RANK.bulk],
+  ['systemPromptAppend', DETAIL_RANK.bulk],
+  ['systemPromptReplace', DETAIL_RANK.bulk],
+  ['userContent', DETAIL_RANK.bulk],
+  ['recipe', DETAIL_RANK.bulk],
+  ['body', DETAIL_RANK.bulk],
+  ['content', DETAIL_RANK.bulk],
+  ['text', DETAIL_RANK.bulk],
+  ['markdown', DETAIL_RANK.bulk],
+  ['readme', DETAIL_RANK.bulk],
+  ['output', DETAIL_RANK.bulk],
+  ['stdout', DETAIL_RANK.bulk],
+  ['stderr', DETAIL_RANK.bulk],
+  ['actual', DETAIL_RANK.bulk],
+  ['actualStdout', DETAIL_RANK.bulk],
+  ['expected', DETAIL_RANK.bulk],
+  ['expectedStdout', DETAIL_RANK.bulk],
+  ['old_string', DETAIL_RANK.bulk],
+  ['new_string', DETAIL_RANK.bulk],
+  ['smoke', DETAIL_RANK.bulk],
+  ['inputSchema', DETAIL_RANK.bulk],
+  ['snapshot', DETAIL_RANK.bulk],
+  ['modifications', DETAIL_RANK.bulk],
+  ['excerpt', DETAIL_RANK.bulk],
+  ['quote', DETAIL_RANK.bulk],
+  ['code', DETAIL_RANK.bulk],
+]);
+
+/**
+ * The band an object entry belongs to. The default is derived from the JSON
+ * TYPE, never from model-authored prose: a payload cannot talk its way to the
+ * top of the pane, and an unranked key sorts MID-list rather than first or
+ * last.
+ */
+function entryRank(key: string, value: unknown): DetailRank {
+  const explicit = DETAIL_RANKS.get(key);
+  if (explicit !== undefined) return explicit;
+  if (value !== null && typeof value === 'object') return DETAIL_RANK.nested;
+  if (typeof value === 'number' || typeof value === 'bigint') return DETAIL_RANK.quantity;
+  if (typeof value === 'string' && (CODE_KEYS.has(key) || MARKDOWN_CONTENT_KEYS.has(key))) {
+    return DETAIL_RANK.bulk;
+  }
+  // Derived, not whitelisted: a key the table has never seen but which ENDS in
+  // `Id` or `At` is a handle or a stamp — `snapshotId`, `corpusId`, `startedAt`
+  // — and belongs with the rest of the bookkeeping. Case-sensitive on purpose,
+  // so an ordinary word ending in "at" or "id" is not swept up.
+  if (/(?:Id|At)$/.test(key)) return DETAIL_RANK.identity;
+  return DETAIL_RANK.locator;
+}
+
+/**
+ * One object's entries, most interesting first. STABLE: equal ranks keep
+ * declaration order, which is what preserves the hand-composed
+ * `[strategyDetails, planDetails]` pair and every other curated payload whose
+ * keys all share one band.
+ *
+ * Only OBJECT entries are ordered. Array items, `parseMarkdownDetail` output
+ * and the LLM envelope keep the order they were given, because there position
+ * IS the meaning: a reordered document, or a reordered tool-call sequence,
+ * would describe a run that never happened.
+ *
+ * Ordering before the `maxNodes` slice also means truncation now sheds the
+ * LEAST interesting entries rather than the last-declared ones.
+ */
+function orderedEntries(value: Record<string, unknown>): [string, unknown][] {
+  return Object.entries(value)
+    .map(([key, entry], index) => ({
+      entry: [key, entry] as [string, unknown],
+      index,
+      rank: entryRank(key, entry),
+    }))
+    .sort((left, right) => left.rank - right.rank || left.index - right.index)
+    .map((ranked) => ranked.entry);
+}
+
 function translatedOrNull(t: Translator, key: string): string | null {
   const translated = t(key);
   return translated === key ? null : translated;
@@ -405,7 +674,7 @@ export function buildStructuredDetail(
                   label: `${structuredDetailLabel(itemKey, t)} ${index + 1}`,
                   children: Array.isArray(entry)
                     ? [walk(entry, itemKey, depth + 2)]
-                    : Object.entries(entry as Record<string, unknown>).map(([childKey, child]) =>
+                    : orderedEntries(entry as Record<string, unknown>).map(([childKey, child]) =>
                         walk(child, childKey, depth + 2)
                       ),
                 }
@@ -420,7 +689,7 @@ export function buildStructuredDetail(
       };
     }
     if (current !== null && typeof current === 'object') {
-      const entries = Object.entries(current as Record<string, unknown>);
+      const entries = orderedEntries(current as Record<string, unknown>);
       const visible = entries.slice(0, Math.max(0, maxNodes - nodes));
       const omitted = entries.length - visible.length;
       return {
@@ -443,7 +712,7 @@ export function buildStructuredDetail(
     return [walk(value, 'items', 0)];
   }
   if (value !== null && typeof value === 'object') {
-    const entries = Object.entries(value as Record<string, unknown>);
+    const entries = orderedEntries(value as Record<string, unknown>);
     if (entries.length === 0) {
       return [{
         kind: 'field',
@@ -533,7 +802,10 @@ export function buildSkillEventDetail(
 ): readonly StructuredDetailNode[] {
   const catalog = skill && skill.id === event.skillId ? skill : null;
   const payload: Record<string, unknown> = {
-    decision: skillEventTitle(event, t),
+    // No `decision` field: both clients already draw `skillEventTitle` as the
+    // pane's own 15px title, and `skillEventSubtitle` the molecule, the skill
+    // id and the initiator. Repeating all four as the first cards pushed the
+    // description, the recipe adherence and the reasoning below the fold.
     skillId: event.skillId,
     l1Name: event.l1Name,
     actor: event.actor?.name && event.actor.name !== event.l1Name

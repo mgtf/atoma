@@ -34,6 +34,13 @@ import {
 } from '../src/viz/client-gl/renderer/motion.js';
 import { drawBurnin } from '../src/viz/client-gl/renderer/views/burnin.js';
 import {
+  COMPACT_VALUE_MAX_CHARS,
+  DETAIL_CARD_MIN_WIDTH,
+  DETAIL_PAIR_GAP,
+  detailColumnWidth,
+  detailNodeWidth,
+} from '../src/viz/client-gl/renderer/detail-layout.js';
+import {
   drawProjects,
   PROJECTS_COLUMN_INSET,
   PROJECTS_DOM_FORM_HEIGHT,
@@ -5959,5 +5966,122 @@ describe('FPS follow-ups', () => {
     internals.host = { clientWidth: 900, clientHeight: 800 };
     renderer.render(at(60));
     expect(rebuild).toHaveBeenCalledTimes(5);
+  });
+});
+
+/**
+ * Three tiny values — `Status ✓ Success`, `Path server.mjs`, `Bytes 4727` —
+ * took a full-width card each and ~200 vertical pixels of a 500px pane, so the
+ * rest of a tool result sat below the fold (2026-09-21). Small fields now
+ * share a row. Asserted through `drawRuns`, the pane a viewer actually reads,
+ * not through the layout helper alone.
+ */
+describe('drawRuns — paired detail fields', () => {
+  const WIDTH = 1280;
+  const HEIGHT = 800;
+
+  function toolRun(result: Record<string, unknown>, args: Record<string, unknown> = {}): VizRun {
+    return makeRun([
+      {
+        id: 'tool-1',
+        ts: Date.parse('2026-08-14T10:01:00.000Z'),
+        kind: 'tool',
+        name: 'write_file',
+        actor: { tier: 1, name: 'Methane' },
+        args,
+        result,
+      },
+    ]);
+  }
+
+  /** Every label drawn inside the scrolled detail layer, with its position. */
+  function detailTexts(ctx: RecordingCtx) {
+    const layer = ctx.texts.filter((entry) =>
+      typeof entry.parent.label === 'string' && entry.parent.label.startsWith('event-detail:')
+    );
+    return layer;
+  }
+  function labelAt(ctx: RecordingCtx, value: string) {
+    return detailTexts(ctx).find((entry) => entry.value === value);
+  }
+
+  it('pairs two small detail fields onto one row, half the card width apart', () => {
+    const ctx = createRecordingCtx();
+    drawRuns(
+      ctx,
+      makeSnapshot(
+        { selectedEventId: 'tool-1' },
+        { run: toolRun({ ok: true, path: 'server.mjs', bytes: 4727 }) }
+      ),
+      WIDTH,
+      HEIGHT
+    );
+
+    const path = labelAt(ctx, 'Path');
+    const bytes = labelAt(ctx, 'Bytes');
+    expect(path).toBeDefined();
+    expect(bytes).toBeDefined();
+    // Same band…
+    expect(bytes!.y).toBe(path!.y);
+    // …and the second card starts beyond the first column's right edge.
+    const pane = runsPaneLayout(WIDTH);
+    const nodeWidth = detailNodeWidth(pane.rightWidth - 42, 1);
+    const columnWidth = detailColumnWidth(nodeWidth);
+    expect(bytes!.x - path!.x).toBeGreaterThanOrEqual(columnWidth);
+    expect(bytes!.x - path!.x).toBeLessThanOrEqual(nodeWidth - columnWidth);
+    // The verdict still leads, above both of them.
+    const status = labelAt(ctx, 'Status');
+    expect(status).toBeDefined();
+    expect(status!.y).toBeLessThan(path!.y);
+  });
+
+  it('keeps a value too long to share a line on its own full-width row', () => {
+    const long = 'x'.repeat(COMPACT_VALUE_MAX_CHARS + 1);
+    const ctx = createRecordingCtx();
+    drawRuns(
+      ctx,
+      makeSnapshot(
+        { selectedEventId: 'tool-1' },
+        { run: toolRun({ path: long, bytes: 4727 }) }
+      ),
+      WIDTH,
+      HEIGHT
+    );
+    const path = labelAt(ctx, 'Path');
+    const bytes = labelAt(ctx, 'Bytes');
+    expect(path).toBeDefined();
+    expect(bytes).toBeDefined();
+    expect(bytes!.y).toBeGreaterThan(path!.y);
+    expect(bytes!.x).toBe(path!.x);
+  });
+
+  it('falls back to one column when a column would be illegibly narrow', () => {
+    // The pane's own two-pane floor: a nested level there cannot hold two
+    // minimum cards plus their gutter, so pairing must not be attempted.
+    const narrow = detailNodeWidth(DETAIL_CARD_MIN_WIDTH * 2 + DETAIL_PAIR_GAP - 1, 0);
+    expect(detailColumnWidth(narrow)).toBeLessThan(DETAIL_CARD_MIN_WIDTH);
+  });
+
+  it('still bounds and masks the detail scroll after pairing', () => {
+    const ctx = createRecordingCtx();
+    drawRuns(
+      ctx,
+      makeSnapshot(
+        { selectedEventId: 'tool-1' },
+        {
+          run: toolRun(
+            { ok: true, path: 'server.mjs', bytes: 4727, stdout: 'built\n'.repeat(400) },
+            { path: 'server.mjs' }
+          ),
+        }
+      ),
+      WIDTH,
+      HEIGHT
+    );
+    expect(ctx.detailBounds).not.toBeNull();
+    expect(ctx.detailScrollMax).toBeGreaterThan(0);
+    expect(scrollbarThumbs(ctx.root).length).toBe(1);
+    // ONE rectangle over the whole pane viewport, never one per column.
+    expect(ctx.detailBounds!.width).toBeGreaterThan(detailColumnWidth(ctx.detailBounds!.width) * 2 - 1);
   });
 });

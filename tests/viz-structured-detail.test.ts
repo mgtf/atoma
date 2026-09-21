@@ -140,11 +140,17 @@ describe('structured detail presentation', () => {
       .toBe('translated:skillOp.creditWithheld');
 
     const withoutCatalog = buildSkillEventDetail(event, null, en) as StructuredDetailField[];
+    // No 'Decision' card: its value IS `skillEventTitle`, which both clients
+    // already draw as the pane's own title, and the ids below it are the
+    // subtitle. Repeating the header verbatim was the first thing a viewer
+    // read (2026-09-21).
     expect(withoutCatalog.map((node) => node.label)).toEqual([
-      'Decision',
       'Skill id',
       'Molecule',
     ]);
+    expect(withoutCatalog.map((node) => node.value)).not.toContain(
+      skillEventTitle(event, en)
+    );
 
     const withCatalog = buildSkillEventDetail(event, {
       id: 'write-doc-and-config-files',
@@ -235,5 +241,118 @@ describe('LLM envelope detail', () => {
       count: 1,
       label: 'Model-visible context',
     });
+  });
+});
+
+/**
+ * The pane opened on whatever order a payload happened to declare: a tool step
+ * on its Arguments, a skill step on four cards repeating its own header, with
+ * the verdict and the Result below the fold (2026-09-21). Ordering is a
+ * PROJECTION — it reorders an object's fields for reading and never an array,
+ * a document or a curated envelope, where position is the evidence.
+ */
+describe('structured detail hierarchy', () => {
+  it('orders a payload by importance, verdict first and bulk last', () => {
+    const nodes = buildStructuredDetail({
+      snapshotId: 'snap-7',
+      stdout: 'built in 4s',
+      bytes: 4727,
+      path: 'server.mjs',
+      reasoning: 'The smoke run answered on the declared port.',
+      ok: true,
+    }, en);
+
+    expect(nodes.map((node) => node.label)).toEqual([
+      'Status',      // verdict
+      'Reasoning',   // prose
+      'Path',        // locator
+      'Bytes',       // quantity
+      'Snapshot Id', // identity
+      'Standard output', // bulk
+    ]);
+  });
+
+  it('opens a tool step on its result rather than its arguments', () => {
+    const nodes = buildStructuredDetail({
+      args: { path: 'server.mjs', content: 'const x = 1;' },
+      result: { ok: true, path: 'server.mjs', bytes: 4727 },
+    }, en) as StructuredDetailSection[];
+
+    expect(nodes.map((node) => node.label)).toEqual(['Result', 'Arguments']);
+    // And inside the result, the status leads.
+    expect(nodes[0]!.children.map((node) => node.label)).toEqual([
+      'Status',
+      'Path',
+      'Bytes',
+    ]);
+  });
+
+  it('sinks the header duplicates of a skill pane under its description', () => {
+    const nodes = buildSkillEventDetail(
+      {
+        kind: 'skill',
+        op: 'match',
+        l1Name: 'Methane',
+        skillId: 'build-in-memory-json-api',
+        actor: { name: 'Idioblast' },
+        reasoning: 'The task asks for a dependency-free JSON API.',
+      },
+      {
+        id: 'build-in-memory-json-api',
+        kind: 'llm',
+        description: 'Build and smoke-test a dependency-free Node HTTP JSON API.',
+        whenToUse: 'Task asks for a built-in-module Node HTTP JSON API.',
+        successes: 3,
+        failures: 1,
+        body: '1. Write server.mjs',
+      },
+      en
+    );
+
+    const labels = nodes.map((node) => node.label);
+    expect(labels.indexOf('Description')).toBeLessThan(labels.indexOf('Skill id'));
+    expect(labels.indexOf('When to use')).toBeLessThan(labels.indexOf('Molecule'));
+    expect(labels.indexOf('Reasoning')).toBeLessThan(labels.indexOf('Initiator'));
+    // The recipe is the whole skill body: it stays, at the foot of the pane.
+    expect(labels.at(-1)).toBe('Recipe');
+  });
+
+  it('never reorders an array, a document or the llm envelope', () => {
+    const items = buildStructuredDetail({
+      files: [
+        { path: 'b.mjs', ok: true },
+        { path: 'a.mjs', ok: false },
+      ],
+    }, en)[0] as StructuredDetailSection;
+    // Item order is the evidence; only each item's own fields are ranked.
+    const first = items.children[0] as StructuredDetailSection;
+    const second = items.children[1] as StructuredDetailSection;
+    expect((first.children[1] as StructuredDetailField).value).toBe('b.mjs');
+    expect((second.children[1] as StructuredDetailField).value).toBe('a.mjs');
+    expect((first.children[0] as StructuredDetailField).label).toBe('Status');
+
+    const document = parseMarkdownDetail('Run it.\n\n# Usage\n\nThen read it.', en);
+    expect(document[0]).toMatchObject({ label: 'Paragraph', value: 'Run it.' });
+    expect(document[1]).toMatchObject({ kind: 'section', label: 'Usage' });
+
+    const envelope = buildLlmEnvelopeDetail(
+      { toolNames: ['write_file'], context: [{ source: 'skill', chars: 24 }] },
+      en
+    );
+    expect(envelope.map((node) => node.key)).toEqual(['toolNames', 'context']);
+  });
+
+  it('gives an unranked key a middle band, never the top or the tail', () => {
+    const nodes = buildStructuredDetail({
+      systemPrompt: 'You are a molecule.',
+      customNestedValue: 'something new',
+      approved: true,
+    }, en);
+
+    expect(nodes.map((node) => node.label)).toEqual([
+      'Decision',
+      'Custom Nested Value',
+      'System Prompt',
+    ]);
   });
 });

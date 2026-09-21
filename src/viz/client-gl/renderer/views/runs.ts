@@ -25,7 +25,9 @@ import {
   filePathFromArgs,
   skillEventSubtitle,
   skillEventTitle,
+  type StructuredDetailField,
   type StructuredDetailNode,
+  type StructuredDetailSection,
 } from '../../../client/structured-detail.js';
 import type { AtomView, RunStatus } from '../../../client/run-utils.js';
 import type { VizEvent, VizRun } from '../../../client/types.js';
@@ -38,6 +40,16 @@ import {
   layoutFilterChipBlock,
   layoutRunFilterBlocks,
 } from '../chip-layout.js';
+import {
+  DETAIL_BADGE_MIN_WIDTH,
+  DETAIL_BADGE_TEXT_PAD,
+  DETAIL_CARD_PAD,
+  DETAIL_CARD_TEXT_PAD,
+  DETAIL_SECTION_INSET,
+  detailNodeWidth,
+  layoutDetailRows,
+  type DetailMeasure,
+} from '../detail-layout.js';
 import {
   detailToneColor,
   eventAccent,
@@ -1438,7 +1450,10 @@ function drawEventDetail(
     event.kind === 'llm'
       ? tryParseJson(raw)
       : event.kind === 'tool' && !event.error
-        ? { args: event.args ?? {}, result: event.result }
+        // Declaration order no longer decides the pane's order — the shared
+        // projection ranks `result` above `args` — but the payload is written
+        // outcome-first anyway, so the two agree on sight.
+        ? { result: event.result, args: event.args ?? {} }
         : !event.error
           ? event
           : undefined;
@@ -1475,10 +1490,10 @@ function drawEventDetail(
   const contentBottom =
     envelope.length === 0 && bodyNodes.length === 0
       ? detailTop +
-        ctx.text(detailLayer, truncate(raw, 8000), x + 18, detailTop, {
+        ctx.text(detailLayer, truncate(raw, DETAIL_RAW_VALUE_CAP), x + 18, detailTop, {
           size: 10,
           mono: true,
-          color: 0xcbd5e1,
+          color: DETAIL_VALUE_COLOR,
           width: width - 42,
         }).height
       : drawStructuredDetailNodes(
@@ -1502,6 +1517,203 @@ function drawEventDetail(
   });
 }
 
+/**
+ * Detail-card geometry. Every number below was an unnamed literal inside
+ * `drawStructuredDetailNodes`, and two of them disagreed with each other: the
+ * label's height was DISCARDED and the value drawn at a fixed `+25`, so a
+ * label that wrapped — reachable in French, where `activeSkillFollowed`
+ * becomes "Respect de la recette" — drew its own second line under the badge.
+ * Named and related here so one set of facts lays a card out, and the value
+ * now starts under the label that was actually drawn.
+ */
+const DETAIL_LABEL_TOP = 7;
+const DETAIL_LABEL_SIZE = 9;
+const DETAIL_VALUE_SIZE = 10;
+/** Air between the label BLOCK and the value. */
+const DETAIL_VALUE_GAP = 6;
+const DETAIL_BADGE_HEIGHT = 24;
+/** The value's inset inside its pill. */
+const DETAIL_BADGE_TEXT_INSET = 10;
+const DETAIL_BADGE_BOTTOM_PAD = 10;
+const DETAIL_TEXT_BOTTOM_PAD = 11;
+const DETAIL_CARD_MIN_HEIGHT = 58;
+const DETAIL_CARD_GAP_Y = 8;
+const DETAIL_SECTION_TITLE_TOP = 3;
+const DETAIL_SECTION_HEADER_GAP = 10;
+/** The fixed header advance the pane used to have, kept as a FLOOR. */
+const DETAIL_SECTION_HEADER_MIN = 29;
+const DETAIL_SECTION_RAIL_LIFT = 4;
+const DETAIL_SECTION_RAIL_TAIL = 7;
+const DETAIL_SECTION_TRAILING = 5;
+const DETAIL_FIELD_VALUE_CAP = 4000;
+const DETAIL_RAW_VALUE_CAP = 8000;
+/**
+ * The slate a detail value is drawn in. NOT `GPU_COLORS.text` (0xe6edf7):
+ * this is the dimmer tone the pane has always used, kept byte-identical.
+ */
+const DETAIL_VALUE_COLOR = 0xcbd5e1;
+const DETAIL_LABEL_FACE = { size: DETAIL_LABEL_SIZE, weight: '600' } as const;
+
+/**
+ * Widths through the exact faces `drawDetailFieldContent` draws with, so the
+ * pairing decision and the draw cannot disagree.
+ */
+function detailMeasure(ctx: RendererCtx): DetailMeasure {
+  return {
+    label: (value) => ctx.measureText(value, DETAIL_LABEL_FACE),
+    value: (field) =>
+      ctx.measureText(field.value, {
+        size: DETAIL_VALUE_SIZE,
+        weight: field.presentation === 'badge' ? '700' : '400',
+        mono: field.presentation === 'code',
+      }),
+  };
+}
+
+/**
+ * One card's content, returning the height it needs. The caller takes the MAX
+ * over a row and fills both backgrounds with it, so two paired cards are one
+ * band rather than two ragged boxes.
+ *
+ * A paired label and value were both MEASURED to fit one line, so they are
+ * drawn `singleLine`: if a font fallback ever proves the measurement wrong the
+ * label squeezes on its x-axis instead of wrapping into its neighbour's card.
+ */
+function drawDetailFieldContent(
+  ctx: RendererCtx,
+  parent: Container,
+  node: StructuredDetailField,
+  cardX: number,
+  top: number,
+  cardWidth: number,
+  paired: boolean,
+  measure: DetailMeasure
+): number {
+  const inner = cardWidth - DETAIL_CARD_TEXT_PAD;
+  const label = ctx.text(
+    parent,
+    node.label,
+    cardX + DETAIL_CARD_PAD,
+    top + DETAIL_LABEL_TOP,
+    {
+      ...DETAIL_LABEL_FACE,
+      color: GPU_COLORS.muted,
+      width: inner,
+      ...(paired ? { singleLine: true } : {}),
+    }
+  );
+  // Rounded so a one-line 9px label (12.15px of line box) still yields the
+  // pane's historical 25px value offset rather than a fractional one, which
+  // would multiply the retained label pool's distinct style keys.
+  const valueTop = Math.round(DETAIL_LABEL_TOP + label.height + DETAIL_VALUE_GAP);
+  if (node.presentation === 'badge') {
+    const accent = detailToneColor(node.tone);
+    const badgeWidth = Math.min(
+      inner,
+      Math.max(
+        DETAIL_BADGE_MIN_WIDTH,
+        Math.ceil(measure.value(node)) + DETAIL_BADGE_TEXT_PAD + 4
+      )
+    );
+    const badge = new Graphics();
+    badge.roundRect(
+      cardX + DETAIL_CARD_PAD,
+      top + valueTop,
+      badgeWidth,
+      DETAIL_BADGE_HEIGHT,
+      6
+    );
+    badge.fill({ color: accent, alpha: node.tone === 'neutral' ? 0.08 : 0.18 });
+    badge.stroke({ color: accent, width: 1, alpha: 0.75 });
+    parent.addChild(badge);
+    ctx.text(
+      parent,
+      node.value,
+      cardX + DETAIL_CARD_PAD + DETAIL_BADGE_TEXT_INSET,
+      top + valueTop + 5,
+      {
+        size: DETAIL_VALUE_SIZE,
+        weight: '700',
+        color: node.tone === 'neutral' ? GPU_COLORS.text : accent,
+        width: badgeWidth - DETAIL_BADGE_TEXT_PAD,
+        // A 24px pill can never hold two lines, whatever the measurement said.
+        singleLine: true,
+      }
+    );
+    return valueTop + DETAIL_BADGE_HEIGHT + DETAIL_BADGE_BOTTOM_PAD;
+  }
+  const valueText = ctx.text(
+    parent,
+    truncate(node.value, DETAIL_FIELD_VALUE_CAP),
+    cardX + DETAIL_CARD_PAD,
+    top + valueTop,
+    {
+      size: DETAIL_VALUE_SIZE,
+      mono: node.presentation === 'code',
+      color: node.tone === 'info' ? GPU_COLORS.cyan : DETAIL_VALUE_COLOR,
+      width: inner,
+      ...(paired ? { singleLine: true } : {}),
+    }
+  );
+  return valueTop + valueText.height + DETAIL_TEXT_BOTTOM_PAD;
+}
+
+/** A section's own header and rail, with its children laid out one level in. */
+function drawDetailSection(
+  ctx: RendererCtx,
+  parent: Container,
+  node: StructuredDetailSection,
+  nodeX: number,
+  nodeWidth: number,
+  cursor: number,
+  x: number,
+  width: number,
+  depth: number
+): number {
+  const rail = new Graphics();
+  parent.addChild(rail);
+  const title = node.count === undefined ? node.label : `${node.label} · ${node.count}`;
+  const titleLabel = ctx.text(parent, title, nodeX + DETAIL_CARD_PAD, cursor + DETAIL_SECTION_TITLE_TOP, {
+    size: depth === 0 ? 12 : 10,
+    color: depth === 0 ? GPU_COLORS.primary : GPU_COLORS.text,
+    weight: '700',
+    width: nodeWidth - DETAIL_CARD_TEXT_PAD,
+  });
+  // Read back rather than fixed, for the same reason as a card's value: a
+  // heading that wrapped used to have its rail start inside its second line.
+  const headerHeight = Math.max(
+    DETAIL_SECTION_HEADER_MIN,
+    Math.round(DETAIL_SECTION_TITLE_TOP + titleLabel.height + DETAIL_SECTION_HEADER_GAP)
+  );
+  const railTop = cursor + headerHeight - DETAIL_SECTION_RAIL_LIFT;
+  let bottom = drawStructuredDetailNodes(
+    ctx,
+    parent,
+    node.children,
+    x,
+    cursor + headerHeight,
+    width,
+    depth + 1
+  );
+  rail
+    .moveTo(nodeX + 2, railTop)
+    .lineTo(nodeX + 2, Math.max(railTop, bottom - DETAIL_SECTION_RAIL_TAIL));
+  rail.stroke({
+    color: depth === 0 ? GPU_COLORS.primary : GPU_COLORS.border,
+    width: depth === 0 ? 2 : 1,
+    alpha: 0.65,
+  });
+  bottom += DETAIL_SECTION_TRAILING;
+  return bottom;
+}
+
+/**
+ * Lays a projected payload out under `startY` and returns the ABSOLUTE bottom
+ * of what it drew, in the same space as `startY` and including the last row's
+ * trailing air. `detailScrollMax` is derived from that number, so the cursor
+ * advances once per ROW and never per card: pairing can only shorten the pane,
+ * never desynchronise its scroll bound.
+ */
 function drawStructuredDetailNodes(
   ctx: RendererCtx,
   parent: Container,
@@ -1511,91 +1723,58 @@ function drawStructuredDetailNodes(
   width: number,
   depth = 0
 ): number {
+  const nodeX = x + depth * DETAIL_SECTION_INSET;
+  const nodeWidth = detailNodeWidth(width, depth);
+  const measure = detailMeasure(ctx);
   let cursor = startY;
-  for (const node of nodes) {
-    const inset = depth * 12;
-    const nodeX = x + inset;
-    const nodeWidth = Math.max(120, width - inset);
-    if (node.kind === 'field') {
-      const background = new Graphics();
-      parent.addChild(background);
-      ctx.text(parent, node.label, nodeX + 10, cursor + 7, {
-        size: 9,
-        color: GPU_COLORS.muted,
-        weight: '600',
-        width: nodeWidth - 20,
-      });
-      if (node.presentation === 'badge') {
-        const accent = detailToneColor(node.tone);
-        const badgeWidth = Math.min(
-          nodeWidth - 20,
-          Math.max(72, node.value.length * 6.4 + 22)
-        );
-        const badge = new Graphics();
-        badge.roundRect(nodeX + 10, cursor + 25, badgeWidth, 24, 6);
-        badge.fill({ color: accent, alpha: node.tone === 'neutral' ? 0.08 : 0.18 });
-        badge.stroke({ color: accent, width: 1, alpha: 0.75 });
-        parent.addChild(badge);
-        ctx.text(parent, node.value, nodeX + 20, cursor + 30, {
-          size: 10,
-          color: node.tone === 'neutral' ? GPU_COLORS.text : accent,
-          weight: '700',
-          width: badgeWidth - 18,
-        });
-        background.roundRect(nodeX, cursor, nodeWidth, 59, 7);
-        background.fill({ color: GPU_COLORS.panelRaised, alpha: 0.55 });
-        background.stroke({ color: GPU_COLORS.border, width: 1, alpha: 0.65 });
-        cursor += 67;
-        continue;
-      }
-
-      const valueText = ctx.text(
+  for (const row of layoutDetailRows(nodes, nodeWidth, measure)) {
+    const first = row.cards[0]!;
+    if (first.node.kind === 'section') {
+      cursor = drawDetailSection(
+        ctx,
         parent,
-        truncate(node.value, 4000),
-        nodeX + 10,
-        cursor + 25,
-        {
-          size: 10,
-          mono: node.presentation === 'code',
-          color: node.tone === 'info' ? GPU_COLORS.cyan : 0xcbd5e1,
-          width: nodeWidth - 20,
-        }
+        first.node,
+        nodeX,
+        nodeWidth,
+        cursor,
+        x,
+        width,
+        depth
       );
-      const fieldHeight = Math.max(58, valueText.height + 36);
-      background.roundRect(nodeX, cursor, nodeWidth, fieldHeight, 7);
-      background.fill({ color: GPU_COLORS.panelRaised, alpha: 0.55 });
-      background.stroke({ color: GPU_COLORS.border, width: 1, alpha: 0.65 });
-      cursor += fieldHeight + 8;
       continue;
     }
-
-    const rail = new Graphics();
-    parent.addChild(rail);
-    const title = node.count === undefined ? node.label : `${node.label} · ${node.count}`;
-    ctx.text(parent, title, nodeX + 10, cursor + 3, {
-      size: depth === 0 ? 12 : 10,
-      color: depth === 0 ? GPU_COLORS.primary : GPU_COLORS.text,
-      weight: '700',
-      width: nodeWidth - 20,
+    // Every background is allocated BEFORE its own labels so it paints behind
+    // them, and filled AFTER the row's height is known so both cards of a
+    // pair share one band.
+    const backgrounds = row.cards.map(() => {
+      const background = new Graphics();
+      parent.addChild(background);
+      return background;
     });
-    const railTop = cursor + 25;
-    cursor += 29;
-    cursor = drawStructuredDetailNodes(
-      ctx,
-      parent,
-      node.children,
-      x,
-      cursor,
-      width,
-      depth + 1
-    );
-    rail.moveTo(nodeX + 2, railTop).lineTo(nodeX + 2, Math.max(railTop, cursor - 7));
-    rail.stroke({
-      color: depth === 0 ? GPU_COLORS.primary : GPU_COLORS.border,
-      width: depth === 0 ? 2 : 1,
-      alpha: 0.65,
+    const paired = row.cards.length > 1;
+    let rowHeight = DETAIL_CARD_MIN_HEIGHT;
+    for (const card of row.cards) {
+      rowHeight = Math.max(
+        rowHeight,
+        drawDetailFieldContent(
+          ctx,
+          parent,
+          card.node as StructuredDetailField,
+          nodeX + card.dx,
+          cursor,
+          card.width,
+          paired,
+          measure
+        )
+      );
+    }
+    backgrounds.forEach((background, index) => {
+      const card = row.cards[index]!;
+      background.roundRect(nodeX + card.dx, cursor, card.width, rowHeight, 7);
+      background.fill({ color: GPU_COLORS.panelRaised, alpha: 0.55 });
+      background.stroke({ color: GPU_COLORS.border, width: 1, alpha: 0.65 });
     });
-    cursor += 5;
+    cursor += rowHeight + DETAIL_CARD_GAP_Y;
   }
   return cursor;
 }
