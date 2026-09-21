@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import { CODEX_MODEL_CAPABILITIES_ENV } from '../src/contracts/codexModels.js';
 import { EventEmitter } from 'node:events';
 import {
   chmodSync,
@@ -981,5 +982,21 @@ describe('Codex L1 host-side action loop', () => {
       has: () => true, execute: async () => { controller.abort(new Error('stop')); return 'read'; },
     } }))).rejects.toMatchObject({ message: 'stop', partialUsage: { outputTokens: 3 } });
     expect(spawnFn).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe('discovered personal model capabilities', () => {
+  it('passes the exact slug and a supported effort through the production transport', async () => {
+    const spawnFn = vi.fn(() => fakeChild({ lines: OK_LINES }));
+    const client = new CodexCliLlmClient({ spawnFn, env: {
+      ATOMA_CODEX_MODEL: 'must-not-substitute',
+      [CODEX_MODEL_CAPABILITIES_ENV]: JSON.stringify([{ id: 'future-haiku-model', label: 'Future', isDefault: true, defaultReasoningEffort: 'low', supportedReasoningEfforts: ['low'] }]),
+    } });
+    const result = await client.complete(req({ model: 'future-haiku-model' }));
+    expect(result.servedModel).toBe('future-haiku-model');
+    const args = spawnFn.mock.calls[0];
+    expect(JSON.stringify(args)).toContain('model_reasoning_effort=low');
+    expect(JSON.stringify(args)).not.toContain('must-not-substitute');
   });
 });

@@ -132,6 +132,10 @@ class CodexHarness {
   private handle(record: SpawnRecord, message: Record<string, unknown>): void {
     record.requests.push(message);
     const method = message['method'];
+    if (method === 'model/list') {
+      send(record.process, { id: message['id'], result: { data: [{ model: 'future-model', displayName: 'Future', isDefault: true, defaultReasoningEffort: 'low', supportedReasoningEfforts: [{ reasoningEffort: 'low' }] }], nextCursor: null } });
+      return;
+    }
     if (method === 'initialized') return;
     if (method === 'initialize') {
       if (this.holdInitialize) return;
@@ -322,6 +326,22 @@ describe('principal Codex profile platform boundary', () => {
 });
 
 describe.skipIf(process.platform === 'win32')('principal Codex profile service', () => {
+  it('discovers models in the exact private generation and invalidates on disconnect', async () => {
+    const alice = viewer('catalogue-alice');
+    const harness = new CodexHarness();
+    const instance = service(harness);
+    const profile = createStoredProfile(path.join(temporaryRoot, 'profiles'), alice.principalId);
+    store.setPrincipalSubscription({ principalId: alice.principalId, provider: 'codex', profileId: profile.profileId });
+    const inventory = await instance.codexModels(alice.principalId);
+    expect(inventory.state).toBe('ready');
+    expect(inventory.models.map((model) => model.id)).toEqual(['future-model']);
+    expect(harness.records[0]!.input.env['CODEX_HOME']).toBe(profile.homePath);
+    expect(harness.records[0]!.process.kill).toHaveBeenCalled();
+    await instance.codexModels(alice.principalId);
+    expect(harness.records).toHaveLength(1);
+    store.deletePrincipalSubscription(alice.principalId, 'codex');
+    expect((await instance.codexModels(alice.principalId)).state).toBe('unavailable');
+  });
   it('connects one principal without exposing the credential, path or account email', async () => {
     const alice = viewer('alice');
     const bob = viewer('bob');

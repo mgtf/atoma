@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { CodexModelCache, readCodexModels } from './codexModels.js';
+import { UNAVAILABLE_CODEX_MODELS, type CodexModelInventory } from '../contracts/codexModels.js';
 import {
   closeSync,
   chmodSync,
@@ -120,7 +122,7 @@ export interface AccountSubscriptionServiceOptions {
   /** How long a completed login may take to expose its account; see DEFAULT_LOGIN_ACCOUNT_SETTLE_MS. */
   readonly loginAccountSettleMs?: number;
   readonly now?: () => number;
-  readonly onConnected?: (event: { principalId: string; orgId: string }) => void;
+  readonly onConnected?: (event: { principalId: string; orgId: string }) => void | Promise<void>;
   readonly onDisconnected?: (event: { principalId: string; orgId: string }) => void;
 }
 
@@ -261,6 +263,7 @@ function completion(value: unknown): { success: boolean; loginId: string | null 
  * generation receipt, while Codex alone reads/writes credential bytes.
  */
 export class AccountSubscriptionService {
+  private readonly modelCache = new CodexModelCache(() => this.now());
   private readonly auth: AuthStore;
   private readonly root: string;
   private readonly sourceEnv: NodeJS.ProcessEnv;
@@ -503,6 +506,27 @@ export class AccountSubscriptionService {
       // An observer cannot undo the local disconnect or leak its credential.
     }
     return true;
+  }
+
+  /** Discover only through this principal's current private generation. */
+  async codexModels(principalId: string, refresh = false, cachedOnly = false): Promise<CodexModelInventory> {
+    const profile = this.codexProfileForRun(principalId);
+    if (!profile || this.closed) return UNAVAILABLE_CODEX_MODELS;
+    if (cachedOnly) return this.modelCache.peek(`${principalId}:${profile.profileId}`);
+    const inventory = await this.modelCache.get(`${principalId}:${profile.profileId}`, async () => {
+      const connection = await this.open(profile.homePath, AbortSignal.any([this.lifecycle.signal, AbortSignal.timeout(30_000)]));
+      try {
+        if (!accountIsChatGpt(await connection.request('account/read', { refreshToken: false }))) {
+          throw new Error('ChatGPT authentication is required');
+        }
+        return await readCodexModels((method, params) => connection.request(method, params));
+      } finally {
+        await connection.closeAndWait();
+      }
+    }, refresh);
+    // A disconnect/reconnect during discovery must never publish the old account's catalogue.
+    return this.codexProfileForRun(principalId)?.profileId === profile.profileId
+      ? inventory : UNAVAILABLE_CODEX_MODELS;
   }
 
   /** Synchronous launch-time resolver: no network and no fallback profile. */
@@ -763,7 +787,7 @@ export class AccountSubscriptionService {
         await this.removeProfileWhenIdle(attempt.principalId, previous.profileId);
       }
       try {
-        this.onConnected?.({ principalId: attempt.principalId, orgId: attempt.orgId });
+        await this.onConnected?.({ principalId: attempt.principalId, orgId: attempt.orgId });
       } catch {
         // An observer cannot roll back a completed provider-owned login.
       }

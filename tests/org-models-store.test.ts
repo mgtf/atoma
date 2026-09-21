@@ -107,12 +107,12 @@ describe('the starter ChatGPT pins armed when a subscription connects', () => {
     const who = member(store);
     const events: PlatformEventInput[] = [];
 
-    const pins = armStarterChatGptPins(store, who, {}, (event) => events.push(event));
+    const pins = armStarterChatGptPins(store, who, {}, (event) => events.push(event), 'gpt-5.6-terra');
 
     expect(pins).toEqual({
-      l1: 'own:openai:gpt-5.4-mini',
+      l1: 'own:openai:gpt-5.6-terra',
       l2: 'own:openai:gpt-5.6-terra',
-      l3: 'own:openai:gpt-5.6-sol',
+      l3: 'own:openai:gpt-5.6-terra',
     });
     // Persisted, not merely returned: the next run reads the store.
     expect(store.modelPins(who.principalId)).toEqual(pins);
@@ -137,7 +137,7 @@ describe('the starter ChatGPT pins armed when a subscription connects', () => {
     });
     const accountEvents: PlatformEventInput[] = [];
     expect(
-      armStarterChatGptPins(accountStore, chose, {}, (event) => accountEvents.push(event))
+      armStarterChatGptPins(accountStore, chose, {}, (event) => accountEvents.push(event), 'gpt-5.6-terra')
     ).toBeNull();
     expect(accountStore.modelPins(chose.principalId).l2).toBe('api:anthropic:claude-sonnet-5');
     expect(accountEvents).toHaveLength(0);
@@ -145,7 +145,7 @@ describe('the starter ChatGPT pins armed when a subscription connects', () => {
     const orgStore = freshStore('starter-org.db');
     const inOrg = member(orgStore);
     orgStore.setOrgTierModels(inOrg.orgId, { l1: 'api:zai:glm-4.5-air', l2: null, l3: null });
-    expect(armStarterChatGptPins(orgStore, inOrg, {}, () => undefined)).toBeNull();
+    expect(armStarterChatGptPins(orgStore, inOrg, {}, () => undefined, 'gpt-5.6-terra')).toBeNull();
     expect(orgStore.modelPins(inOrg.principalId)).toEqual({ l1: null, l2: null, l3: null });
 
     const hostStore = freshStore('starter-host.db');
@@ -164,8 +164,8 @@ describe('the starter ChatGPT pins armed when a subscription connects', () => {
   it('is idempotent: the pins it armed are themselves a configuration', () => {
     const store = freshStore('starter-twice.db');
     const who = member(store);
-    expect(armStarterChatGptPins(store, who, {}, () => undefined)).not.toBeNull();
-    expect(armStarterChatGptPins(store, who, {}, () => undefined)).toBeNull();
+    expect(armStarterChatGptPins(store, who, {}, () => undefined, 'gpt-5.6-terra')).not.toBeNull();
+    expect(armStarterChatGptPins(store, who, {}, () => undefined, 'gpt-5.6-terra')).toBeNull();
   });
 });
 

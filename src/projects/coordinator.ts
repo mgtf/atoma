@@ -1,3 +1,4 @@
+import { assertPersonalCodexModels, CODEX_MODEL_CAPABILITIES_ENV, type CodexModelInventory } from '../contracts/codexModels.js';
 import { projectWorkspaceRelative } from '../contracts/launcherVolumes.js';
 import { randomUUID } from 'node:crypto';
 import { migratePlatformSkills, reconcilePlatformSkills } from '../skills/migratePlatform.js';
@@ -150,6 +151,7 @@ export interface ProjectCoordinatorOptions {
   readonly principalCodexProfileFor?: (
     principalId: string
   ) => PrincipalCodexProfile | null;
+  readonly principalCodexModelsFor?: (principalId: string) => Promise<CodexModelInventory>;
   /**
    * Observer fired when a run spends any CLI subscription (host or requesting
    * principal). The payer ledger distinguishes them; the caller journals it,
@@ -866,6 +868,7 @@ export function projectRunHostLayout(
 }
 
 export class ProjectRunCoordinator {
+  private readonly principalCodexModelsFor?: (principalId: string) => Promise<CodexModelInventory>;
   private readonly store: ProjectStore;
   private readonly dbPath: string;
   private readonly hostEnv: NodeJS.ProcessEnv;
@@ -905,6 +908,7 @@ export class ProjectRunCoordinator {
     this.publisher = options.publisher;
     if (options.onRunFinished) this.onRunFinished = options.onRunFinished;
     if (options.tierModelsFor) this.tierModelsFor = options.tierModelsFor;
+    if (options.principalCodexModelsFor) this.principalCodexModelsFor = options.principalCodexModelsFor;
     if (options.orgTierModelsFor) this.orgTierModelsFor = options.orgTierModelsFor;
     if (options.orgProviderKeyFor) this.orgProviderKeyFor = options.orgProviderKeyFor;
     if (options.platformAdmins) this.platformAdmins = options.platformAdmins;
@@ -1141,6 +1145,17 @@ export class ProjectRunCoordinator {
         ...(principalCodexProfile ? { principalCodexProfile } : {}),
       });
       environment = built.environment;
+      if (principalSubscriptionTiers(built.payers).length > 0) {
+        if (!this.principalCodexModelsFor) {
+          throw new ProjectRunConfigurationError('ChatGPT model discovery is unavailable. Refresh your models in Settings.');
+        }
+        const inventory = await this.principalCodexModelsFor(input.principalId);
+        assertPersonalCodexModels(Object.values(built.payers).map((row) => row.selection), inventory);
+        if (this.resolvePrincipalCodexProfile(input.principalId)?.profileId !== principalCodexProfile?.profileId) {
+          throw new ProjectRunConfigurationError('Your ChatGPT connection changed. Start the run again.');
+        }
+        environment[CODEX_MODEL_CAPABILITIES_ENV] = JSON.stringify(inventory.models);
+      }
       // FIRED FROM THE LEDGER, not from the host env. A run may now spend the
       // subscription on some tiers and a key on others, so "did this run touch
       // a CLI login" is a question about what was RESOLVED — the old

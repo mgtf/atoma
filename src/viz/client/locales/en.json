@@ -1,4 +1,9 @@
 {
+  "settings.refreshModels": "Refresh ChatGPT models",
+  "settings.modelCatalogue.ready": "Models reported by your connected ChatGPT account.",
+  "settings.modelCatalogue.stale": "Refresh failed. Previously reported models are shown but cannot be selected.",
+  "settings.modelCatalogue.unavailable": "The ChatGPT model catalogue is unavailable. Refresh to try again.",
+  "settings.modelUnavailable": "{{model}} — unavailable",
   "settings.runCapacity": "Concurrent runs",
   "settings.runCapacityValue": "{{active}} active / {{limit}} allowed (one run at a time on this host)",
   "skillReason.successNotFollowed": "Success not credited — the validator observed that the run did not follow the recipe",

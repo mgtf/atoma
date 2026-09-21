@@ -1,3 +1,4 @@
+import { assertPersonalCodexModels, UNAVAILABLE_CODEX_MODELS } from '../contracts/codexModels.js';
 import { openDb, unfoldedRegistryPredicate } from '../registry/db.js';
 import { updateOrgModels } from '../auth/orgModels.js';
 import { createServer, request as httpRequest } from 'node:http';
@@ -525,7 +526,7 @@ const ACCOUNT_SUBSCRIPTIONS: AccountSubscriptionService | null = AUTH?.store
       ...(process.env[ACCOUNT_PROFILES_ROOT_ENV]?.trim()
         ? { profilesRoot: process.env[ACCOUNT_PROFILES_ROOT_ENV].trim() }
         : {}),
-      onConnected: ({ principalId, orgId }) => {
+      onConnected: async ({ principalId, orgId }) => {
         emit({
           kind: 'principal.subscription_connected',
           actorType: 'principal',
@@ -535,7 +536,10 @@ const ACCOUNT_SUBSCRIPTIONS: AccountSubscriptionService | null = AUTH?.store
           detail: { provider: 'codex' },
         });
         try {
-          armStarterChatGptPins(AUTH.store!, { principalId, orgId }, process.env, emit);
+          const inventory = await ACCOUNT_SUBSCRIPTIONS?.codexModels(principalId);
+          const defaultModel = inventory?.state === 'ready'
+            ? inventory.models.find((model) => model.isDefault)?.id : undefined;
+          armStarterChatGptPins(AUTH.store!, { principalId, orgId }, process.env, emit, defaultModel);
         } catch (error) {
           // A convenience, never a precondition: a failed write leaves the
           // member exactly where a connected subscription without pins
@@ -817,6 +821,7 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
       ? {
           principalCodexProfileFor: (principalId: string) =>
             ACCOUNT_SUBSCRIPTIONS.codexProfileForRun(principalId),
+          principalCodexModelsFor: (principalId: string) => ACCOUNT_SUBSCRIPTIONS.codexModels(principalId, true),
         }
       : {}),
     // A run billed to a host or requester login is journaled, never pushed.
@@ -2802,9 +2807,15 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       return HOST_SUBSCRIPTION_FAMILIES.map((family) => ({ family }));
     };
 
-    const subscriptionPayload = (): Record<string, unknown> => {
+    const subscriptionPayload = async (): Promise<Record<string, unknown>> => {
       const offers = hostSubscriptionOffers();
       return {
+        personalCodexModels: roleAtLeast(viewer.role, 'org:member')
+          ? await ACCOUNT_SUBSCRIPTIONS?.codexModels(
+              viewer.principalId, url.searchParams.get('refresh') === '1',
+              PROJECTS_RUNTIME?.coordinator.hasActiveRunForPrincipal(viewer.principalId) ?? false
+            ) ?? UNAVAILABLE_CODEX_MODELS
+          : UNAVAILABLE_CODEX_MODELS,
         personalSubscriptions: {
           codex:
             roleAtLeast(viewer.role, 'org:member') &&
@@ -2948,7 +2959,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           // pin without one falls through at run time, so the picker greys
           // the family instead of offering a dormant choice.
           ollamaAvailable: Boolean(process.env['OLLAMA_BASE_URL']?.trim()),
-          ...subscriptionPayload(),
+          ...await subscriptionPayload(),
         });
         return;
       }
@@ -3024,6 +3035,18 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           return;
         }
         const before = authStore.modelPins(viewer.principalId);
+        if (requested && typeof requested === 'object') {
+          const changes = Object.entries(requested).filter(([tier, value]) =>
+            value !== before[tier as keyof typeof before]
+          ).map(([, value]) => typeof value === 'string' ? value : null);
+          if (changes.some((value) => value && isPrincipalSubscriptionSelection(value))) {
+            const inventory = await ACCOUNT_SUBSCRIPTIONS?.codexModels(viewer.principalId) ?? UNAVAILABLE_CODEX_MODELS;
+            try { assertPersonalCodexModels(changes, inventory); } catch (error) {
+              sendJson(res, 409, { error: error instanceof Error ? error.message : 'ChatGPT models unavailable' });
+              return;
+            }
+          }
+        }
         const pins = authStore.setModelPins(viewer.principalId, requested);
         // Journaled at the moment of the CHOICE. The run rows that follow are
         // written by whoever launches, which may be someone else entirely, so
@@ -3049,7 +3072,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           defaults: operatorTierDefaults(process.env),
           catalog: LLM_PROVIDER_CATALOG,
           ollamaAvailable: Boolean(process.env['OLLAMA_BASE_URL']?.trim()),
-          ...subscriptionPayload(),
+          ...await subscriptionPayload(),
         });
       } catch {
         sendJson(res, 400, { error: 'each tier must be null or one of the offered models' });

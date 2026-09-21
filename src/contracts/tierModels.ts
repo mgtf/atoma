@@ -152,7 +152,7 @@ export function operatorTierDefaults(
 }
 
 /**
- * THE STARTER GRADIENT FOR A MEMBER'S OWN CHATGPT LOGIN.
+ * THE PROVIDER DEFAULT FOR A MEMBER'S OWN CHATGPT LOGIN.
  *
  * Connecting a personal subscription is the ONE moment where arming pins on
  * the member's behalf is a service rather than a liberty: the account choice
@@ -162,16 +162,14 @@ export function operatorTierDefaults(
  * default or an operator pin — a deployment that configured its tiers keeps
  * them, and a member who picked models keeps those.
  *
- * The gradient follows the cost rule stated in the root contract: the cheapest
- * model that can answer, per rank. L1 carries the tool loop and the call
- * volume, L3 the reasoning, so the price order ($2/$12 → $5/$30 by the
- * `metrics` table) is the tier order.
+ * The caller supplies the default from the connected account's model/list.
+ * No static model list can establish what that account may use.
  */
-export function principalChatGptStarterPins(): TierModelPins {
+export function principalChatGptStarterPins(model: string): TierModelPins {
   return accountTierModelPinsSchema.parse({
-    l1: principalChatGptSelection('gpt-5.4-mini'),
-    l2: principalChatGptSelection('gpt-5.6-terra'),
-    l3: principalChatGptSelection('gpt-5.6-sol'),
+    l1: principalChatGptSelection(model),
+    l2: principalChatGptSelection(model),
+    l3: principalChatGptSelection(model),
   });
 }
 

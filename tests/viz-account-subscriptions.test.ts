@@ -366,6 +366,7 @@ describe('personal subscription settings', () => {
           ollamaAvailable: true,
           personalSubscriptions: { claude: false, codex: true },
           personalSubscriptionState: state,
+          personalCodexModels: { state: 'ready', checkedAt: null, models: [] },
         }),
         state
       ).toBe(state === 'connected');
@@ -413,5 +414,30 @@ describe('personal subscription settings', () => {
     for (const [, init] of fetchMock.mock.calls) {
       expect(init).toMatchObject({ credentials: 'same-origin', body: '{}' });
     }
+  });
+});
+
+
+describe('discovered model picker', () => {
+  it('shows new models, preserves an unavailable selection and refreshes on request', async () => {
+    const account: VizAccountModels = { ...ACCOUNT_MODELS,
+      pins: { l1: 'own:openai:retired-model', l2: null, l3: null },
+      personalSubscriptions: { codex: true, claude: false },
+      personalCodexModels: { state: 'ready', checkedAt: '2026-09-21T00:00:00Z', models: [{
+        id: 'future-model', label: 'Future model', isDefault: true,
+        defaultReasoningEffort: 'low', supportedReasoningEfforts: ['low'],
+      }] },
+    };
+    vi.spyOn(api, 'accountModels').mockResolvedValue(account);
+    vi.spyOn(api, 'orgModels').mockResolvedValue(ORG_MODELS);
+    vi.spyOn(api, 'accountSubscriptions').mockResolvedValue({ ...DISCONNECTED, codex: { ...DISCONNECTED.codex, state: 'connected' } });
+    orgModelsForm('org:member');
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('tab', { name: 'LLM models' }));
+    expect(await screen.findByRole('option', { name: 'own:openai:retired-model — unavailable' })).toBeDisabled();
+    expect(screen.getAllByRole('option', { name: 'Future model' })).toHaveLength(3);
+    expect(screen.queryByRole('option', { name: 'GPT-5.4 Mini' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Refresh ChatGPT models' }));
+    await waitFor(() => expect(api.accountModels).toHaveBeenCalledWith(true));
   });
 });

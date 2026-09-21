@@ -1320,6 +1320,22 @@ describe('the subscription-transport door, at the coordinator', () => {
     expect(seen).toEqual([]);
   });
 
+  it.each(['removed', 'stale', 'missing-resolver'] as const)('refuses a personal model before spawning when %s', async (state) => {
+    const f = fixture();
+    const driver = deliveringDriver();
+    const coordinator = new ProjectRunCoordinator({
+      store: f.store, dbPath: f.dbPath, projectsRoot: f.root,
+      hostEnv: { ...haystackTestEnvironment(f.root), ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
+      driver: driver as unknown as ProjectRunDriver, acquireLease: async () => lease(),
+      tierModelsFor: () => ({ l1: 'own:openai:future-model', l2: null, l3: null }),
+      principalCodexProfileFor: () => ({ profileId: 'generation', homePath: join(f.root, 'profile'), profilesRoot: f.root }),
+      ...(state === 'missing-resolver' ? {} : { principalCodexModelsFor: async () => ({
+        state: state === 'stale' ? 'stale' as const : 'ready' as const, checkedAt: null, models: [],
+      }) }),
+    });
+    await expectRefused(f, coordinator, driver, state, /ChatGPT/);
+  });
+
   it("resolves a personal Codex generation from the run's requesting principal", async () => {
     const f = fixture();
     const lookedUp: string[] = [];
@@ -1338,6 +1354,7 @@ describe('the subscription-transport door, at the coordinator', () => {
         l2: 'own:openai:gpt-5.6-terra',
         l3: null,
       }),
+      principalCodexModelsFor: async () => ({ state: 'ready', checkedAt: null, models: [{ id: 'gpt-5.6-terra', label: 'Terra', isDefault: true, defaultReasoningEffort: 'medium', supportedReasoningEfforts: ['medium'] }] }),
       principalCodexProfileFor: (principalId) => {
         lookedUp.push(principalId);
         return {
@@ -1357,7 +1374,7 @@ describe('the subscription-transport door, at the coordinator', () => {
       request: { idempotencyKey: 'personal-codex', goal: 'Build a clock.' },
     });
     await coordinator.waitForIdle();
-    expect(lookedUp).toEqual([f.viewer.principalId]);
+    expect(lookedUp).toEqual([f.viewer.principalId, f.viewer.principalId]);
     expect(seen).toEqual([
       { principalId: f.viewer.principalId, payer: 'principal-subscription' },
     ]);

@@ -1,3 +1,4 @@
+import type { CodexModelInventory } from '../../contracts/codexModels.js';
 import type { AccountSubscriptionsResponse } from '../../contracts/accountSubscriptions.js';
 import type { AcceptanceInfo, TopologyInfo } from '../../contracts/depthRouting.js';
 
@@ -332,6 +333,7 @@ export interface VizPersonalSubscriptionCapabilities {
 
 /** Per-tier model pins plus the labels the account page needs to show. */
 export interface VizAccountModels {
+  personalCodexModels?: CodexModelInventory;
   pins: { l1: string | null; l2: string | null; l3: string | null };
   /** The host's own selector per tier, or null where the host pinned none. */
   defaults: { l1: string | null; l2: string | null; l3: string | null };

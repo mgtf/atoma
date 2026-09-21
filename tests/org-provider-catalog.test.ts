@@ -225,12 +225,12 @@ describe('the subscriptions are neighbours, not catalogue members', () => {
 describe('the starter gradient armed on an unconfigured account', () => {
   const EMPTY = { l1: null, l2: null, l3: null } as const;
 
-  it('is a cheapest-first ladder of the requester OWN subscription', () => {
-    const pins = principalChatGptStarterPins();
+  it('uses the discovered default on the requester OWN subscription', () => {
+    const pins = principalChatGptStarterPins('gpt-5.6-terra');
     expect(pins).toEqual({
-      l1: 'own:openai:gpt-5.4-mini',
+      l1: 'own:openai:gpt-5.6-terra',
       l2: 'own:openai:gpt-5.6-terra',
-      l3: 'own:openai:gpt-5.6-sol',
+      l3: 'own:openai:gpt-5.6-terra',
     });
     // The account space must admit it on every tier, or the write that arms
     // it would throw where nothing can report the failure.
@@ -240,7 +240,7 @@ describe('the starter gradient armed on an unconfigured account', () => {
     // Never the host's login: an automatic pin may only spend the requester's.
     expect(Object.values(pins).every((value) => principalChatGptSubscriptionModel(value!))).toBe(true);
     expect(selectionsMixCodexOwners(Object.values(pins))).toBe(false);
-    // Cheapest rank first, by the one price table the ledger uses.
+    // The same provider default has the same price on each tier.
     const outputs = TIERS.map((tier) => pricesFor(pinForTier(pins, tier)!).output);
     expect(outputs).toEqual([...outputs].sort((a, b) => a - b));
   });

@@ -9,7 +9,7 @@ import {
 import { isPrincipalSubscriptionSelection } from '../contracts/runPayers.js';
 
 /**
- * ARM THE STARTER GRADIENT, ONCE, ON AN OTHERWISE UNUSABLE DEPLOYMENT.
+ * ARM THE PROVIDER DEFAULT, ONCE, ON AN OTHERWISE UNUSABLE DEPLOYMENT.
  *
  * A member whose account, organisation and host all name nothing cannot launch
  * a run at all: every tier fails on the missing pin. Connecting a personal
@@ -33,15 +33,16 @@ export function armStarterChatGptPins(
   auth: AuthStore,
   principal: { readonly principalId: string; readonly orgId: string },
   env: NodeJS.ProcessEnv,
-  emit: PlatformEventSink
+  emit: PlatformEventSink,
+  defaultModel?: string
 ): TierModelPins | null {
   const unresolved = everyTierUnresolved({
     account: auth.modelPins(principal.principalId),
     org: auth.orgTierModels(principal.orgId),
     host: operatorTierDefaults(env),
   });
-  if (!unresolved) return null;
-  const pins = auth.setModelPins(principal.principalId, principalChatGptStarterPins());
+  if (!unresolved || !defaultModel) return null;
+  const pins = auth.setModelPins(principal.principalId, principalChatGptStarterPins(defaultModel));
   const tiers = (['l1', 'l2', 'l3'] as const).filter((tier) => {
     const value = pins[tier];
     return typeof value === 'string' && isPrincipalSubscriptionSelection(value);

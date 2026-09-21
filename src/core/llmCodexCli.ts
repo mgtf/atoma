@@ -1,3 +1,4 @@
+import { CODEX_MODEL_CAPABILITIES_ENV, codexModelSchema } from '../contracts/codexModels.js';
 import { completeCodexToolLoop, isCodexToolAction } from './codexToolLoop.js';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
@@ -148,6 +149,8 @@ export function resolveCodexModel(
   env: NodeJS.ProcessEnv = process.env
 ): string {
   const override = env['ATOMA_CODEX_MODEL'];
+  // Discovered selections are exact provider slugs, never compatibility aliases.
+  if (env[CODEX_MODEL_CAPABILITIES_ENV]) return model;
   if (override && override.trim().length > 0) {
     // ATOMA_CLAUDE_MODEL gets a runner banner; this override had NONE
     // (review 2026-08-14 §1.13) — it silently rewrote every codex-routed
@@ -580,6 +583,7 @@ export class CodexCliLlmClient implements LlmClient {
     this.spawnFn = opts.spawnFn ?? defaultCodexSpawn;
     this.modelEnv = Object.freeze({
       ATOMA_CODEX_MODEL: sourceEnv['ATOMA_CODEX_MODEL'],
+      [CODEX_MODEL_CAPABILITIES_ENV]: sourceEnv[CODEX_MODEL_CAPABILITIES_ENV],
     });
     this.childEnv = Object.freeze(codexChildEnvironment(sourceEnv));
     this.profileHome = this.childEnv['CODEX_HOME']?.trim() || undefined;
@@ -635,9 +639,22 @@ export class CodexCliLlmClient implements LlmClient {
     }
   }
 
+  private effortFor(req: LlmCompletionRequest): string | undefined {
+    const raw = this.modelEnv[CODEX_MODEL_CAPABILITIES_ENV];
+    if (!raw) return codexEffortFor(req);
+    const models = codexModelSchema.array().max(1000).parse(JSON.parse(raw));
+    const model = models.find((entry) => entry.id === req.model);
+    if (!model) throw new Error('Selected ChatGPT model is absent from the launch inventory');
+    const requested = codexEffortFor(req);
+    if (model.supportedReasoningEfforts.includes(requested)) return requested;
+    return model.supportedReasoningEfforts.includes(model.defaultReasoningEffort)
+      ? model.defaultReasoningEffort : undefined;
+  }
+
   private async completeOnce(req: LlmCompletionRequest, outputSchema?: Record<string, unknown>): Promise<CodexOutcome> {
     if (req.signal?.aborted) throw req.signal.reason ?? new Error('aborted');
 
+    const effort = this.effortFor(req);
     const jail = this.ensureJail();
     const instructionsFile = path.join(jail.root, `instructions-${process.hrtime.bigint()}.txt`);
     writeFileSync(instructionsFile, req.systemPrompt, 'utf8');
@@ -649,7 +666,7 @@ export class CodexCliLlmClient implements LlmClient {
       cwd: jail.cwd,
       instructionsFile,
       outputSchemaFile,
-      effort: codexEffortFor(req),
+      effort,
     });
 
     let child: ChildProcess;

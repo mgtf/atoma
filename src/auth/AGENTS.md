@@ -75,6 +75,11 @@ Loopback HTTP keeps its development cookie names and paths.
   is itself the authorization to spend. `armStarterChatGptPins` owns the rule
   and journals it under the manual kind with `automatic: true`. Never let it
   overwrite a value, and never arm the HOST's login from it.
+- Personal ChatGPT models come from app-server `model/list` in that exact
+  private generation. The bounded five-minute cache is keyed by principal and
+  generation; refresh failure exposes stale data without authorizing new pins.
+  Launch refreshes the inventory before spend. No static fallback or model
+  substitution. Empty accounts start with the provider-reported default only.
 - Personal Claude/claude.ai login is unavailable until Anthropic grants the
   third-party approval its SDK terms require. Keep that a server-owned disabled
   capability, not a client flag or an emulated OAuth flow.
