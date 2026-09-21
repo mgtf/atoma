@@ -1133,5 +1133,12 @@
   "welcome.handheld.continue": "少なくともアカウントにはアクセスする",
   "settings.runCapacity": "同時run数",
   "settings.runCapacityValue": "{{active}}件がアクティブ / {{limit}}件まで許可（このホストでは一度に1つのrunのみ）",
-  "auth.switchAccount": "アカウントを切り替える"
+  "auth.switchAccount": "アカウントを切り替える",
+  "settings.refreshModels": "ChatGPTモデルを更新",
+  "settings.modelCatalogue.ready": "接続中のChatGPTアカウントから取得したモデルです。",
+  "settings.modelCatalogue.stale": "更新に失敗しました。以前取得したモデルが表示されていますが、選択できません。",
+  "settings.modelCatalogue.unavailable": "ChatGPTモデルカタログを利用できません。更新してもう一度お試しください。",
+  "settings.modelUnavailable": "{{model}} — 利用不可",
+  "settings.mcpConnectAnother": "別のクライアントを接続",
+  "settings.mcpHideSetup": "セットアップガイドを非表示"
 }
