@@ -8,8 +8,11 @@ import {
   applySceneCamera,
   interpolateSceneCamera,
   pinSceneCameraTopRight,
+  sceneCameraAxis,
   sceneCameraEase,
   sceneCameraForMode,
+  sceneCameraNavigationPose,
+  sceneCameraNavigationShot,
   sceneCameraTransitionDuration,
   sceneCameraViewport,
   type SceneCamera,
@@ -29,27 +32,68 @@ function sameCamera(left: SceneCamera, right: SceneCamera): boolean {
 }
 
 /**
+ * The destination the rail last routed to, and its row in the rail.
+ *
+ * The KEY is what makes a shot a shot: re-rendering for data, a selection or a
+ * resize must never re-fire one. The RANK is the row the destination occupies
+ * in the visible nav order, or -1 for a surface with no row of its own; the
+ * plane keeps the previous rank itself, so how far a click travelled is
+ * derived where the previous pose already lives instead of during a render.
+ */
+export interface SceneCameraNavigation {
+  readonly key: string;
+  readonly rank: number;
+}
+
+/**
  * Imperative camera driver: React publishes only the navigation intent, while
  * rAF owns the intermediate poses. Every frame is written once to the DOM and
  * to the shared camera registry, so rendering and inverse hit-testing cannot
  * observe different points in the travelling shot.
+ *
+ * Two intents reach it. A MODE change is the long move between the whole-scene
+ * overview and the focused content column. A change of DESTINATION at an
+ * unchanged mode is the navigation shot: the same axis, travelled out and back
+ * in one beat, so reaching a section from the rail is a camera move rather
+ * than a silent content swap under a static lens.
  */
 export function SceneCameraPlane({
   mode,
+  navigation,
   onSettled,
   children,
 }: {
   mode: SceneCameraMode;
+  navigation?: SceneCameraNavigation;
   onSettled?: () => void;
   children: ReactNode;
 }) {
   const planeRef = useRef<HTMLDivElement>(null);
+  /**
+   * What the last run of this effect was asked for. The comparison cannot be
+   * made against the painted pose: a navigation shot begins and ends on the
+   * same pose, so only the intent records that one was requested.
+   */
+  const requested = useRef<{
+    mode: SceneCameraMode;
+    navigationKey: string | null;
+    navigationRank: number;
+  } | null>(null);
+  const navigationKey = navigation?.key ?? null;
+  const navigationRank = navigation?.rank ?? -1;
 
   useLayoutEffect(() => {
     const plane = planeRef.current;
     if (!plane) return;
     let frameRequest: number | null = null;
     let disposed = false;
+
+    const previous = requested.current;
+    requested.current = { mode, navigationKey, navigationRank };
+    const navigated = previous !== null &&
+      previous.mode === mode &&
+      navigationKey !== null &&
+      previous.navigationKey !== navigationKey;
 
     const targetCamera = () => sceneCameraForMode(
       mode,
@@ -68,14 +112,8 @@ export function SceneCameraPlane({
       onSettled?.();
     };
 
-    const canAnimate = typeof requestAnimationFrame !== 'undefined' &&
-      !prefersReducedMotion() &&
-      !sameCamera(current, targetCamera());
-    if (!canAnimate) {
-      settle();
-    } else {
+    const travel = (duration: number, poseAt: (progress: number) => SceneCamera) => {
       const startedAt = performance.now();
-      const duration = sceneCameraTransitionDuration(mode);
       plane.dataset['sceneCameraMotion'] = 'moving';
       plane.dataset['sceneCameraProgress'] = '0';
       const tick = (now: number) => {
@@ -86,20 +124,44 @@ export function SceneCameraPlane({
           settle();
           return;
         }
-        const camera = pinSceneCameraTopRight(
-          interpolateSceneCamera(
-            current,
-            targetCamera(),
-            sceneCameraEase(progress)
-          ),
-          plane.clientWidth,
-          plane.clientHeight
-        );
-        applySceneCamera(plane, camera);
+        applySceneCamera(plane, poseAt(progress));
         plane.dataset['sceneCameraProgress'] = progress.toFixed(4);
         frameRequest = requestAnimationFrame(tick);
       };
       frameRequest = requestAnimationFrame(tick);
+    };
+
+    const animatable = typeof requestAnimationFrame !== 'undefined' &&
+      !prefersReducedMotion();
+    if (animatable && navigated && mode === 'focus') {
+      // The rail moved the reader sideways at an unchanged mode. Depart from
+      // where the camera actually stands rather than from the nominal focus
+      // pose, so a second click during the first shot continues the move
+      // instead of cutting back to focus for it.
+      const rowDistance = previous.navigationRank < 0 || navigationRank < 0
+        ? 1
+        : Math.abs(navigationRank - previous.navigationRank);
+      const shot = sceneCameraNavigationShot(rowDistance);
+      const fromAxis = sceneCameraAxis(current, plane.clientWidth, plane.clientHeight);
+      travel(shot.durationMs, (progress) => sceneCameraNavigationPose(
+        progress,
+        shot,
+        plane.clientWidth,
+        plane.clientHeight,
+        fromAxis
+      ));
+    } else if (animatable && !sameCamera(current, targetCamera())) {
+      travel(sceneCameraTransitionDuration(mode), (progress) => pinSceneCameraTopRight(
+        interpolateSceneCamera(
+          current,
+          targetCamera(),
+          sceneCameraEase(progress)
+        ),
+        plane.clientWidth,
+        plane.clientHeight
+      ));
+    } else {
+      settle();
     }
 
     // The target column is responsive because the rail is. Once animation is
@@ -116,7 +178,7 @@ export function SceneCameraPlane({
       observer?.disconnect();
       if (frameRequest !== null) cancelAnimationFrame(frameRequest);
     };
-  }, [mode, onSettled]);
+  }, [mode, navigationKey, navigationRank, onSettled]);
 
   return (
     <div

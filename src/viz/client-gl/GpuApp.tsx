@@ -150,6 +150,17 @@ function GpuAppContent({
     () => setCameraRevision((revision) => revision + 1),
     []
   );
+  /**
+   * What the camera is asked to move for: the destination, and the rail row it
+   * occupies. `SceneCameraPlane` keeps the previous one, so the amplitude of
+   * its navigation shot follows the distance actually travelled down the rail.
+   * A destination with no row of its own (Settings, from the account menu)
+   * reports -1 and gets the short beat.
+   */
+  const sceneNavigation = useMemo(
+    () => ({ key: state.view, rank: visibleViews(authSnapshot).indexOf(state.view) }),
+    [authSnapshot, state.view]
+  );
   const metrics = useRef<GpuRenderMetrics>(emptyRenderMetrics());
   const { phase: entryPhase, begin: beginEnter } = useEntryFade();
   const arrive = beginEnter;
@@ -1038,7 +1049,11 @@ function GpuAppContent({
           reader is not read two surfaces at once. `aria-hidden` alone would
           have done only the last of the three. */}
       <div className="gpu-scene-host" inert={previewOpen}>
-      <SceneCameraPlane mode={state.sceneCameraMode} onSettled={cameraSettled}>
+      <SceneCameraPlane
+        mode={state.sceneCameraMode}
+        navigation={sceneNavigation}
+        onSettled={cameraSettled}
+      >
         <GpuSurface
           data={data}
           releaseVersion={RELEASE_VERSION}

@@ -127,6 +127,7 @@ import {
   sceneCameraEase,
   sceneCameraIsMoving,
   sceneCameraForMode,
+  sceneCameraNavigationShot,
   sceneCameraRenderTransform,
   sceneCameraTransitionDuration,
   sceneCameraViewport,
@@ -441,6 +442,7 @@ import {
   drawSidebar,
   FOCUS_RAIL_FPS_SCALE,
   focusRailChromeLayout,
+  navRowDistance,
   overviewRailChromeLayout,
   utilityDockOpacity,
   type FocusRailChromeLayout,
@@ -600,6 +602,8 @@ export class GpuRenderer {
     from: ViewName;
     to: ViewName;
     startedAt: number;
+    /** Held, not recomputed: the sweep and the camera are ONE beat. */
+    durationMs: number;
   } | null = null;
   private previousEventIds = new Set<string>();
   private currentEventIds = new Set<string>();
@@ -1917,10 +1921,18 @@ export class GpuRenderer {
     );
     this.drawRemovedFilterEffects();
     if (this.previousView && this.previousView !== snapshot.state.view) {
+      // The light sweep rides the camera's navigation shot rather than
+      // running beside it on a fixed clock: same rail rows, same duration,
+      // so a long jump reads as one longer move instead of two beats.
       this.activeViewTransition = {
         from: this.previousView,
         to: snapshot.state.view,
         startedAt: performance.now(),
+        durationMs: sceneCameraNavigationShot(navRowDistance(
+          snapshot.data.auth,
+          this.previousView,
+          snapshot.state.view
+        )).durationMs,
       };
     }
     this.previousView = snapshot.state.view;
@@ -4332,8 +4344,9 @@ export class GpuRenderer {
   private drawViewTransition(width: number, height: number) {
     const transition = this.activeViewTransition;
     if (!transition) return;
+    const duration = transition.durationMs;
     const initialElapsed = performance.now() - transition.startedAt;
-    if (initialElapsed >= 560 || prefersReducedMotion()) {
+    if (initialElapsed >= duration || prefersReducedMotion()) {
       this.activeViewTransition = null;
       return;
     }
@@ -4383,7 +4396,7 @@ export class GpuRenderer {
     let elapsed = initialElapsed;
     const animate = (ticker: Ticker) => {
       if (!prefersReducedMotion()) elapsed += ticker.deltaMS;
-      const progress = Math.min(1, elapsed / 560);
+      const progress = Math.min(1, elapsed / duration);
       const eased = 1 - (1 - progress) ** 3;
       const sweepX = -width * 0.42 + eased * width * 1.55;
       bars.forEach((bar, index) => {

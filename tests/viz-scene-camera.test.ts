@@ -8,8 +8,12 @@ import {
   projectScenePoint,
   rendererToClientPoint,
   sceneCameraCssTransform,
+  sceneCameraAxis,
   sceneCameraEase,
   sceneCameraForMode,
+  sceneCameraNavigationAxis,
+  sceneCameraNavigationPose,
+  sceneCameraNavigationShot,
   sceneCameraRenderTransform,
   unprojectScenePoint,
   visibleSceneLayoutHeight,
@@ -393,5 +397,127 @@ describe('the global scene camera', () => {
     const point = { x: 173, y: 421 };
     expect(projectScenePoint(point, 800, 600, flat)).toEqual(point);
     expect(unprojectScenePoint(point, 800, 600, flat)).toEqual(point);
+  });
+});
+
+describe('the navigation shot', () => {
+  const VIEWPORTS = [
+    { width: 432, height: 720 },
+    { width: 528, height: 800 },
+    { width: 1_280, height: 720 },
+    { width: 1_440, height: 900 },
+    { width: 2_560, height: 1_440 },
+  ] as const;
+  const SAMPLES = Array.from({ length: 121 }, (_, index) => index / 120);
+
+  it('leaves the focus pose and lands back on it', () => {
+    for (const { width, height } of VIEWPORTS) {
+      const focus = sceneCameraForMode('focus', width, height);
+      for (const rows of [1, 3, 9]) {
+        const shot = sceneCameraNavigationShot(rows);
+        expect(sceneCameraNavigationPose(0, shot, width, height)).toEqual(focus);
+        expect(sceneCameraNavigationPose(1, shot, width, height)).toEqual(focus);
+        // A beat nothing moves in is not a beat. Measure the excursion on the
+        // axis itself, since scale is what a viewport of any shape shares.
+        const axes = SAMPLES.map((progress) => sceneCameraNavigationAxis(progress, shot));
+        expect(Math.min(...axes)).toBeCloseTo(1 - shot.pullBack, 3);
+        expect(Math.max(...axes)).toBeGreaterThan(1);
+        expect(Math.max(...axes)).toBeLessThanOrEqual(1 + shot.overshoot + 1e-9);
+      }
+    }
+  });
+
+  it('never opens a page-background edge at any point of the shot', () => {
+    for (const { width, height } of VIEWPORTS) {
+      for (const rows of [1, 2, 5, 12]) {
+        const shot = sceneCameraNavigationShot(rows);
+        for (const progress of SAMPLES) {
+          const camera = sceneCameraNavigationPose(progress, shot, width, height);
+          const frame = buildSceneCameraFrame(camera, width, height);
+          // Face-on, so Pixi's affine render transform stays the exact
+          // projection the DOM and the hit tests use.
+          expect(frame.forward[6]).toBe(0);
+          expect(frame.forward[7]).toBe(0);
+          for (const corner of [
+            { x: 0, y: 0 },
+            { x: width, y: 0 },
+            { x: width, y: height },
+            { x: 0, y: height },
+          ]) {
+            const source = unprojectScenePoint(corner, width, height, camera);
+            const where = `${width}x${height} rows ${rows} at ${progress}`;
+            expect(source.x, `${where} x`).toBeGreaterThanOrEqual(-1e-9);
+            expect(source.x, `${where} x`).toBeLessThanOrEqual(width + 1e-9);
+            expect(source.y, `${where} y`).toBeGreaterThanOrEqual(-1e-9);
+            expect(source.y, `${where} y`).toBeLessThanOrEqual(height + 1e-9);
+          }
+        }
+      }
+    }
+  });
+
+  it('reports the distance travelled down the rail, up to a ceiling', () => {
+    const shots = [1, 2, 3, 4, 5].map((rows) => sceneCameraNavigationShot(rows));
+    for (let index = 1; index < shots.length; index += 1) {
+      expect(shots[index]!.pullBack).toBeGreaterThan(shots[index - 1]!.pullBack);
+      expect(shots[index]!.durationMs).toBeGreaterThan(shots[index - 1]!.durationMs);
+      expect(shots[index]!.overshoot).toBeGreaterThan(shots[index - 1]!.overshoot);
+    }
+    // Beyond the ceiling a jump is a jump: the rail has no longer move to make.
+    expect(sceneCameraNavigationShot(40)).toEqual(shots.at(-1));
+    // A route with no rail row of its own still gets the short beat.
+    expect(sceneCameraNavigationShot(0)).toEqual(shots[0]);
+    expect(sceneCameraNavigationShot(-3)).toEqual(shots[2]);
+  });
+
+  it('departs from where an interrupted shot actually stands', () => {
+    const width = 1_440;
+    const height = 900;
+    const shot = sceneCameraNavigationShot(4);
+    // Interrupt the first shot at its widest, the moment a second click is
+    // most likely to arrive, and read the axis back off the painted pose.
+    const interrupted = sceneCameraNavigationPose(0.32, shot, width, height);
+    const axis = sceneCameraAxis(interrupted, width, height);
+    expect(axis).toBeCloseTo(1 - shot.pullBack, 6);
+    const resumed = sceneCameraNavigationPose(0, shot, width, height, axis);
+    expect(resumed.sceneScale).toBeCloseTo(interrupted.sceneScale, 9);
+    expect(resumed.sourceTopRatio).toBeCloseTo(interrupted.sourceTopRatio, 9);
+    expect(sceneCameraNavigationPose(1, shot, width, height, axis)).toEqual(
+      sceneCameraForMode('focus', width, height)
+    );
+    // The overview end of the axis is 0 and the focused end is 1, whatever
+    // the viewport: that is what makes the reading comparable at all.
+    expect(sceneCameraAxis(sceneCameraForMode('overview', width, height), width, height))
+      .toBeCloseTo(0, 12);
+    expect(sceneCameraAxis(sceneCameraForMode('focus', width, height), width, height))
+      .toBeCloseTo(1, 12);
+  });
+
+  it('moves the scene by a visible distance without stripping the rail', () => {
+    for (const { width, height } of VIEWPORTS) {
+      const railWidth = sidebarWidthForViewport(width);
+      const shot = sceneCameraNavigationShot(5);
+      // Source x met by the left viewport edge tells how much rail is on screen.
+      const railAt = (progress: number) => railWidth - unprojectScenePoint(
+        { x: 0, y: 0 },
+        width,
+        height,
+        sceneCameraNavigationPose(progress, shot, width, height)
+      ).x;
+      const settled = railAt(1);
+      const widest = railAt(0.32);
+      const punch = Math.min(...SAMPLES.map(railAt));
+      // The destination tile is what the reader navigates by: the landing
+      // overshoot spends the focused crop's lead and never eats into it.
+      expect(punch, `${width}x${height} icon column`)
+        .toBeGreaterThanOrEqual(FOCUS_SIDEBAR_BUTTON_WIDTH - 1e-6);
+      expect(punch, `${width}x${height} punch`).toBeLessThan(settled);
+      // And the retreat is a move a reader can see, measured as the share of
+      // the rail the full dezoom would have given back — the one reading that
+      // means the same thing on a phone and on a 27-inch display.
+      const reveal = (widest - settled) / (railWidth - settled);
+      expect(reveal, `${width}x${height} reveal`).toBeGreaterThan(0.2);
+      expect(reveal, `${width}x${height} reveal`).toBeLessThan(0.45);
+    }
   });
 });

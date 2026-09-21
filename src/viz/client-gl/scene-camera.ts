@@ -205,17 +205,32 @@ export function interpolateSceneCamera(
   const value = clamp01(progress);
   if (value === 0) return from;
   if (value === 1) return to;
-  const inverseDistance = lerp(1 / from.perspectivePx, 1 / to.perspectivePx, value);
+  return travelSceneCamera(from, to, value);
+}
+
+/**
+ * The same pose interpolation, along the WHOLE line rather than the segment:
+ * 0 is `from`, 1 is `to`, and a position past 1 keeps going in the same
+ * direction, in the same parameter space (reciprocal distance, log scale,
+ * linear ratios). The navigation shot uses that continuation for its landing
+ * overshoot; `interpolateSceneCamera` is this function clamped to the segment.
+ */
+export function travelSceneCamera(
+  from: SceneCamera,
+  to: SceneCamera,
+  position: number
+): SceneCamera {
+  const inverseDistance = lerp(1 / from.perspectivePx, 1 / to.perspectivePx, position);
   return {
     perspectivePx: 1 / Math.max(Number.EPSILON, inverseDistance),
-    pitchDegrees: from.pitchDegrees + shortestAngle(from.pitchDegrees, to.pitchDegrees) * value,
-    yawDegrees: from.yawDegrees + shortestAngle(from.yawDegrees, to.yawDegrees) * value,
-    sceneScale: Math.exp(lerp(Math.log(from.sceneScale), Math.log(to.sceneScale), value)),
-    targetXRatio: lerp(from.targetXRatio, to.targetXRatio, value),
-    targetYRatio: lerp(from.targetYRatio, to.targetYRatio, value),
-    sourceTopRatio: lerp(from.sourceTopRatio, to.sourceTopRatio, value),
-    anchorXRatio: lerp(from.anchorXRatio, to.anchorXRatio, value),
-    anchorYRatio: lerp(from.anchorYRatio, to.anchorYRatio, value),
+    pitchDegrees: from.pitchDegrees + shortestAngle(from.pitchDegrees, to.pitchDegrees) * position,
+    yawDegrees: from.yawDegrees + shortestAngle(from.yawDegrees, to.yawDegrees) * position,
+    sceneScale: Math.exp(lerp(Math.log(from.sceneScale), Math.log(to.sceneScale), position)),
+    targetXRatio: lerp(from.targetXRatio, to.targetXRatio, position),
+    targetYRatio: lerp(from.targetYRatio, to.targetYRatio, position),
+    sourceTopRatio: lerp(from.sourceTopRatio, to.sourceTopRatio, position),
+    anchorXRatio: lerp(from.anchorXRatio, to.anchorXRatio, position),
+    anchorYRatio: lerp(from.anchorYRatio, to.anchorYRatio, position),
   };
 }
 
@@ -571,4 +586,150 @@ export function sceneCameraViewport(element: Element | null): SceneCameraViewpor
 /** Navigation timing; the return is a little quicker than the approach. */
 export function sceneCameraTransitionDuration(mode: SceneCameraMode): number {
   return mode === 'focus' ? 780 : 650;
+}
+
+/**
+ * THE NAVIGATION SHOT.
+ *
+ * Reaching a section from the rail while the camera is ALREADY focused used to
+ * move nothing: the content swapped underneath a static lens. This is the beat
+ * that answers such a click — the camera eases back along its own
+ * overview↔focus axis, lets the scene breathe, then glides in and lands on the
+ * focus pose with a small approach overshoot.
+ *
+ * It travels the segment the two poses already define, so it inherits every
+ * invariant they were built for: face-on, pinned to the top-right corner, no
+ * page background at any edge. `pullBack` is how far back along that axis the
+ * shot goes (1 would be the full overview), `overshoot` bounds how far past
+ * focus the landing carries before it settles.
+ */
+export interface SceneCameraNavigationShot {
+  readonly pullBack: number;
+  readonly overshoot: number;
+  readonly durationMs: number;
+}
+
+/** Fraction of the shot spent leaving; the rest is the approach and landing. */
+const NAV_RETREAT_FRACTION = 0.32;
+const NAV_PULL_BACK_BASE = 0.14;
+const NAV_PULL_BACK_PER_ROW = 0.04;
+/**
+ * The ceiling is composition, not safety: the focused crop holds the rail's
+ * icon column at the viewport edge, and pulling further back slides the rail's
+ * empty lead into shot. 0.3 keeps that reveal to a few tens of pixels.
+ */
+const NAV_PULL_BACK_MAX = 0.3;
+const NAV_OVERSHOOT_BASE = 0.05;
+const NAV_OVERSHOOT_PER_ROW = 0.012;
+const NAV_OVERSHOOT_MAX = 0.09;
+const NAV_DURATION_BASE = 520;
+const NAV_DURATION_PER_ROW = 40;
+const NAV_DURATION_MAX = 760;
+/** Peak of `sin(pi v) * v^2`, the late kick that lands the approach. */
+const NAV_KICK_PEAK = 0.399793;
+/** Beyond this the amplitude stops growing: a jump is a jump. */
+const NAV_MAX_ROWS = 5;
+
+/**
+ * Resolves the shot for a click that travelled `rowDistance` rail rows. A
+ * neighbouring section gets a short beat; crossing the rail gets a longer,
+ * wider one, so the rail's own geometry is what the motion reports.
+ */
+export function sceneCameraNavigationShot(rowDistance: number): SceneCameraNavigationShot {
+  const rows = Math.min(NAV_MAX_ROWS, Math.max(1, Math.round(Math.abs(rowDistance)))) - 1;
+  return {
+    pullBack: Math.min(NAV_PULL_BACK_MAX, NAV_PULL_BACK_BASE + NAV_PULL_BACK_PER_ROW * rows),
+    overshoot: Math.min(NAV_OVERSHOOT_MAX, NAV_OVERSHOOT_BASE + NAV_OVERSHOOT_PER_ROW * rows),
+    durationMs: Math.min(NAV_DURATION_MAX, NAV_DURATION_BASE + NAV_DURATION_PER_ROW * rows),
+  };
+}
+
+/**
+ * Where the shot stands on the overview→focus axis at `progress`: 1 is the
+ * focus pose it starts and ends on, lower values are further back toward the
+ * whole-scene composition. Departure is a fast ease-out, the return a
+ * zero-velocity approach carrying one late kick past the pose it lands on.
+ */
+export function sceneCameraNavigationAxis(
+  progress: number,
+  shot: SceneCameraNavigationShot,
+  fromAxis = 1
+): number {
+  const value = clamp01(progress);
+  const back = 1 - shot.pullBack;
+  if (value <= NAV_RETREAT_FRACTION) {
+    const departure = 1 - (1 - value / NAV_RETREAT_FRACTION) ** 3;
+    return fromAxis + (back - fromAxis) * departure;
+  }
+  const approach = (value - NAV_RETREAT_FRACTION) / (1 - NAV_RETREAT_FRACTION);
+  const kick = Math.sin(Math.PI * approach) * approach * approach / NAV_KICK_PEAK;
+  return 1 - shot.pullBack * (1 - sceneCameraEase(approach)) + shot.overshoot * kick;
+}
+
+/**
+ * How far past the focus pose a landing may carry before the rail's icon
+ * column starts leaving the frame.
+ *
+ * The focused crop keeps `FOCUS_RAIL_GUARD_PX` of the rail's lead beside that
+ * column; an approach overshoot may spend that guard and not one pixel more,
+ * because the destination tile at the trailing edge is what the reader
+ * navigates by. A viewport whose focus asks for no approach has no room at all.
+ */
+export function sceneCameraNavigationCeiling(
+  viewportWidth: number,
+  viewportHeight: number
+): number {
+  const width = Math.max(1, viewportWidth);
+  const span = Math.log(
+    sceneCameraForMode('focus', width, viewportHeight).sceneScale
+  );
+  if (!(span > 1e-9)) return 1;
+  const buttonLeft = Math.max(
+    0,
+    sidebarWidthForViewport(width) - GPU_LAYOUT.sidebarFocusButtonWidth
+  );
+  const spentGuard = width / Math.max(1, width - buttonLeft);
+  return Math.max(1, Math.log(spentGuard) / span);
+}
+
+/** The pinned pose the shot paints at `progress`, for this viewport. */
+export function sceneCameraNavigationPose(
+  progress: number,
+  shot: SceneCameraNavigationShot,
+  viewportWidth: number,
+  viewportHeight: number,
+  fromAxis = 1
+): SceneCamera {
+  const axis = Math.min(
+    sceneCameraNavigationCeiling(viewportWidth, viewportHeight),
+    Math.max(0, sceneCameraNavigationAxis(progress, shot, fromAxis))
+  );
+  return pinSceneCameraTopRight(
+    travelSceneCamera(
+      sceneCameraForMode('overview', viewportWidth, viewportHeight),
+      sceneCameraForMode('focus', viewportWidth, viewportHeight),
+      axis
+    ),
+    viewportWidth,
+    viewportHeight
+  );
+}
+
+/**
+ * Where an already painted pose stands on the overview→focus axis.
+ *
+ * Scale is the axis: `travelSceneCamera` moves it in log space between the
+ * overview's 1 and the focused pose, so one logarithm recovers the position a
+ * travelling shot was interrupted at. A viewport whose focused pose asks for
+ * no approach at all has no axis to speak of, and reports the focus end.
+ */
+export function sceneCameraAxis(
+  camera: SceneCamera,
+  viewportWidth: number,
+  viewportHeight: number
+): number {
+  const focus = sceneCameraForMode('focus', viewportWidth, viewportHeight);
+  const span = Math.log(focus.sceneScale);
+  if (!(Math.abs(span) > 1e-9)) return 1;
+  return Math.log(camera.sceneScale) / span;
 }

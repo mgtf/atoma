@@ -77,6 +77,25 @@ export interface OverviewRailChromeLayout {
   readonly navigationTop: number;
 }
 
+/**
+ * How many rail rows separate two destinations.
+ *
+ * The rail owns this because it owns the ORDER. The renderer asks for it to
+ * time the motion a route deserves, and must not keep a second nav layout of
+ * its own to answer it; a destination with no row (Settings, reached from the
+ * account menu) is one row away, the shortest move there is.
+ */
+export function navRowDistance(
+  auth: { viewer: { platformAdmin: boolean } } | null,
+  from: ViewName,
+  to: ViewName
+): number {
+  const rows = visibleViews(auth);
+  const start = rows.indexOf(from);
+  const end = rows.indexOf(to);
+  return start < 0 || end < 0 ? 1 : Math.abs(end - start);
+}
+
 /** Shared cross-fade curve for utilities moving between the two rail modes. */
 export function utilityDockOpacity(
   direction: 'enter' | 'leave',
