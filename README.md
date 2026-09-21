@@ -16,6 +16,17 @@ check the result, and let you inspect the work along the way.
 
 </div>
 
+> [!WARNING]
+> **atoma is under active development.** Organisations are designed to be
+> isolated from one another (projects, workspaces, traces and previews), but
+> the platform has not been independently audited and we cannot yet guarantee
+> that isolation, or the absence of other security defects, under every
+> condition. **Do not include confidential, personal or otherwise sensitive
+> data in your goals, uploaded files or generated applications**, whether on
+> [atoma.run](https://atoma.run) or on a self-hosted instance exposed to others.
+> Use the hosted service to evaluate the product, not to process data you could
+> not afford to see leak. See [SECURITY.md](SECURITY.md) to report a vulnerability.
+
 ## Watch the demo
 
 https://github.com/user-attachments/assets/481c59de-2f29-423e-a55c-80cc5b448b92
