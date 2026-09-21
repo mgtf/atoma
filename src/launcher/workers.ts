@@ -19,6 +19,27 @@ type State = {
   egress: boolean;
 };
 
+/**
+ * A Unix socket path must fit `sockaddr_un.sun_path`: 104 bytes on macOS/BSD,
+ * 108 on Linux. 100 keeps the margin. The per-worker path is
+ * `<socketRoot>/<uuid>/w.sock`, so the root itself only gets what a UUID and
+ * the socket name leave. Checked at CONSTRUCTION as well as per worker: bound
+ * late, the launcher answers `operation-failed` with no message on the wire,
+ * and a socket root a few bytes too long looks like an engine fault.
+ */
+const SOCKET_PATH_BYTES = 100;
+const WORKER_PATH_OVERHEAD = '/'.length + 36 + '/w.sock'.length;
+
+function socketRootTooLong(socketRoot: string): string {
+  return `Worker socket root is too long: ${Buffer.byteLength(socketRoot)} bytes + ${WORKER_PATH_OVERHEAD} for <uuid>/w.sock exceeds the ${SOCKET_PATH_BYTES}-byte Unix socket budget (${socketRoot})`;
+}
+
+export function assertSocketRootFits(socketRoot: string): void {
+  if (Buffer.byteLength(socketRoot) + WORKER_PATH_OVERHEAD > SOCKET_PATH_BYTES) {
+    throw new Error(socketRootTooLong(socketRoot));
+  }
+}
+
 /** Engine ownership and transport rendezvous. No tool is executed in this process. */
 export class LauncherWorkers implements WorkerLauncher {
   private readonly live = new Map<string, State>();
@@ -44,6 +65,7 @@ export class LauncherWorkers implements WorkerLauncher {
       }
     }
     if ((lstatSync(options.socketRoot).mode & 0o007) !== 0) throw new Error('Worker socket root must be private');
+    assertSocketRootFits(options.socketRoot);
     if (!/^[1-9]\d*:\d+$/.test(options.user)) throw new Error('Worker user must be numeric and non-root');
   }
 
@@ -69,7 +91,7 @@ export class LauncherWorkers implements WorkerLauncher {
     const directory = path.join(this.options.socketRoot, id);
     const workerPath = path.join(directory, 'w.sock');
     const clientPath = path.join(directory, 'c.sock');
-    if (Buffer.byteLength(workerPath) > 100) throw new Error('Worker socket root is too long');
+    if (Buffer.byteLength(workerPath) > SOCKET_PATH_BYTES) throw new Error(socketRootTooLong(this.options.socketRoot));
     mkdirSync(directory, { mode: 0o700 });
     const state: State = {
       handle: { id, ownerId: spec.ownerId, socketPath: clientPath, workspaceHostPath: workspace },

@@ -2,7 +2,7 @@ import { applyRetention } from '../src/projects/retention.js';
 import { PlatformEventLog } from '../src/platform/events.js';
 import { closeStoreHandles } from '../src/core/stores.js';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, renameSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, writeFileSync, existsSync, rmSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import Database from 'better-sqlite3';
@@ -24,7 +24,9 @@ describe.skipIf(!hasPython)('offline recovery through real backup archives and a
   let projectId: string;
   const runId = '33333333-3333-4333-8333-333333333333';
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'atoma-restore-test-'));
+    // realpath: retention refuses a symlinked ancestor, and macOS resolves
+    // tmpdir() through /var -> private/var. A deployment root is a real path.
+    root = realpathSync(mkdtempSync(join(tmpdir(), 'atoma-restore-test-')));
     db = new Database(join(root, 'source.db'));
     db.pragma('foreign_keys = ON');
     db.exec(AUTH_TABLES_DDL);
@@ -68,6 +70,27 @@ describe.skipIf(!hasPython)('offline recovery through real backup archives and a
       store: { integrity: 'ok', issues: [], projectRuns: [{ runId, status: 'delivered', workspace: true, log: true, trace: true }] } });
     expect(readFileSync(join(root, 'recovered', 'projects', 'orgs', '11111111-1111-4111-8111-111111111111', 'projects', projectId, 'runs', runId, 'workspace', 'index.html'), 'utf8')).toBe('<p>restored</p>');
     expect(store.getProjectRun('11111111-1111-4111-8111-111111111111', runId)?.status).toBe('delivered');
+  });
+
+  // The drill reads archives with python's tarfile, not the writer's own tar.
+  // macOS bsdtar stores extended attributes as AppleDouble sidecars (`._skills`
+  // beside `skills`) and HIDES them from `tar -t`, so a snapshot written on a
+  // Mac looked clean and was refused as unsafe by every other reader. Assert
+  // the members a foreign reader sees, tier root by tier root (2026-09-22).
+  it('writes archives with no sidecar member outside the tier root', async () => {
+    const snapshot = await backup();
+    const listing = spawnSync(python, ['-c',
+      'import json,sys,tarfile\n' +
+      'print(json.dumps({a: [m.name for m in tarfile.open(sys.argv[1] + "/" + a, "r:gz")] for a in sys.argv[2:]}))',
+      snapshot.snapshotDir, 'skills.tar.gz', 'runs.tar.gz', 'archive.tar.gz', 'projects.tar.gz', 'supervisor.tar.gz',
+    ], { encoding: 'utf8', timeout: 30000 });
+    expect(listing.status, listing.stderr).toBe(0);
+    const members = JSON.parse(listing.stdout) as Record<string, string[]>;
+    for (const [archive, names] of Object.entries(members)) {
+      const expectedRoot = archive === 'projects.tar.gz' ? 'orgs' : archive.replace('.tar.gz', '');
+      expect(names.length, archive).toBeGreaterThan(0);
+      for (const name of names) expect(name.split('/')[0], `${archive} member ${name}`).toBe(expectedRoot);
+    }
   });
 
   it('restores intentionally expired bytes as metadata, and flags interrupted retention', async () => {

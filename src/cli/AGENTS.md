@@ -111,6 +111,16 @@ can only report that it cannot be.
   resolved path, the summary refuses the word complete, and the restore drill
   fails. The store can never be declared optional.
 - The destination is required and refused inside the repository.
+- A snapshot must be readable by a reader that is not us. Two producer defects
+  broke that silently until 2026-09-22, both invisible on the machine that
+  wrote the archive: the online backup inherits the source's journal mode, so a
+  WAL store yielded a WAL-flagged `store.db` that SQLite refuses to open
+  `mode=ro` when carried alone, which is exactly how recovery carries it; and
+  macOS `tar` stores extended attributes as AppleDouble sidecars (`._skills`
+  beside `skills`) that its own `tar -t` HIDES and every other reader sees as
+  an entry outside the tier root. The store is settled into rollback mode in
+  `core/sqliteBackup.ts` and the tar runs under `COPYFILE_DISABLE`. Verify a
+  snapshot with a FOREIGN reader, never with the tool that produced it.
 - The offline recovery exercise is `python3 scripts/restore-drill.py <snapshot>
   --dest <new-directory>`, not a service start or a compiled product command.
   It verifies hashes, extracts regular files into an isolated destination and

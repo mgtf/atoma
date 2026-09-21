@@ -4,7 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LauncherWorkers } from '../src/launcher/workers.js';
+import { assertSocketRootFits, LauncherWorkers } from '../src/launcher/workers.js';
 import { DockerLauncher } from '../src/launcher/docker.js';
 import { serveLauncher } from '../src/launcher/service.js';
 import { SocketLauncher } from '../src/launcher/client.js';
@@ -21,6 +21,12 @@ it('keeps the worker socket profile isolated and rejects caller engine syntax', 
   expect(launcherRequestSchema.safeParse({ op: 'startWorker', spec: { ownerId: 'run', workspaceId: 'build', egress: false, workspaceHostPath: '/etc' } }).success).toBe(false);
 });
 
+it('refuses a socket root that cannot hold a worker socket path', () => {
+  expect(() => assertSocketRootFits('/run/atoma/sockets')).not.toThrow();
+  expect(() => assertSocketRootFits(`/var/folders/xx/${'g'.repeat(28)}/T/atoma-sockets`))
+    .toThrow(/Worker socket root is too long: \d+ bytes \+ 44 .*100-byte/);
+});
+
 // Unix socket-file mounts are a Linux deployment contract. The fake engine
 // starts the REAL worker in a child; no Docker or paid provider is used here.
 describe.skipIf(process.platform === 'win32')('launcher worker transport', () => {
@@ -35,7 +41,12 @@ describe.skipIf(process.platform === 'win32')('launcher worker transport', () =>
   const clients: SocketLauncher[] = [];
 
   beforeEach(async () => {
-    root = realpathSync(mkdtempSync(join(tmpdir(), 'atw-')));
+    // A SHORT base on purpose: `<socketRoot>/<uuid>/w.sock` must fit
+    // sun_path (104 bytes on macOS), and the macOS per-user $TMPDIR alone is
+    // 56 bytes — a tmpdir() root would exceed the budget and fail every worker
+    // start here as an opaque launcher error rather than testing transport.
+    const base = process.platform === 'darwin' ? '/tmp' : tmpdir();
+    root = realpathSync(mkdtempSync(join(base, 'atw-')));
     chmodSync(root, 0o700);
     mkdirSync(join(root, 's'), { mode: 0o700 });
     workspace = join(root, 'workspace');

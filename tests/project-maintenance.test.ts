@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, writeFileSync, mkdtempSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, mkdtempSync, realpathSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -18,7 +18,9 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 function fixture() {
-  const root = mkdtempSync(join(tmpdir(), 'atoma-maintenance-'));
+  // realpath: retention refuses a symlinked ancestor, and macOS resolves
+  // tmpdir() through /var -> private/var. A deployment root is a real path.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'atoma-maintenance-')));
   roots.push(root);
   return projectRetrievalFixture(root);
 }

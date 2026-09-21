@@ -2,6 +2,8 @@ import Database from 'better-sqlite3';
 import {
   existsSync,
   mkdirSync,
+  chmodSync,
+  copyFileSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -67,6 +69,42 @@ describe('snapshotSqliteStore', () => {
       expect(writer.prepare('SELECT value FROM mature_state').pluck().all()).toEqual([
         'from-live-wal',
       ]);
+    } finally {
+      writer.close();
+    }
+  });
+
+  // Recovery carries store.db ALONE: `scripts/restore-drill.py` copies that one
+  // file and opens it `mode=ro`. A WAL-flagged snapshot needs to create `-shm`
+  // beside itself to be read at all, so it is unreadable from read-only media
+  // and refused outright by newer SQLite builds. Read it back the way recovery
+  // does: the lone file, in a directory nothing may write (2026-09-22).
+  it('leaves one self-contained file a read-only reader can open alone', async () => {
+    const root = tempRoot();
+    const source = join(root, 'production.db');
+    const destination = join(root, 'snapshot', 'store.db');
+    const writer = openWalFixture(source);
+    try {
+      await snapshotSqliteStore(source, destination);
+      expect(existsSync(destination + '-wal')).toBe(false);
+      expect(existsSync(destination + '-shm')).toBe(false);
+      // Bytes 18/19 of the header are the write/read version: 2 means WAL.
+      expect([...readFileSync(destination).subarray(18, 20)]).toEqual([1, 1]);
+
+      const offline = join(root, 'offline');
+      mkdirSync(offline);
+      copyFileSync(destination, join(offline, 'store.db'));
+      chmodSync(offline, 0o500);
+      try {
+        const reader = new Database(join(offline, 'store.db'), { readonly: true, fileMustExist: true });
+        try {
+          expect(reader.prepare('SELECT value FROM mature_state').pluck().all()).toEqual(['from-live-wal']);
+        } finally {
+          reader.close();
+        }
+      } finally {
+        chmodSync(offline, 0o700);
+      }
     } finally {
       writer.close();
     }

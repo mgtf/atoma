@@ -99,6 +99,12 @@ allow replacing an endpoint with a host-side symlink: do not use that shape.
 Tool requests remain concurrent and id-matched on the data channel, independent
 of serialized lifecycle RPC. Shared wire types live in `contracts/workerProtocol.ts`.
 
+The socket root is bounded: `<socketRoot>/<uuid>/w.sock` must fit `sun_path`
+(104 bytes on macOS/BSD, 108 on Linux), so a root over 56 bytes cannot hold a
+worker. `LauncherWorkers` refuses it at CONSTRUCTION and names the arithmetic,
+because bound late the protocol answers a coded `operation-failed` with no
+message and a root a few bytes too long reads as an engine fault (2026-09-22).
+
 One connection owns each worker and one worker owns each configured workspace.
 A lost data channel is terminal. Removal must be confirmed by the engine before
 network teardown or reuse; failed removal retains the workspace claim. Startup

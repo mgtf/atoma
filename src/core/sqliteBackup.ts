@@ -36,6 +36,7 @@ export async function snapshotSqliteStore(
   try {
     sourceHandle = new Database(source, { readonly: true, fileMustExist: true });
     await sourceHandle.backup(destination);
+    settleJournal(destination);
   } catch (err) {
     // A failed online backup may leave a partial destination; remove it so
     // the helper is safe to retry and never leaves a plausible-looking
@@ -47,4 +48,29 @@ export async function snapshotSqliteStore(
   } finally {
     sourceHandle?.close();
   }
+}
+
+/**
+ * Leave the snapshot in ROLLBACK mode, as ONE self-contained file.
+ *
+ * The online backup inherits the SOURCE's journal mode, and the product store
+ * runs in WAL. SQLite then refuses `mode=ro` on the copy unless it can create
+ * `-shm` beside it, which the offline reader cannot do on read-only media, and
+ * which newer SQLite builds refuse outright on a read-only connection
+ * (measured 2026-09-22: python 3.51.0 answers "unable to open database file"
+ * for a WAL-flagged snapshot carried alone). Recovery carries store.db ALONE —
+ * `scripts/restore-drill.py` copies that one file and opens it read-only — so a
+ * WAL-flagged snapshot is a backup nobody can read. Switching the COPY to
+ * DELETE checkpoints it and drops the sidecars; the source is untouched, and
+ * the product re-enables WAL when it next opens the restored store.
+ */
+function settleJournal(destination: string): void {
+  const snapshot = new Database(destination, { fileMustExist: true });
+  try {
+    snapshot.pragma('journal_mode = DELETE');
+  } finally {
+    snapshot.close();
+  }
+  rmSync(destination + '-wal', { force: true });
+  rmSync(destination + '-shm', { force: true });
 }

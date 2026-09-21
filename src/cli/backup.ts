@@ -241,6 +241,14 @@ function tarDirectory(sourceDir: string, outFile: string, excludes: readonly str
   const res = spawnSync('tar', args, {
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: 10 * 60 * 1000,
+    // COPYFILE_DISABLE: macOS bsdtar stores extended attributes as AppleDouble
+    // sidecars — an empty `skills/` carrying `com.apple.provenance` yields a
+    // top-level `._skills` member. `tar -tzf` HIDES those entries by merging
+    // them back, so the archive looks clean on the machine that wrote it, while
+    // any other reader sees them: `scripts/restore-drill.py` refuses `._skills`
+    // as an entry outside the tier root and the whole snapshot fails to
+    // restore. A backup that cannot be restored is not a backup (2026-09-22).
+    env: { ...process.env, COPYFILE_DISABLE: '1' },
   });
   if (res.status !== 0) {
     throw new Error(

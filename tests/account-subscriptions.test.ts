@@ -7,6 +7,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   unlinkSync,
@@ -185,7 +186,9 @@ let store: AuthStore;
 let services: AccountSubscriptionService[];
 
 beforeEach(() => {
-  temporaryRoot = mkdtempSync(path.join(tmpdir(), 'atoma-subscriptions-'));
+  // realpath: a stored profile reports the resolved home (ensurePrivateRoot),
+  // and macOS resolves tmpdir() through /var -> private/var.
+  temporaryRoot = realpathSync(mkdtempSync(path.join(tmpdir(), 'atoma-subscriptions-')));
   db = new Database(path.join(temporaryRoot, 'store.db'));
   store = new AuthStore(db);
   services = [];
