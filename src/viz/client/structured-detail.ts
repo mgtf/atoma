@@ -299,6 +299,20 @@ function entryRank(key: string, value: unknown): DetailRank {
 }
 
 /**
+ * An entry with NOTHING to show. A shell step records `stderr: ''` on every
+ * success, and the pane drew it as a labelled card with an empty body — an
+ * `Error output` heading over blank space, on the one result where the
+ * absence of an error is already stated by `Exit code 0` (2026-09-21).
+ *
+ * Only the EMPTY STRING qualifies. `null` and `undefined` still render as
+ * their "None" badge, because a key explicitly set to null is a fact about
+ * the payload; a key whose value is whitespace is not.
+ */
+function nothingToShow(value: unknown): boolean {
+  return typeof value === 'string' && value.trim() === '';
+}
+
+/**
  * One object's entries, most interesting first. STABLE: equal ranks keep
  * declaration order, which is what preserves the hand-composed
  * `[strategyDetails, planDetails]` pair and every other curated payload whose
@@ -310,10 +324,13 @@ function entryRank(key: string, value: unknown): DetailRank {
  * would describe a run that never happened.
  *
  * Ordering before the `maxNodes` slice also means truncation now sheds the
- * LEAST interesting entries rather than the last-declared ones.
+ * LEAST interesting entries rather than the last-declared ones. Nothing is
+ * dropped for being UNIMPORTANT; an entry with no content at all is dropped
+ * here, which is also why it never consumes a `maxNodes` slot.
  */
 function orderedEntries(value: Record<string, unknown>): [string, unknown][] {
   return Object.entries(value)
+    .filter(([, entry]) => !nothingToShow(entry))
     .map(([key, entry], index) => ({
       entry: [key, entry] as [string, unknown],
       index,

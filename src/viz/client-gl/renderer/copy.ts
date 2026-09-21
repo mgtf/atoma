@@ -246,13 +246,11 @@ export function gpuEventCardCopy(event: VizEvent, t: GpuTranslate): GpuEventCard
       .map((block) => t(`detail.enum.contextSource.${block.source}`))
       .join(' · ');
   } else if (event.kind === 'context') {
-    body = [
-      t(`detail.enum.contextSource.${scalar(event.source)}`),
-      event.skillId,
-      event.preview,
-    ]
-      .filter(Boolean)
-      .join(' · ');
+    // The INJECT itself, and nothing else. The source and the skill id are
+    // already the first two members of this kind's footer, and on the
+    // one-line card that duplication spent the whole body budget restating
+    // what the facts beside it were about to say (2026-09-21).
+    body = event.preview ?? '';
   } else if (event.kind === 'cache') {
     body = [scalar(event.outcome), event.reasoning].filter(Boolean).join(' · ');
   } else if (event.kind === 'registry' && !body) {

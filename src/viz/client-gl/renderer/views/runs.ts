@@ -92,9 +92,24 @@ const EVENT_TITLE_X = 11;
 const EVENT_DECISION_INSET = 118;
 const EVENT_COLUMN_GAP = 10;
 const EVENT_ACTOR_MIN_WIDTH = 64;
+/** Enough for `L1 CarbonDioxide`, the longest molecule name plus its tier. */
+const EVENT_ACTOR_MAX_WIDTH = 120;
 /** Mean advance of 11px bold in the UI face; only bounds the truncation. */
 const EVENT_TITLE_CHAR_PX = 6.4;
-/** Characters the card's second line can show at 9px across the pane. */
+/**
+ * The card is ONE LINE. It had two — title and actor above, body and footer
+ * below — which spent 64px of row on 37px of content and put about ten steps
+ * on a screen (owner request, 2026-09-21). Everything it says now shares one
+ * band, `TIMELINE_ROW_HEIGHT` is 40, and the detail pane — not the card — is
+ * where a step is read.
+ *
+ * Tops inside the resulting 30px card, each face's line box centred against
+ * the 11px title's: 11px is 14.85px of line box, 10px is 13.5, 9px is 12.15.
+ */
+const EVENT_TITLE_TOP = 7;
+const EVENT_DECISION_TOP = 8;
+const EVENT_ACTOR_TOP = 9;
+const EVENT_DETAIL_TOP = 9;
 
 /**
  * Roughly two lines of the 13px summary title at the right pane's width.
@@ -851,30 +866,28 @@ export function drawRuns(
       cardContent,
       truncate(copy.title, Math.max(8, Math.min(28, Math.floor(titleBudget / EVENT_TITLE_CHAR_PX)))),
       EVENT_TITLE_X,
-      6,
-      { size: 11, weight: '700', color: eventAccent(event) }
+      EVENT_TITLE_TOP,
+      { size: 11, weight: '700', color: eventAccent(event), singleLine: true }
     );
-    const rawMeta = copy.meta.replace(/(?: · )?⑂ [^ ·]+/g, '').trim();
-    const actor = rawMeta.split(' · ')[0] ?? '';
-    // Measured, not estimated: the estimate above only bounds the truncation.
-    const actorX = Math.max(118, EVENT_TITLE_X + titleLabel.width + EVENT_COLUMN_GAP);
-    const actorWidth = decisionX - actorX - EVENT_COLUMN_GAP;
-    if (actor && actorWidth >= EVENT_ACTOR_MIN_WIDTH) {
-      ctx.text(cardContent, truncate(actor, 28), actorX, 7, {
-        size: 9,
-        color: GPU_COLORS.muted,
-        width: actorWidth,
-      });
-    }
     if (copy.decision) {
-      ctx.text(cardContent, copy.decision, cardWidth - 118, 6, {
+      ctx.text(cardContent, copy.decision, decisionX, EVENT_DECISION_TOP, {
         size: 10,
         color: copy.decision.startsWith('✕') || copy.decision.startsWith('↑')
           ? GPU_COLORS.warning
           : GPU_COLORS.success,
         weight: '700',
+        singleLine: true,
       });
     }
+    const rawMeta = copy.meta.replace(/(?: · )?⑂ [^ ·]+/g, '').trim();
+    const actor = rawMeta.split(' · ')[0] ?? '';
+    // Measured, not estimated: the estimate above only bounds the truncation.
+    const actorX = Math.max(118, EVENT_TITLE_X + titleLabel.width + EVENT_COLUMN_GAP);
+    // The decision column is only RESERVED when there is a decision to draw;
+    // a tool card spends those 118px on its own facts instead.
+    const detailRight = copy.decision
+      ? decisionX - EVENT_COLUMN_GAP
+      : cardWidth - EVENT_TITLE_X;
     // The FOOTER is never the part that gets cut. It carries the facts the
     // card exists to report — served model, tokens, cache read, cost — while
     // the body is prose that survives truncation gracefully. Truncating the
@@ -885,14 +898,35 @@ export function drawRuns(
     // the next fixed-height card. Reserve measured space for the footer.
     const footer = copy.footer.replace(/\s+/g, ' ').trim();
     const body = copy.body.replace(/\s+/g, ' ').trim();
-    const detailWidth = Math.max(0, cardWidth - 22);
-    const bodyBudget = Math.max(0, detailWidth - ctx.measureText(
-      footer ? ` · ${footer}` : '', { size: 9 }
-    ));
+    const footerAdvance = ctx.measureText(footer ? ` · ${footer}` : '', { size: 9 });
+    // Priority on the single line: the title, then the footer's facts, then
+    // the actor, then the body. The molecule is named again in the atom lanes
+    // and in the detail pane, so the actor yields to the numbers — but it
+    // outranks the prose, which truncates gracefully and never disappears
+    // without the ellipsis saying so.
+    const actorRoom = Math.min(
+      EVENT_ACTOR_MAX_WIDTH,
+      detailRight - actorX - footerAdvance - EVENT_COLUMN_GAP
+    );
+    const actorText =
+      actor && actorRoom >= EVENT_ACTOR_MIN_WIDTH
+        ? ctx.fitText(actor, actorRoom, { size: 9 })
+        : '';
+    let detailX = actorX;
+    if (actorText) {
+      const actorLabel = ctx.text(cardContent, actorText, actorX, EVENT_ACTOR_TOP, {
+        size: 9,
+        color: GPU_COLORS.muted,
+        singleLine: true,
+      });
+      detailX = actorX + actorLabel.width + EVENT_COLUMN_GAP;
+    }
+    const detailWidth = Math.max(0, detailRight - detailX);
+    const bodyBudget = Math.max(0, detailWidth - footerAdvance);
     const detail = [ctx.fitText(body, bodyBudget, { size: 9 }), footer]
       .filter(Boolean)
       .join(' · ');
-    ctx.text(cardContent, detail, 11, 25, {
+    ctx.text(cardContent, detail, detailX, EVENT_DETAIL_TOP, {
       size: 9,
       color: event.error ? GPU_COLORS.error : GPU_COLORS.muted,
       width: detailWidth,
@@ -1433,10 +1467,42 @@ function drawEventDetail(
         width: width - 36,
       }
     );
-    ctx.text(ctx.root, event.preview ?? '', x + 18, y + 142, {
-      size: 10,
-      color: GPU_COLORS.muted,
-      width: width - 36,
+    // The injected text used to be drawn straight onto the pane at a fixed y,
+    // with no mask and no scroll, so anything past the pane's bottom edge was
+    // simply gone — while the `chars` count beside it announced how much
+    // (2026-09-21). It now shares the scrolled, masked layer every other kind
+    // uses, and mono, because this is the literal tail of a system prompt.
+    const contextTop = y + 140;
+    const contextBottom = y + height - 14;
+    const contextHeight = Math.max(40, contextBottom - contextTop);
+    ctx.detailBounds = new Rectangle(x + 12, contextTop - 6, width - 24, contextHeight + 6);
+    const contextLayer = new Container();
+    contextLayer.label = `event-detail:${event.id}`;
+    contextLayer.position.y = -ctx.detailScrollY;
+    ctx.root.addChild(contextLayer);
+    contextLayer.mask = ctx.detailMask(x + 12, contextTop - 6, width - 24, contextHeight + 6);
+    const contextText = ctx.text(
+      contextLayer,
+      truncate(event.preview ?? '', DETAIL_RAW_VALUE_CAP),
+      x + 18,
+      contextTop,
+      {
+        size: 10,
+        mono: true,
+        color: DETAIL_VALUE_COLOR,
+        width: width - 42,
+      }
+    );
+    ctx.detailScrollMax = Math.max(0, contextTop + contextText.height - contextBottom + 8);
+    ctx.detailScrollY = Math.min(ctx.detailScrollY, ctx.detailScrollMax);
+    contextLayer.position.y = -ctx.detailScrollY;
+    drawScrollbarThumb(ctx.root, {
+      x,
+      y: contextTop,
+      width,
+      height: contextHeight,
+      scrollY: ctx.detailScrollY,
+      maxScroll: ctx.detailScrollMax,
     });
     return;
   }

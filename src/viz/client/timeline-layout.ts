@@ -2,7 +2,14 @@ import type { EventFilters } from './run-utils.js';
 import { filterEvents } from './run-utils.js';
 import type { VizEvent } from './types.js';
 
-export const TIMELINE_ROW_HEIGHT = 64;
+/**
+ * Row pitch for one event. The card is 10px shorter than the row, so this is
+ * a 30px card: one line of title, actor, facts and decision. It was 64 for
+ * the two-line card the GPU client drew until 2026-09-21, which spent 27px of
+ * every row on air. Connector geometry and the virtualised window read this
+ * number rather than restating it.
+ */
+export const TIMELINE_ROW_HEIGHT = 40;
 
 export interface TimelineBranch {
   readonly id: string;

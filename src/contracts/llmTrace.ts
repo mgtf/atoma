@@ -25,7 +25,17 @@ export const LLM_CALL_ROLES = [
 
 export type LlmCallRole = (typeof LLM_CALL_ROLES)[number];
 
-export const CONTEXT_PREVIEW_CHARS = 160;
+/**
+ * How much of a context block the citation carries. 160 characters made the
+ * viz pane's `context` step unreadable — a 1,167-character skill recipe was
+ * cut mid-sentence, and the step exists precisely so a viewer can see what
+ * the model was shown (2026-09-21). 2,000 covers a recipe or a coaching note
+ * whole while keeping the citation a CITATION: a longer block is still
+ * truncated with an ellipsis, and the block itself lives in the skill store.
+ * One context event is recorded per distinct block per run, so the bound on a
+ * trace is the run's distinct injects, not its calls.
+ */
+export const CONTEXT_PREVIEW_CHARS = 2000;
 
 export interface ContextBlock {
   readonly id: string;

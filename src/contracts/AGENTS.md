@@ -75,6 +75,15 @@ Neighbours:
   `src/projects` modules and a value edge back would close a subsystem cycle;
   it is allowed here for the same reason `runStats.ts` holds its own parser,
   and because no model-authored payload ever enters it.
+- `llmTrace.ts` CITES model-visible context, it does not copy it:
+  `citeContext` records a block's source, its true `chars` and a preview
+  capped at `CONTEXT_PREVIEW_CHARS`, and the same id is cited on the `llm`
+  event. The cap is 2,000 — raised from 160 because the viz `context` step
+  exists so a viewer can read what the model was shown, and 160 cut a
+  1,167-character recipe mid-sentence (2026-09-21). It stays a CAP: a longer
+  block is still truncated with an ellipsis, and one event is recorded per
+  distinct block per run, so a trace grows with a run's injects rather than
+  with its calls.
 - A trace's SIZE is a function of how much work the run did (~19KB per tool
   call, measured). Never bound it with a constant: a 512KB cap recorded
   delivered run `2857a579` as `failed`. Bound the PROJECTION instead — the

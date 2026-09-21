@@ -5051,7 +5051,8 @@ describe('drawRuns behavior', () => {
     const ctx = createRecordingCtx();
     drawRuns(ctx, makeSnapshot({}, { run: makeRun(events) }), WIDTH, HEIGHT);
 
-    const opts = (text: RecordedText) => (text.options ?? {}) as { weight?: string; size?: number };
+    const opts = (text: RecordedText) =>
+      (text.options ?? {}) as { weight?: string; size?: number; width?: number };
     const inCards = ctx.texts.filter((text) =>
       ctx.eventCards.some((card) => card.content === text.parent));
 
@@ -5061,7 +5062,12 @@ describe('drawRuns behavior', () => {
     const title = inCards.find((text) => text.value.includes('reverify_recorded_probe'));
     expect(title, 'fixture must produce the long title').toBeDefined();
     const sameCard = inCards.filter((text) => text.parent === title!.parent);
-    const actor = sameCard.find((text) => opts(text).size === 9 && text.y === 7);
+    // The card is one line, so the actor and the facts line share a y. Only
+    // the facts line is given a measured `width`, which is what tells them
+    // apart without pinning this test to a pixel.
+    const actor = sameCard.find(
+      (text) => opts(text).size === 9 && opts(text).width === undefined
+    );
     expect(actor, 'the card must draw an actor for this to mean anything').toBeDefined();
 
     // The stub measures a label at size * 0.58 per character.
@@ -5088,7 +5094,8 @@ describe('drawRuns behavior', () => {
     drawRuns(ctx, makeSnapshot({}, { run: makeRun(events) }), WIDTH, HEIGHT);
 
     const detail = ctx.texts.find((text) =>
-      ctx.eventCards.some((card) => card.content === text.parent) && text.y === 25);
+      ctx.eventCards.some((card) => card.content === text.parent) &&
+      typeof (text.options as { width?: number } | undefined)?.width === 'number');
     expect(detail, 'the card must draw a detail line').toBeDefined();
     expect(detail!.value).toContain('cache 177k');
     expect(detail!.value).toContain('$');
@@ -5106,7 +5113,8 @@ describe('drawRuns behavior', () => {
       const ctx = createRecordingCtx();
       drawRuns(ctx, makeSnapshot({}, { run: makeRun([event]) }), width, HEIGHT);
       const detail = ctx.texts.find((text) =>
-        ctx.eventCards.some((card) => card.content === text.parent) && text.y === 25);
+        ctx.eventCards.some((card) => card.content === text.parent) &&
+        typeof (text.options as { width?: number } | undefined)?.width === 'number');
       expect(detail).toBeDefined();
       expect(detail!.value).not.toMatch(/[\r\n]/);
       expect(detail!.value).toContain('43ms');
@@ -6005,7 +6013,7 @@ describe('drawRuns — paired detail fields', () => {
     return detailTexts(ctx).find((entry) => entry.value === value);
   }
 
-  it('pairs two small detail fields onto one row, half the card width apart', () => {
+  it('packs three small detail fields onto one row, a column apart', () => {
     const ctx = createRecordingCtx();
     drawRuns(
       ctx,
@@ -6017,22 +6025,24 @@ describe('drawRuns — paired detail fields', () => {
       HEIGHT
     );
 
+    const status = labelAt(ctx, 'Status');
     const path = labelAt(ctx, 'Path');
     const bytes = labelAt(ctx, 'Bytes');
+    expect(status).toBeDefined();
     expect(path).toBeDefined();
     expect(bytes).toBeDefined();
-    // Same band…
-    expect(bytes!.y).toBe(path!.y);
-    // …and the second card starts beyond the first column's right edge.
+    // One band: a verdict badge no longer owns a row of its own.
+    expect(path!.y).toBe(status!.y);
+    expect(bytes!.y).toBe(status!.y);
+    // Three columns, in the projection's own order, left to right.
     const pane = runsPaneLayout(WIDTH);
     const nodeWidth = detailNodeWidth(pane.rightWidth - 42, 1);
-    const columnWidth = detailColumnWidth(nodeWidth);
+    const columnWidth = detailColumnWidth(nodeWidth, 3);
+    expect(columnWidth).toBeGreaterThanOrEqual(DETAIL_CARD_MIN_WIDTH);
+    expect(path!.x - status!.x).toBeGreaterThanOrEqual(columnWidth);
     expect(bytes!.x - path!.x).toBeGreaterThanOrEqual(columnWidth);
-    expect(bytes!.x - path!.x).toBeLessThanOrEqual(nodeWidth - columnWidth);
-    // The verdict still leads, above both of them.
-    const status = labelAt(ctx, 'Status');
-    expect(status).toBeDefined();
-    expect(status!.y).toBeLessThan(path!.y);
+    // The last card is flush with the right edge a full-width card would have.
+    expect(bytes!.x - status!.x).toBe(nodeWidth - columnWidth);
   });
 
   it('keeps a value too long to share a line on its own full-width row', () => {
