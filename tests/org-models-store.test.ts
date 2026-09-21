@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { createSecretKey } from 'node:crypto';
 import { afterAll, describe, expect, it } from 'vitest';
 import { AuthStore } from '../src/auth/store.js';
+import { armStarterChatGptPins } from '../src/auth/accountModels.js';
+import type { PlatformEventInput } from '../src/contracts/platformEvents.js';
 import {
   resolveSecretEncryption,
   type SecretEncryptionContext,
@@ -82,6 +84,88 @@ describe('organisation tier model defaults', () => {
     expect(() =>
       store.setOrgTierModels('no-such-org', { l1: null, l2: null, l3: null })
     ).toThrow(/organisation not found/);
+  });
+});
+
+describe('the starter ChatGPT pins armed when a subscription connects', () => {
+  function member(store: AuthStore): { principalId: string; orgId: string } {
+    const outcome = store.completeLogin(
+      {
+        provider: 'github',
+        subject: `starter-${Math.random()}`,
+        displayName: 'Member',
+        email: null,
+        emailVerified: false,
+      },
+      null
+    )!;
+    return { principalId: outcome.viewer.principalId, orgId: outcome.viewer.orgId };
+  }
+
+  it('fills the three tiers and journals the spending it armed', () => {
+    const store = freshStore('starter-empty.db');
+    const who = member(store);
+    const events: PlatformEventInput[] = [];
+
+    const pins = armStarterChatGptPins(store, who, {}, (event) => events.push(event), 'gpt-5.6-terra');
+
+    expect(pins).toEqual({
+      l1: 'own:openai:gpt-5.6-terra',
+      l2: 'own:openai:gpt-5.6-terra',
+      l3: 'own:openai:gpt-5.6-terra',
+    });
+    // Persisted, not merely returned: the next run reads the store.
+    expect(store.modelPins(who.principalId)).toEqual(pins);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      kind: 'principal.subscription_pin',
+      actorId: who.principalId,
+      orgId: who.orgId,
+      detail: { tiers: ['l1', 'l2', 'l3'], automatic: true },
+    });
+    // Non-secret choices only — a journal row never carries credentials.
+    expect(JSON.stringify(events)).not.toContain('auth.json');
+  });
+
+  it('never displaces an account, organisation or host value', () => {
+    const accountStore = freshStore('starter-account.db');
+    const chose = member(accountStore);
+    accountStore.setModelPins(chose.principalId, {
+      l1: null,
+      l2: 'api:anthropic:claude-sonnet-5',
+      l3: null,
+    });
+    const accountEvents: PlatformEventInput[] = [];
+    expect(
+      armStarterChatGptPins(accountStore, chose, {}, (event) => accountEvents.push(event), 'gpt-5.6-terra')
+    ).toBeNull();
+    expect(accountStore.modelPins(chose.principalId).l2).toBe('api:anthropic:claude-sonnet-5');
+    expect(accountEvents).toHaveLength(0);
+
+    const orgStore = freshStore('starter-org.db');
+    const inOrg = member(orgStore);
+    orgStore.setOrgTierModels(inOrg.orgId, { l1: 'api:zai:glm-4.5-air', l2: null, l3: null });
+    expect(armStarterChatGptPins(orgStore, inOrg, {}, () => undefined, 'gpt-5.6-terra')).toBeNull();
+    expect(orgStore.modelPins(inOrg.principalId)).toEqual({ l1: null, l2: null, l3: null });
+
+    const hostStore = freshStore('starter-host.db');
+    const onHost = member(hostStore);
+    expect(
+      armStarterChatGptPins(
+        hostStore,
+        onHost,
+        { ATOMA_MODEL_L3: 'api:anthropic:claude-opus-5' },
+        () => undefined
+      )
+    ).toBeNull();
+    expect(hostStore.modelPins(onHost.principalId)).toEqual({ l1: null, l2: null, l3: null });
+  });
+
+  it('is idempotent: the pins it armed are themselves a configuration', () => {
+    const store = freshStore('starter-twice.db');
+    const who = member(store);
+    expect(armStarterChatGptPins(store, who, {}, () => undefined, 'gpt-5.6-terra')).not.toBeNull();
+    expect(armStarterChatGptPins(store, who, {}, () => undefined, 'gpt-5.6-terra')).toBeNull();
   });
 });
 

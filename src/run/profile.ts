@@ -46,8 +46,9 @@ export interface TaskProfileGuidance {
 }
 
 export interface TaskProfile {
-  /** Operator-selected depth pilot. The floor is fixed before either planner runs. */
+  /** Supervision depth policy. The floor is fixed before either planner runs. */
   readonly depthExperiment?: {
+    readonly defaultMode?: import('../contracts/depthRouting.js').DepthMode;
     readonly floor: import('../contracts/depthRouting.js').ProofFloor;
     entryCell(ctx: ProfileSeedContext): AtomType;
   };

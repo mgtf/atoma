@@ -8,6 +8,7 @@ import { applyDocumentLocale } from '../client/i18n-catalog.js';
 import type { EventFilters } from '../client/run-utils.js';
 import type { SceneCameraMode } from './scene-camera.js';
 import type { DocsThemeKey } from './docs-content.js';
+import { isHandheldDevice } from './handheld.js';
 
 export { DOC_THEMES, type DocsThemeKey } from './docs-content.js';
 
@@ -55,10 +56,9 @@ export const ADMIN_VIEWS: readonly ViewName[] = [
  * - Gate off (`auth` null): the classic operator developer path — every
  *   instance surface, no admin plane (there are no organisations to manage).
  * - Gated platform admin: everything, plus the admin plane.
- * - Gated member: org-scoped surfaces only. Registry, skills and burn-in are
- *   instance-global operator state; the server 403s them for non-admins, so
- *   offering the tabs would poison the global data error the way the
- *   ungated /api/projects 404 once did.
+ * - Gated member: org-scoped work plus the two platform commons — the Registry
+ *   (the one platform registry every run reads and earns on) and the
+ *   Skills catalog. Burn-in remains private operator state.
  *
  * There is no `launch` tab: a tab that could only DESCRIBE how to phrase a
  * goal, beside a Projects tab that actually starts runs, split one job over
@@ -71,7 +71,7 @@ export function visibleViews(auth: { viewer: { platformAdmin: boolean } } | null
   if (auth.viewer.platformAdmin) {
     return ['projects', 'runs', 'registry', 'skills', 'burnin', 'docs', ...ADMIN_VIEWS];
   }
-  return ['projects', 'runs', 'docs'];
+  return ['projects', 'runs', 'registry', 'skills', 'docs'];
 }
 
 /**
@@ -221,6 +221,16 @@ export interface GpuUiState {
    */
   entered: boolean;
   /**
+   * The visitor's device has only coarse, hover-less pointers — a phone or a
+   * tablet. ONE sample of `isHandheldDevice()`, refreshed when its media
+   * query changes. Layout only: mobile uses ordinary product admission.
+   */
+  handheld: boolean;
+  handheldAccepted: boolean;
+  acceptHandheld: () => void;
+  /** Continue was pressed on a handheld device: the control re-labels and disables. */
+  handheldBlocked: boolean;
+  /**
    * The account menu behind the header orb. Not a view: it is an overlay drawn
    * above every view, and it closes on navigation so it can never outlive the
    * screen it was opened from.
@@ -242,6 +252,10 @@ export interface GpuUiState {
   showWelcome: () => void;
   /** Crystal route: focused content restores overview; overview opens Welcome. */
   activateCrystal: () => void;
+  /** Live media-query sample. Becoming handheld throws the visitor back behind the gate. */
+  setHandheld: (handheld: boolean) => void;
+  /** The handheld gate's only transition; `enter()` takes it on a handheld device. */
+  blockHandheld: () => void;
   toggleAccountMenu: () => void;
   closeAccountMenu: () => void;
   toggleLocaleMenu: () => void;
@@ -347,6 +361,16 @@ function viewChange(
   };
 }
 
+/** Sampled once at load; GpuApp refreshes the store when the media query flips. */
+const HANDHELD_AT_LOAD = isHandheldDevice();
+function initialHandheldAccepted(): boolean {
+  try {
+    return typeof sessionStorage !== 'undefined' && sessionStorage.getItem('atoma.viz.handheldAccepted') === '1';
+  } catch {
+    return false;
+  }
+}
+
 export const useGpuStore = create<GpuUiState>()((set) => ({
   // The app opens on PROJECTS: it is the authenticated launch surface. Runs
   // is where you go to watch what you started, a second step rather than the
@@ -403,6 +427,17 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
     settings: 0,
   },
   entered: initialEntered(),
+  handheld: HANDHELD_AT_LOAD,
+  handheldAccepted: initialHandheldAccepted(),
+  acceptHandheld: () => {
+    try {
+      sessionStorage.setItem('atoma.viz.handheldAccepted', '1');
+    } catch {
+      // Acceptance still works when storage is unavailable.
+    }
+    set({ handheldAccepted: true, handheldBlocked: false });
+  },
+  handheldBlocked: false,
   accountMenuOpen: false,
   localeMenuOpen: false,
   notificationsMenuOpen: false,
@@ -435,6 +470,8 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
         localeMenuOpen: false,
         notificationsMenuOpen: false,
       }),
+  setHandheld: (handheld) => set({ handheld }),
+  blockHandheld: () => set({ handheldBlocked: true }),
   // The three chrome menus are exclusive: opening one closes the others, so
   // two overlays can never contest the same corner of the header.
   toggleAccountMenu: () => set((state) => ({

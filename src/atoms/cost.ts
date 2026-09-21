@@ -40,7 +40,7 @@ function envThreshold(name: string, fallback: number): number {
   return Number.isInteger(n) && n > 0 ? n : fallback;
 }
 
-/** Successes (with zero failures) before a type/skill skips validation. */
+/** Consecutive successes for types; clean lifetime successes for skills. */
 export function trustThreshold(): number {
   return envThreshold('ATOMA_TRUST_THRESHOLD', TRUST_THRESHOLD_SUCCESSES);
 }
@@ -175,11 +175,11 @@ export function postApprovalSignal(): AbortSignal {
 export const STRATEGY_MAX_TOKENS = 8000;
 
 export function shouldTrustType(type: AtomType): boolean {
-  return type.failures === 0 && type.successes >= trustThreshold();
+  return type.consecutiveSuccesses >= trustThreshold();
 }
 
 /**
- * Same trust contract, applied to a SKILL's own counters. Gates the
+ * Skills retain their own clean-lifetime trust contract. Gates the
  * deterministic dispatch of `kind: 'script'` skills in `L2.runSubtask`:
  * a trusted script runs via write_file + run_shell with ZERO LLM calls
  * (no L1 plan/execute, no validators). Note that promotion already
@@ -195,7 +195,7 @@ export function shouldTrustSkill(skill: { successes: number; failures: number })
 export function trustedApproval(type: AtomType): PositiveVerdict {
   return {
     approved: true,
-    reasoning: `trust fast-path: ${type.name} has ${type.successes} successes / ${type.failures} failures`,
+    reasoning: `trust fast-path: ${type.name} has ${type.consecutiveSuccesses} consecutive successes (${type.successes} successes / ${type.failures} failures in history)`,
   };
 }
 

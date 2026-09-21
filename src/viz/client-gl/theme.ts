@@ -14,7 +14,15 @@ export const GPU_COLORS = {
   panelHover: 0x2b4668,
   border: 0x426386,
   text: 0xe6edf7,
-  muted: 0x8a96ae,
+  /**
+   * Secondary text. Was 0x8a96ae: about 5.5:1 against the card fills, which
+   * passes the WCAG bar for BODY copy and misses badly for what this token is
+   * actually spent on — 8 and 9px facts lines, the densest and most-read text
+   * in the client (owner report, 2026-09-21: "le gris du texte est
+   * illisible"). 0xa8b4cc lifts that to ~7.9:1 while staying clearly below
+   * `text`, so the two-level hierarchy this token exists for survives.
+   */
+  muted: 0xa8b4cc,
   primary: 0x6ea8ff,
   success: 0x4ade80,
   warning: 0xfbbf24,
@@ -51,6 +59,12 @@ export const GPU_LAYOUT = {
   sidebarFocusButtonWidth: 44,
   /** Narrowest the rail may become before its labels stop being legible. */
   sidebarMinWidth: 112,
+  /**
+   * The rail a phone gets: one icon tile plus its pad, with no label column
+   * at all. Below the labelled floor a label had 20px to live in and rendered
+   * as an ellipsis, so the rail drops labels rather than clipping them.
+   */
+  sidebarCompactWidth: 56,
   /** Preserve this much view space by shrinking the rail on narrow windows. */
   contentMinWidth: 320,
   gap: 10,
@@ -68,6 +82,9 @@ export const GPU_LAYOUT = {
 export function sidebarWidthForViewport(
   viewportWidth: number
 ): number {
+  if (sidebarIsCompactForViewport(viewportWidth)) {
+    return Math.max(0, Math.min(viewportWidth, GPU_LAYOUT.sidebarCompactWidth));
+  }
   return Math.max(
     0,
     Math.min(
@@ -76,4 +93,18 @@ export function sidebarWidthForViewport(
       Math.max(GPU_LAYOUT.sidebarMinWidth, viewportWidth - GPU_LAYOUT.contentMinWidth)
     )
   );
+}
+
+/**
+ * The widest viewport that cannot hold BOTH the labelled rail at its floor
+ * and the content minimum. From here down the rail is icon tiles only, in
+ * overview as well as focus; `--gpu-sidebar`'s media query mirrors this
+ * exact boundary.
+ */
+export const SIDEBAR_COMPACT_MAX_VIEWPORT =
+  GPU_LAYOUT.sidebarMinWidth + GPU_LAYOUT.contentMinWidth - 1;
+
+/** A phone-width viewport: the rail shows icons, never a clipped label. */
+export function sidebarIsCompactForViewport(viewportWidth: number): boolean {
+  return viewportWidth <= SIDEBAR_COMPACT_MAX_VIEWPORT;
 }

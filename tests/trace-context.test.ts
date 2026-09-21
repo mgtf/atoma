@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { citeContext, foldContextBlocks } from '../src/contracts/llmTrace.js';
+import {
+  CONTEXT_PREVIEW_CHARS,
+  citeContext,
+  foldContextBlocks,
+} from '../src/contracts/llmTrace.js';
 import { L1Atom } from '../src/atoms/L1Atom.js';
 import { RecordingLlmClient } from '../src/viz/recordingLlm.js';
 import { TraceRecorder } from '../src/viz/trace.js';
@@ -53,14 +57,18 @@ describe('context fold', () => {
   });
 
   it('keeps a citation smaller than the body the model saw', () => {
+    // Sized off the contract, not a literal: the cap rose to 2,000 so the
+    // viz `context` step could show a whole skill recipe, and a test that
+    // restated the old number would have looked like a policy change.
+    const body = CONTEXT_PREVIEW_CHARS * 2;
     const cited = citeContext({
       id: 'c1',
       source: 'fallback-trace',
-      text: 'x'.repeat(400),
+      text: 'x'.repeat(body),
     });
-    expect(cited.chars).toBe(400);
+    expect(cited.chars).toBe(body);
     expect(cited.preview.endsWith('…')).toBe(true);
-    expect(cited.preview.length).toBeLessThan(400);
+    expect(cited.preview.length).toBeLessThan(body);
   });
 });
 

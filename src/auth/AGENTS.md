@@ -56,6 +56,10 @@ Loopback HTTP keeps its development cookie names and paths.
   implementation before this capability may be enabled there.
 - Codex login uses the official app-server device-code account methods. Pending
   attempts are bounded, memory-only and self-scoped from the resolved session.
+  A completed login is verified with a bounded settle window: released Codex
+  (≤0.154) notifies `account/login/completed` BEFORE reloading its auth cache,
+  so the first `account/read` may report no account. Retry until `account/updated`
+  or the window closes; never fail on the first empty read (2026-09-15).
   A run resolves the exact current generation from its requesting principal;
   disconnection deletes the receipt first and never falls back to the host.
   App-server access shares the same per-`CODEX_HOME` lease as run calls. The
@@ -65,6 +69,17 @@ Loopback HTTP keeps its development cookie names and paths.
   is reaped. Status verification shares the bounded app-server process budget.
   Startup removes only safe UUID generations absent from the receipt set, so a
   crash cannot leave an unbounded credential-bearing staging corpus.
+- Connecting a personal subscription ARMS the three tier pins when, and only
+  when, no level of the chain (account pin > org default > host env) resolves
+  any tier: that member could not launch a run at all, and the account choice
+  is itself the authorization to spend. `armStarterChatGptPins` owns the rule
+  and journals it under the manual kind with `automatic: true`. Never let it
+  overwrite a value, and never arm the HOST's login from it.
+- Personal ChatGPT models come from app-server `model/list` in that exact
+  private generation. The bounded five-minute cache is keyed by principal and
+  generation; refresh failure exposes stale data without authorizing new pins.
+  Launch refreshes the inventory before spend. No static fallback or model
+  substitution. Empty accounts start with the provider-reported default only.
 - Personal Claude/claude.ai login is unavailable until Anthropic grants the
   third-party approval its SDK terms require. Keep that a server-owned disabled
   capability, not a client flag or an emulated OAuth flow.

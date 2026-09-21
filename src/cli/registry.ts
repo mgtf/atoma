@@ -11,11 +11,13 @@
  */
 
 import { openDb } from '../registry/db.js';
+import { setLedgerScope } from '../core/ledger.js';
 import { skillsDirPath, storeDbPath } from '../core/stores.js';
 import { SkillRegistry } from '../skills/registry.js';
 import { parseCliArgs } from './args.js';
 import { AtomRegistry, type AtomType } from '../registry/atomRegistry.js';
 import type { Tier } from '../core/types.js';
+import { shouldTrustType, trustThreshold } from '../atoms/cost.js';
 
 import { taxonomyForTier } from '../core/taxonomy.js';
 import { elementForTool } from '../contracts/toolTaxonomy.js';
@@ -98,6 +100,8 @@ function formatType(t: AtomType): string[] {
     `v${t.version}`,
     String(t.successes),
     String(t.failures),
+    String(t.consecutiveSuccesses),
+    shouldTrustType(t) ? 'yes' : 'no',
     t.successes + t.failures === 0
       ? '—'
       : ((t.successes / (t.successes + t.failures)) * 100).toFixed(0) + '%',
@@ -115,6 +119,8 @@ const tableHeaders = [
   'v',
   'succ',
   'fail',
+  'streak',
+  'trusted',
   'ratio',
   'created_by',
   'created_at',
@@ -180,6 +186,9 @@ function cmdShow(registry: AtomRegistry, name: string, dbPath: string): void {
   console.log(`  created at  : ${type.createdAt}`);
   console.log(`  successes   : ${type.successes}`);
   console.log(`  failures    : ${type.failures}`);
+  console.log(`  trust streak: ${type.consecutiveSuccesses}/${trustThreshold()} consecutive approved final results`);
+  console.log(`  trusted     : ${shouldTrustType(type) ? 'yes' : 'no'}`);
+  console.log('  history     : success/failure totals survive behavior changes; behavior changes reset the trust streak.');
   console.log(
     `  elements    : ${
       type.tools
@@ -407,7 +416,8 @@ function help(): void {
                                 "Mario platformer" even though the system
                                 prompt now targets Minesweeper). Wraps a
                                 patch with descriptionReplace; the type
-                                version is bumped and counters are reset.
+                                version is bumped, while historical totals
+                                and the trust streak are preserved.
   rebrand <name>              — align the "You are <Name>…" first line of
     | rebrand --all             the systemPrompt with the agent's actual
                                 taxonomy name. Fixes seeds that
@@ -424,7 +434,8 @@ function help(): void {
   rollback <name> --to <v>    — restore an archived version's content as a
                                 NEW live version (roll-forward: history
                                 stays append-only, version keeps rising,
-                                counters reset — the restored behaviour
+                                trust streak resets, totals are preserved;
+                                the restored behaviour
                                 re-earns trust). Prompt/tools/params are
                                 restored exactly; description is not
                                 versioned and is kept as-is.
@@ -457,7 +468,7 @@ function cmdHistory(registry: AtomRegistry, name: string): void {
     console.log(`      prompt: ${head}…  tools: ${v.tools.map((t) => t.name).join(', ') || '(none)'}`);
   }
   console.log(
-    `  v${live.version}  (LIVE)  ✓${live.successes}/✗${live.failures}\n` +
+    `  v${live.version}  (LIVE)  ✓${live.successes}/✗${live.failures}; trust streak ${live.consecutiveSuccesses}/${trustThreshold()}\n` +
       `      prompt: ${live.systemPrompt.split('\n')[0]?.slice(0, 70)}…\n\n` +
       `rollback with: registry rollback ${name} --to <version>`
   );
@@ -482,7 +493,8 @@ function cmdRollback(registry: AtomRegistry, name: string, toRaw: string | undef
     }
     console.log(
       `${name}: restored v${to} content as NEW live v${after.version} (was v${before.version}).\n` +
-        `  counters reset ${before.successes}/${before.failures} → 0/0 — the restored type re-earns trust.\n` +
+        `  trust streak reset ${before.consecutiveSuccesses} → ${after.consecutiveSuccesses}; historical totals kept at ${after.successes}/${after.failures}.\n` +
+        `  the restored type re-earns trust after ${trustThreshold()} consecutive approved final results.\n` +
         `  description is not versioned and was kept as-is.`
     );
     if (/^bootstrap-/.test(after.createdBy)) {
@@ -512,7 +524,10 @@ function main(): void {
   const dbPath = dbPathFrom(args.flags);
   const db = openDb(dbPath);
   const registry = new AtomRegistry(db);
-  const skills = new SkillRegistry(skillsDirPath());
+  // Skill trust lives in the same store as the atoms (W4): one `--db`, one file.
+  const skills = new SkillRegistry(skillsDirPath(), { db });
+  // Whatever this process appends to the lifecycle ledger, the CLI did it.
+  setLedgerScope({ actorType: 'cli' });
 
   switch (args.command) {
     case 'list':

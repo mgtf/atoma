@@ -286,7 +286,23 @@ describe('GPU authentication controls', () => {
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/'));
   });
 
-  it('keeps the account control available when logout fails', async () => {
+  it('signs out before requesting the provider account picker', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        authenticated: true, displayName: 'Grace Hopper', role: 'org:member',
+      }))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }));
+    const { navigate } = renderControls(fetchMock);
+    const user = userEvent.setup();
+    await openAccountMenu(user);
+    await user.click(screen.getByRole('button', { name: 'Switch account' }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/auth/logout', {
+      method: 'POST', credentials: 'same-origin', headers: { accept: 'text/html' },
+    });
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/auth/login?select_account=1'));
+  });
+
+  it.each(['Sign out', 'Switch account'])('keeps the account control available when %s fails', async (action) => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
         authenticated: true,
@@ -298,7 +314,7 @@ describe('GPU authentication controls', () => {
     const user = userEvent.setup();
 
     await openAccountMenu(user);
-    await user.click(await screen.findByRole('button', { name: 'Sign out' }));
+    await user.click(await screen.findByRole('button', { name: action }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Account action failed');
     expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();

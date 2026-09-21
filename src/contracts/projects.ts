@@ -1,6 +1,15 @@
 import { z } from 'zod';
 import { runStatsSchema } from './runStats.js';
 
+/** Zero suspends admission; the host still has one global run slot. */
+export const orgRunLimitSchema = z.number().int().min(0).max(1);
+export const orgRunCapacitySchema = z.object({
+  maxConcurrent: orgRunLimitSchema,
+  active: z.number().int().nonnegative(),
+  globalMaxConcurrent: z.literal(1),
+});
+export type OrgRunCapacity = z.infer<typeof orgRunCapacitySchema>;
+
 function hasAsciiControl(value: string): boolean {
   return [...value].some((character) => {
     const code = character.charCodeAt(0);
@@ -227,6 +236,8 @@ export const projectRunHostPathsSchema = z
     workspacePath: z.string().min(1).max(4_096),
     runsPath: z.string().min(1).max(4_096),
     logPath: z.string().min(1).max(4_096),
+    /** Global catalog selected by the host; absent on legacy run receipts. */
+    skillsPath: z.string().min(1).max(4_096).optional(),
   })
   .strict();
 
@@ -302,6 +313,7 @@ export const projectRunSchema = z
     goal: projectGoalSchema,
     status: projectRunStatusSchema,
     hostPaths: projectRunHostPathsSchema,
+    bytesExpiredAt: instantSchema.nullable().optional(),
     repositoryBase: repositoryRunBaseSchema.optional(),
     traceId: z.string().min(1).max(255).nullable(),
     stats: runStatsSchema.nullable(),

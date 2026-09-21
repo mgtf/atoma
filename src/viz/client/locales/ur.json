@@ -1127,5 +1127,18 @@
   "depth.entry.deep": "ایسی بافت سے آغاز کریں جو خلیات اور سالمات کی نگرانی کرے۔",
   "depth.entry.short": "ایسے خلیے سے آغاز کریں جو سالمات کی نگرانی کرے۔",
   "depth.deepening": "ابتدائی خلیے کی دوبارہ کوششیں ختم ہو گئیں۔ بافت کی نگرانی کے ساتھ دوبارہ آغاز کریں۔",
-  "depth.coverage": "{{total}} میں سے {{covered}} ترسیلی ذمہ داریوں کا احاطہ کیا گیا"
+  "depth.coverage": "{{total}} میں سے {{covered}} ترسیلی ذمہ داریوں کا احاطہ کیا گیا",
+  "welcome.handheld.blocked": "ابھی موبائل پر دستیاب نہیں ہے",
+  "welcome.handheld.hint": "Atoma کو فونز اور ٹیبلٹس کے لیے ابھی حتمی شکل دی جا رہی ہے۔ آپ مکمل رسائی کے ساتھ جاری رکھ سکتے ہیں، لیکن کچھ اسکرینیں شاید ابھی موبائل پر اچھی طرح کام نہ کریں۔",
+  "welcome.handheld.continue": "کم از کم مجھے اپنے اکاؤنٹ تک رسائی دیں",
+  "settings.runCapacity": "بیک وقت runs",
+  "settings.runCapacityValue": "{{active}} فعال / {{limit}} کی اجازت (اس ہوسٹ پر ایک وقت میں ایک run)",
+  "auth.switchAccount": "اکاؤنٹ تبدیل کریں",
+  "settings.refreshModels": "ChatGPT ماڈلز تازہ کریں",
+  "settings.modelCatalogue.ready": "آپ کے منسلک ChatGPT اکاؤنٹ کے رپورٹ کردہ ماڈلز۔",
+  "settings.modelCatalogue.stale": "تازہ کاری ناکام رہی۔ پہلے رپورٹ کیے گئے ماڈلز دکھائے جا رہے ہیں، لیکن انہیں منتخب نہیں کیا جا سکتا۔",
+  "settings.modelCatalogue.unavailable": "ChatGPT ماڈل کیٹلاگ دستیاب نہیں ہے۔ دوبارہ کوشش کرنے کے لیے تازہ کریں۔",
+  "settings.modelUnavailable": "{{model}} — دستیاب نہیں",
+  "settings.mcpConnectAnother": "کوئی اور کلائنٹ منسلک کریں",
+  "settings.mcpHideSetup": "سیٹ اپ گائیڈ چھپائیں"
 }

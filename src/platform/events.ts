@@ -1,6 +1,8 @@
 import type Database from 'better-sqlite3';
 import { ZodError } from 'zod';
 import {
+  crossOrgReadSchema,
+  type CrossOrgRead,
   isPlatformEventFamily,
   platformEventInputSchema,
   severityForKind,
@@ -28,7 +30,7 @@ import { openStoreHandle, storeDbPath } from '../core/stores.js';
  * the set of seen reasons bounded so a flood cannot grow memory.
  *
  * ONE WRITE PATH, ONE NOTIFICATION. Subscribers are notified from inside
- * `append`, so there is no way to journal an event without offering it to the
+ * the shared publish path, so successful appends and committed read-audit receipts reach the
  * router — the "impossible to forget" shape the run/notification split had to
  * be refactored into. Cross-process writers (the operator CLI) reach the same
  * table through their own handle and therefore notify nobody: audited, never
@@ -60,10 +62,14 @@ CREATE INDEX IF NOT EXISTS idx_platform_events_kind ON platform_events(kind);
 -- filtered by run and kind. Without this they were full scans of a table that
 -- grows to 50k rows, on a resident timer. Additive on open, not a migration.
 CREATE INDEX IF NOT EXISTS idx_platform_events_run ON platform_events(run_id, kind);
+CREATE INDEX IF NOT EXISTS idx_platform_events_admin_read ON platform_events(actor_id, org_id, at)
+  WHERE kind = 'admin.cross_org_read';
 `;
 
 /** Hard ceiling on rows kept, independent of age. */
 export const PLATFORM_EVENTS_MAX_ROWS = 50_000;
+/** One receipt per admin/organisation/hour across HTTP and MCP polling. */
+export const CROSS_ORG_READ_WINDOW_MS = 60 * 60 * 1000;
 export const PLATFORM_EVENTS_DEFAULT_RETENTION_DAYS = 90;
 const MAX_RETENTION_DAYS = 3_650;
 
@@ -225,51 +231,46 @@ export class PlatformEventLog {
   }
 
   /**
-   * Journal one event and offer it to the subscribers. Never throws; returns
-   * the stored row, or null when the event was dropped (invalid input or a
-   * store failure) so a caller that cares can tell.
+   * Persist one row. Callers choose fail-open append or strict read audit.
    */
-  append(input: PlatformEventInput): PlatformEvent | null {
-    let stored: PlatformEvent;
-    try {
-      const parsed = platformEventInputSchema.parse(input);
-      const at = this.now().toISOString();
-      const severity = severityForKind(parsed.kind);
-      const result = this.db
-        .prepare(
-          `INSERT INTO platform_events
-             (at, kind, severity, actor_type, actor_id, org_id, project_id, run_id, summary, detail)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run(
-          at,
-          parsed.kind,
-          severity,
-          parsed.actorType,
-          parsed.actorId,
-          parsed.orgId,
-          parsed.projectId,
-          parsed.runId,
-          parsed.summary,
-          parsed.detail === undefined ? null : JSON.stringify(parsed.detail)
-        );
-      stored = {
-        seq: Number(result.lastInsertRowid),
+  private persist(input: PlatformEventInput): PlatformEvent {
+    const parsed = platformEventInputSchema.parse(input);
+    const at = this.now().toISOString();
+    const severity = severityForKind(parsed.kind);
+    const result = this.db
+      .prepare(
+        `INSERT INTO platform_events
+           (at, kind, severity, actor_type, actor_id, org_id, project_id, run_id, summary, detail)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
         at,
+        parsed.kind,
         severity,
-        kind: parsed.kind,
-        actorType: parsed.actorType,
-        actorId: parsed.actorId,
-        orgId: parsed.orgId,
-        projectId: parsed.projectId,
-        runId: parsed.runId,
-        summary: parsed.summary,
-        ...(parsed.detail === undefined ? {} : { detail: parsed.detail }),
-      };
-    } catch (error) {
-      warnOnce(`append(${String(input.kind)}) failed`, error);
-      return null;
-    }
+        parsed.actorType,
+        parsed.actorId,
+        parsed.orgId,
+        parsed.projectId,
+        parsed.runId,
+        parsed.summary,
+        parsed.detail === undefined ? null : JSON.stringify(parsed.detail)
+      );
+    return {
+      seq: Number(result.lastInsertRowid),
+      at,
+      severity,
+      kind: parsed.kind,
+      actorType: parsed.actorType,
+      actorId: parsed.actorId,
+      orgId: parsed.orgId,
+      projectId: parsed.projectId,
+      runId: parsed.runId,
+      summary: parsed.summary,
+      ...(parsed.detail === undefined ? {} : { detail: parsed.detail }),
+    };
+  }
+
+  private publish(stored: PlatformEvent): void {
     for (const listener of this.listeners) {
       try {
         void Promise.resolve(listener(stored)).catch((error: unknown) => {
@@ -279,9 +280,46 @@ export class PlatformEventLog {
         warnOnce(`listener for ${stored.kind} threw`, error);
       }
     }
+  }
+
+  append(input: PlatformEventInput): PlatformEvent | null {
+    let stored: PlatformEvent;
+    try { stored = this.persist(input); }
+    catch (error) {
+      warnOnce(`append(${String(input.kind)}) failed`, error);
+      return null;
+    }
+    this.publish(stored);
     return stored;
   }
 
+  /** Strict audit: polling shares a durable receipt, not an authorization. */
+  recordCrossOrgRead(input: CrossOrgRead): true {
+    const read = crossOrgReadSchema.parse(input);
+    if (this.db.inTransaction) throw new Error('Cross-organisation audit needs its own transaction');
+    const hasReceipt = () => {
+      // Re-read after acquiring the write lock: a concurrent writer's receipt
+      // may have a timestamp later than this request's original arrival time.
+      const now = this.now();
+      const cutoff = new Date(now.getTime() - CROSS_ORG_READ_WINDOW_MS).toISOString();
+      return this.db.prepare(`SELECT seq FROM platform_events
+        WHERE kind = 'admin.cross_org_read' AND actor_id = ? AND org_id = ?
+          AND at > ? AND at <= ? LIMIT 1`).get(read.actorId, read.orgId, cutoff, now.toISOString());
+    };
+    // Poll hits are read-only. Only the first read needs a writer lock; recheck
+    // under that lock so separate server processes cannot emit duplicate rows.
+    if (hasReceipt()) return true;
+    const stored = this.db.transaction(() => {
+      if (hasReceipt()) return null;
+      return this.persist({ kind: 'admin.cross_org_read', actorType: 'principal', actorId: read.actorId,
+        orgId: read.orgId, projectId: null, runId: null,
+        summary: 'Platform administrator accessed organisation data',
+        detail: { surface: read.surface, windowSeconds: CROSS_ORG_READ_WINDOW_MS / 1000 } });
+    }).immediate();
+    // Only committed rows reach the notification router. A failed write throws.
+    if (stored) this.publish(stored);
+    return true;
+  }
   /** A `PlatformEventSink` bound to this log, for injection into domain code. */
   get sink(): (input: PlatformEventInput) => void {
     return (input) => {

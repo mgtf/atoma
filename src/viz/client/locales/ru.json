@@ -1127,5 +1127,18 @@
   "depth.entry.deep": "Начните с ткани, контролирующей клетки и молекулы.",
   "depth.entry.short": "Начните с клетки, контролирующей молекулы.",
   "depth.deepening": "Начальная клетка исчерпала все повторные попытки. Перезапустите с контролем на уровне ткани.",
-  "depth.coverage": "Выполнено обязательств по поставке: {{covered}} из {{total}}"
+  "depth.coverage": "Выполнено обязательств по поставке: {{covered}} из {{total}}",
+  "welcome.handheld.blocked": "Пока недоступно на мобильных устройствах",
+  "welcome.handheld.hint": "Версия atoma для телефонов и планшетов ещё дорабатывается. Вы можете продолжить с полным доступом, но некоторые экраны пока могут некорректно работать на мобильных устройствах.",
+  "welcome.handheld.continue": "Хотя бы войти в мой аккаунт",
+  "settings.runCapacity": "Одновременные run",
+  "settings.runCapacityValue": "Активных: {{active}} / разрешено: {{limit}} (на этом хосте одновременно выполняется только один run)",
+  "auth.switchAccount": "Сменить учётную запись",
+  "settings.refreshModels": "Обновить модели ChatGPT",
+  "settings.modelCatalogue.ready": "Модели, доступные в подключённой учётной записи ChatGPT.",
+  "settings.modelCatalogue.stale": "Не удалось обновить. Показаны ранее доступные модели, но выбрать их нельзя.",
+  "settings.modelCatalogue.unavailable": "Каталог моделей ChatGPT недоступен. Обновите, чтобы повторить попытку.",
+  "settings.modelUnavailable": "{{model}} — недоступна",
+  "settings.mcpConnectAnother": "Подключить другой клиент",
+  "settings.mcpHideSetup": "Скрыть руководство по настройке"
 }

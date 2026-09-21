@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, posix, win32 } from 'node:path';
 import { readFileSync } from 'node:fs';
 import Database from 'better-sqlite3';
+import { closeStoreHandles } from '../src/core/stores.js';
 import { INSTRUCTIONS } from '../src/mcp/server.js';
 import {
   DEFAULT_RUN_TIMEOUT_MS,
@@ -724,6 +725,10 @@ describe('MCP readers — the ones the roadmap owed', () => {
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;
     }
+    // The skill readers hold the cached store handle on <dir>/atoma.db (W4:
+    // skill trust is rows); Windows will not remove a directory holding an
+    // open database file.
+    closeStoreHandles();
     rmSync(dir, { recursive: true, force: true });
   });
 

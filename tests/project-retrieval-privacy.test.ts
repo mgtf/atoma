@@ -7,7 +7,7 @@ import { L3Atom } from '../src/atoms/L3Atom.js';
 import { L2Atom } from '../src/atoms/L2Atom.js';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
-import { resolveProjectRegistryOwner } from '../src/projects/runAuthority.js';
+import { assertProjectRunAuthority } from '../src/projects/runAuthority.js';
 import { AnthropicLlmClient } from '../src/core/llm.js';
 import { closeStoreHandles, openStoreHandle } from '../src/core/stores.js';
 import { SkillRegistry } from '../src/skills/registry.js';
@@ -34,7 +34,7 @@ const RELOAD_IN_ANOTHER_PROCESS = String.raw`
   import { readFileSync } from 'node:fs';
   import { AtomRegistry } from './src/registry/atomRegistry.ts';
   import { openDb } from './src/registry/db.ts';
-  import { resolveProjectRegistryOwner } from './src/projects/runAuthority.ts';
+  import { assertProjectRunAuthority } from './src/projects/runAuthority.ts';
   import { L1Atom } from './src/atoms/L1Atom.ts';
   import { L2Atom } from './src/atoms/L2Atom.ts';
   import { L3Atom } from './src/atoms/L3Atom.ts';
@@ -50,10 +50,10 @@ const RELOAD_IN_ANOTHER_PROCESS = String.raw`
   const binding = prepared.binding;
   const search = createProjectRetrievalTool(binding, { signal: new AbortController().signal, deadlineAt: Date.now() + 10_000 });
   const ownSource = await search.execute({ query: 'annual price' });
-  const registry = new AtomRegistry(openDb(dbPath), resolveProjectRegistryOwner({ dbPath,
-    runId: process.env.ATOMA_RUN_ID, workspacePath: process.env.ATOMA_BUILD_WORKSPACE,
-    skillsPath: process.env.ATOMA_SKILLS_DIR, runsPath: process.env.ATOMA_RUNS_DIR }));
-  // Each fresh project bootstraps from code, never from another owner's rows.
+  assertProjectRunAuthority({ dbPath, runId: process.env.ATOMA_RUN_ID, workspacePath: process.env.ATOMA_BUILD_WORKSPACE,
+    skillsPath: process.env.ATOMA_SKILLS_DIR, runsPath: process.env.ATOMA_RUNS_DIR });
+  // ONE platform registry: this project reads what every earlier run left there.
+  const registry = new AtomRegistry(openDb(dbPath));
   const seed = { description: 'Reads documented constraints', systemPrompt: 'Read authorized sources.',
     tools: [{ name: 'write_file', description: 'Write a file', inputSchema: { type: 'object', properties: {} } }], params: {}, createdBy: 'privacy-fixture' };
   if (!registry.listByTier(1).length) registry.create(1, seed);
@@ -112,15 +112,15 @@ async function fixture() {
   await prepared.prepare(context);
   const binding = prepared.binding;
   const backend = await withProjectRetrievalBackend(localToolBackend({ workspaceRoot: run.layout.workspacePath, logger: silentLogger() }), binding, context);
-  const owner = resolveProjectRegistryOwner({ dbPath: f.dbPath, runId: run.run.projectRunId,
+  assertProjectRunAuthority({ dbPath: f.dbPath, runId: run.run.projectRunId,
     workspacePath: run.layout.workspacePath, skillsPath: run.layout.skillsPath, runsPath: run.layout.runsPath });
-  const registry = new AtomRegistry(openDb(f.dbPath), owner);
+  const registry = new AtomRegistry(openDb(f.dbPath));
   const tools = backend.toolDecls.filter(t => t.name === SEARCH || t.name === 'write_file');
   const seed = { description: 'Reads documented constraints', systemPrompt: 'Read the authorized source and cite it.', tools, params: {}, createdBy: 'privacy-fixture' };
   const supervisor = registry.create(2, seed);
   const child = registry.create(1, seed);
   const skills = new SkillRegistry(run.layout.skillsPath);
-  return { ...f, run, owner, registry, child, supervisor, skills, backend, tools };
+  return { ...f, run, registry, child, supervisor, skills, backend, tools };
 }
 
 function enqueueSearch(ctx: ReturnType<typeof makeCtx>): void {
@@ -150,7 +150,17 @@ function enqueueAttempt(ctx: ReturnType<typeof makeCtx>): void {
   enqueueSearch(ctx);
 }
 
-describe('tenant retrieval downstream privacy audit', () => {
+/**
+ * Since 2026-09-15 (`docs/platform-trust-2026-09-15.md`) there is ONE registry
+ * for every run on the platform. These tests CHARACTERISE what that means for
+ * text a run derives from its private retrieval corpus: the corpus itself
+ * stays the run's (`ownPassages` is 0 for every other project), while what a
+ * validator writes INTO the registry — prompt coaching, descriptions, branch
+ * names, planner-created types — is platform knowledge and reaches the next
+ * project's run. Skill bodies were already shared. The 2026-09-09 audit that
+ * partitioned the registry is superseded by that decision.
+ */
+describe('tenant retrieval downstream: what the platform registry shares', () => {
   it('keeps a deliberately non-generalized learned recipe in the owning project, including after reload and namespace sharing', async () => {
     const f = await fixture();
     const ctx = { ...makeCtx(), tools: f.backend.executor };
@@ -210,20 +220,25 @@ describe('tenant retrieval downstream privacy audit', () => {
     } finally { await f.backend.cleanup(); }
   });
 
-  it('neither reads an existing common decision nor writes a new one with the coordinator cache policy', async () => {
+  it('reads and writes the platform prefilter cache like any run, under the coordinator environment', async () => {
     const f = await fixture();
     try {
       const db = openStoreHandle(f.dbPath, PREFILTER_CACHE_TABLE_DDL);
       db.prepare('INSERT INTO prefilter_cache(key,outcome,at,hits) VALUES (?,?,?,0)')
         .run('previous', jsonText({ kind: 'escalate', reasoning: FACT }), new Date().toISOString());
-      expect(process.env['ATOMA_PREFILTER_CACHE']).toBe('0');
-      expect(prefilterCacheGet('previous')).toBeNull();
+      // The coordinator no longer pins the cache off for a tenant run
+      // (asserted on its environment in project-coordinator.test.ts); the
+      // vitest harness pins it off globally to keep the real store clean, so
+      // point it at this fixture's store here. A planning decision another run
+      // cached — reasoning included — is reused.
+      vi.stubEnv('ATOMA_PREFILTER_CACHE', f.dbPath);
+      expect(prefilterCacheGet('previous')).toMatchObject({ kind: 'escalate', reasoning: FACT });
       prefilterCachePut('current', { kind: 'escalate', reasoning: FACT });
-      expect(db.prepare('SELECT key,hits FROM prefilter_cache').all()).toEqual([{ key: 'previous', hits: 0 }]);
+      expect(db.prepare('SELECT key FROM prefilter_cache ORDER BY key').all()).toEqual([{ key: 'current' }, { key: 'previous' }]);
     } finally { await f.backend.cleanup(); }
   });
 
-  it.each(['ephemeral', 'patch', 'branch'] as const)('contains %s validator coaching through retrieval, persistence and another project reload', async scope => {
+  it.each(['ephemeral', 'patch', 'branch'] as const)('shares persisted %s validator coaching with every project, and only persisted coaching', async scope => {
     const f = await fixture();
     vi.stubEnv('ATOMA_SKILL_LEARN', '0');
     const ctx = { ...makeCtx(), tools: f.backend.executor };
@@ -237,21 +252,19 @@ describe('tenant retrieval downstream privacy audit', () => {
       await L2Atom.fromType(f.supervisor, f.registry, [], f.skills).handleDirect({ description: 'Find the annual price.' }, ctx);
       expect(ctx.llm.calls.some(call => call.role === 'plan' && call.systemPrompt.includes(FACT))).toBe(true);
       const other = projectRetrievalFixture(root, { subject: 'other-owner', slug: 'other' }).makeRun();
-      const reloaded = new AtomRegistry(openDb(f.dbPath), f.owner);
-      const tainted = reloaded.listByTier(1).filter(type => type.systemPrompt.includes(FACT));
-      expect(tainted).toHaveLength(scope === 'ephemeral' ? 0 : 1);
-      for (const type of tainted) expect(type.systemPrompt).not.toContain('Cite private/pricing.md.');
-      for (const next of [other, projectRetrievalFixture(root, { slug: 'sibling' }).makeRun()]) {
-        const { prompts, catalogue, types } = await readNextProject(f.dbPath, next);
-        expect(JSON.stringify({ prompts, catalogue, types })).not.toContain(FACT);
+      const reloaded = new AtomRegistry(openDb(f.dbPath));
+      const coached = reloaded.listByTier(1).filter(type => type.systemPrompt.includes(FACT));
+      expect(coached).toHaveLength(scope === 'ephemeral' ? 0 : 1);
+      // additionalContext is per-call and never persisted, whatever the scope.
+      for (const type of coached) expect(type.systemPrompt).not.toContain('Cite private/pricing.md.');
+      for (const next of [other, projectRetrievalFixture(root, { slug: 'sibling' }).makeRun(), f.makeRun()]) {
+        const { prompts } = await readNextProject(f.dbPath, next);
+        expect(prompts.some(prompt => prompt.includes(FACT))).toBe(scope !== 'ephemeral');
       }
-      const sameProject = await readNextProject(f.dbPath, f.makeRun());
-      expect(sameProject.prompts.some(prompt => prompt.includes(FACT))).toBe(scope !== 'ephemeral');
-      expect(new AtomRegistry(openDb(f.dbPath)).listByTier(1)).toEqual([]);
     } finally { await f.backend.cleanup(); }
   });
 
-  it('keeps planner-created L1 descriptions and tool metadata inside the project', async () => {
+  it('shares planner-created L1 descriptions and tool metadata with the next project', async () => {
     const f = await fixture(); vi.stubEnv('ATOMA_SKILL_LEARN', '0');
     const ctx = { ...makeCtx(), tools: f.backend.executor };
     ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'new reader' }));
@@ -264,11 +277,11 @@ describe('tenant retrieval downstream privacy audit', () => {
       await L2Atom.fromType(f.supervisor, f.registry, [], f.skills).handleDirect({ description: 'Find annual price' }, ctx);
       expect(f.registry.listByTier(1).some(type => JSON.stringify(type).includes(FACT))).toBe(true);
       const other = projectRetrievalFixture(root, { subject: 'other-owner', slug: 'other' }).makeRun();
-      expect(JSON.stringify(await readNextProject(f.dbPath, other))).not.toContain(FACT);
+      expect(JSON.stringify((await readNextProject(f.dbPath, other)).types)).toContain(FACT);
     } finally { await f.backend.cleanup(); }
   });
 
-  it.each(['patch', 'branch', 'create'] as const)('contains L3-to-L2 %s metadata from a source-derived decision', async scope => {
+  it.each(['patch', 'branch', 'create'] as const)('shares L3-to-L2 %s metadata from a source-derived decision with every project', async scope => {
     const f = await fixture();
     vi.stubEnv('ATOMA_SKILL_LEARN', '0');
     const root = f.registry.create(3, { ...f.supervisor, createdBy: 'privacy-fixture' });
@@ -296,12 +309,12 @@ describe('tenant retrieval downstream privacy audit', () => {
       await L3Atom.buildWithModel(root, f.registry, 'api:ollama:test').handle({ description: 'Find annual price' }, ctx);
       expect(f.registry.listByTier(2).some(type => JSON.stringify(type).includes(FACT))).toBe(true);
       const other = projectRetrievalFixture(f.root, { subject: 'other-owner', slug: 'other' }).makeRun();
-      expect(JSON.stringify(await readNextProject(f.dbPath, other))).not.toContain(FACT);
+      expect(JSON.stringify((await readNextProject(f.dbPath, other)).types)).toContain(FACT);
       expect(JSON.stringify(await readNextProject(f.dbPath, f.makeRun()))).toContain(FACT);
     } finally { await f.backend.cleanup(); }
   });
 
-  it.each(['description', 'branch-name'])('keeps private %s out of another organisation’s routing catalogue', async field => {
+  it.each(['description', 'branch-name'])('publishes a %s a validator wrote to every organisation’s routing catalogue', async field => {
     const f = await fixture();
     vi.stubEnv('ATOMA_SKILL_LEARN', '0');
     const ctx = { ...makeCtx(), tools: f.backend.executor };
@@ -311,14 +324,19 @@ describe('tenant retrieval downstream privacy audit', () => {
     ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'Specialize the reader',
       ...(field === 'description'
         ? { scope: 'patch', modifications: { descriptionReplace: marker } }
-        : { scope: 'branch', branchName: marker, modifications: { additionalContext: FACT } }),
+        // A real specialization gets a branch identity; coaching alone now
+        // reuses the existing behavior instead of creating a duplicate.
+        : { scope: 'branch', branchName: marker, modifications: {
+          systemPromptAppend: 'Always quote the supporting passage before giving the answer.',
+          additionalContext: FACT,
+        } }),
     }));
     enqueueAttempt(ctx);
     ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'source consulted' }));
     try {
       await L2Atom.fromType(f.supervisor, f.registry, [], f.skills).handleDirect({ description: 'Find the annual price.' }, ctx);
       const other = projectRetrievalFixture(root, { subject: 'other-owner', slug: 'other' }).makeRun();
-      expect((await readNextProject(f.dbPath, other)).catalogue).not.toContain(marker);
+      expect((await readNextProject(f.dbPath, other)).catalogue).toContain(marker);
     } finally { await f.backend.cleanup(); }
   });
 });

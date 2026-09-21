@@ -1,0 +1,20 @@
+# Only packaged runtime inputs enter an image build context.
+**
+!package.json
+!package-lock.json
+!dist/
+!dist/**
+!docker/
+!docker/**
+!scripts/
+!scripts/husky-install.mjs
+!scripts/retrieval-haystack.py
+!scripts/requirements-haystack.txt
+# Defence in depth even inside an otherwise admitted directory.
+**/.env*
+**/*.db
+**/*.db-*
+**/*.pem
+**/*.key
+**/node_modules
+**/.git

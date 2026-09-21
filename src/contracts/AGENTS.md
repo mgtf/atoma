@@ -33,6 +33,14 @@ Neighbours:
   (`REPORTED_WEB_PROBE_ALIASES`) are READER tolerance for recipes distilled
   before a rename; never teach one, and never widen the on-disk checker to
   accept one — a compiled script dispatches on that discriminator.
+- `probeManifest.ts` also hosts the taught two-call `validate_html` shape
+  (`SMOKE_TWO_CALL_SHAPE`, rendered as `SMOKE_TWO_CALL_LINES`) for the same
+  reason it hosts `EXAMPLE_WEB_ENTRY`: one constant, rendered by two layers
+  that may not import each other (the tool's refusal and the shared smoke
+  guidance). It is the executed-interactions counterpart of
+  `establishesDomInteraction`; its second call changes state once before the
+  reset because a reset on a fresh page proves nothing. Generic vocabulary
+  only — control, milestone, reset — never one widget's names.
 
 ## Proof attestation
 
@@ -45,6 +53,14 @@ Neighbours:
   log read as proof that clicking worked.
 - The obligation vocabulary is CLOSED and has one member. Adding a second is a
   design review with its own evidence, not a schema edit.
+- A `validate_html` PRE-FLIGHT refusal is a statement about the request, not
+  an observation of the artefact: no page opened, no document bound. Its
+  error strings carry one of TWO prefixes — `SMOKE_PREFLIGHT_REFUSAL_PREFIX`
+  for the smoke guards, `PROBE_URL_REFUSAL_PREFIX` for a portless loopback URL
+  (2026-09-21: a bound-origin mismatch read as a dead service replayed a run
+  into its deadline) — and `isPreflightRefusal` is the one predicate over
+  both; the tools write them, the L1 validation ledger reads the predicate.
+  Never grep the literals.
 - `Witness` declares its OBSERVER. Never relabel a model-declared witness as
   transport-observed, and never fold transport witnesses into the
   recorded-probe rendering — they are references, and they carry no `cmd`.
@@ -59,6 +75,15 @@ Neighbours:
   `src/projects` modules and a value edge back would close a subsystem cycle;
   it is allowed here for the same reason `runStats.ts` holds its own parser,
   and because no model-authored payload ever enters it.
+- `llmTrace.ts` CITES model-visible context, it does not copy it:
+  `citeContext` records a block's source, its true `chars` and a preview
+  capped at `CONTEXT_PREVIEW_CHARS`, and the same id is cited on the `llm`
+  event. The cap is 2,000 — raised from 160 because the viz `context` step
+  exists so a viewer can read what the model was shown, and 160 cut a
+  1,167-character recipe mid-sentence (2026-09-21). It stays a CAP: a longer
+  block is still truncated with an ellipsis, and one event is recorded per
+  distinct block per run, so a trace grows with a run's injects rather than
+  with its calls.
 - A trace's SIZE is a function of how much work the run did (~19KB per tool
   call, measured). Never bound it with a constant: a 512KB cap recorded
   delivered run `2857a579` as `failed`. Bound the PROJECTION instead — the

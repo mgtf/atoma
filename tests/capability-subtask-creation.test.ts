@@ -161,8 +161,7 @@ describe('L3Atom.createSubtaskL2 — capability-first description', () => {
     );
     expect(second.name).toBe(first.name);
     expect(reg.listByTier(2)).toHaveLength(1);
-    // A DIFFERENT invented name still gets its own L2 — the alias is
-    // per-name, not a blanket "reuse whatever was created last".
+    // A different invented label cannot allocate the same behavior again.
     const third = any3.resolveL2ForSubtask(
       { description: 'phase 3: something else', preferredChild: 'Benzene' },
       strategy,
@@ -170,8 +169,8 @@ describe('L3Atom.createSubtaskL2 — capability-first description', () => {
       2,
       ctx
     );
-    expect(third.name).not.toBe(first.name);
-    expect(reg.listByTier(2)).toHaveLength(2);
+    expect(third.name).toBe(first.name);
+    expect(reg.listByTier(2)).toHaveLength(1);
   });
 
   it('tier-2 description stays distinct from tier-1 for the same toolset (L2 ≠ L1)', async () => {
@@ -228,11 +227,11 @@ describe('L3Atom.createSubtaskL2 — capability-first description', () => {
     );
     expect(second.name).toBe(first.name);
     expect(reg.listByTier(1)).toHaveLength(1);
-    // A different invented name still gets its own L1.
+    // A different invented label cannot allocate the same behavior again.
     const third = any2.resolveL1ForSubtask(
       { description: 'write module C', preferredChild: 'Krypton' },
       strategy, { description: 'parent' }, 2, ctx
     );
-    expect(third.name).not.toBe(first.name);
-    expect(reg.listByTier(1)).toHaveLength(2);
+    expect(third.name).toBe(first.name);
+    expect(reg.listByTier(1)).toHaveLength(1);
   });

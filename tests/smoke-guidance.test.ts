@@ -11,10 +11,15 @@ import {
   detectBrittleComputedStyleLiteral,
   detectResetErasedIntermediateEvidence,
   diagnoseSmokeEvaluationError,
+  parseInteractions,
   probeManifestWriteRefusal,
   renderSmokeFailure,
 } from '../src/tools/builtin.js';
-import { smokeOkIncludesStyling } from '../src/contracts/probeManifest.js';
+import {
+  SMOKE_TWO_CALL_LINES,
+  SMOKE_TWO_CALL_SHAPE,
+  smokeOkIncludesStyling,
+} from '../src/contracts/probeManifest.js';
 
 /**
  * The smoke guidance and the validate_html pre-flight guards are two halves
@@ -99,6 +104,46 @@ describe('SMOKE_DESIGN_GUIDANCE ↔ validate_html pre-flight guards', () => {
   it('renders the canonical shape verbatim, never a hand-copied twin', () => {
     for (const line of SMOKE_CANONICAL_STATE_SHAPE.split('\n')) {
       expect(SMOKE_DESIGN_GUIDANCE).toContain(line);
+    }
+  });
+
+  // MEASURED 2026-09-15 (docs/incidents/verification-replay-2026-09-15.md):
+  // the guidance taught the self-driving shape as THE canonical one and never
+  // said it executes no real interaction, so a phase carrying the
+  // dom-interaction obligation earned no credit and the L3 planned a second
+  // verification phase to cover it. The guidance now renders the two-call
+  // shape from the one contract constant and states what each shape proves.
+  it('renders the two-call shape verbatim and says the self-driving shape covers nothing', () => {
+    for (const line of SMOKE_TWO_CALL_LINES) {
+      expect(SMOKE_DESIGN_GUIDANCE).toContain(line);
+    }
+    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/self-driving smoke executes NO real interaction/);
+    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/"dom-interaction" proof obligation therefore stays UNCOVERED/);
+    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/call 2 changes state ONCE, resets/);
+    // The covering shape comes BEFORE the canonical self-driving shape: a
+    // small model copies the first concrete shape it reads, and the sentence
+    // that scopes the self-driving one sits between the two.
+    const twoCall = SMOKE_DESIGN_GUIDANCE.indexOf(SMOKE_TWO_CALL_LINES[0]!);
+    const scoping = SMOKE_DESIGN_GUIDANCE.indexOf('The shape below is the SELF-DRIVING call');
+    // The canonical shape's first line, `interactions: []`, also occurs earlier
+    // in prose between backticks; its first TWO lines (indented as rendered)
+    // occur once.
+    const canonical = SMOKE_DESIGN_GUIDANCE.indexOf(
+      SMOKE_CANONICAL_STATE_SHAPE.split('\n')
+        .slice(0, 2)
+        .map((line) => `  ${line}`)
+        .join('\n')
+    );
+    expect(twoCall).toBeGreaterThan(-1);
+    expect(twoCall).toBeLessThan(scoping);
+    expect(scoping).toBeLessThan(canonical);
+    // Each taught half passes the guards WITH its own interactions kept — the
+    // read-only smoke drives nothing, so nothing is discarded.
+    for (const [name, half] of Object.entries(SMOKE_TWO_CALL_SHAPE)) {
+      const interactions = parseInteractions([...half.interactions]);
+      expect(detectSmokeStatementError(half.smoke), name).toBeNull();
+      expect(detectBrittleComputedStyleLiteral(half.smoke), name).toBeNull();
+      expect(detectResetErasedIntermediateEvidence(interactions, half.smoke), name).toBeNull();
     }
   });
 

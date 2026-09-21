@@ -1,6 +1,164 @@
 # Changelog
 
-## Unreleased
+## v0.4.0 — 2026-09-17
+
+Scoped document retrieval for every project run on a single Haystack backend,
+GitHub repository imports, isolated preview hosting on its own subdomain,
+opt-in supervision depth routing, and ONE registry, ONE skill catalog and ONE
+trust for the whole platform. Everything landed since v0.3.0.
+
+### Added
+
+- Scoped project document retrieval. A host-side boundary admits a project's
+  registered sources explicitly, and every project run must search them, with
+  the requirement derived from stored run receipts. Haystack is the sole
+  backend after a measured comparison; deterministic FTS5 indexing and paired
+  BM25 were both built, measured and retired. Searches return exact copyable
+  citations and accept document-metadata filters; failed attempts are retained
+  with their accounting, and cancellation survives retrieval warmup. The seven
+  dated pilot records — Anthropic agentic retrieval, the paired BM25 negative
+  result, the Haystack comparison and agent pilot, the invocation-policy arms,
+  the ten-minute diagnostics — are consolidated verbatim into one archive
+  under `docs/incidents/`.
+- GitHub repository imports and document extraction. Delivered workspaces are
+  published complete, and an interrupted upload is recovered rather than
+  leaving a partial repository.
+- Isolated preview egress and secure subdomain hosting, with controlled
+  preview network checks in CI, terminal preview availability and JSON exports.
+- MCP OAuth login and client connection commands.
+- Opt-in supervision depth routing with bound delivery proofs: deep and short
+  entry paths compared under one bounded deepening, attempt-scoped evidence and
+  common root acceptance, with browser observations bound to the final response
+  and to the process holding its port. Build runs now default to short-first
+  supervision with safe deepening.
+- Trajectory drift journaling in the sentinel — stage A of
+  `docs/trajectory-predictability-design-2026-09-09.md`: observe, journal,
+  decide nothing. `src/contracts/trajectory.ts` owns the signature, key and
+  score shapes and the pure derivation over trace events; the score is a
+  length-normalised edit distance over element names, never args or results.
+  The analyst digest gains a mechanical trajectories block, named as evidence
+  and never as a threshold to design from.
+- An offline recovery drill with preserved live validation evidence. The state
+  backup gains two tiers — the `orgs/` project corpus and the supervisor
+  records — and its manifest becomes an inventory (per-tier source, SHA-256,
+  top-level entries, recursive file count, recorded exclusions, captured and
+  skipped lists) rather than a completeness claim.
+- Registered benchmarks run through MCP in the existing viz, and a run reports
+  its project elapsed time.
+
+### Changed
+
+- ONE registry, ONE skill catalog, ONE trust for the whole platform — a run is
+  a run (`docs/platform-trust-2026-09-15.md`). `atom_types` loses its owner
+  column; `openDb` folds a partitioned store back with a whole-file backup,
+  absorbing same-name project rows into the platform row with their counters
+  added (`atom_id_merges` records the identities) and keeping every other
+  project row whole. `SkillRegistry` loses its trust scope; the coordinator and
+  the runner fold `.trust/…` sidecars and absorbed-identity namespaces into the
+  catalog, setting aside what they displace. `AtomRegistry` and `SkillRegistry`
+  constructors take only their store. A tenant run still proves it is the
+  registered run (`assertProjectRunAuthority`). Execution follows: the
+  coordinator no longer pins promotion, deterministic dispatch or the prefilter
+  cache off for project runs and sends no veto flag; a tenant launch insists on
+  `--container` and nothing else. Consequence, characterised rather than
+  prevented: text a validator derives from one organisation's retrieval corpus
+  and writes into a prompt reaches every organisation's next run — the corpus
+  itself does not travel.
+- The Registry is a workspace destination for every signed-in role, as Skills
+  became: `/api/registries` and `/api/registry/:id` answer members and viewers,
+  the store's host path reduced to its basename. Burn-in stays the platform
+  admin's.
+- The MCP commons readers follow: `atoma_registry_list`, `atoma_registry_show`,
+  `atoma_registry_history`, `atoma_skills_list` and `atoma_skills_show` sit on
+  the `viewer` tier, with `store` and `skillsDir` redacted to basenames below
+  `platform`. Skill analytics, the four lifecycle writes and the prompt surface
+  stay platform-tier, and a client that already saw these readers gets the same
+  payload as before.
+- Skill bodies are shared platform-wide and the catalog is exposed to members.
+- Connecting a personal ChatGPT login arms that member's three tiers, only into
+  emptiness: it walks the run's own chain (account pin, org default, host env)
+  so it can never displace a member's choice, an organisation default or an
+  operator pin, and follows the cost rule cheapest-rank-first — mini on L1,
+  terra on L2, sol on L3. It is journaled under the kind a manual choice uses,
+  marked `automatic`. Settings tabs now read in the order of a first setup:
+  identity, what pays for a run, the models those choices unlock, then the MCP
+  address.
+- Planning and validator prompts are capability-first. The rule telling L2/L3
+  to refuse reuse across task domains had nothing to match on capability labels
+  and could only spawn identical clones with zero trust; both planning prompts
+  now match on capability, the validator sections and examples are rewritten
+  around capability defects, and validator-authored `descriptionReplace` passes
+  through `resolveCreationDescription` at L2 and L3. Dynamically created L1s no
+  longer receive two reporting contracts, the iteration cap is 4 everywhere,
+  and the web branch template carries the web evidence contract.
+- The two-call browser proof is taught from one contract constant,
+  `SMOKE_TWO_CALL_SHAPE`: real interactions up to the milestone under a
+  read-only smoke, then one change plus the reset under another, with the
+  explicit statement that the self-driving IIFE shape executes no real
+  interaction and covers nothing. No guard is relaxed and the refused set is
+  byte-identical. The shared validation prompt's TOOLSET SCOPE rule now states
+  that a declared tool may be called as many times as the plan needs.
+- Obsolete releases are pruned after a successful deployment.
+- CI fails when translations remain incomplete: hard translation failures
+  propagate and every target catalog must be complete, while partial successful
+  work is still committed through always-run cleanup steps.
+- The GPU client suspends rendering while the window is inactive.
+- The README and `SECURITY.md` present shared learning as the design rather
+  than as missing tenant isolation, and state the price without softening it.
+  The security scope now names what stays protected — projects, workspaces,
+  traces, searchable documents, credentials — and excludes the shared commons
+  explicitly. Mutually untrusted tenants are not a supported deployment shape.
+- `docs/saas-architecture.md` is reconciled against source after the
+  2026-09-15 owner decision, then corrected where five of its claims did not
+  survive verification: skill counters are not single-writer, `lifecycle_events`
+  carries `seq`, per-organisation bounded admission already exists for
+  previews, Gate 0 blocks W4 alone, and the launcher is not a second store
+  writer today.
+- `npm run backup` is compiled (`node dist/cli/backup.js`) because the host
+  installs with `npm ci --omit=dev`; `backup:dev` is the source path, and
+  `release:check` smokes the compiled `--help`.
+
+### Fixed
+
+- A standing browser proof survives a pre-flight refusal. The L1 kept one bit —
+  the `ok` flag of its last `validate_html` call — so a refusal after
+  successful observations of an unchanged document fired the internal
+  validation banner and replayed the whole phase. That bit becomes a ledger
+  bound to the observed document: a refusal observes nothing and retires
+  nothing, the last executed observation decides, and a write to the observed
+  path after its last `ok` observation retires it as stale.
+- The production Registry listed every type twice. The viz server opens every
+  handle read-only, so on a deployed host the owner-partition fold never fired
+  while the readers had stopped filtering by owner. The server now folds every
+  configured store at startup, idempotently and loudly on failure, and
+  `unfoldedRegistryPredicate` guards every read-only reader, with
+  `AtomRegistry` refusing an unfolded store outright.
+- A completed Codex device login is no longer lost. Every released Codex up to
+  0.154 sends `account/login/completed` before `auth_manager.reload()`, so
+  reading the account immediately saw no ChatGPT account and deleted the
+  freshly written profile. The account is now read inside a bounded settle
+  window, woken early by `account/updated`, never refreshing tokens.
+- Codex tool action sequencing and argument recovery; MCP run retries are
+  preserved and browser interaction targets are scrolled into view.
+- Recoverable atom trust and the reuse of equivalent capabilities.
+- Every registry transaction takes the write lock before the read.
+- The restore drill is valid on the deployed shape: a tier that is not
+  applicable is distinguished from one expected and lost, so a host running no
+  benchmarks no longer reports every snapshot incomplete — without silencing
+  the skipped list, which is the only signal that earned state went missing.
+- Preview proxy resolution, internal artifact delivery, session identity and
+  stale request handling; the cleanup assertion is scoped to its own
+  generation.
+- The egress proxy stays alive when denied clients disconnect.
+- Delayed live traces are recovered without leaking errors across views, run
+  index errors are confined to the active view, multiline timeline previews are
+  contained within their cards, and mobile viz navigation and touch scrolling
+  work.
+- Observed browser checks are preserved in result validation, inferred port
+  constraints are reviewed against the requested startup contract, and prose
+  punctuation is excluded from inferred validation URLs.
+- Pending run usage is distinguished from zero totals.
+- Skill events are localized in the viz without misattributing withheld credit.
 
 ## v0.3.0 — 2026-09-08
 

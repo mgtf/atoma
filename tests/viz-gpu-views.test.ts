@@ -20,6 +20,7 @@ import {
   BUTTON_LABEL_INSET,
   GpuRenderer,
   NAV_HOVER_SCALE,
+  TOUCH_SCROLL_SLOP_PX,
   emptyRenderMetrics,
 } from '../src/viz/client-gl/gpu-renderer.js';
 import type {
@@ -32,6 +33,13 @@ import {
   setReducedMotionOverrideForTests,
 } from '../src/viz/client-gl/renderer/motion.js';
 import { drawBurnin } from '../src/viz/client-gl/renderer/views/burnin.js';
+import {
+  COMPACT_VALUE_MAX_CHARS,
+  DETAIL_CARD_MIN_WIDTH,
+  DETAIL_PAIR_GAP,
+  detailColumnWidth,
+  detailNodeWidth,
+} from '../src/viz/client-gl/renderer/detail-layout.js';
 import {
   drawProjects,
   PROJECTS_COLUMN_INSET,
@@ -57,9 +65,12 @@ import {
 } from '../src/viz/client-gl/renderer/views/sidebar.js';
 import { clampSceneTuningPosition } from '../src/viz/client-gl/tuning.js';
 import {
+  drawViewFrame,
   viewFrame,
   viewFrameGutterRects,
+  VIEW_FRAME_CONTENT_TOP,
   VIEW_FRAME_PAD,
+  VIEW_FRAME_TITLE_Y,
 } from '../src/viz/client-gl/renderer/view-frame.js';
 import { overlayMenuClip } from '../src/viz/client-gl/renderer/overlay-menu-clip.js';
 import {
@@ -98,6 +109,7 @@ import {
   pinMarkElapsedMs,
   setMarkBeadVisible,
 } from '../src/viz/client-gl/renderer/mark-clock.js';
+import { MARK_SURGE, setMarkCoreSurge } from '../src/viz/client-gl/renderer/mark-surge.js';
 import { drawRegistry } from '../src/viz/client-gl/renderer/views/registry.js';
 import {
   drawRuns,
@@ -130,6 +142,8 @@ import type { AuthUiSnapshot } from '../src/viz/client-gl/AuthControls.js';
 import {
   GPU_COLORS,
   GPU_LAYOUT,
+  SIDEBAR_COMPACT_MAX_VIEWPORT,
+  sidebarIsCompactForViewport,
   sidebarWidthForViewport,
 } from '../src/viz/client-gl/theme.js';
 import { buildAtomaMarkFrame } from '../src/viz/client-gl/brand-mark.js';
@@ -164,6 +178,7 @@ interface RecordedButton {
   height: number;
   active: boolean;
   spinning?: boolean;
+  disabled?: boolean;
   onActivate?: (id: string) => void;
 }
 
@@ -460,7 +475,8 @@ function createRecordingCtx(): RecordingCtx {
       spinning,
       labelMaxWidth,
       _labelY,
-      accessibleLabel
+      accessibleLabel,
+      disabled
     ) {
       // The real `button()` FITS its label to its own width against measured
       // glyphs, so views hand it unbounded copy on purpose. Recording the raw
@@ -481,6 +497,7 @@ function createRecordingCtx(): RecordingCtx {
         height,
         active,
         spinning: spinning === true,
+        disabled: disabled === true,
         onActivate,
       });
       ctx.recordHitTarget(parent, {
@@ -619,6 +636,10 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     selectedDocsTheme: 'quick',
     scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 0, docs: 0, admin: 0, journal: 0, ledger: 0, sentinel: 0, announce: 0, settings: 0 },
     entered: true,
+    handheld: false,
+    handheldAccepted: false,
+    acceptHandheld: noop,
+    handheldBlocked: false,
     accountMenuOpen: false,
     localeMenuOpen: false,
     notificationsMenuOpen: false,
@@ -627,6 +648,8 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     enter: noop,
     showWelcome: noop,
     activateCrystal: noop,
+    setHandheld: noop,
+    blockHandheld: noop,
     toggleAccountMenu: noop,
     closeAccountMenu: noop,
     toggleLocaleMenu: noop,
@@ -1052,6 +1075,66 @@ describe('drawWelcome as the login gate', () => {
   });
 });
 
+describe('drawWelcome on a handheld device', () => {
+  const WIDTH = 390;
+  const HEIGHT = 844;
+  const GATED = {
+    login: { providers: [{ id: 'github', label: 'GitHub' }], notice: null },
+  };
+
+  afterEach(() => {
+    setMarkCoreSurge(0);
+    pinMarkElapsedMs(null);
+  });
+
+  it('offers the real canvas login on mobile, with no disclaimer', () => {
+    const ctx = createRecordingCtx();
+    drawWelcome(ctx, makeSnapshot({ entered: false, handheld: true }, GATED), WIDTH, HEIGHT);
+    expect(ctx.buttons.map(button => button.id)).toEqual(['login.provider.github']);
+    expect(ctx.buttons[0]!.disabled).toBe(false);
+    expect(ctx.buttons[0]!.width).toBe(welcomeLayout(WIDTH, HEIGHT, true).buttonWidth);
+    expect(ctx.markRoot.children.length).toBe(1);
+  });
+
+  it('keeps the widened control inside a narrow phone and unchanged on the desktop', () => {
+    const narrow = welcomeLayout(320, 640, true);
+    expect(narrow.buttonX).toBeGreaterThanOrEqual(28);
+    expect(narrow.buttonX + narrow.buttonWidth).toBeLessThanOrEqual(320 - 28);
+    expect(narrow.buttonWidth).toBeGreaterThanOrEqual(200);
+    const desktop = welcomeLayout(1280, 800);
+    expect(welcomeLayout(1280, 800, false)).toEqual(desktop);
+    expect(desktop.buttonWidth).toBe(200);
+  });
+
+  it('swells the bead with the surge and leaves it untouched at rest', () => {
+    // Pin the clock so both attaches share one pose; only the surge differs.
+    pinMarkElapsedMs(1_000);
+    const findByLabel = (node: Container, label: string): Container | null => {
+      if (node.label === label) return node;
+      for (const child of node.children) {
+        const found = findByLabel(child, label);
+        if (found) return found;
+      }
+      return null;
+    };
+    const coreScaleAt = (surge: number) => {
+      setMarkCoreSurge(surge);
+      const ctx = createRecordingCtx();
+      drawWelcome(ctx, makeSnapshot({ entered: false, handheld: true }), WIDTH, HEIGHT);
+      const core = findByLabel(ctx.markRoot, 'mark-core');
+      expect(core).not.toBeNull();
+      return { scale: core!.scale.x, bloomAlpha: core!.children[0]!.alpha };
+    };
+    const rest = coreScaleAt(0);
+    const restAgain = coreScaleAt(0);
+    expect(restAgain).toEqual(rest);
+    const flare = coreScaleAt(1);
+    expect(flare.scale).toBeCloseTo(rest.scale * (1 + MARK_SURGE.coreScale), 6);
+    expect(flare.bloomAlpha).toBeGreaterThanOrEqual(rest.bloomAlpha);
+    expect(flare.bloomAlpha).toBeLessThanOrEqual(1);
+  });
+});
+
 describe('drawDocs', () => {
   it('renders every end-user topic and opens on the quick-start guide', () => {
     const ctx = createRecordingCtx();
@@ -1181,7 +1264,7 @@ describe('the nav rail', () => {
     expect(groups).toHaveLength(1);
     expect(groups[0]).toMatchObject({ group: 'workspace' });
     expect(rows.filter((row) => row.kind === 'item').map((row) => row.view)).toEqual([
-      'projects', 'runs', 'docs',
+      'projects', 'runs', 'registry', 'skills', 'docs',
     ]);
   });
 
@@ -1205,7 +1288,7 @@ describe('the nav rail', () => {
     expect(ctx.root.children.some((child) => child.label === 'sidebar-band')).toBe(true);
     const nav = ctx.buttons.filter((button) => button.id.startsWith('nav.'));
     expect(nav.map((button) => button.id)).toEqual([
-      'nav.projects', 'nav.runs', 'nav.docs', 'nav.registry', 'nav.skills', 'nav.burnin',
+      'nav.projects', 'nav.runs', 'nav.registry', 'nav.skills', 'nav.docs', 'nav.burnin',
     ]);
     expect(nav.filter((button) => button.active).map((button) => button.id)).toEqual([
       'nav.skills',
@@ -1242,11 +1325,11 @@ describe('the nav rail', () => {
     expect(ctx.root.children.some((child) => child.label === 'sidebar-band')).toBe(false);
     const nav = ctx.buttons.filter((button) => button.id.startsWith('nav.'));
     expect(nav.map((button) => button.id)).toEqual([
-      'nav.projects', 'nav.runs', 'nav.docs', 'nav.registry', 'nav.skills', 'nav.burnin',
+      'nav.projects', 'nav.runs', 'nav.registry', 'nav.skills', 'nav.docs', 'nav.burnin',
     ]);
     expect(ctx.texts.some((text) => ['WORKSPACE', 'OPERATE'].includes(text.value))).toBe(false);
     expect(ctx.tooltips.map((tooltip) => tooltip.text)).toEqual([
-      'Projects', 'Runs', 'Docs', 'Registry', 'Skills', 'Burn-in',
+      'Projects', 'Runs', 'Registry', 'Skills', 'Docs', 'Burn-in',
     ]);
     for (const button of nav) {
       expect(button.x).toBe(GPU_LAYOUT.sidebarWidth - FOCUS_SIDEBAR_BUTTON_WIDTH);
@@ -1362,7 +1445,42 @@ describe('the nav rail', () => {
     expect(sidebarWidthForViewport(528)).toBe(GPU_LAYOUT.sidebarWidth);
     expect(sidebarWidthForViewport(500)).toBe(180);
     expect(sidebarWidthForViewport(432)).toBe(GPU_LAYOUT.sidebarMinWidth);
-    expect(sidebarWidthForViewport(320)).toBe(GPU_LAYOUT.sidebarMinWidth);
+    // 432 is the last viewport that holds the labelled floor AND the content
+    // minimum together. One pixel narrower is a phone: icon tiles, no labels.
+    expect(SIDEBAR_COMPACT_MAX_VIEWPORT).toBe(431);
+    expect(sidebarIsCompactForViewport(432)).toBe(false);
+    expect(sidebarIsCompactForViewport(431)).toBe(true);
+    for (const width of [431, 390, 375, 320]) {
+      expect(sidebarWidthForViewport(width)).toBe(GPU_LAYOUT.sidebarCompactWidth);
+    }
+    expect(GPU_LAYOUT.sidebarCompactWidth).toBeLessThan(GPU_LAYOUT.sidebarMinWidth);
+    expect(GPU_LAYOUT.sidebarCompactWidth).toBeGreaterThanOrEqual(GPU_LAYOUT.sidebarFocusButtonWidth);
+  });
+
+  it('draws a phone-width overview rail as icon tiles, never as clipped labels', () => {
+    const ctx = createRecordingCtx();
+    const width = sidebarWidthForViewport(390);
+    drawSidebar(ctx, makeSnapshot({ view: 'skills' }), 844, width);
+    // Overview keeps its wash; only the labels go.
+    expect(ctx.root.children.some((child) => child.label === 'sidebar-band')).toBe(true);
+    const nav = ctx.buttons.filter((button) => button.id.startsWith('nav.'));
+    expect(nav.map((button) => button.id)).toEqual([
+      'nav.projects', 'nav.runs', 'nav.registry', 'nav.skills', 'nav.docs', 'nav.burnin',
+    ]);
+    expect(ctx.texts.some((text) => ['WORKSPACE', 'OPERATE'].includes(text.value))).toBe(false);
+    expect(ctx.tooltips.map((tooltip) => tooltip.text)).toEqual([
+      'Projects', 'Runs', 'Registry', 'Skills', 'Docs', 'Burn-in',
+    ]);
+    for (const button of nav) {
+      // Centred in the strip and fully inside it: the compact overview rail
+      // is on screen edge to edge, unlike the camera-cropped focus rail.
+      expect(button.width).toBe(GPU_LAYOUT.sidebarFocusButtonWidth);
+      expect(button.x).toBe((width - GPU_LAYOUT.sidebarFocusButtonWidth) / 2);
+      expect(button.x + button.width).toBeLessThanOrEqual(width);
+    }
+    const crystal = overviewRailChromeLayout(width);
+    expect(crystal.crystal.x + crystal.crystal.width).toBeLessThanOrEqual(width);
+    expect(nav[0]!.y).toBeGreaterThanOrEqual(crystal.navigationTop);
   });
 
   it('keeps the CSS content offset equal to the rail it must clear', () => {
@@ -1373,6 +1491,12 @@ describe('the nav rail', () => {
     expect(css).toMatch(new RegExp(
       `--gpu-sidebar:\\s*min\\(100vw, clamp\\(${GPU_LAYOUT.sidebarMinWidth}px,` +
       `[\\s\\S]*?100vw - ${GPU_LAYOUT.contentMinWidth}px[\\s\\S]*?${GPU_LAYOUT.sidebarWidth}px`
+    ));
+    // The phone rail: the CSS media boundary and the compact width are the
+    // same two numbers the renderer derives, or a DOM field sits under a tile.
+    expect(css).toMatch(new RegExp(
+      `@media \\(max-width: ${SIDEBAR_COMPACT_MAX_VIEWPORT}px\\)\\s*\\{\\s*:root\\s*\\{\\s*` +
+      `--gpu-sidebar:\\s*min\\(100vw, ${GPU_LAYOUT.sidebarCompactWidth}px\\)`
     ));
     for (const selector of [
       'gpu-run-input', 'gpu-project-form', 'gpu-view-search',
@@ -1415,6 +1539,46 @@ describe('the nav rail', () => {
     expect(css).toMatch(/\.gpu-overlays-veiled\s*\{[\s\S]*?opacity:\s*\.35/);
     expect(css).toMatch(/\.gpu-overlays-veiled\s*\{[\s\S]*?clip-path:\s*polygon\(\s*evenodd/);
     expect(css).toMatch(/\.gpu-project-form\s*\{[\s\S]*?--gpu-overlay-top:\s*104px/);
+  });
+
+  it('stops inactive rendering and rebuilds only the latest snapshot on return', () => {
+    let focused = true;
+    let hidden = false;
+    vi.stubGlobal('document', { get hidden() { return hidden; }, hasFocus: () => focused });
+    const renderer = new GpuRenderer();
+    const start = vi.fn();
+    const stop = vi.fn();
+    const internals = renderer as unknown as {
+      initialized: boolean;
+      app: unknown;
+      syncRenderActivity: () => void;
+      renderCameraFrame: () => void;
+      renderScene: (snapshot: GpuRenderSnapshot) => void;
+    };
+    internals.app = { start, stop };
+    internals.initialized = true;
+    const rebuild = vi.spyOn(internals, 'renderScene').mockImplementation(() => {});
+    try {
+      focused = false;
+      internals.syncRenderActivity();
+      expect(stop).toHaveBeenCalledOnce();
+      renderer.render(makeSnapshot({ view: 'runs' }));
+      const latest = makeSnapshot({ view: 'skills' });
+      renderer.render(latest);
+      // A camera callback must not reach the absent GPU renderer either.
+      expect(() => internals.renderCameraFrame()).not.toThrow();
+      expect(rebuild).not.toHaveBeenCalled();
+      hidden = true;
+      focused = true;
+      internals.syncRenderActivity();
+      expect(start).not.toHaveBeenCalled();
+      hidden = false;
+      internals.syncRenderActivity();
+      expect(rebuild).toHaveBeenCalledExactlyOnceWith(latest);
+      expect(start).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('breaks the end-of-transition identity guard BEFORE tearing the app down', () => {
@@ -1626,10 +1790,11 @@ describe('visibleViews', () => {
     // No `launch` tab anywhere: describing how to phrase a goal is not a view
     // of its own, it is part of the form that starts the run.
     expect(visibleViews(null)).not.toContain('launch');
-    // Gated member: no instance-global operator surfaces — the server 403s
-    // them, so the tabs must not exist to poison the global data error.
-    // Docs stays: it is static prose, not a fetch of gated data.
-    expect(visibleViews({ ...base, viewer })).toEqual(['projects', 'runs', 'docs']);
+    // Gated member: the org surfaces plus the two platform commons, Registry
+    // and Skills. Burn-in stays out — the server 403s it, so its tab must not
+    // exist to poison the global data error. Docs stays: it is static prose,
+    // not a fetch of gated data.
+    expect(visibleViews({ ...base, viewer })).toEqual(['projects', 'runs', 'registry', 'skills', 'docs']);
     // The admin plane is FIVE destinations, one per job, not one tab holding
     // organisations, the journal, the ledger and the sentinel at once — and
     // the composer that used to ride at the foot of the organisation list is
@@ -2189,6 +2354,48 @@ describe('drawSentinel', () => {
     const ctx = createRecordingCtx();
     drawSentinel(ctx, makeSnapshot({ view: 'sentinel' }, { auth }), 1280, 720);
     expect(ctx.scrollMax.sentinel).not.toBeUndefined();
+  });
+});
+
+describe('drawViewFrame on a narrow column', () => {
+  it('fits a long project title inside the phone frame without wrapping into the form', () => {
+    const ctx = createRecordingCtx();
+    const frame = viewFrame(320 - GPU_LAYOUT.sidebarCompactWidth, 700);
+    drawViewFrame(ctx, frame, 'Project: a project name much wider than this phone', '5 runs');
+    const title = ctx.texts[0]!;
+    expect(title.value.endsWith('…')).toBe(true);
+    expect(ctx.measureText(title.value, { size: 16, weight: '700' })).toBeLessThanOrEqual(frame.innerWidth);
+    expect(title.options).toMatchObject({ singleLine: true, width: frame.innerWidth });
+  });
+
+  it('keeps the subtitle on the title line, clear of the content top the DOM form sits at', () => {
+    // A phone's content column: the compact rail leaves 334px of a 390px
+    // viewport. The subtitle used to stack under the title and land under
+    // the project form, which starts at VIEW_FRAME_CONTENT_TOP.
+    const ctx = createRecordingCtx();
+    const frame = viewFrame(390 - GPU_LAYOUT.sidebarCompactWidth, 844);
+    drawViewFrame(ctx, frame, 'Projects', '1 project in this organisation');
+    const title = ctx.texts.find((text) => text.value === 'Projects')!;
+    const subtitle = ctx.texts.find((text) => text.value !== 'Projects')!;
+    expect(subtitle.y).toBe(frame.y + VIEW_FRAME_TITLE_Y + 5);
+    expect(subtitle.y + 11).toBeLessThan(frame.y + VIEW_FRAME_CONTENT_TOP);
+    // Measured from the title, never over it, and inside the frame.
+    expect(subtitle.x).toBeGreaterThan(title.x + ctx.measureText('Projects', { size: 16, weight: '700' }));
+    const options = subtitle.options as { singleLine?: boolean; width?: number };
+    expect(options.singleLine).toBe(true);
+    expect(subtitle.x + (options.width ?? 0)).toBeLessThanOrEqual(frame.innerX + frame.innerWidth);
+  });
+
+  it('ellipsises a subtitle that cannot share the line rather than wrapping it under the form', () => {
+    const ctx = createRecordingCtx();
+    const frame = viewFrame(390 - GPU_LAYOUT.sidebarCompactWidth, 844);
+    const long = 'a very long subtitle that has no hope of fitting beside a long title on a phone';
+    drawViewFrame(ctx, frame, 'Projects', long);
+    const subtitle = ctx.texts.find((text) => text.value !== 'Projects')!;
+    expect(subtitle.value).not.toBe(long);
+    expect(subtitle.value.endsWith('…')).toBe(true);
+    expect(subtitle.value.length).toBeGreaterThan(1);
+    expect(ctx.texts.filter((text) => text.y >= frame.y + VIEW_FRAME_CONTENT_TOP)).toHaveLength(0);
   });
 });
 
@@ -2891,10 +3098,13 @@ describe('GPU account menu', () => {
     expect(ids).toContain('org.switch.org-b');
     expect(ids).not.toContain('org.switch.org-a');
     expect(ids).toContain('account.settings');
+    expect(ids).toContain('auth.switchAccount');
+    const switchAccount = ctx.buttons.find((button) => button.id === 'auth.switchAccount');
+    switchAccount?.onActivate?.(switchAccount.id);
     expect(ids).toContain('auth.signOut');
     const signOut = ctx.buttons.find((button) => button.id === 'auth.signOut');
     signOut?.onActivate?.(signOut.id);
-    expect(activated).toEqual(['auth.signOut']);
+    expect(activated).toEqual(['auth.switchAccount', 'auth.signOut']);
   });
 
   it('clips DOM overlays to the same panel rect the account menu draws', () => {
@@ -4228,7 +4438,9 @@ describe('attachAtomaMark glass layering', () => {
     );
     expect(source).toContain('if (shell) glassGlow.visible = false');
     expect(source).toContain('behind.visible = false');
-    expect(source).toContain('shell?.update(frame, { beadVisible, lamp, pointerClip })');
+    expect(source).toContain(
+      'shell?.update(frame, { beadVisible, lamp, pointerClip, coreGain: shellGain })'
+    );
     expect(source).toContain('pointerLampForLocal');
     expect(source).toContain('bobPx');
     const paintStart = source.indexOf('const paint = ');
@@ -4839,7 +5051,8 @@ describe('drawRuns behavior', () => {
     const ctx = createRecordingCtx();
     drawRuns(ctx, makeSnapshot({}, { run: makeRun(events) }), WIDTH, HEIGHT);
 
-    const opts = (text: RecordedText) => (text.options ?? {}) as { weight?: string; size?: number };
+    const opts = (text: RecordedText) =>
+      (text.options ?? {}) as { weight?: string; size?: number; width?: number };
     const inCards = ctx.texts.filter((text) =>
       ctx.eventCards.some((card) => card.content === text.parent));
 
@@ -4849,7 +5062,12 @@ describe('drawRuns behavior', () => {
     const title = inCards.find((text) => text.value.includes('reverify_recorded_probe'));
     expect(title, 'fixture must produce the long title').toBeDefined();
     const sameCard = inCards.filter((text) => text.parent === title!.parent);
-    const actor = sameCard.find((text) => opts(text).size === 9 && text.y === 7);
+    // The card is one line, so the actor and the facts line share a y. Only
+    // the facts line is given a measured `width`, which is what tells them
+    // apart without pinning this test to a pixel.
+    const actor = sameCard.find(
+      (text) => opts(text).size === 9 && opts(text).width === undefined
+    );
     expect(actor, 'the card must draw an actor for this to mean anything').toBeDefined();
 
     // The stub measures a label at size * 0.58 per character.
@@ -4876,7 +5094,8 @@ describe('drawRuns behavior', () => {
     drawRuns(ctx, makeSnapshot({}, { run: makeRun(events) }), WIDTH, HEIGHT);
 
     const detail = ctx.texts.find((text) =>
-      ctx.eventCards.some((card) => card.content === text.parent) && text.y === 25);
+      ctx.eventCards.some((card) => card.content === text.parent) &&
+      typeof (text.options as { width?: number } | undefined)?.width === 'number');
     expect(detail, 'the card must draw a detail line').toBeDefined();
     expect(detail!.value).toContain('cache 177k');
     expect(detail!.value).toContain('$');
@@ -4894,7 +5113,8 @@ describe('drawRuns behavior', () => {
       const ctx = createRecordingCtx();
       drawRuns(ctx, makeSnapshot({}, { run: makeRun([event]) }), width, HEIGHT);
       const detail = ctx.texts.find((text) =>
-        ctx.eventCards.some((card) => card.content === text.parent) && text.y === 25);
+        ctx.eventCards.some((card) => card.content === text.parent) &&
+        typeof (text.options as { width?: number } | undefined)?.width === 'number');
       expect(detail).toBeDefined();
       expect(detail!.value).not.toMatch(/[\r\n]/);
       expect(detail!.value).toContain('43ms');
@@ -5547,6 +5767,121 @@ describe('render groups — per-frame animation stays off the root batch', () =>
 });
 
 
+describe('touch scrolling — a finger drag drives the same router as the wheel', () => {
+  // Node has no TouchEvent; the handlers read only these members.
+  type TouchLike = { identifier: number; clientX: number; clientY: number };
+  type Internals = {
+    snapshot: GpuRenderSnapshot | null;
+    scrollMax: Partial<Record<string, number>>;
+    runPickerBounds: Rectangle | null;
+    runPickerScrollMax: number;
+    app: unknown;
+    touchScroll: unknown;
+    touchStart(event: { touches: TouchLike[] }): void;
+    touchMove(event: { changedTouches: TouchLike[] }): void;
+    touchEnd(): void;
+  };
+
+  function armRenderer(snapshot: GpuRenderSnapshot, viewport = { width: 390, height: 844 }) {
+    const renderer = new GpuRenderer();
+    const internals = renderer as unknown as Internals;
+    internals.snapshot = snapshot;
+    // A bare canvas outside any camera plane: client pixels ARE renderer
+    // pixels, so the deltas below can be read straight off the finger.
+    internals.app = {
+      canvas: {
+        closest: () => null,
+        getBoundingClientRect: () => ({ left: 0, top: 0, ...viewport }),
+      },
+      screen: viewport,
+    };
+    return internals;
+  }
+
+  it('scrolls the current view by the finger travel once past the slop, and not before', () => {
+    const onScroll = vi.fn();
+    const internals = armRenderer({
+      // Mid-list, so both directions have room; the mock never moves the
+      // state, so every delta is measured from this same 100.
+      ...makeSnapshot({ view: 'projects', scrollY: { ...makeState().scrollY, projects: 100 } }),
+      onScroll,
+    });
+    internals.scrollMax = { projects: 500 };
+    internals.touchStart({ touches: [{ identifier: 7, clientX: 200, clientY: 600 }] });
+    internals.touchMove({
+      changedTouches: [{ identifier: 7, clientX: 200, clientY: 600 - (TOUCH_SCROLL_SLOP_PX - 1) }],
+    });
+    expect(onScroll).not.toHaveBeenCalled();
+    // Finger up the screen = content up = scrollY grows, by exactly the travel.
+    internals.touchMove({ changedTouches: [{ identifier: 7, clientX: 200, clientY: 560 }] });
+    expect(onScroll).toHaveBeenLastCalledWith('projects', 40);
+    internals.touchMove({ changedTouches: [{ identifier: 7, clientX: 200, clientY: 590 }] });
+    expect(onScroll).toHaveBeenLastCalledWith('projects', -30);
+    // Another finger's motion is not this drag.
+    internals.touchMove({ changedTouches: [{ identifier: 8, clientX: 200, clientY: 100 }] });
+    expect(onScroll).toHaveBeenCalledTimes(2);
+    internals.touchEnd();
+    expect(internals.touchScroll).toBeNull();
+  });
+
+  it('fails closed like the wheel: a view with no declared maximum does not move', () => {
+    const onScroll = vi.fn();
+    const internals = armRenderer({ ...makeSnapshot({ view: 'projects' }), onScroll });
+    internals.scrollMax = {};
+    internals.touchStart({ touches: [{ identifier: 1, clientX: 200, clientY: 600 }] });
+    internals.touchMove({ changedTouches: [{ identifier: 1, clientX: 200, clientY: 400 }] });
+    expect(onScroll).toHaveBeenLastCalledWith('projects', 0);
+  });
+
+  it('keeps driving the pane the finger landed on after it wanders out of it', () => {
+    const onScroll = vi.fn();
+    const onRunPickerScroll = vi.fn();
+    const internals = armRenderer({
+      ...makeSnapshot({ view: 'runs', focusedInput: 'run' }),
+      onScroll,
+      onRunPickerScroll,
+    });
+    internals.scrollMax = { runs: 900 };
+    internals.runPickerBounds = new Rectangle(0, 0, 390, 300);
+    internals.runPickerScrollMax = 400;
+    internals.touchStart({ touches: [{ identifier: 2, clientX: 100, clientY: 250 }] });
+    internals.touchMove({ changedTouches: [{ identifier: 2, clientX: 100, clientY: 230 }] });
+    expect(onRunPickerScroll).toHaveBeenLastCalledWith(20);
+    // Now well below the picker: still the picker's drag, never the view's.
+    internals.touchMove({ changedTouches: [{ identifier: 2, clientX: 100, clientY: 700 }] });
+    expect(onRunPickerScroll).toHaveBeenCalledTimes(2);
+    expect(onScroll).not.toHaveBeenCalled();
+  });
+
+  it('is a one-finger gesture: a second finger disarms it', () => {
+    const onScroll = vi.fn();
+    const internals = armRenderer({ ...makeSnapshot({ view: 'projects' }), onScroll });
+    internals.scrollMax = { projects: 500 };
+    internals.touchStart({ touches: [{ identifier: 1, clientX: 200, clientY: 600 }] });
+    internals.touchStart({
+      touches: [
+        { identifier: 1, clientX: 200, clientY: 600 },
+        { identifier: 2, clientX: 240, clientY: 620 },
+      ],
+    });
+    internals.touchMove({ changedTouches: [{ identifier: 1, clientX: 200, clientY: 400 }] });
+    expect(onScroll).not.toHaveBeenCalled();
+  });
+
+  it('declares the vertical pan on the canvas so a drag ends as a pan, not a tap', () => {
+    // Source-level: `touch-action` is a browser contract the handlers depend
+    // on (pointercancel), and nothing behavioural can observe it in Node.
+    const css = readFileSync(resolve('src/viz/client-gl/styles.css'), 'utf8');
+    expect(css).toMatch(/\.gpu-ui-canvas\s*\{[^}]*touch-action:\s*pan-y/);
+    expect(css).not.toMatch(/\.gpu-ui-canvas\s*\{[^}]*touch-action:\s*none/);
+    const source = readFileSync(resolve('src/viz/client-gl/gpu-renderer.ts'), 'utf8');
+    for (const type of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) {
+      expect(source).toMatch(new RegExp(`addEventListener\\('${type}', this\\.\\w+, \\{ passive: true \\}\\)`));
+      expect(source).toMatch(new RegExp(`removeEventListener\\('${type}', this\\.\\w+\\)`));
+    }
+  });
+});
+
 describe('FPS follow-ups', () => {
   it.each(['filterButton', 'navButton', 'atomButton'] as const)('%s settles, wakes on hover, and settles again', (kind) => {
     setReducedMotionOverrideForTests(false);
@@ -5639,5 +5974,124 @@ describe('FPS follow-ups', () => {
     internals.host = { clientWidth: 900, clientHeight: 800 };
     renderer.render(at(60));
     expect(rebuild).toHaveBeenCalledTimes(5);
+  });
+});
+
+/**
+ * Three tiny values — `Status ✓ Success`, `Path server.mjs`, `Bytes 4727` —
+ * took a full-width card each and ~200 vertical pixels of a 500px pane, so the
+ * rest of a tool result sat below the fold (2026-09-21). Small fields now
+ * share a row. Asserted through `drawRuns`, the pane a viewer actually reads,
+ * not through the layout helper alone.
+ */
+describe('drawRuns — paired detail fields', () => {
+  const WIDTH = 1280;
+  const HEIGHT = 800;
+
+  function toolRun(result: Record<string, unknown>, args: Record<string, unknown> = {}): VizRun {
+    return makeRun([
+      {
+        id: 'tool-1',
+        ts: Date.parse('2026-08-14T10:01:00.000Z'),
+        kind: 'tool',
+        name: 'write_file',
+        actor: { tier: 1, name: 'Methane' },
+        args,
+        result,
+      },
+    ]);
+  }
+
+  /** Every label drawn inside the scrolled detail layer, with its position. */
+  function detailTexts(ctx: RecordingCtx) {
+    const layer = ctx.texts.filter((entry) =>
+      typeof entry.parent.label === 'string' && entry.parent.label.startsWith('event-detail:')
+    );
+    return layer;
+  }
+  function labelAt(ctx: RecordingCtx, value: string) {
+    return detailTexts(ctx).find((entry) => entry.value === value);
+  }
+
+  it('packs three small detail fields onto one row, a column apart', () => {
+    const ctx = createRecordingCtx();
+    drawRuns(
+      ctx,
+      makeSnapshot(
+        { selectedEventId: 'tool-1' },
+        { run: toolRun({ ok: true, path: 'server.mjs', bytes: 4727 }) }
+      ),
+      WIDTH,
+      HEIGHT
+    );
+
+    const status = labelAt(ctx, 'Status');
+    const path = labelAt(ctx, 'Path');
+    const bytes = labelAt(ctx, 'Bytes');
+    expect(status).toBeDefined();
+    expect(path).toBeDefined();
+    expect(bytes).toBeDefined();
+    // One band: a verdict badge no longer owns a row of its own.
+    expect(path!.y).toBe(status!.y);
+    expect(bytes!.y).toBe(status!.y);
+    // Three columns, in the projection's own order, left to right.
+    const pane = runsPaneLayout(WIDTH);
+    const nodeWidth = detailNodeWidth(pane.rightWidth - 42, 1);
+    const columnWidth = detailColumnWidth(nodeWidth, 3);
+    expect(columnWidth).toBeGreaterThanOrEqual(DETAIL_CARD_MIN_WIDTH);
+    expect(path!.x - status!.x).toBeGreaterThanOrEqual(columnWidth);
+    expect(bytes!.x - path!.x).toBeGreaterThanOrEqual(columnWidth);
+    // The last card is flush with the right edge a full-width card would have.
+    expect(bytes!.x - status!.x).toBe(nodeWidth - columnWidth);
+  });
+
+  it('keeps a value too long to share a line on its own full-width row', () => {
+    const long = 'x'.repeat(COMPACT_VALUE_MAX_CHARS + 1);
+    const ctx = createRecordingCtx();
+    drawRuns(
+      ctx,
+      makeSnapshot(
+        { selectedEventId: 'tool-1' },
+        { run: toolRun({ path: long, bytes: 4727 }) }
+      ),
+      WIDTH,
+      HEIGHT
+    );
+    const path = labelAt(ctx, 'Path');
+    const bytes = labelAt(ctx, 'Bytes');
+    expect(path).toBeDefined();
+    expect(bytes).toBeDefined();
+    expect(bytes!.y).toBeGreaterThan(path!.y);
+    expect(bytes!.x).toBe(path!.x);
+  });
+
+  it('falls back to one column when a column would be illegibly narrow', () => {
+    // The pane's own two-pane floor: a nested level there cannot hold two
+    // minimum cards plus their gutter, so pairing must not be attempted.
+    const narrow = detailNodeWidth(DETAIL_CARD_MIN_WIDTH * 2 + DETAIL_PAIR_GAP - 1, 0);
+    expect(detailColumnWidth(narrow)).toBeLessThan(DETAIL_CARD_MIN_WIDTH);
+  });
+
+  it('still bounds and masks the detail scroll after pairing', () => {
+    const ctx = createRecordingCtx();
+    drawRuns(
+      ctx,
+      makeSnapshot(
+        { selectedEventId: 'tool-1' },
+        {
+          run: toolRun(
+            { ok: true, path: 'server.mjs', bytes: 4727, stdout: 'built\n'.repeat(400) },
+            { path: 'server.mjs' }
+          ),
+        }
+      ),
+      WIDTH,
+      HEIGHT
+    );
+    expect(ctx.detailBounds).not.toBeNull();
+    expect(ctx.detailScrollMax).toBeGreaterThan(0);
+    expect(scrollbarThumbs(ctx.root).length).toBe(1);
+    // ONE rectangle over the whole pane viewport, never one per column.
+    expect(ctx.detailBounds!.width).toBeGreaterThan(detailColumnWidth(ctx.detailBounds!.width) * 2 - 1);
   });
 });

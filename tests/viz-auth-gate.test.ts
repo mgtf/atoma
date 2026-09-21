@@ -15,6 +15,9 @@ import { GITHUB_COPY } from '../src/github/http.js';
 import { ProjectStore } from '../src/projects/store.js';
 import { projectRunHostLayout } from '../src/projects/coordinator.js';
 import { sleepInhibitorHint } from '../src/sentinel/resident.js';
+import { SkillRegistry } from '../src/skills/registry.js';
+import { AtomRegistry } from '../src/registry/atomRegistry.js';
+import { openDb } from '../src/registry/db.js';
 
 /**
  * Process-level contract: real viz server, real SQLite and a local OAuth app.
@@ -723,6 +726,81 @@ describe('viz auth gate (process level)', () => {
     });
   }, 120_000);
 
+  it('migrates project skills at startup and serves their existing URLs to ordinary viewers', async () => {
+    const instance = tempInstance();
+    const invitation = randomBytes(32).toString('base64url');
+    createInvitation(instance.dbPath, invitation, 'org:viewer');
+    const projectsRoot = join(instance.root, 'projects');
+    const namespace = '5412001e-43f6-439c-b6ce-95bd4f41c21b';
+    const skillId = 'recover-missing-live-browser-proof';
+    const db = new Database(instance.dbPath);
+    try {
+      const orgId = db.prepare('SELECT org_id FROM auth_organisations').pluck().get() as string;
+      const principalId = db.prepare('SELECT principal_id FROM auth_principals').pluck().get() as string;
+      const project = new ProjectStore(db).createProject({ orgId, principalId,
+        project: { name: 'Learning', slug: 'learning', repositoryTarget: { installationId: '123', owner: 'owner', name: 'learning', visibility: 'private' } } });
+      const layout = projectRunHostLayout(projectsRoot, orgId, project.projectId, randomUUID());
+      new SkillRegistry(layout.skillsPath).save(namespace, { id: skillId, description: 'Restore browser proof', whenToUse: 'When live browser proof is missing', kind: 'llm', body: 'Inspect the browser probe result.' });
+    } finally { db.close(); }
+    const provider = await startFakeProvider({ port: await freePort(), subject: 920 });
+    const port = await freePort();
+    const base = `http://127.0.0.1:${port}`;
+    const running = startViz([...instance.args, '--port', String(port)], {
+      ...providerEnv(provider, base), ATOMA_PROJECTS_ROOT: projectsRoot,
+    });
+    await waitReady(running, `${base}/auth/whoami`);
+    expect((await fetch(`${base}/api/skills`)).status).toBe(401);
+    const jar = new CookieJar();
+    expect((await fetchWithJar(jar, `${base}/auth/login?provider=github&invite=${invitation}`)).status).toBe(200);
+    const headers = { cookie: jar.header(base)! };
+    expect(await (await fetch(`${base}/auth/whoami`, { headers })).json()).toMatchObject({ platformAdmin: false });
+    expect(await (await fetch(`${base}/api/skills`, { headers })).json()).toContainEqual({ l1Name: namespace, l1Label: namespace, count: 1 });
+    expect(await (await fetch(`${base}/api/skills/${namespace}`, { headers })).json()).toEqual([expect.objectContaining({ id: skillId })]);
+    const detail = await fetch(`${base}/api/skills/${namespace}/${skillId}`, { headers });
+    expect(detail.status).toBe(200);
+    expect(await detail.json()).toMatchObject({ body: 'Inspect the browser probe result.' });
+    expect((await fetch(`${base}/api/burnin`, { headers })).status).toBe(403);
+  });
+
+  it('serves the one platform registry to every viewer, host path excluded', async () => {
+    const instance = tempInstance();
+    const invitation = randomBytes(32).toString('base64url');
+    createInvitation(instance.dbPath, invitation, 'org:viewer');
+    // ONE registry for every run on the platform: what a member reads here is
+    // what their own runs read and earn on (docs/platform-trust-2026-09-15.md).
+    const seed = { tools: [], params: {}, createdBy: 'seed' };
+    const db = openDb(instance.dbPath);
+    try {
+      const registry = new AtomRegistry(db);
+      const shared = registry.create(1, { ...seed, description: 'Shared capability', systemPrompt: 'Shared routing guidance' });
+      registry.recordSuccess(shared.name);
+    } finally { db.close(); }
+    const provider = await startFakeProvider({ port: await freePort(), subject: 921 });
+    const port = await freePort();
+    const base = `http://127.0.0.1:${port}`;
+    const running = startViz([...instance.args, '--port', String(port)], providerEnv(provider, base));
+    await waitReady(running, `${base}/auth/whoami`);
+    expect((await fetch(`${base}/api/registries`)).status).toBe(401);
+    const jar = new CookieJar();
+    expect((await fetchWithJar(jar, `${base}/auth/login?provider=github&invite=${invitation}`)).status).toBe(200);
+    const headers = { cookie: jar.header(base)! };
+    expect(await (await fetch(`${base}/auth/whoami`, { headers })).json()).toMatchObject({ platformAdmin: false });
+    // The store is named by basename only: the host's filesystem layout is
+    // operator information.
+    expect(await (await fetch(`${base}/api/registries`, { headers })).json()).toEqual([
+      { id: 'atoma', label: 'atoma', path: 'atoma.db', exists: true, counts: { 1: 1, 2: 0, 3: 0, total: 1 } },
+    ]);
+    const dump = await fetch(`${base}/api/registry/atoma`, { headers });
+    expect(dump.status).toBe(200);
+    const body = await dump.json() as { registry: { path: string }; types: Array<Record<string, unknown>> };
+    expect(body.registry.path).toBe('atoma.db');
+    expect(body.types).toEqual([
+      expect.objectContaining({ tier: 1, description: 'Shared capability', systemPrompt: 'Shared routing guidance', successes: 1 }),
+    ]);
+    // Burn-in stays the operator's alone.
+    expect((await fetch(`${base}/api/burnin`, { headers })).status).toBe(403);
+  });
+
   it('reserves operator surfaces and the admin control plane to a CLI-granted platform admin', async () => {
     const instance = tempInstance();
     const benchmark = seedBenchmark(join(instance.runsDir, 'benchmarks'));
@@ -744,7 +822,10 @@ describe('viz auth gate (process level)', () => {
     expect(await whoamiBefore.json()).toMatchObject({ authenticated: true, platformAdmin: false });
     expect(await (await fetch(`${base}/api/runs`, { headers: cookie })).json()).toEqual([]);
     expect((await fetch(`${base}/api/runs/${benchmark.start.runId}`, { headers: cookie })).status).toBe(404);
-    for (const path of ['/api/registries', '/api/skills', '/api/burnin', '/api/admin/organisations']) {
+    for (const path of ['/api/skills', '/api/registries']) {
+      expect((await fetch(`${base}${path}`, { headers: cookie })).status).toBe(200);
+    }
+    for (const path of ['/api/burnin', '/api/admin/organisations']) {
       const refused = await fetch(`${base}${path}`, { headers: cookie });
       expect(refused.status).toBe(403);
     }
@@ -780,7 +861,7 @@ describe('viz auth gate (process level)', () => {
     expect(await whoamiAfter.json()).toMatchObject({ authenticated: true, platformAdmin: true });
     expect(await (await fetch(`${base}/api/runs`, { headers: cookie })).json()).toMatchObject([{ id: benchmark.start.runId }]);
     expect(await (await fetch(`${base}/api/runs/${benchmark.start.runId}`, { headers: cookie })).json()).toEqual(benchmark.trace);
-    expect((await fetch(`${base}/api/registries`, { headers: cookie })).status).toBe(200);
+    expect((await fetch(`${base}/api/burnin`, { headers: cookie })).status).toBe(200);
 
     const organisations = await fetch(`${base}/api/admin/organisations`, { headers: cookie });
     expect(organisations.status).toBe(200);
@@ -816,7 +897,7 @@ describe('viz auth gate (process level)', () => {
     expect(
       runAuthCli(['node', 'auth', 'revoke-admin', '--principal', 'fake@example.com', '--db', instance.dbPath], {})
     ).toBe(0);
-    expect((await fetch(`${base}/api/registries`, { headers: cookie })).status).toBe(403);
+    expect((await fetch(`${base}/api/burnin`, { headers: cookie })).status).toBe(403);
     expect((await fetch(`${base}/api/admin/organisations`, { headers: cookie })).status).toBe(403);
   });
 
@@ -1139,7 +1220,7 @@ describe('viz auth gate (process level)', () => {
     expect((await fetch(`${base}/auth/avatar/${whoami.principalId}`)).status).toBe(401);
     // Account routes are self-scoped, never operator-scoped: no platform admin
     // grant happened above, and every one of them answered.
-    expect((await fetch(`${base}/api/registries`, { headers: cookie })).status).toBe(403);
+    expect((await fetch(`${base}/api/burnin`, { headers: cookie })).status).toBe(403);
   });
 
   it('serves the platform audit journal to the admin alone, newest first', async () => {
@@ -1159,7 +1240,7 @@ describe('viz auth gate (process level)', () => {
     expect((await fetchWithJar(jar, `${base}/auth/login?provider=github`)).status).toBe(200);
     const cookie = { cookie: jar.header(base)! };
 
-    // Before the grant the journal is operator-level state, like the registry.
+    // Before the grant the journal is operator-level state, like burn-in.
     for (const path of ['/api/admin/events', '/api/admin/ledger', '/api/admin/sentinel']) {
       expect((await fetch(`${base}${path}`, { headers: cookie })).status).toBe(403);
     }
@@ -2063,3 +2144,62 @@ describe('viz auth gate (process level)', () => {
     expect(await listed.json()).toEqual([expect.objectContaining({ installationId: '99887766' })]);
   });
 });
+
+it('audits all four HTTP cross-org read paths and refuses reads if the journal fails', async () => {
+  const instance = tempInstance();
+  const provider = await startFakeProvider({ port: await freePort(), subject: 7707 });
+  const port = await freePort();
+  const base = `http://127.0.0.1:${port}`;
+  const running = startViz([...instance.args, '--port', String(port)], providerEnv(provider, base));
+  await waitReady(running, `${base}/auth/whoami`);
+  const jar = new CookieJar();
+  expect((await fetchWithJar(jar, `${base}/auth/login?provider=github`)).status).toBe(200);
+  const cookie = { cookie: jar.header(base)! };
+  const db = new Database(instance.dbPath);
+  try {
+    const auth = new AuthStore(db);
+    const adminId = db.prepare('SELECT principal_id FROM auth_principals LIMIT 1').pluck().get() as string;
+    auth.grantPlatformAdmin(adminId);
+    const foreign = auth.completeLogin({ provider: 'github', subject: 'foreign-audit-owner',
+      displayName: 'Foreign owner', email: null, emailVerified: false }, null)!.viewer;
+    const projects = new ProjectStore(db);
+    const project = projects.createProject({ orgId: foreign.orgId, principalId: foreign.principalId,
+      project: { name: 'Audit fixture', slug: 'audit-fixture', repositoryTarget: {
+        installationId: '123', owner: 'owner', name: 'audit-fixture', visibility: 'private',
+      } } });
+    const runId = randomUUID();
+    const layout = projectRunHostLayout(join(instance.root, 'projects'), foreign.orgId, project.projectId, runId);
+    projects.createProjectRun({ orgId: foreign.orgId, projectId: project.projectId, principalId: foreign.principalId,
+      projectRunId: runId, request: { idempotencyKey: runId, goal: 'Audit fixture' }, hostPaths: {
+        workspacePath: layout.workspacePath, runsPath: layout.runsPath, logPath: layout.logPath,
+      } });
+    mkdirSync(layout.runsPath, { recursive: true });
+    writeFileSync(join(layout.runsPath, `${runId}.json`), JSON.stringify({ id: runId,
+      label: 'Audit fixture', startedAt: '2026-09-20T12:00:00Z', events: [] }));
+    const paths = [
+      ['/api/projects', 'projects.index'],
+      [`/api/projects/${project.projectId}/runs`, 'projects.detail'],
+      ['/api/runs', 'runs.index'],
+      [`/api/runs/${runId}`, 'runs.trace'],
+    ];
+    for (const [path, surface] of paths) {
+      // Isolate each wiring seam; a previous receipt must not hide a missing hook.
+      db.prepare("DELETE FROM platform_events WHERE kind = 'admin.cross_org_read'").run();
+      expect((await fetch(`${base}${path}`, { headers: cookie })).status).toBe(200);
+      const row = db.prepare("SELECT actor_id, org_id, detail FROM platform_events WHERE kind = 'admin.cross_org_read'").get() as {
+        actor_id: string; org_id: string; detail: string;
+      };
+      expect(row).toMatchObject({ actor_id: adminId, org_id: foreign.orgId });
+      expect(JSON.parse(row.detail)).toMatchObject({ surface });
+      expect((await fetch(`${base}${path}`, { headers: cookie })).status).toBe(200);
+      expect(db.prepare("SELECT count(*) AS n FROM platform_events WHERE kind = 'admin.cross_org_read'").get()).toEqual({ n: 1 });
+      db.prepare("DELETE FROM platform_events WHERE kind = 'admin.cross_org_read'").run();
+      db.exec("CREATE TRIGGER refuse_read_audit BEFORE INSERT ON platform_events WHEN NEW.kind = 'admin.cross_org_read' BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END");
+      try { expect((await fetch(`${base}${path}`, { headers: cookie })).status).toBe(503); }
+      finally { db.exec('DROP TRIGGER refuse_read_audit'); }
+    }
+    auth.revokePlatformAdmin(adminId);
+    expect((await fetch(`${base}/api/runs/${runId}`, { headers: cookie })).status).toBe(404);
+    expect((await fetch(`${base}/auth/whoami`, { headers: cookie })).status).toBe(200);
+  } finally { db.close(); }
+}, 120_000);

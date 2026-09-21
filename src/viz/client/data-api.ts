@@ -178,7 +178,7 @@ export const api = {
   sendAnnouncement: (body: { segment: string; texts: VizAnnouncementTexts }) =>
     mutateJson<{ segment: string; orgCount: number | null }>('/api/admin/announce', body),
   organisation: () => fetchJson<VizOrganisation>('/api/org'),
-  accountModels: () => fetchJson<VizAccountModels>('/api/account/models'),
+  accountModels: (refresh = false) => fetchJson<VizAccountModels>(`/api/account/models${refresh ? '?refresh=1' : ''}`),
   accountSubscriptions: () =>
     fetchJson<VizAccountSubscriptions>('/api/account/subscriptions'),
   startCodexSubscriptionLogin: () =>

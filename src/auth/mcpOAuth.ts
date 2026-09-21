@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { z } from 'zod';
 import type { AuthGate } from './gate.js';
 import { MCP_CODE_TTL_MS, MCP_OAUTH_SCOPE, oauthHash } from './mcpOAuthStore.js';
-import { authCookieName, parseCookieHeader, serializeCookie, SESSION_COOKIE } from './sessions.js';
+import { authCookieName, parseCookieHeader, retireSessionCookie, serializeCookie, SESSION_COOKIE } from './sessions.js';
 import { BoundedFixedWindowRateLimiter } from './rate-limit.js';
 import type { PlatformEventSink } from '../contracts/platformEvents.js';
 
@@ -203,6 +203,17 @@ export class McpOAuth {
         json(res, 403, { error: 'access_denied' }); return;
       }
       this.pending.delete(id);
+      if (form.get('decision') === 'switch') {
+        // A new request may bind to the next login; the displayed consent never can.
+        const nextId = fresh();
+        const { sessionHash: _sessionHash, principalId: _principalId, orgId: _orgId, ...unbound } = pending;
+        this.pending.set(nextId, unbound);
+        auth.revokeSession(session);
+        res.setHeader('set-cookie', [retireSessionCookie({ secure: this.options.origin.protocol === 'https:' }),
+          serializeCookie(RETURN_COOKIE, nextId, { secure: this.options.origin.protocol === 'https:', path: '/auth',
+            maxAgeSeconds: Math.max(0, (pending.expiresAt - Date.now()) / 1000) })]);
+        redirect(res, '/auth/login?select_account=1'); return;
+      }
       const callback = new URL(pending.redirectUri);
       callback.searchParams.set('iss', this.options.origin.origin);
       if (pending.state !== null) callback.searchParams.set('state', pending.state);
@@ -225,10 +236,13 @@ export class McpOAuth {
       'content-security-policy': `default-src 'none'; style-src 'unsafe-inline'; form-action 'self' ${new URL(pending.redirectUri).origin}; frame-ancestors 'none'; base-uri 'none'` });
     res.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Connect to Atoma</title><style>body{font:17px system-ui;background:#101918;color:#e7eeeb;max-width:560px;margin:12vh auto;padding:24px;line-height:1.6}button{font:inherit;padding:10px 24px;margin:16px 12px 0 0;border-radius:8px;cursor:pointer}code{overflow-wrap:anywhere}</style>
-<h1>Connect to Atoma</h1><p><strong>${escape(client.client_name)}</strong> wants access as <strong>${escape(viewer.displayName)}</strong>
-in <strong>${escape(viewer.orgName)}</strong>.</p><p>This grants your current MCP permissions, including starting runs and spending the organisation’s configured provider when your role allows it.${viewer.platformAdmin ? ' Your platform administrator access is included.' : ''}</p>
+<h1>Connect to Atoma</h1><p><strong>${escape(client.client_name)}</strong> wants access to your Atoma account.</p>
+<dl><dt>Account</dt><dd>${escape(viewer.displayName)}</dd>${auth.listLoginIdentities(viewer.principalId).map(identity => `<dt>${escape(identity.provider)} account</dt><dd>${escape(identity.email ?? identity.subject)}</dd>`).join('')}
+<dt>Organisation</dt><dd>${escape(viewer.orgName)}</dd><dt>Role</dt><dd>${escape(viewer.role.replace('org:', ''))}${viewer.platformAdmin ? ' · Platform administrator' : ''}</dd></dl>
+<p>${viewer.role === 'org:viewer' && !viewer.platformAdmin ? 'This connection can read the information available to your account. It cannot start runs.' : 'This connection can use your current MCP permissions, including starting runs and consuming the configured AI provider quota.'}${viewer.platformAdmin ? ' Your platform administrator access is included.' : ''}</p>
 <p>Client names are supplied by the application. Continue only if you started this connection.</p>
 <p>Return address: <code>${escape(pending.redirectUri)}</code></p><p>You can revoke this connection in Settings → MCP access.</p>
-<form method="post" action="/oauth/authorize"><input type="hidden" name="request" value="${id}"><button name="decision" value="allow">Allow access</button><button name="decision" value="deny">Cancel</button></form></html>`);
+<form method="post" action="/oauth/authorize"><input type="hidden" name="request" value="${id}"><button name="decision" value="allow">Allow access</button><button name="decision" value="deny">Cancel</button><button name="decision" value="switch">Use another account</button></form>
+<p>Using another account signs this browser out of Atoma and returns here after sign-in.</p></html>`);
   }
 }

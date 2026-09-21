@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { isAccountTierSelection, isValidTierModelSelection } from '../core/providerCatalog.js';
 import { tierPinVariable, tryParseModelSelector, TIERS, type TierNumber } from './modelSelector.js';
+import { principalChatGptSelection } from './runPayers.js';
 
 /**
  * PER-TIER MODEL SELECTION — THE ONE CHOICE CONTRACT.
@@ -148,4 +149,47 @@ export function operatorTierDefaults(
     out[`l${tier}`] = value && tryParseModelSelector(value) ? value : null;
   }
   return out;
+}
+
+/**
+ * THE PROVIDER DEFAULT FOR A MEMBER'S OWN CHATGPT LOGIN.
+ *
+ * Connecting a personal subscription is the ONE moment where arming pins on
+ * the member's behalf is a service rather than a liberty: the account choice
+ * is the authorization to spend, and the member just made it for this exact
+ * provider. It is applied only when NOTHING else resolves (see
+ * `everyTierUnresolved`), so it can never displace a choice, an organisation
+ * default or an operator pin — a deployment that configured its tiers keeps
+ * them, and a member who picked models keeps those.
+ *
+ * The caller supplies the default from the connected account's model/list.
+ * No static model list can establish what that account may use.
+ */
+export function principalChatGptStarterPins(model: string): TierModelPins {
+  return accountTierModelPinsSchema.parse({
+    l1: principalChatGptSelection(model),
+    l2: principalChatGptSelection(model),
+    l3: principalChatGptSelection(model),
+  });
+}
+
+/**
+ * True when NO level of the chain names a model on ANY tier, i.e. every run
+ * this principal could launch would fail on the missing pin. Asked with the
+ * same walker the run uses, so "unconfigured" here and "unresolved" at launch
+ * cannot drift apart.
+ */
+export function everyTierUnresolved(input: {
+  readonly account: TierModelPins;
+  readonly org: TierModelPins;
+  readonly host: Record<'l1' | 'l2' | 'l3', string | null>;
+}): boolean {
+  return TIERS.every((tier) =>
+    tierChainCandidates({
+      account: input.account,
+      org: input.org,
+      host: input.host[`l${tier}`],
+      tier,
+    }).every((candidate) => candidate === null)
+  );
 }

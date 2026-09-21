@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import type { ChildProcess } from 'node:child_process';
@@ -10,6 +10,9 @@ import {
   type ContainerSpawn,
 } from '../src/tools/containerExecutor.js';
 import { encodeMessage } from '../src/tools/containerProtocol.js';
+import * as launcher from '../src/launcher/docker.js';
+
+afterEach(() => vi.restoreAllMocks());
 
 function fakeWorker(pid: number): ChildProcess {
   const child = Object.assign(new EventEmitter(), {
@@ -41,6 +44,46 @@ function fakeWorker(pid: number): ChildProcess {
 }
 
 describe('ContainerToolExecutor lifecycle', () => {
+  it('waits for engine removal after the CLI exits and permanently closes the old backend', async () => {
+    let removed!: () => void;
+    const drain = vi.fn(() => new Promise<void>((resolve) => { removed = resolve; }));
+    vi.spyOn(launcher, 'attachedWorkerLifecycle').mockReturnValue({ name: 'atoma-worker-owned', drain });
+    const root = mkdtempSync(join(tmpdir(), 'atoma-executor-drain-'));
+    const worker = fakeWorker(4242);
+    const spawnFn = vi.fn((_command: string, args: string[]) => {
+      expect(args.slice(0, 3)).toEqual(['run', '--name', 'atoma-worker-owned']);
+      return worker;
+    }) as unknown as ContainerSpawn;
+    const executor = new ContainerToolExecutor({ workspaceHostPath: root, spawnFn, forwardWorkerLogs: false });
+    try {
+      await executor.start();
+      worker.emit('exit', 1);
+      let finished = false;
+      const pending = executor.drain().then(() => { finished = true; });
+      await Promise.resolve();
+      expect(finished).toBe(false);
+      await expect(executor.start()).rejects.toThrow('drained');
+      removed();
+      await pending;
+      expect(finished).toBe(true);
+      expect(drain).toHaveBeenCalledTimes(1);
+      expect(spawnFn).toHaveBeenCalledTimes(1);
+    } finally { executor.stop(); rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it.each(['remaining', 'engine-error', 'auto-removed'])('requires an engine proof of absence (%s)', async (state) => {
+    const runDocker = vi.fn(async (args: string[]) => {
+      if (args[0] === 'rm') throw new Error('Removal raced auto-remove');
+      if (state === 'engine-error') throw new Error('Engine unavailable');
+      return state === 'remaining' ? 'still-running-id\n' : '';
+    });
+    const worker = launcher.attachedWorkerLifecycle({ runDocker });
+    if (state === 'auto-removed') await expect(worker.drain()).resolves.toBeUndefined();
+    else await expect(worker.drain()).rejects.toThrow(state === 'remaining' ? 'refusing workspace replacement' : 'Engine unavailable');
+    expect(runDocker.mock.calls.map(([args]) => args)).toEqual([
+      ['rm', '-f', worker.name], ['ps', '-a', '--filter', `name=^/${worker.name}$`, '--format', '{{.ID}}'],
+    ]);
+  });
   it('creates the workspace on the host BEFORE the engine is asked to mount it', async () => {
     // THE DEFECT THIS PINS, measured on a real project run (2026-09-02): a
     // bind-mount source that does not exist is created by the DAEMON, as root.

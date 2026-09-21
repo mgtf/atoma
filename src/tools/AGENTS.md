@@ -51,6 +51,10 @@ Neighbours:
 - `ToolSandbox.drain()` is the stronger local contract before workspace
   replacement: await cleanup, kill surviving owned children/groups and confirm
   their exit; a surviving process prevents replacement.
+- `ContainerToolExecutor.drain()` permanently closes its transport, removes
+  every worker it started through the launcher-issued ownership handle and
+  requires a successful engine query proving absence. CLI exit alone is not
+  worker exit. The backend drains workers before stopping its egress sidecar.
 - Docker image packaging is verified statically against the worker import graph
   and dynamically by booting the real image.
 - `start_static_server` and `start_node_server` use OS-selected ports and explicit
@@ -58,6 +62,16 @@ Neighbours:
   set's ONE `servedOrigins` registry, which `fetch_url` and `validate_html`
   read. Do not kill arbitrary process groups; only safe integer PGIDs greater
   than 1 may reach group syscalls.
+- A loopback URL with NO port is refused PRE-FLIGHT by both probe tools
+  (`unservedLoopbackProbeRefusal`, prefix `PROBE_URL_REFUSAL_PREFIX` from
+  [src/contracts](../contracts/AGENTS.md)): the server tools never bind the
+  protocol default, so `http://localhost/` is a request-shape error, and the
+  refusal names the registered origins. An EXPLICIT unregistered port is NOT
+  refused — a `run_shell`-started server is invisible to the registry — but a
+  refused connection there gets the registered origins appended to its error.
+  Measured 2026-09-21 (run `d3098d25`): a final review probing the bare origin
+  read the refusal as a dead service and replayed executions into the 1800 s
+  deadline.
 - `validate_html` treats smoke input as a JS expression, bounds every supplied
   duration, and ignores Chrome's own favicon 404. Browser console errors remain
   evidence but not every one is a mechanical failure.
@@ -80,7 +94,20 @@ Neighbours:
   it around one widget vocabulary. The guidance and the `validate_html`
   pre-flight guards are ONE contract: `SMOKE_ASYNC_TRANSITION_EXAMPLE` is
   exported so `tests/smoke-guidance.test.ts` can feed it to the real guards.
-  Never teach a smoke shape the tool refuses. A SYNCHRONOUS `getComputedStyle`
+  Never teach a smoke shape the tool refuses.
+- The erased-intermediate-state refusal hands out TWO shapes since
+  2026-09-15, rendered from ONE contract constant (`SMOKE_TWO_CALL_SHAPE`,
+  [src/contracts](../contracts/AGENTS.md)) because atoms and tools may not
+  import each other: real interactions up to the milestone under a read-only
+  smoke, then one change plus the reset under a read-only smoke — the only
+  taught shape that also covers a declared `dom-interaction` obligation — and
+  the self-driving IIFE, which passes every guard and executes NO interaction,
+  so both texts say it covers nothing. The covering shape comes first.
+  `tests/smoke-two-call-coverage.test.ts` feeds both calls to the guards and
+  through the attestation seam to `checkProofCoverage`. Why, and the measured
+  cost of teaching the self-driving shape alone:
+  [incident](../../docs/incidents/verification-replay-2026-09-15.md).
+- A SYNCHRONOUS `getComputedStyle`
   read on a TRANSITIONED property returns the pre-transition value (verified
   in Chrome, 2026-08-21): assert the class/inline marker the source toggles,
   or make the smoke async and await past the declared duration — the tool
@@ -165,7 +192,11 @@ Neighbours:
   because a refusal reporting none of them is indistinguishable from a call
   that sent no interactions at all — the exact confusion that field pair
   exists to prevent. It carries NO `document` since 2026-09-13: no page was
-  loaded, and a binding is established on the loaded response.
+  loaded, and a binding is established on the loaded response. Its error
+  strings start with the contract's `SMOKE_PREFLIGHT_REFUSAL_PREFIX`
+  ([src/contracts](../contracts/AGENTS.md)), which is how the L1 validation
+  ledger tells a refusal from a failed observation of the page; keep the
+  wording behind the prefix free to change, never the prefix.
 - Moving smoke guidance closer to the call site is NOT the untried variable.
   The erased-intermediate-state rule already sits in the `smoke` PARAMETER
   description and the model still violated it six times across two batches.

@@ -161,8 +161,12 @@ describe('gpuEventCardCopy for an LLM call', () => {
       t
     );
     expect(title).toContain('context');
-    expect(body).toContain('Skill');
-    expect(body).toContain('web-build');
+    // The body is the INJECT and nothing else: the source and the skill id
+    // are the footer's own first members, and on the one-line card that
+    // duplication spent the body budget restating them.
+    expect(body).toBe('STEP 1: write_file');
+    expect(footer).toContain('Skill');
+    expect(footer).toContain('web-build');
     expect(footer).toContain('42c');
   });
 

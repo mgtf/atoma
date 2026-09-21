@@ -6,6 +6,8 @@
  * whole 2,800-line module into anything wanting one prompt constant.
  */
 import type { Plan } from '../core/types.js';
+import type { Atom } from '../core/atom.js';
+import { SMOKE_TWO_CALL_LINES } from '../contracts/probeManifest.js';
 
 /** Recovery must preserve the deliverable and verify its actual runtime. */
 export const FALLBACK_VERIFICATION_GUIDANCE = [
@@ -211,6 +213,18 @@ export const SMOKE_DESIGN_GUIDANCE = [
   `If the control has NO exposed method, click the element itself inside the`,
   `same IIFE (\`document.getElementById(idFromSource).click()\`) — that still`,
   `counts as driving your own state, so the interaction array must be empty.`,
+  `A self-driving smoke executes NO real interaction: with \`interactions: []\``,
+  `nothing is clicked or typed, and beside it every listed interaction is`,
+  `DISCARDED, so the transport record reads executed=0. A phase that declares`,
+  `the "dom-interaction" proof obligation therefore stays UNCOVERED on that`,
+  `shape however complete its snapshots, and the method earns no credit. Under`,
+  `that obligation use REAL selector-based interactions and a READ-ONLY smoke,`,
+  `in TWO calls, because one list that repeats a control and then resets is`,
+  `refused pre-flight: call 1 replays the state-changing control up to the`,
+  `milestone and asserts it; call 2 changes state ONCE, resets, and asserts the`,
+  `initial state. Both calls are accepted and both execute their interactions:`,
+  ...SMOKE_TWO_CALL_LINES.map((line) => `  ${line}`),
+  `The shape below is the SELF-DRIVING call, for state logic no real input has to prove.`,
   `Use this canonical shape instead of inventing a new sequence each time:`,
   ...SMOKE_CANONICAL_STATE_SHAPE.split('\n').map((line) => `  ${line}`),
   `Read CURRENT source for exactElement id and class names; derive thresholds`,
@@ -372,6 +386,30 @@ export const PROOF_OBLIGATION_GUIDANCE = [
   `uncovered obligation withholds method credit. Declare it whenever required.`,
 ].join('\n');
 
+/**
+ * RECORDED PROOF IS STANDING PROOF, at plan grain. Run `cc894dad`
+ * (2026-09-21, docs/incidents/progressive-runs-2026-09-21.md) planned
+ * implement → comprehensive re-audit → README as three sequential phases: the
+ * re-audit re-proved what the build phase had already recorded (~$2.51 and
+ * ~1573 s of an 1800 s deadline across three executions of one molecule) and
+ * the README phase timed out before its first tool call, so three credited
+ * phases delivered nothing. The within-phase half of this rule is the
+ * validation ledger (docs/incidents/verification-replay-2026-09-15.md); this
+ * is the between-phases half. Landed on the operator's 2026-09-21 decision
+ * against the collected backlog set, not against a single run.
+ */
+export const STANDING_PROOF_PLANNING_GUIDANCE = [
+  `== RECORDED PROOF IS STANDING PROOF ==`,
+  `Verification belongs INSIDE the phase that builds or changes an artefact,`,
+  `and the probes that phase records stay valid until a later phase mutates`,
+  `that artefact. Do NOT plan a phase whose only purpose is re-running or`,
+  `broadly re-auditing evidence an earlier phase already recorded: it buys no`,
+  `new proof and spends the run's fixed deadline that the remaining phases`,
+  `(documentation, packaging) still need. A later read-only phase may cite the`,
+  `recorded probes instead of re-running them; re-verify ONLY what a mutation`,
+  `since the record invalidated.`,
+].join('\n');
+
 /** Durable HTTP docs must not capture the one port assigned to this run. */
 export const HTTP_PORTABLE_DOC_GUIDANCE = [
   `HTTP DOCUMENTATION USES A PORT PLACEHOLDER. In README/docs and durable`,
@@ -442,6 +480,14 @@ export const FALLBACK_SYSTEM_PROMPT = [
   FALLBACK_VERIFICATION_GUIDANCE,
   'Return the requested JSON format. Report observed evidence and failed or unverified requirements honestly.',
 ].join('\n');
+
+/** Per-attempt coaching must not become a reusable registry instruction. */
+export function carryTaskCoaching<T extends Atom>(source: Atom, replacement: T): T {
+  for (const block of source.contextBlocks()) {
+    if (block.source === 'coaching') replacement.injectContext(block);
+  }
+  return replacement;
+}
 
 /** Per-attempt coaching must not become a reusable registry instruction. */
 export function recoveryContext(task: string, diagnostic: string): string {

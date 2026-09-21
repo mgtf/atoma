@@ -335,6 +335,14 @@ const PUSH_ROUTE_SOURCES: Record<PlatformEventKind, PushRouteSource | null> = {
    * that was drafted for it is in this file's history.
    */
   'security.flagged': null,
+  'run.retention': null,
+  'org.run_limit_changed': null,
+  'admin.cross_org_read': {
+    audience: { orgOwners: true },
+    copy: {
+      en: { title: 'Atoma — administrator access', body: 'A platform administrator accessed your organisation’s data.' },
+    },
+  },
   'admin.granted': {
     audience: { platformAdmins: true },
     vars: (event) => ({ name: text(event, 'displayName') }),

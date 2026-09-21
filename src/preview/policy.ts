@@ -12,6 +12,7 @@ import {
   type Stats,
 } from 'node:fs';
 import path from 'node:path';
+import type { LauncherPreviewOwnership } from '../contracts/launcher.js';
 import {
   ArtifactPolicyError,
   DEFAULT_ARTIFACT_LIMITS,
@@ -232,10 +233,7 @@ export function previewWorkspaceHasFile(workspaceRoot: string, relativePath: str
  * widened to world-readable, which would be the other way to make it work and
  * the wrong one on a shared host.
  */
-export interface PreviewCopyOwnership {
-  readonly uid: number;
-  readonly gid: number;
-}
+export type PreviewCopyOwnership = Readonly<LauncherPreviewOwnership>;
 
 export interface PreviewCopyLimits {
   readonly maxBytes: number;

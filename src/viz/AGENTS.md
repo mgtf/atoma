@@ -1,10 +1,8 @@
 # Visualizer — AGENTS.md
 
-`src/viz/` owns the trace projection, the gated HTTP surfaces and web push,
-plus the GPU product client and its frozen MUI fallback.
+`src/viz/` owns trace projection, gated HTTP, web push and the GPU client (MUI is frozen).
 
-Read [`AGENTS.md`](../../AGENTS.md) first: it holds the cross-cutting rules.
-Everything below is stated once, here, and is not repeated at the root.
+Read [`AGENTS.md`](../../AGENTS.md) first for cross-cutting rules.
 Traces are immutable evidence: project them, never rewrite them.
 
 Neighbours:
@@ -68,13 +66,13 @@ npm run viz:mark-turn:analyze
   goes there, never back into the class.
 - Scrollable GPU content goes through `createScrollPane` (bounded + masked);
   the wheel handler FAILS CLOSED on `scrollMax`, so a view that never declares
-  its max does not scroll. Cull by skipping draws, not by stopping the layout cursor. Detail panes report `detailBounds`/`detailScrollMax`. Runs retains a bounded row window under a fixed mask. Reproject hit targets and shadow anchors on scroll; window crossings, changed data/selection/filters, resize and camera travel rebuild. Retained listeners dispatch to the latest React callback.
+  its max does not scroll. Wheel ticks and one-finger touch drags share ONE router (`scrollAt`): the drag names its pane from where the finger LANDED and converts travel through the live camera. The canvas declares `touch-action: pan-y`, never `none` — the browser's `pointercancel` on a recognised pan is what keeps Pixi from reporting a tap on the row the finger began on (2026-09-15: a phone could neither scroll nor read the rail). Cull by skipping draws, not by stopping the layout cursor. Detail panes report `detailBounds`/`detailScrollMax`. Runs retains a bounded row window under a fixed mask. Reproject hit targets and shadow anchors on scroll; window crossings, changed data/selection/filters, resize and camera travel rebuild. Retained listeners dispatch to the latest React callback.
 - `prefersReducedMotion()` (`renderer/motion.ts`) is the only reduced-motion
   source in the GL client. Every animation system consults it and JUMPS to its
   final state — exit effects are skipped entirely, never left running.
-- The GPU client uses one Pixi context (WebGPU with WebGL fallback). Do not add
-  a second context for a tiny widget. Smoke tests assert exactly one canvas and
-  both backends.
+- The GPU client uses one Pixi context (WebGPU with WebGL fallback). Do not add a second context for a tiny widget. Smoke tests assert exactly one canvas and both backends.
+- The renderer stops its ticker when the document is hidden or loses focus. Camera draws are gated too;
+  background snapshots coalesce until focus returns, when the latest scene is rebuilt before animation resumes.
 - Keep GPU animation state out of React/Zustand hot paths. Use mutable samples
   read once per frame; do not rebuild the scene for pointer motion. A subtree
   that MUTATES EVERY FRAME draws into its own render group (`ctx.animatedLayer`,
@@ -286,6 +284,7 @@ npm run viz:mark-turn:analyze
   unroutable-view fallback lands on Projects too. On the ungated developer path
   project routes do not exist, so Projects shows its explanatory empty state
   and the DOM mutation form is absent.
+- Handheld devices use the same login and entry flow as desktop. `isHandheldDevice()` (`client-gl/handheld.ts`) remains the one pointer-capability predicate for mobile layout; changing device capability must never revoke entry. No mobile disclaimer or white-out interrupts authentication.
 - The ADMIN PLANE is FIVE views, one per job — Organisations (`admin`), the
   platform journal, the catalogue ledger, the Sentinel, and Announcements —
   under one nav heading. It was one tab holding several: three questions on one
@@ -345,6 +344,18 @@ npm run viz:mark-turn:analyze
   heading but no body on purpose: it is composed per call from the task, the
   plan and injected skills, so it belongs to a run — the heading points at an
   LLM event in Runs rather than inventing a template nobody ever sent.
+- The run-step detail pane is HIERARCHISED. Order is a PROJECTION ranked once
+  in `client/structured-detail.ts` — verdict first, bulk last, eight ranks over
+  a TYPE-derived default — so a new key lands mid-list. It sorts OBJECT entries
+  before the `maxNodes` slice, never an array, and drops an entry with NO
+  content (`stderr: ''`). `detail-layout.ts` packs adjacent fields up to THREE
+  per row, at the narrowest count any MEASURES into: 2+2, not 3+1.
+- The timeline event card AND the run's two bookends are ONE LINE
+  (`TIMELINE_ROW_HEIGHT` 40, card 30), shedding title > footer > actor > body
+  as width runs out; a bookend's second line at `y + 28` drew outside its own
+  cartouche. A `context` inject scrolls in the masked layer every other kind
+  uses. `GPU_COLORS.muted` is a LEGIBILITY FLOOR for the 8–9px facts it is
+  mostly spent on (~7.9:1) — do not lower it back.
 - The nav is a LEFT RAIL (`renderer/views/sidebar.ts`), not a header tab strip.
   `visibleViews` remains the ONE definition of which tabs a viewer gets; the
   rail only groups them, and a test holds the group list to it so a new view
@@ -392,7 +403,7 @@ npm run viz:mark-turn:analyze
   keys the retention on the resolved pair. Any DOM overlay that sits over a
   VIEW is positioned from the `--gpu-sidebar` CSS variable, whose CSS clamp a
   test holds equal to `sidebarWidthForViewport`: overview shrinks 208px to a
-  112px floor; focus preserves that source layout while the camera crops its trailing icon tile. The
+  112px floor, and at or below `SIDEBAR_COMPACT_MAX_VIEWPORT` (431px, where that floor and the 320px content minimum no longer fit together) the rail is the 56px `sidebarCompactWidth` of centred icon tiles with no label column — a label with 20px to live in is an ellipsis, not a destination; focus preserves that source layout while the camera crops its trailing icon tile. The
   run search input is not one of them, it lives in the header band. With a
   Pixi overlay menu open, view DOM overlays stay mounted, render INERT
   (`inert`) and dim (`.gpu-overlays-veiled`): they sit above the canvas, so
@@ -504,16 +515,22 @@ npm run viz:mark-turn:analyze
 - Operator source launchers (`npm run viz`, `doctor:dev`, `auth:dev`) fill
   unset keys from checkout `.env`. Do not load `.env` inside `src/viz/server.ts`:
   process-level tests spawn it from the repository cwd with a cleaned env.
-- Behind the gate the instance-global operator surfaces (`/api/registries`,
-  `/api/registry/:id`, `/api/skills/*`, `/api/burnin`) answer ONLY the platform
-  admin (403 otherwise) — an invitation must not read operator-level state (review 2026-08-20 §2.2). The admin also
-  reads every organisation's projects and run traces, and manages organisations
-  through `/api/admin/organisations` and `/api/admin/invitations` (same-origin
-  POST). Writes (create project, start/cancel runs) stay bound to the viewer's
-  ACTIVE organisation for admins too. `visibleViews` is the one nav definition:
-  gated members get org surfaces only; the ungated developer path is unchanged.
-  Registry ownership is enforced in storage ([src/registry](../registry/AGENTS.md));
-  these operator readers show only operator-owned rows and history.
+- Behind the gate `/api/burnin` answers ONLY the platform admin (403 otherwise): an invitation
+  must not read operator-level state (review 2026-08-20 §2.2). The admin also reads every
+  organisation's projects and run traces, and manages organisations through
+  `/api/admin/organisations` and `/api/admin/invitations` (same-origin POST); writes stay
+  bound to the viewer's ACTIVE organisation for admins too. `visibleViews` is the one nav
+  definition; the ungated developer path is unchanged.
+- The server FOLDS every configured store at startup (`openDb`); read-only handles never fold,
+  and an unfoldable store is logged, never served as duplicates ([src/registry](../registry/AGENTS.md)).
+- Registry and Skills are WORKSPACE destinations for every authenticated role (Registry since
+  2026-09-15): ONE registry and ONE catalog for every run, so a member reads what their own
+  runs earn on ([src/skills](../skills/AGENTS.md)). `/api/registries` and `/api/registry/:id`
+  redact the store's host path for non-admins; `/api/skills` uses public namespace metadata.
+  `/api/skills` also resolves an ABSORBED atom id through `atom_id_merges` to the kept
+  namespace (chain-followed): the fold moves recipes under the kept identity while traces and
+  bookmarks keep carrying the old one, so the typed boundary answers the historical URL —
+  traces are never rewritten to do it (2026-09-18).
 - `/mcp` is the ONE MCP (contract in [src/mcp](../mcp/AGENTS.md)): OAuth or
   API bearer token behind the gate, the operator on the ungated loopback, Host
   pinned either way. `/api/tokens` mints (POST, same-origin, journaled
@@ -521,7 +538,10 @@ npm run viz:mark-turn:analyze
   `token.revoked`) the SESSION's principal's tokens for its ACTIVE
   organisation; the plaintext leaves the server once, in the POST response.
   `McpAccessPanel` leads with the URL, browser sign-in and authorized access.
-  Client commands are selectable; config and manual tokens stay collapsed. A minted
+  Client commands are selectable; config and manual tokens stay collapsed. An
+  access with a non-null last-use date and no revocation hides setup by default;
+  authorized access comes first, the URL stays visible, and a connect-another
+  button reopens setup. Unused tokens alone never hide setup. A minted
   token opens its disclosure and is shown once, with copy and revoke. It
   resets when the active identity/org changes and never re-reads a secret.
   GET describes ungated operator access; mutations there return 409. A failed

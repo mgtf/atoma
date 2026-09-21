@@ -82,27 +82,32 @@ function seedRegistry() {
   reg.create(2, {
     ...seed,
     description: 'single-file web artefact orchestrator',
+    systemPrompt: 'Orchestrate static web pages.',
     createdBy: 'bootstrap-canonical',
   });
   reg.create(2, {
     ...seed,
     description: 'Node HTTP server orchestrator',
+    systemPrompt: 'Orchestrate Node HTTP servers.',
     createdBy: 'bootstrap-canonical-http',
   });
   // Three canonical L1s seeded with the markers the enrichment recognises.
   reg.create(1, {
     ...seed,
     description: 'single-file web artefact builder: writes index.html, serves, validates',
+    systemPrompt: 'Build static web pages.',
     createdBy: 'bootstrap-canonical',
   });
   reg.create(1, {
     ...seed,
     description: 'Node HTTP server builder: writes server code, boots node, probes endpoints',
+    systemPrompt: 'Build Node HTTP servers.',
     createdBy: 'bootstrap-canonical-http',
   });
   reg.create(1, {
     ...seed,
     description: 'file scribe: reads, writes, and lists workspace files',
+    systemPrompt: 'Write workspace files.',
     createdBy: 'bootstrap-canonical-filescribe',
   });
   return { reg, l3Type: l3 };

@@ -71,6 +71,52 @@ can only report that it cannot be.
   activator death cannot leave every write on 503. Existing work always blocks
   an activation; deployment never reaps it.
 
+## Backup
+
+- `npm run backup` is the COMPILED command (`node dist/cli/backup.js`), like
+  `auth` and `projects`: the production host installs with `npm ci --omit=dev`
+  and has no tsx, so a source-path default silently made the documented
+  collection impossible there until 2026-09-14. `backup:dev` is the source
+  path; `release:check` runs the compiled `--help` smoke.
+- It snapshots the legacy six tiers into one dated directory: skills, operator runs, the
+  `~/.atoma/archive` tier, the org-scoped project corpus, the supervisor
+  records, and the store LAST (SQLite online backup, never a raw copy). Last
+  on purpose since W4 (2026-09-18): skill trust is rows in the store while
+  skill bodies are files in the skills tier, every file+row mutation writes
+  its file before its row, so rows that are never older than the bodies can
+  only pair a body with a state the registry already tolerates — the reverse
+  could restore a freshly compiled script with the llm recipe's earned trust.
+  The projects tier is the `orgs/` child of `ATOMA_PROJECTS_ROOT`,
+  not the root — the default root is `~/.atoma`, which also holds the build
+  workspace and the MCP lease — and it excludes `node_modules`, recorded in
+  the manifest under `excluded`. The supervisor tier follows
+  `supervisorDirPath`. Both were missing until 2026-09-14, when the
+  [value audit](../../docs/value-audit-2026-09-14.md) found the corpus it had
+  to reconcile outside every captured tier.
+- With `ATOMA_LAUNCHER_WORKSPACE_ROOT`, it also captures the `projects/`
+  projection as mandatory `workspaces.tar.gz` (layout version 2). Older snapshots
+  retain the six-tier contract; missing projected workspaces fail restoration.
+- The manifest is an inventory, not a completeness claim: per-tier source,
+  SHA-256, top-level entries and recursive file count, the `captured`,
+  `skipped` and `notApplicable` lists, the `optionalTiers` declaration, and
+  the host-held key the copied store still needs to be usable. Each artefact
+  is consistent with itself; nothing makes the set atomic across roots, so the
+  operator captures while no run, publication or analyst pass mutates them —
+  without touching the run lease to make room.
+- A tier absent from a host is either a shape fact or a loss, and only the
+  deployment knows which, so it DECLARES its absences in
+  `ATOMA_BACKUP_OPTIONAL_TIERS`. A server runs no benchmarks and has no
+  `~/.atoma/archive`; the same server missing `skills/` has lost months.
+  Everything undeclared is mandatory: missing, it is a loud skip naming the
+  resolved path, the summary refuses the word complete, and the restore drill
+  fails. The store can never be declared optional.
+- The destination is required and refused inside the repository.
+- The offline recovery exercise is `python3 scripts/restore-drill.py <snapshot>
+  --dest <new-directory>`, not a service start or a compiled product command.
+  It verifies hashes, extracts regular files into an isolated destination and
+  checks SQLite plus project-file correspondence without migrations or writes
+  to the source. Scope and exit dispositions: [recovery exercise](../../docs/recovery-drill-2026-09-14.md).
+
 ## Burn-in and friction
 
 - Burn-in CSVs belong to exactly one writer/schema. Refuse foreign headers
@@ -163,3 +209,11 @@ can only report that it cannot be.
   helper both hosts share. Armed by default because the rule exists to collect
   calibration rows; `off` disarms it. `--once` prints, per corpus, how many
   finished runs and credited trajectories the reference held.
+
+## Project maintenance
+
+`projects:maintenance` is compiled; `projects:maintenance:dev` uses source.
+Retention plans are read-only. Apply requires stopped services, a restorable
+backup and the existing global run lease without recovery. Limits are
+operator-owned and updated atomically with their audit receipt.
+[Commands and preconditions](../../docs/project-maintenance.md).

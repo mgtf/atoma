@@ -1127,5 +1127,18 @@
   "depth.entry.deep": "Mit einem Gewebe beginnen, das Zellen und Moleküle überwacht.",
   "depth.entry.short": "Mit einer Zelle beginnen, die Moleküle überwacht.",
   "depth.deepening": "Die Einstiegszelle hat ihre Wiederholungsversuche ausgeschöpft. Mit Gewebeüberwachung neu starten.",
-  "depth.coverage": "{{covered}} von {{total}} Lieferverpflichtungen abgedeckt"
+  "depth.coverage": "{{covered}} von {{total}} Lieferverpflichtungen abgedeckt",
+  "welcome.handheld.blocked": "Auf Mobilgeräten noch nicht verfügbar",
+  "welcome.handheld.hint": "atoma wird noch für Smartphones und Tablets optimiert. Sie können mit vollem Zugriff fortfahren, aber einige Ansichten funktionieren auf Mobilgeräten möglicherweise noch nicht richtig.",
+  "welcome.handheld.continue": "Zumindest auf mein Konto zugreifen",
+  "settings.runCapacity": "Gleichzeitige runs",
+  "settings.runCapacityValue": "{{active}} aktiv / {{limit}} erlaubt (auf diesem Host jeweils nur ein run)",
+  "auth.switchAccount": "Konto wechseln",
+  "settings.refreshModels": "ChatGPT-Modelle aktualisieren",
+  "settings.modelCatalogue.ready": "Von Ihrem verbundenen ChatGPT-Konto gemeldete Modelle.",
+  "settings.modelCatalogue.stale": "Aktualisierung fehlgeschlagen. Zuvor gemeldete Modelle werden angezeigt, können aber nicht ausgewählt werden.",
+  "settings.modelCatalogue.unavailable": "Der ChatGPT-Modellkatalog ist nicht verfügbar. Aktualisieren Sie ihn, um es erneut zu versuchen.",
+  "settings.modelUnavailable": "{{model}} — nicht verfügbar",
+  "settings.mcpConnectAnother": "Weiteren Client verbinden",
+  "settings.mcpHideSetup": "Einrichtungsanleitung ausblenden"
 }

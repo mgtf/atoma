@@ -1,7 +1,7 @@
 # Supervision depth as a routed decision — bounded experimental contract, 2026-09-13
 
-Status: **design accepted for implementation on 2026-09-13; not yet an
-executable protocol.** The seven decisions of §13 are closed and are not
+Status: **runtime implemented; short-first integration into ordinary runs
+on 2026-09-14 (§17).** The seven decisions of §13 are closed and are not
 reopened by implementation. The pre-registration (§8) is written last and
 freezes the version of the code that was actually verified. Normative rules
 move into the owning `AGENTS.md` files as the increments of §14 land, per
@@ -739,3 +739,27 @@ Validation after the corrections on the local macOS host: `release:check`
 passed with 4,013 tests passed and 7 skipped, both TypeScript configurations,
 lint, documentation checks, zero audit vulnerabilities, build and compiled
 release smokes. `git diff --check` passed. No paid experiment was run.
+
+## 17. Product integration, 2026-09-14
+
+The owner chose to make short-first supervision the default for new ordinary
+build runs, without making a comparative benchmark a prerequisite. The build
+profile selects `short`: L2 plans and supervises L1 work; at its exhausted
+fallback moment the runner drains the first attempt and restarts once through
+L3. The shared root acceptance and declared delivery floor still apply.
+`--depth deep` selects the full topology immediately. Baseline and seeded
+comparison runs retain their existing protocol.
+
+The default is resolved inside `startTask`, so CLI, MCP and project launches
+all inherit it. Both local and container backends support the transition.
+For containers, each attached worker receives a launcher-owned unique name;
+drain permanently closes the old executor, removes its owned containers and
+requires a successful engine query proving they are absent before stopping
+egress and archiving the workspace. An exited Docker CLI or a failed engine
+query does not establish that the worker stopped. Failure prevents the second
+attempt and leaves the workspace in place.
+
+The comparative measurement protocol in §8 remains optional follow-up work.
+The default is an owner decision, not a new claim of measured cost or quality
+improvement. Model routing by operation and changes to learning credit remain
+outside this change.

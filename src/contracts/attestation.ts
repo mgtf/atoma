@@ -85,6 +85,53 @@ export const browserObservationSchema = z.object({
 export type ObservedDocument = z.infer<typeof observedDocumentSchema>;
 export type BrowserObservation = z.infer<typeof browserObservationSchema>;
 
+/**
+ * Every error string a `validate_html` PRE-FLIGHT refusal produces starts with
+ * this prefix. A refusal is a statement about the REQUEST (its smoke shape,
+ * its interaction order), made before any page is opened: no browser ran, no
+ * document was bound, nothing about the artefact was observed. The writer
+ * (`src/tools/builtin.ts`) and every reader — the L1 validation ledger, the
+ * sentinel — spell the prefix from here so a refusal is never mistaken for a
+ * failed observation of the artefact. Measured 2026-09-14, seeded counter:
+ * three successful observations of one unchanged document were discarded
+ * because the LAST call was a refusal, and the run replayed its whole
+ * verification twice before its deadline.
+ */
+export const SMOKE_PREFLIGHT_REFUSAL_PREFIX = 'smoke rejected pre-flight: ';
+
+/**
+ * The same request-statement semantics for a URL that cannot name a server
+ * this tool set started: a loopback URL with no port. `start_node_server` and
+ * `start_static_server` bind OS-assigned ports and never the protocol
+ * default, so `http://localhost/` is a shape error, not an observation of a
+ * dead service. Measured on project run `d3098d25` (2026-09-21,
+ * docs/incidents/progressive-runs-2026-09-21.md): the final review probed the
+ * bare origin, read the connection refusal as a dead service although the
+ * bound origin was serving, and replayed near-duplicate executions into the
+ * 1800 s deadline — $3.50 recorded, nothing delivered.
+ */
+export const PROBE_URL_REFUSAL_PREFIX = 'url rejected pre-flight: ';
+
+const PREFLIGHT_REFUSAL_PREFIXES: readonly string[] = [
+  SMOKE_PREFLIGHT_REFUSAL_PREFIX,
+  PROBE_URL_REFUSAL_PREFIX,
+];
+
+/** True when a raw `validate_html` result is a pre-flight refusal, not an observation. */
+export function isPreflightRefusal(raw: unknown): boolean {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+  const errors = (raw as Record<string, unknown>)['errors'];
+  return (
+    Array.isArray(errors) &&
+    errors.length > 0 &&
+    errors.every(
+      (entry) =>
+        typeof entry === 'string' &&
+        PREFLIGHT_REFUSAL_PREFIXES.some((prefix) => entry.startsWith(prefix))
+    )
+  );
+}
+
 /** The observation union. One member today; the discriminant is `kind`. */
 export type ToolObservation = BrowserObservation;
 

@@ -65,6 +65,13 @@ try {
   assert.equal(denied.origin, new URL(redirectUri).origin);
   assert.equal(denied.searchParams.get('error'), 'access_denied');
   assert.equal(denied.searchParams.has('code'), false);
+  await page.goto(`${base}/oauth/authorize?${query}`);
+  await Promise.all([page.waitForNavigation({ timeout: 5000 }), page.click('button[value="switch"]')]);
+  assert.equal(submittedOrigin, base);
+  assert.equal(new URL(page.url()).pathname, '/auth/login');
+  assert.equal(new URL(page.url()).searchParams.get('select_account'), '1');
+  assert.equal(store.resolveSession(session), null);
+  assert.ok((await browser.cookies()).some(cookie => cookie.name === 'atoma_mcp_return'));
   console.log('MCP OAuth browser consent and token exchange passed');
 } finally {
   await browser?.close();

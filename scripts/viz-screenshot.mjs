@@ -1,4 +1,4 @@
-/* global document, HTMLButtonElement */
+/* global document, HTMLButtonElement, matchMedia */
 /**
  * viz-screenshot — capture a PNG of the GPU client for visual review.
  *
@@ -34,6 +34,9 @@
  *                        overview. Overview re-activates the selected menu,
  *                        exercising the real return transition.
  *   --tuning             Open the floating Scene Tuning window.
+ *   --handheld           A phone (390x844, touch as the only pointer): the
+ *                        direct login or authenticated entry (-gate and
+ *                        -projects PNGs beside --out).
  *   --out <path>         PNG destination. Default:
  *                        screenshots/<view>-<auth-mode>-<camera>.png
  *   --url <base>         Attach to an already-running UI server instead of
@@ -48,6 +51,7 @@ import { createServer } from 'node:net';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer';
+import { assertMobileProjects } from './viz-mobile-probe.mjs';
 
 const READY_TIMEOUT_MS = 60_000;
 
@@ -64,6 +68,7 @@ const selectFirst = has('--select-first');
 const repositoryMode = arg('--repository-mode', '');
 const notifications = has('--notifications');
 const scrollEnd = has('--scroll-end');
+const handheld = has('--handheld');
 const cameraMode = arg('--camera', 'focus');
 if (cameraMode !== 'overview' && cameraMode !== 'focus') {
   throw new Error(`--camera must be overview or focus, got ${cameraMode}`);
@@ -105,6 +110,16 @@ async function freePorts(count) {
 function gatedStubs() {
   const principalId = '11111111-2222-3333-4444-555555555555';
   const projectId = 'aaaaaaaa-1111-4222-8333-bbbbbbbbbbbb';
+  // Registry is a member destination: the one platform store, named by its
+  // basename only (the server redacts the host path for non-admins).
+  const registry = { id: 'atoma', label: 'atoma', path: 'atoma.db', exists: true, counts: { 1: 1, 2: 0, 3: 0, total: 1 } };
+  const sharedMolecule = {
+    tier: 1, rank: 'molecule', ordinal: 1, name: 'Water',
+    description: 'Verify browser behaviour from an observed interaction.',
+    systemPrompt: 'You are a Molecule. Establish the initial state, activate one control, inspect the resulting state and report the observed evidence.',
+    tools: ['read_file'], elements: [{ tool: 'read_file', number: 3, name: 'Lithium', symbol: 'Li' }], params: {},
+    createdBy: 'bootstrap', createdAt: '2026-09-15T00:00:00.000Z', version: 1, successes: 3, failures: 0, history: [],
+  };
   const runs = [
     ['delivered', 0.63, null, { status: 'published', commitSha: 'c28afe4f8e3d2b1a0c9e', repositoryUrl: 'https://github.com/example/stopwatch' }],
     ['failed', null, 'control-plane JSON is not a bounded regular file: /tmp/example/trace.json', null],
@@ -312,6 +327,11 @@ function gatedStubs() {
       updatedAt: '2026-08-20T00:00:00.000Z',
     }],
     [`/api/projects/${projectId}/runs`]: runs,
+    '/api/registries': [registry],
+    '/api/registry/atoma': { registry, types: [sharedMolecule] },
+    '/api/skills': [{ l1Name: 'shared-molecule', l1Label: 'Water', count: 1 }],
+    '/api/skills/shared-molecule': [{ id: 'verify-browser-behaviour', description: 'Verify browser behaviour with an observed interaction.', whenToUse: 'When a browser interaction needs verification.', kind: 'llm', successes: 0, failures: 0, updatedAt: '2026-09-15T00:00:00.000Z' }],
+    '/api/skills/shared-molecule/verify-browser-behaviour': { id: 'verify-browser-behaviour', description: 'Verify browser behaviour with an observed interaction.', whenToUse: 'When a browser interaction needs verification.', kind: 'llm', successes: 0, failures: 0, updatedAt: '2026-09-15T00:00:00.000Z', body: 'Establish the initial state. Activate the relevant control. Inspect the resulting state and report the observed evidence.' },
     // The Runs view auto-selects the newest index entry and loads its trace,
     // so these two stubs make `--view Runs` render the full run surface:
     // summary card, metric tiles, branch filter chips and the timeline.
@@ -424,6 +444,46 @@ function fixtureTrace() {
   };
 }
 
+/** Prove the real touch entry: provider login or direct authenticated admission. */
+async function captureHandheldGate(page) {
+  if (!await page.evaluate(() => matchMedia('(any-pointer: coarse) and (any-hover: none)').matches)) {
+    throw new Error('--handheld: touch media query did not match');
+  }
+  await page.waitForFunction(() => globalThis.__ATOMA_GPU__?.hitTargets().some(entry => entry.id === 'welcome.continue' || entry.id.startsWith('login.provider.')), { timeout: READY_TIMEOUT_MS });
+  const stem = outPath.replace(/\.png$/i, '');
+  await mkdir(dirname(outPath), { recursive: true });
+  await page.screenshot({ path: stem + '-gate.png' });
+  const target = await page.evaluate(() => {
+    const handle = globalThis.__ATOMA_GPU__;
+    const row = handle.hitTargets().find(entry => entry.id === 'welcome.continue' || entry.id.startsWith('login.provider.'));
+    return { id: row.id, ...handle.projectRendererPoint(row.x + row.width / 2, row.y + row.height / 2) };
+  });
+  if (target.id.startsWith('login.provider.')) {
+    const provider = target.id.slice('login.provider.'.length);
+    const href = await page.$eval('.gpu-a11y-bridge a', node => node.getAttribute('href'));
+    if (!href || !href.includes(encodeURIComponent(provider))) throw new Error('Missing mobile login link');
+    // Stop at the OAuth boundary: this proof must not sign into a real account.
+    await page.setRequestInterception(true);
+    let reachedLogin = false;
+    page.on('request', request => {
+      if (request.isInterceptResolutionHandled()) return;
+      if (request.isNavigationRequest() && new URL(request.url()).pathname.startsWith('/auth/')) {
+        reachedLogin = true;
+        void request.respond({ status: 200, contentType: 'text/html', body: '<p>OAuth entry reached</p>' });
+      } else { void request.continue().catch(() => {}); }
+    });
+    await Promise.all([page.waitForNavigation({ timeout: READY_TIMEOUT_MS }), page.touchscreen.tap(target.x, target.y)]);
+    if (!reachedLogin) throw new Error('Mobile tap did not reach OAuth');
+  } else {
+    await page.touchscreen.tap(target.x, target.y);
+    await page.waitForSelector('.gpu-app[data-entered="true"]', { timeout: READY_TIMEOUT_MS });
+    if (await page.$('.gpu-handheld-veil')) throw new Error('Mobile entry was interrupted');
+    await page.waitForSelector('.gpu-project-form', { timeout: READY_TIMEOUT_MS });
+    await page.screenshot({ path: stem + '-projects.png' });
+  }
+  console.log('Mobile touch entry passed: ' + target.id);
+}
+
 /** Spawn the source dev stack on free ports; resolve when the UI answers. */
 async function spawnDevStack() {
   const [devPort, apiPort] = await freePorts(2);
@@ -470,7 +530,20 @@ try {
   });
   try {
     const page = await browser.newPage();
-    await page.setViewport({ width, height, deviceScaleFactor: 2 });
+    if (handheld) {
+      // A phone: touch is the ONLY pointer, so `(any-pointer: coarse) and
+      // (any-hover: none)` must come true from Chrome's own emulation — the
+      // gate's predicate is proven, never forced through `?atomaHandheld`.
+      await page.setViewport({
+        width: has('--width') ? width : 390,
+        height: has('--height') ? height : 844,
+        deviceScaleFactor: 3,
+        isMobile: true,
+        hasTouch: true,
+      });
+    } else {
+      await page.setViewport({ width, height, deviceScaleFactor: 2 });
+    }
     page.on('pageerror', (error) => console.error(`pageerror: ${error.message}`));
     if (has('--debug')) {
       page.on('console', (message) => console.error(`[console:${message.type()}] ${message.text().slice(0, 200)}`));
@@ -523,6 +596,14 @@ try {
           .catch(() => '<page unreachable>');
         throw new Error(`${error.message}\npage body at timeout:\n${body}`);
       });
+
+    if (handheld) {
+      // Exercise the real mobile entry control.
+      await captureHandheldGate(page);
+      await browser.close();
+      stack.stop();
+      process.exit(0);
+    }
 
     // Pass the arrival gate through the a11y bridge, then wait for the nav.
     await page.waitForFunction(
@@ -654,16 +735,18 @@ try {
     }
 
     if (selectFirst) {
-      const spot = await page.evaluate(() => {
+      const prefix = view === 'Skills' ? 'skill.select.' : view === 'Registry' ? 'registry.atom.' : 'project.select.';
+      await page.waitForFunction((key) => globalThis.__ATOMA_GPU__?.hitTargets().some(entry => entry.id.startsWith(key)), { timeout: READY_TIMEOUT_MS }, prefix);
+      const spot = await page.evaluate((key) => {
         const handle = globalThis.__ATOMA_GPU__;
-        const row = handle?.hitTargets().find((entry) => entry.id.startsWith('project.select.'));
+        const row = handle?.hitTargets().find((entry) => entry.id.startsWith(key));
         if (!row || !handle.projectRendererPoint) return null;
         return handle.projectRendererPoint(
           row.x + row.width / 2,
           row.y + row.height / 2
         );
-      });
-      if (!spot) throw new Error('--select-first: no project row on screen');
+      }, prefix);
+      if (!spot) throw new Error('--select-first: no selectable row on screen');
       await page.mouse.click(spot.x, spot.y);
       await page.evaluate(() => new Promise((resolveWait) => setTimeout(resolveWait, 800)));
     }
@@ -691,8 +774,15 @@ try {
       await page.select('select[aria-label="Starting point"]', repositoryMode);
       await page.type('input[aria-label="Source GitHub repository"]', 'https://github.com/acme/app');
     }
+    if (has('--touch-probe')) {
+      if (!authed || !selectFirst || view !== 'Projects') {
+        throw new Error('--touch-probe requires --auth --select-first and the Projects view');
+      }
+      await assertMobileProjects(page, gatedStubs()['/api/projects'][0].projectId);
+    }
     await page.screenshot({ path: outPath });
-    console.log(`viz screenshot: ${outPath} (${view}, ${authed ? 'gated' : 'ungated'}, camera ${cameraMode}${selectFirst ? ', first project selected' : ''}${notifications ? ', notification tray open' : ''}, ${width}x${height})`);
+    const capturedViewport = page.viewport();
+    console.log(`viz screenshot: ${outPath} (${view}, ${authed ? 'gated' : 'ungated'}, camera ${cameraMode}${selectFirst ? ', first row selected' : ''}${notifications ? ', notification tray open' : ''}, ${capturedViewport.width}x${capturedViewport.height})`);
   } finally {
     await browser.close();
   }

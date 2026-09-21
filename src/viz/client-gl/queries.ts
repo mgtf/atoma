@@ -316,7 +316,7 @@ export function useOrganisation(active: boolean) {
 export function useAccountModels(active: boolean) {
   return useQuery({
     queryKey: ['viz', 'account', 'models'],
-    queryFn: api.accountModels,
+    queryFn: () => api.accountModels(),
     enabled: active,
     staleTime: 30_000,
   });

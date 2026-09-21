@@ -1,5 +1,5 @@
 #!/usr/bin/env tsx
-import { operatorRegistryPredicate } from '../registry/db.js';
+import { unfoldedRegistryPredicate } from '../registry/db.js';
 /**
  * atoma ledger CLI — inspect the append-only lifecycle ledger and check
  * the mutable stores against it.
@@ -20,13 +20,16 @@ import { operatorRegistryPredicate } from '../registry/db.js';
  * same file. That closes half of the ledger's old KNOWN LIMIT by
  * construction: you can no longer project one store's history against a
  * different store's counters, which is exactly how this command once reported
- * `IMPOSSIBLE  Helium: store 2 < ledger 6` for a week. The SKILL half of the
- * pairing is still conventional — bodies and counters live under
- * `--skills-dir` — so that flag still has to name the right tree.
+ * `IMPOSSIBLE  Helium: store 2 < ledger 6` for a week. Since 2026-09-18 the
+ * skill counters are rows in that same file too (W4), read through the same
+ * handle; only the skill BODIES live under `--skills-dir`, so that flag names
+ * which recipes exist, not where their trust is. The handle is READ-ONLY: a
+ * `--db` may be a backup snapshot, and a store from before the skill table
+ * reads its legacy sidecars instead of gaining a table.
  */
 import Database from 'better-sqlite3';
 import { existsSync } from 'node:fs';
-import { ledgerDbPath, projectCounters, readLedger } from '../core/ledger.js';
+import { ledgerDbPath, projectCounters, readLedger, type LedgerScope } from '../core/ledger.js';
 import { skillsDirPath } from '../core/stores.js';
 import { SkillRegistry } from '../skills/registry.js';
 import { parseCliArgs } from './args.js';
@@ -55,7 +58,7 @@ function renderEntity(entity: string, labels: Map<string, string>): string {
 function displayNamesByAtomId(db: Database.Database): Map<string, string> {
   const out = new Map<string, string>();
   try {
-    for (const r of db.prepare('SELECT atom_id, name FROM atom_types').all() as {
+    for (const r of db.prepare(`SELECT atom_id, name FROM atom_types WHERE ${unfoldedRegistryPredicate(db)}`).all() as {
       atom_id: string | null;
       name: string;
     }[]) {
@@ -65,6 +68,20 @@ function displayNamesByAtomId(db: Database.Database): Map<string, string> {
     /* unreadable store — every entity falls back to its raw key */
   }
   return out;
+}
+
+/**
+ * The scope, compactly: `@org/project run:<id> by principal:<id>`, or nothing
+ * for a platform-level row. A row with no scope predates the columns or was
+ * written by a process with nothing to say; both are shown as they are.
+ */
+function renderScope(scope: LedgerScope | undefined): string {
+  if (!scope) return '';
+  const where = scope.orgId ? `@${scope.orgId}${scope.projectId ? `/${scope.projectId}` : ''}` : '';
+  const run = scope.runId ? `run:${scope.runId}` : '';
+  const actor = scope.actorType ? `by ${scope.actorType}${scope.actorId ? `:${scope.actorId}` : ''}` : '';
+  const parts = [where, run, actor].filter(Boolean);
+  return parts.length > 0 ? `  [${parts.join(' ')}]` : '';
 }
 
 function main(): void {
@@ -81,7 +98,9 @@ function main(): void {
     console.log(`(no store at ${dbPath} — nothing to read)`);
     return;
   }
-  const db = new Database(dbPath);
+  // READ-ONLY: `--db` may name a backup snapshot, and a reader never migrates
+  // one — a store from before the skill_meta table reads its legacy sidecars.
+  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   const events = readLedger(db);
 
   if (cmd === 'tail') {
@@ -94,7 +113,7 @@ function main(): void {
     for (const ev of events.slice(-n)) {
       const detail = ev.detail ? `  ${JSON.stringify(ev.detail)}` : '';
       console.log(
-        `${ev.at}  ${ev.kind.padEnd(24)}  ${renderEntity(ev.entity, labels)}${detail}`
+        `${ev.at}  ${ev.kind.padEnd(24)}  ${renderEntity(ev.entity, labels)}${detail}${renderScope(ev.scope)}`
       );
     }
     console.log(`\n${events.length} event(s) total — ${dbPath}`);
@@ -110,10 +129,12 @@ function main(): void {
   // Atom types — the SAME file the events came from, so this half of the
   // comparison cannot be mispaired.
   const rows = db
-    .prepare(`SELECT ${operatorRegistryPredicate(db) === '1' ? "'operator' AS owner_key, NULL AS atom_id" : 'owner_key, atom_id'}, name, successes, failures FROM atom_types`)
-    .all() as { owner_key: string; atom_id: string; name: string; successes: number; failures: number }[];
+    .prepare(`SELECT atom_id, name, successes, failures FROM atom_types WHERE ${unfoldedRegistryPredicate(db)}`)
+    .all() as { atom_id: string | null; name: string; successes: number; failures: number }[];
   for (const r of rows) {
-    const p = projected.get(r.owner_key === 'operator' ? r.name : r.atom_id) ?? { successes: 0, failures: 0 };
+    // Keyed by the stable id (T4). The name is the fallback for a store whose
+    // rows never resolved — a pre-T4 store read read-only, say.
+    const p = (r.atom_id ? projected.get(r.atom_id) : undefined) ?? projected.get(r.name) ?? { successes: 0, failures: 0 };
     if (r.successes < p.successes || r.failures < p.failures) {
       impossible++;
       console.log(
@@ -124,11 +145,10 @@ function main(): void {
     }
   }
   console.log(`types checked: ${rows.length} (db: ${dbPath})`);
-  db.close();
 
-  // Skills (_meta.json) — still a separate store, so this pairing is still
-  // the caller's responsibility.
-  const skills = new SkillRegistry(skillsDirPath(flags['skills-dir']));
+  // Skills: trust rows in the SAME store, read through the same handle (W4);
+  // only the bodies' tree is still named by the caller.
+  const skills = new SkillRegistry(skillsDirPath(flags['skills-dir']), { db });
   let skillCount = 0;
   for (const ns of skills.listNamespaces()) {
     for (const sk of skills.loadFor(ns)) {
@@ -146,6 +166,7 @@ function main(): void {
     }
   }
   console.log(`skills checked: ${skillCount} (dir: ${skills.rootDir})`);
+  db.close();
 
   console.log('');
   if (impossible > 0) {

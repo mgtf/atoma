@@ -1127,5 +1127,18 @@
   "depth.entry.deep": "Commence par un tissu supervisant des cellules et des molécules.",
   "depth.entry.short": "Commence par une cellule supervisant des molécules.",
   "depth.deepening": "La cellule d’entrée a épuisé ses nouvelles tentatives. Recommence avec une supervision par un tissu.",
-  "depth.coverage": "{{covered}} obligations de livraison couvertes sur {{total}}"
+  "depth.coverage": "{{covered}} obligations de livraison couvertes sur {{total}}",
+  "welcome.handheld.blocked": "Pas encore disponible sur mobile",
+  "welcome.handheld.hint": "Atoma est encore en cours d’adaptation pour les téléphones et les tablettes. Tu peux continuer avec un accès complet, mais certains écrans peuvent ne pas encore bien fonctionner sur mobile.",
+  "welcome.handheld.continue": "Me permettre au moins d’accéder à mon compte",
+  "settings.runCapacity": "Runs simultanés",
+  "settings.runCapacityValue": "{{active}} actifs / {{limit}} autorisés (un run à la fois sur cet hôte)",
+  "auth.switchAccount": "Changer de compte",
+  "settings.refreshModels": "Actualiser les modèles ChatGPT",
+  "settings.modelCatalogue.ready": "Modèles signalés par ton compte ChatGPT connecté.",
+  "settings.modelCatalogue.stale": "Échec de l’actualisation. Les modèles précédemment signalés sont affichés, mais ne peuvent pas être sélectionnés.",
+  "settings.modelCatalogue.unavailable": "Le catalogue de modèles ChatGPT est indisponible. Actualise-le pour réessayer.",
+  "settings.modelUnavailable": "{{model}} — indisponible",
+  "settings.mcpConnectAnother": "Connecter un autre client",
+  "settings.mcpHideSetup": "Masquer le guide de configuration"
 }

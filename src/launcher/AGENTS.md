@@ -59,35 +59,79 @@ Two consequences worth stating:
   owned by something that cascades — `ownerReferences` — needs no synchronous
   fallback. That difference is exactly what the swap should absorb.
 
-## What is IN-PROCESS today, and what that costs
+The local composition seam is `createContainerLauncher`: it returns only
+`ContainerLauncher`, and egress and viz consumers use that return type.
+Shared-deadline network removal and launcher-selected preview copy ownership
+are contract operations; neither requires the concrete backend type.
 
-`DockerLauncher` runs inside the calling process. The recorded target is a
-launcher in its own container, reached over a permissioned socket. Two things
-had to come first: a contract narrow enough that the transport can change
-without a caller changing, and one implementation proving that contract
-against behaviour that already works.
+## Local and separate service modes
 
-Until the move happens, be honest about what is true: "the launcher owns the
-images and the flags" is a CODE-ORGANISATION property, not yet a security
-boundary. It becomes the boundary the day this class runs somewhere else. Do
-not describe the current state as satisfying invariant 1 — nothing is
-containerised yet, so the invariant is not yet under test.
+`connectContainerLauncher` selects the local backend when no
+`ATOMA_LAUNCHER_SOCKET` is configured, otherwise the separate Linux service.
+The configured socket must work; never fall back to Docker on the caller.
+Setup and limitations: [launcher service](../../docs/launcher-service.md).
 
-## What did NOT migrate, and why
+The socket is private, versioned and bounded. Only the service chooses images,
+runtime, workspace location and identity. Callers verify the reported profile;
+handles cannot name another owner or arbitrary engine object. Naming has one
+shared derivation. Arm/disarm calls are awaited so registration precedes work.
+Each connection holds its owners; disconnect cleanup follows any in-flight
+operation and never reaps another connection's objects. Unknown outcomes are
+not replayed. Global reconciliation refuses while a connection owns work and excludes new claims until it finishes.
 
-The worker container's **attached stdio** stays in
-[`src/tools/containerExecutor.ts`](../tools/containerExecutor.ts). It is an RPC
-TRANSPORT, not a lifecycle operation: the control plane pipes the tool-call
-protocol over the child's stdin and stdout, and a launcher reached over a
-socket cannot hand a pipe back.
+W1–W3 supply the service, transport and volumes, not deployed acceptance.
+The shared workspace projection remains a W7 packaging requirement. Local mode
+remains in-process and does not satisfy the deployment boundary.
 
-Closing that gap means giving the worker a socket or network protocol instead
-of stdio — a protocol change, with its own compatibility and isolation
-questions. Phase 0's contract is explicitly that the run path is unchanged
-behaviourally, so it is out of scope here and must not be smuggled in as a
-refactor. `workerRunArgs` remains the isolation contract for that path and is
-asserted by test, not by comment.
+## Worker lifecycle and transport
 
+`ContainerToolExecutor` is a compatibility facade. Local stdio attach lives
+in `localWorker.ts`; the service mode uses `RemoteWorkerExecutor` and the
+closed `WorkerLauncher` contract. The launcher chooses image, uid, workspace
+mapping and egress topology. No caller path or engine argument crosses RPC.
+
+The launcher creates two private Unix endpoints per worker. The worker
+CONNECTS to its endpoint, mounted as ONE read-only socket file; the caller
+connects to the separately issued endpoint. The launcher relays their NDJSON
+protocol with stream backpressure. Neither the control socket nor any sibling
+endpoint is mounted in the worker. A worker-writable socket directory would
+allow replacing an endpoint with a host-side symlink: do not use that shape.
+Tool requests remain concurrent and id-matched on the data channel, independent
+of serialized lifecycle RPC. Shared wire types live in `contracts/workerProtocol.ts`.
+
+One connection owns each worker and one worker owns each configured workspace.
+A lost data channel is terminal. Removal must be confirmed by the engine before
+network teardown or reuse; failed removal retains the workspace claim. Startup
+cleanup waits for the outstanding create, and control disconnect retries it.
+The worker label is `dev.atoma.owner=worker`, separate from preview and egress.
+The explicit orphan sweep includes it, and the exit backstop removes workers
+before the network registry runs. Boot recovery and stale socket sweeping are
+launcher-owned.
+
+Service workspaces are named volumes. The local driver binds a launcher-owned
+projection beneath one dedicated root; callers never choose driver options.
+The projection preserves host-side delivery, preview classification and backups
+without mounting product stores into workloads. `hostPath` describes that view;
+only the issued volume identity is used for a workload mount. Projects derive
+their path from stable ids through `projectWorkspaceRelative`; operator aliases
+remain service configuration and must fall beneath the same root.
+
+`WorkspaceVolumes` journals intent BEFORE creation in machine-local operational
+state. It never opens the product store. A separate SQLite exclusive transaction
+fences service processes while the JSON journal is atomically committed and
+fsynced; OS process death releases the lock. A failed journal write poisons the
+manager until restart. A volume that predates its creation intent is never
+adopted or removed. Failed removal retains its lease and prevents reuse.
+
+Heartbeats renew a ten-minute lease, capped at 24 hours from workspace creation.
+Expired leases cannot be resurrected. Socket expiry joins the in-flight operation
+before reverse teardown; failed disconnect cleanup retries every 30 seconds.
+Boot recovery runs under the process lock, before accepting clients: workers,
+owner networks, volumes, then stale UUID socket directories. Engine absence
+must be confirmed. Run bytes survive volume teardown for retention/backup (W9);
+only ephemeral preview projections are removed. Never broaden that deletion to
+run data. Shared root paths and local-driver backing must be mounted consistently
+on the engine host, launcher and control plane; W7 packages that topology.
 ## The flags are the isolation
 
 Every flag in a profile was verified against a real container before it was
@@ -184,10 +228,10 @@ understands the deliverable. The directory is recreated empty every time: one
 left by a crashed predecessor would be mounted into the next generation, which
 is how a preview would serve bytes the run that owns it never produced.
 
-When workspaces become named volumes under a containerised control plane, the
-handle keeps its shape and only the backend changes — which is why `hostPath`
-is optional on it and callers must treat its absence as normal.
-
+The service uses a named volume with a shared projection; the legacy local
+backend retains its direct directory. The optional `hostPath` is a copy/view
+capability, not the engine identity. Mount construction resolves the issued
+volume inside the launcher rather than accepting a handle's path back.
 ## Ordering belongs to the caller
 
 `purgeOwner`, `createNetwork`, `startUnit` and `removeNetwork` are primitives.
@@ -205,7 +249,7 @@ teardown must share ONE deadline, not each get a fresh budget.
 
 - **A launcher that returns a pipe.** It would make the interface unswappable
   for the one operation that matters most, and it is what keeps the worker's
-  transport out of this subsystem instead of half-in.
+  transport behind an explicit socket protocol.
 - **Auto-arming the hard-exit registry inside `createNetwork`.** Tracking is
   armed BEFORE creation on purpose: if stale-object removal raced the engine's
   endpoint teardown, `create` itself can fail while the old objects are still

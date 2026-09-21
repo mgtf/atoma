@@ -31,6 +31,7 @@ import { EntryVeilLayer } from './EntryVeilLayer.js';
 import { PreviewPlane } from './PreviewPlane.js';
 import { usePreviewSession } from './usePreviewSession.js';
 import { useEntryFade } from './entry-fade.js';
+import { handheldMediaQuery, isHandheldDevice } from './handheld.js';
 import { GpuSurface } from './GpuSurface.js';
 import { SceneCameraPlane } from './SceneCameraPlane.js';
 import { SceneTuningPanel } from './SceneTuningPanel.js';
@@ -151,6 +152,7 @@ function GpuAppContent({
   );
   const metrics = useRef<GpuRenderMetrics>(emptyRenderMetrics());
   const { phase: entryPhase, begin: beginEnter } = useEntryFade();
+  const arrive = beginEnter;
 
   // Operator surfaces are admin-only behind the gate: the server 403s them
   // for ordinary members, and a 403'd query would poison the global data
@@ -165,17 +167,17 @@ function GpuAppContent({
     state.view === 'runs' && apiReady,
     runsQuery.data?.find((entry) => entry.id === state.selectedRunId)
   );
-  const registriesQuery = useRegistries(state.view === 'registry' && operatorSurfaces);
+  const registriesQuery = useRegistries(state.view === 'registry' && apiReady);
   const registryQuery = useRegistry(
     state.selectedRegistryId,
-    state.view === 'registry' && operatorSurfaces
+    state.view === 'registry' && apiReady
   );
-  const namespacesQuery = useSkillNamespaces(state.view === 'skills' && operatorSurfaces);
+  const namespacesQuery = useSkillNamespaces(state.view === 'skills' && apiReady);
   const namespaceNames = useMemo(
     () => (namespacesQuery.data ?? []).map((item) => item.l1Name),
     [namespacesQuery.data]
   );
-  const skillLists = useSkillLists(namespaceNames, state.view === 'skills' && operatorSurfaces);
+  const skillLists = useSkillLists(namespaceNames, state.view === 'skills' && apiReady);
   const selectedRunEvent = useMemo(
     () => runQuery.data?.events.find((event) => event.id === state.selectedEventId) ?? null,
     [runQuery.data, state.selectedEventId]
@@ -189,7 +191,7 @@ function GpuAppContent({
       ? { l1Name: runSkillNs, id: selectedRunEvent.skillId }
       : null;
   const skillSelection = state.view === 'skills' ? state.selectedSkill : runSkillSelection;
-  const skillDetailQuery = useSkillDetail(skillSelection, Boolean(skillSelection) && operatorSurfaces);
+  const skillDetailQuery = useSkillDetail(skillSelection, Boolean(skillSelection) && apiReady);
   const burninQuery = useBurnin(state.view === 'burnin' && operatorSurfaces);
   // The family guidance renders inside the project run form, so it is fetched
   // with the Projects view. It is supplementary copy, never gating: it is
@@ -478,6 +480,16 @@ function GpuAppContent({
     if (gateBlocked && state.entered) useGpuStore.setState({ entered: false });
   }, [gateBlocked, state.entered]);
 
+  // The handheld predicate is a live media query (a DevTools device toggle
+  // flips it without a reload); the store holds one sample of it.
+  useEffect(() => {
+    const query = handheldMediaQuery();
+    if (!query) return undefined;
+    const refresh = () => useGpuStore.getState().setHandheld(isHandheldDevice());
+    query.addEventListener('change', refresh);
+    return () => query.removeEventListener('change', refresh);
+  }, []);
+
   useEffect(() => {
     const runs = runsQuery.data ?? [];
     if (!state.selectedRunId && runs[0]) state.selectRun(runs[0].id);
@@ -672,7 +684,7 @@ function GpuAppContent({
       return;
     }
     if (id === 'welcome.continue') {
-      beginEnter();
+      arrive();
       return;
     }
     if (id === 'brand.crystal') {
@@ -877,7 +889,7 @@ function GpuAppContent({
   }, [
     activateAuth,
     authSnapshot,
-    beginEnter,
+    arrive,
     loadOlderEvents,
     loadOlderNotifications,
     mintInvitation,
@@ -1053,7 +1065,7 @@ function GpuAppContent({
           onLoginStart={setPendingLoginProvider}
           t={t}
           onSelectRun={state.selectRun}
-          onEnter={beginEnter}
+          onEnter={arrive}
           githubInstallations={githubInstallationsQuery.data ?? []}
           projects={projectsQuery.data ?? []}
           onCreateProject={() => { void createProject(); }}

@@ -1,3 +1,5 @@
+import { basename } from 'node:path';
+import { TRUST_THRESHOLD_SUCCESSES } from '../atoms/cost.js';
 import { updateOrgModels } from '../auth/orgModels.js';
 import type { PlatformEventSink } from '../contracts/platformEvents.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -68,11 +70,15 @@ import { WriteRefused, registryRollback, skillDrop, skillMerge, skillReset, type
  * count, and the tier a call re-checks all read the same rows.
  *
  * TIERS (`identity.ts`):
- *   viewer   — read an organisation's projects, runs and traces
+ *   viewer   — read an organisation's projects, runs and traces, plus the two
+ *              platform commons the viz shows every signed-in role (since
+ *              2026-09-15): the one platform registry (list, show, history)
+ *              and the skill catalog (list, show) — see `commonsForTier`
  *   member   — start, cancel and publish that organisation's runs
  *   admin    — the organisation's members and model defaults
- *   platform — the instance: operator runs, registry, skills, ledger, the
- *              operator run corpus, friction, the journal, every organisation
+ *   platform — the instance: operator runs, skill analytics (stats, review),
+ *              the four lifecycle writes, ledger, the operator run corpus,
+ *              friction, the journal, every organisation
  *
  * NEEDS. A tool is registered only when the host can honour it: the tenant
  * tools need the gated projects runtime, the journal tool needs a journal,
@@ -154,6 +160,27 @@ type ToolResult = {
  * a model sees; the structure is what a script keeps. Arrays and scalars have
  * no structured form (the protocol wants an object) and travel as text only.
  */
+/**
+ * The registry and skill readers are the platform COMMONS, open to every tier
+ * since 2026-09-15 exactly as the viz opens them (`registrySummaryFor` in
+ * `src/viz/server.ts`): one registry, one trust, for every run on the
+ * platform (`docs/platform-trust-2026-09-15.md`). What is NOT for a tenant is
+ * the HOST PATH of the store or of the skills tree, so any tier below
+ * platform gets the basename — enough to name the store, nothing about the
+ * host's filesystem layout. The platform payload is byte-for-byte the old one.
+ */
+function commonsForTier(payload: unknown, tier: McpTier): unknown {
+  if (tier === 'platform' || payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+    return payload;
+  }
+  const shaped: Record<string, unknown> = { ...(payload as Record<string, unknown>) };
+  for (const key of ['store', 'skillsDir']) {
+    const value = shaped[key];
+    if (typeof value === 'string') shaped[key] = basename(value);
+  }
+  return shaped;
+}
+
 function jsonResult(payload: unknown): ToolResult {
   const text = JSON.stringify(payload, null, 2);
   const structured =
@@ -307,6 +334,7 @@ export const MCP_TOOLS: readonly McpToolSpec[] = [
             const { store, viewer } = tenant(ctx);
             const run = store.getProjectRun(viewer.orgId, args.runId) ?? (viewer.platformAdmin ? store.getProjectRunAnyOrg(args.runId) : null);
             if (!run) throw new ProjectHttpError(404, 'project run not found');
+            ctx.deps.projects!.service.auditRead(viewer, run.orgId, 'mcp.trace');
             const path = resolveProjectRunTraceFile({ projectRunId: run.projectRunId, runsPath: run.hostPaths.runsPath, traceId: run.traceId });
             if (!path) throw new ProjectHttpError(404, 'this run has no trace yet');
             return runTraceFile(path, { ...(args.offset !== undefined ? { offset: args.offset } : {}), ...(args.limit !== undefined ? { limit: args.limit } : {}) });
@@ -563,42 +591,42 @@ export const MCP_TOOLS: readonly McpToolSpec[] = [
   },
   {
     name: 'atoma_registry_list',
-    tier: 'platform',
+    tier: 'viewer',
     needs: [],
-    register: (server) =>
+    register: (server, ctx) =>
       server.registerTool(
         'atoma_registry_list',
         {
           title: 'List agent types',
           description:
-            'Persisted molecules, cells and tissues with their earned trust counters and elemental tool metadata. A type with 3+ successes and zero failures is TRUSTED, which lets its supervisor skip LLM validation.',
+            `Persisted molecules, cells and tissues with historical success/failure totals, consecutiveSuccesses, the configured trustThreshold and trusted state, plus elemental tool metadata. Trust requires consecutive approved final results since the last failure or behavior change (default threshold: ${TRUST_THRESHOLD_SUCCESSES}); a trusted type lets its supervisor skip LLM validation.`,
           inputSchema: { tier: z.number().int().min(1).max(3).optional() },
           annotations: READ_ONLY,
         },
-        (args) => jsonResult(registryList({ tier: args.tier as 1 | 2 | 3 | undefined }))
+        (args) => jsonResult(commonsForTier(registryList({ tier: args.tier as 1 | 2 | 3 | undefined }), ctx.tier))
       ),
   },
   {
     name: 'atoma_registry_show',
-    tier: 'platform',
+    tier: 'viewer',
     needs: [],
-    register: (server) =>
+    register: (server, ctx) =>
       server.registerTool(
         'atoma_registry_show',
         {
           title: 'Show one agent type',
-          description: 'One molecule, cell or tissue in full, plus its version history. A patch RESETS trust.',
+          description: 'One molecule, cell or tissue in full, plus its version history, historical totals, consecutiveSuccesses, trustThreshold and trusted state. A behavior patch or rollback resets the trust streak while preserving historical totals. A description-only patch preserves both.',
           inputSchema: { name: z.string().min(1) },
           annotations: READ_ONLY,
         },
-        (args) => jsonResult(registryShow(args))
+        (args) => jsonResult(commonsForTier(registryShow(args), ctx.tier))
       ),
   },
   {
     name: 'atoma_skills_list',
-    tier: 'platform',
+    tier: 'viewer',
     needs: [],
-    register: (server) =>
+    register: (server, ctx) =>
       server.registerTool(
         'atoma_skills_list',
         {
@@ -607,7 +635,7 @@ export const MCP_TOOLS: readonly McpToolSpec[] = [
           inputSchema: { l1: z.string().optional() },
           annotations: READ_ONLY,
         },
-        (args) => jsonResult(skillsList(args))
+        (args) => jsonResult(commonsForTier(skillsList(args), ctx.tier))
       ),
   },
   {
@@ -694,9 +722,9 @@ export const MCP_TOOLS: readonly McpToolSpec[] = [
   },
   {
     name: 'atoma_registry_history',
-    tier: 'platform',
+    tier: 'viewer',
     needs: [],
-    register: (server) =>
+    register: (server, ctx) =>
       server.registerTool(
         'atoma_registry_history',
         {
@@ -705,14 +733,14 @@ export const MCP_TOOLS: readonly McpToolSpec[] = [
           inputSchema: { name: z.string().min(1) },
           annotations: READ_ONLY,
         },
-        (args) => jsonResult(registryHistory(args))
+        (args) => jsonResult(commonsForTier(registryHistory(args), ctx.tier))
       ),
   },
   {
     name: 'atoma_skills_show',
-    tier: 'platform',
+    tier: 'viewer',
     needs: [],
-    register: (server) =>
+    register: (server, ctx) =>
       server.registerTool(
         'atoma_skills_show',
         {
@@ -722,7 +750,7 @@ export const MCP_TOOLS: readonly McpToolSpec[] = [
           inputSchema: { l1: z.string().min(1).describe('Molecule name or atom id.'), id: z.string().min(1) },
           annotations: READ_ONLY,
         },
-        (args) => jsonResult(skillShow(args))
+        (args) => jsonResult(commonsForTier(skillShow(args), ctx.tier))
       ),
   },
   {
@@ -906,7 +934,7 @@ export const MCP_TOOLS: readonly McpToolSpec[] = [
         {
           title: 'Roll an agent type back to an older version',
           description:
-            'Restore an older version’s prompt, tools and params as a NEW live version (roll-forward-to-old-content; see atoma_registry_history for versions). Trust RESETS: the restored type re-earns it. A bootstrap type’s seeder may patch the rollback away on the next run. Attributed and journaled.',
+            'Restore an older version’s prompt, tools and params as a NEW live version (roll-forward-to-old-content; see atoma_registry_history for versions). The trust streak resets while historical success/failure totals are preserved; the restored type re-earns trust through consecutive approved final results. A bootstrap type’s seeder may patch the rollback away on the next run. Attributed and journaled.',
           inputSchema: { name: z.string().min(1), toVersion: z.number().int().positive() },
           annotations: MUTATING,
         },

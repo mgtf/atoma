@@ -1,3 +1,4 @@
+import type { ProjectWorkspaceIdentity } from '../contracts/launcherVolumes.js';
 import { ToolSandbox } from '../tools/sandbox.js';
 import { InMemoryToolRegistry } from '../tools/registry.js';
 import { defaultBuiltinTools } from '../tools/builtin.js';
@@ -24,7 +25,7 @@ export interface ToolBackend {
   readonly rootLabel: string;
   /** Release children/containers. Must be safe to call twice. */
   cleanup(): Promise<void>;
-  /** Strict quiescence before an experiment replaces this backend's workspace. */
+  /** Strict quiescence before a depth transition replaces this backend's workspace. */
   drain?(): Promise<void>;
 }
 
@@ -93,12 +94,14 @@ export async function containerToolBackend(opts: {
   egressAllowlist?: readonly string[];
   /** Names the per-run network and proxy, so two runs never share either. */
   runId?: string;
+  projectWorkspace?: ProjectWorkspaceIdentity;
 }): Promise<ToolBackend> {
-  const image = opts.image ?? DEFAULT_WORKER_IMAGE;
+  const image = opts.image ?? process.env['ATOMA_WORKER_IMAGE'] ?? DEFAULT_WORKER_IMAGE;
   // PER RUN, not shared. Reproduced: two containers on one --internal network
   // reach each other's servers (`REACHED: TENANT_A_WORKSPACE_SECRET`), so a
   // shared network would hand one tenant's workspace to the next.
-  const sidecar = opts.egress
+  const remote = process.env['ATOMA_LAUNCHER_SOCKET'] !== undefined;
+  const sidecar = opts.egress && !remote
     ? await startEgressSidecar({
         runId: opts.runId ?? String(process.pid),
         image,
@@ -108,6 +111,7 @@ export async function containerToolBackend(opts: {
   const exec = new ContainerToolExecutor({
     workspaceHostPath: opts.workspaceRoot,
     image,
+    ownerId: opts.runId, proxiedEgress: opts.egress, project: opts.projectWorkspace,
     ...(sidecar
       ? { egress: { network: sidecar.network, proxyHost: sidecar.proxyHost, proxyPort: sidecar.proxyPort } }
       : {}),
@@ -115,6 +119,7 @@ export async function containerToolBackend(opts: {
   try {
     await exec.start();
   } catch (err) {
+    await exec.drain();
     await sidecar?.stop();
     throw err;
   }
@@ -125,12 +130,16 @@ export async function containerToolBackend(opts: {
     // view of the same bytes through the bind mount.
     rootLabel:
       `${opts.workspaceRoot} (in container, mounted at /workspace` +
-      `${sidecar ? ', proxied egress' : ', no network'})`,
+      `${opts.egress ? ', proxied egress' : ', no network'})`,
     cleanup: async () => {
-      exec.stop();
+      await exec.drain();
       // The sidecar outlives the worker container by design — the worker is
       // `--rm`, the network is not — so it must be torn down explicitly or
       // every run leaks a network and a proxy.
+      await sidecar?.stop();
+    },
+    drain: async () => {
+      await exec.drain();
       await sidecar?.stop();
     },
   };

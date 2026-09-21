@@ -203,11 +203,7 @@ export const PRINCIPAL_CHATGPT_SUBSCRIPTION_FAMILY: SubscriptionFamily = {
   label: 'ChatGPT (your subscription)',
   credentialEnvVar: null,
   suggestive: false,
-  models: CHATGPT_SUBSCRIPTION_MODELS.map((model) => ({
-    id: model,
-    label: modelLabel(model),
-    tiers: [1, 2, 3],
-  })),
+  models: [],
 };
 
 /** Every machine-bound family offered beside (never inside) the key catalogue. */
@@ -276,6 +272,7 @@ function subscriptionFamilyOf(
     PRINCIPAL_CHATGPT_SUBSCRIPTION_FAMILY,
   ].find((candidate) => candidate.selectorPrefix === `${selector.mode}:${selector.vendor}`);
   if (!family) return null;
+  if (selector.mode === 'own' && selector.vendor === 'openai') return family;
   const model = family.models.find((entry) => entry.id === selector.model);
   if (!model) return null;
   if (tier !== undefined && model.tiers && !model.tiers.includes(tier)) return null;
@@ -291,6 +288,8 @@ function subscriptionFamilyOf(
 export function isAccountTierSelection(value: string, tier?: TierNumber): boolean {
   if (isValidTierModelSelection(value)) return true;
   const selector = tryParseModelSelector(value);
+  // Persistence validates spelling, not a time-varying account entitlement.
+  // New choices and launches validate against that principal's discovered inventory.
   return selector !== null && subscriptionFamilyOf(selector, tier) !== null;
 }
 
@@ -300,8 +299,8 @@ export function tierModelSelectionLabel(value: string): string {
   if (!selector) return value;
   const family = subscriptionFamilyOf(selector);
   if (family) {
-    const model = family.models.find((entry) => entry.id === selector.model)!;
-    return `${family.label} — ${model.label}`;
+    const model = family.models.find((entry) => entry.id === selector.model);
+    return `${family.label} — ${model?.label ?? modelLabel(selector.model)}`;
   }
   const provider = findProvider(selector.vendor);
   if (!provider || selector.mode !== 'api') return formatModelSelector(selector);

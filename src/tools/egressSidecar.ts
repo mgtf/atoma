@@ -1,5 +1,5 @@
+import { connectContainerLauncher } from '../launcher/connect.js';
 import {
-  DockerLauncher,
   EGRESS_ASYNC_CLEANUP_BUDGET_MS,
   EGRESS_EXIT_REMOVE_ATTEMPTS,
   EGRESS_EXIT_REMOVE_RETRY_MS,
@@ -101,7 +101,7 @@ export async function startEgressSidecar(
   deps: EgressSidecarDependencies = {}
 ): Promise<EgressSidecar> {
   const now = deps.now ?? Date.now;
-  const launcher = new DockerLauncher({
+  const launcher = await connectContainerLauncher({
     image: opts.image,
     ...(deps.runDocker ? { runDocker: deps.runDocker } : {}),
     ...(deps.waitUntilReady ? { waitUntilReady: deps.waitUntilReady } : {}),
@@ -118,12 +118,17 @@ export async function startEgressSidecar(
   // Clean any debris from a previous crashed run with the same id before
   // creating: `docker network create` fails on an existing name, and the
   // failure would be reported as "egress unavailable" for a stale object.
-  await launcher.purgeOwner('egress', ownerId);
+  try {
+    await launcher.purgeOwner('egress', ownerId);
 
-  // Arm hard-exit cleanup before creation too: if stale-object removal raced
-  // Docker endpoint teardown, `network create` itself can fail while the old
-  // network is still durable and still needs the synchronous fallback.
-  launcher.armHardExitCleanup('egress', ownerId);
+    // Arm hard-exit cleanup before creation too: if stale-object removal raced
+    // Docker endpoint teardown, `network create` itself can fail while the old
+    // network is still durable and still needs the synchronous fallback.
+    await launcher.armHardExitCleanup('egress', ownerId);
+  } catch (error) {
+    await launcher.close?.();
+    throw error;
+  }
   let proxy;
   try {
     const internalHandle = await launcher.createNetwork(internal);
@@ -139,33 +144,37 @@ export async function startEgressSidecar(
     );
     await launcher.awaitUnitReady(proxy);
   } catch (err) {
-    const cleanupDeadline = now() + EGRESS_ASYNC_CLEANUP_BUDGET_MS;
-    await launcher.stopUnit(
-      {
-        kind: 'egress-proxy',
-        ownerId,
-        name: launcher.unitName('egress-proxy', ownerId),
-      },
-      'failed'
-    );
-    const internalRemoved = await launcher.removeNetworkBefore(
-      { family: 'egress', kind: 'internal', ownerId, name: network },
-      cleanupDeadline
-    );
-    const uplinkRemoved = await launcher.removeNetworkBefore(
-      { family: 'egress', kind: 'uplink', ownerId, name: uplinkNetwork },
-      cleanupDeadline
-    );
-    // If Docker is still tearing down an endpoint, keep the entry registered:
-    // process-exit cleanup gets one final synchronous, bounded retry.
-    if (internalRemoved && uplinkRemoved) launcher.disarmHardExitCleanup('egress', ownerId);
-    if (isIsolatedGatewayUnsupported(err)) {
-      throw new Error(
-        'proxied egress requires Docker Engine 28+ for an isolated bridge gateway; refusing to fall back to host-reachable --internal networking',
-        { cause: err }
+    try {
+      const cleanupDeadline = now() + EGRESS_ASYNC_CLEANUP_BUDGET_MS;
+      await launcher.stopUnit(
+        {
+          kind: 'egress-proxy',
+          ownerId,
+          name: launcher.unitName('egress-proxy', ownerId),
+        },
+        'failed'
       );
+      const internalRemoved = await launcher.removeNetworkBefore(
+        { family: 'egress', kind: 'internal', ownerId, name: network },
+        cleanupDeadline
+      );
+      const uplinkRemoved = await launcher.removeNetworkBefore(
+        { family: 'egress', kind: 'uplink', ownerId, name: uplinkNetwork },
+        cleanupDeadline
+      );
+      // If Docker is still tearing down an endpoint, keep the entry registered:
+      // process-exit cleanup gets one final synchronous, bounded retry.
+      if (internalRemoved && uplinkRemoved) await launcher.disarmHardExitCleanup('egress', ownerId);
+      if (isIsolatedGatewayUnsupported(err)) {
+        throw new Error(
+          'proxied egress requires Docker Engine 28+ for an isolated bridge gateway; refusing to fall back to host-reachable --internal networking',
+          { cause: err }
+        );
+      }
+      throw err;
+    } finally {
+      await launcher.close?.();
     }
-    throw err;
   }
 
   const proxyHandle = proxy;
@@ -193,7 +202,8 @@ export async function startEgressSidecar(
           cleanupDeadline
         );
         if (internalRemoved && uplinkRemoved) {
-          launcher.disarmHardExitCleanup('egress', ownerId);
+          await launcher.disarmHardExitCleanup('egress', ownerId);
+          await launcher.close?.();
         } else {
           // Keep the hard-exit fallback armed and allow an explicit second
           // stop() call to retry. Reject explicitly: resolving here told the

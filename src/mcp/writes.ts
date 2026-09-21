@@ -1,4 +1,4 @@
-import { operatorRegistryPredicate } from '../registry/db.js';
+import { unfoldedRegistryPredicate } from '../registry/db.js';
 /**
  * The OPERATOR WRITES of the MCP surface — the four catalogue-hygiene verbs
  * the CLI has had all along (`skills reset|drop|merge`, `registry rollback`),
@@ -24,10 +24,18 @@ import { operatorRegistryPredicate } from '../registry/db.js';
  * WRITE HANDLES. The readers open `{ readonly: true }` handles on purpose;
  * these open the store through `openDb` — the one path that runs the schema
  * and migrations — exactly as the CLI does, and close it before returning.
+ *
+ * LEDGER SCOPE (T7). The lifecycle rows those store methods append carry the
+ * actor too, through `withLedgerScope` around each SYNCHRONOUS write: this
+ * process serves every organisation, so a process-wide scope would attribute
+ * one request's write to another's principal. The scope names the principal
+ * and organisation of a bearer, or `cli` for the loopback operator — the same
+ * mapping `journal` applies to the platform event.
  */
 
 import { existsSync } from 'node:fs';
 import { type PlatformEventInput, type PlatformEventSink, eventLabel } from '../contracts/platformEvents.js';
+import { withLedgerScope, type LedgerScope } from '../core/ledger.js';
 import { skillsDirPath, storeDbPath } from '../core/stores.js';
 import { AtomRegistry } from '../registry/atomRegistry.js';
 import { openDb } from '../registry/db.js';
@@ -50,7 +58,7 @@ function labels(): Map<string, string> {
   if (!existsSync(dbPath)) return out;
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   try {
-    for (const r of db.prepare(`SELECT atom_id, name FROM atom_types WHERE ${operatorRegistryPredicate(db)}`).all() as { atom_id: string | null; name: string }[]) {
+    for (const r of db.prepare(`SELECT atom_id, name FROM atom_types WHERE ${unfoldedRegistryPredicate(db)}`).all() as { atom_id: string | null; name: string }[]) {
       if (r.atom_id) out.set(r.atom_id, r.name);
     }
   } catch {
@@ -72,6 +80,13 @@ function journal(emit: PlatformEventSink | undefined, actor: OperatorActor, even
   return true;
 }
 
+/** The lifecycle-ledger scope of a write: who did it, and for which organisation. */
+export function ledgerScopeOf(actor: OperatorActor): LedgerScope {
+  return actor.kind === 'principal'
+    ? { orgId: actor.orgId, actorType: 'principal', actorId: actor.principalId }
+    : { actorType: 'cli' };
+}
+
 function resolveSkill(l1: string, id: string) {
   const dir = skillsDirPath();
   const reg = new SkillRegistry(dir);
@@ -85,7 +100,7 @@ function resolveSkill(l1: string, id: string) {
 export function skillReset(input: { l1: string; id: string; actor: OperatorActor; emit?: PlatformEventSink }): unknown {
   const { dir, reg, ref, skill } = resolveSkill(input.l1, input.id);
   if (!skill) throw new WriteRefused(`no skill "${input.id}" for molecule "${input.l1}" under ${dir}`);
-  reg.resetCounters(ref.atomId, input.id);
+  withLedgerScope(ledgerScopeOf(input.actor), () => reg.resetCounters(ref.atomId, input.id));
   const journaled = journal(input.emit, input.actor, {
     kind: 'skill.reset',
     summary: `skill ${eventLabel(ref.name)}/${eventLabel(input.id)} counters reset by ${input.actor.label}`,
@@ -110,7 +125,7 @@ export function skillDrop(input: { l1: string; id: string; force?: boolean; acto
       `refusing to drop ${ref.name}/${input.id}: it has ${skill.successes} recorded success(es) — proven knowledge. Pass force to drop it anyway.`
     );
   }
-  reg.drop(ref.atomId, input.id);
+  withLedgerScope(ledgerScopeOf(input.actor), () => reg.drop(ref.atomId, input.id));
   const journaled = journal(input.emit, input.actor, {
     kind: 'skill.dropped',
     summary: `skill ${eventLabel(ref.name)}/${eventLabel(input.id)} dropped by ${input.actor.label}`,
@@ -139,7 +154,7 @@ export function skillMerge(input: { l1: string; keep: string; absorb: string; fo
       `refusing to absorb ${ref.name}/${input.absorb}: its body has ${absorb.successes} recorded success(es) and would be DELETED. If that body is the one worth keeping, merge in the other direction; otherwise pass force.`
     );
   }
-  const merged = reg.merge(ref.atomId, input.keep, input.absorb);
+  const merged = withLedgerScope(ledgerScopeOf(input.actor), () => reg.merge(ref.atomId, input.keep, input.absorb));
   if (!merged) throw new WriteRefused('merge failed (a skill vanished mid-operation)');
   const journaled = journal(input.emit, input.actor, {
     kind: 'skill.merged',
@@ -168,7 +183,8 @@ export function registryRollback(input: { name: string; toVersion: number; actor
     if (!before) throw new WriteRefused(`no agent type named "${input.name}"`);
     let after;
     try {
-      after = registry.rollback(input.name, input.toVersion, input.actor.label);
+      after = withLedgerScope(ledgerScopeOf(input.actor), () =>
+        registry.rollback(input.name, input.toVersion, input.actor.label));
     } catch (error: unknown) {
       // The registry's own refusals (unknown version, already live) become
       // tool refusals the host can show; they are domain answers, not faults.
@@ -180,7 +196,7 @@ export function registryRollback(input: { name: string; toVersion: number; actor
       : journal(input.emit, input.actor, {
           kind: 'registry.rolled_back',
           summary: `agent type ${eventLabel(input.name)} rolled back to v${input.toVersion} (now v${after.version}) by ${input.actor.label}`,
-          detail: { name: input.name, tier: before.tier, fromVersion: before.version, toVersion: input.toVersion, liveVersion: after.version, trustBefore: { successes: before.successes, failures: before.failures } },
+          detail: { name: input.name, tier: before.tier, fromVersion: before.version, toVersion: input.toVersion, liveVersion: after.version, trustBefore: { successes: before.successes, failures: before.failures, consecutiveSuccesses: before.consecutiveSuccesses } },
         });
     return {
       name: input.name,
@@ -189,15 +205,16 @@ export function registryRollback(input: { name: string; toVersion: number; actor
       fromVersion: before.version,
       restoredVersion: input.toVersion,
       liveVersion: after.version,
-      trustBefore: { successes: before.successes, failures: before.failures },
-      trustAfter: { successes: after.successes, failures: after.failures },
+      trustThreshold: trustThreshold(),
+      trustBefore: { successes: before.successes, failures: before.failures, consecutiveSuccesses: before.consecutiveSuccesses },
+      trustAfter: { successes: after.successes, failures: after.failures, consecutiveSuccesses: after.consecutiveSuccesses },
       actor: input.actor.label,
       journaled,
       note: noop
         ? `v${input.toVersion} content is identical to the live version; nothing changed.`
         : /^bootstrap-/.test(after.createdBy)
-          ? 'Counters reset — the restored type re-earns trust. This is a canonical/bootstrap type: its seeder re-aligns the prompt on the next run and will patch this rollback away if the seed differs.'
-          : 'Counters reset — the restored type re-earns trust. description is not versioned and was kept as-is.',
+          ? 'Trust streak reset; historical success/failure totals preserved. The restored type re-earns trust through consecutive approved final results. This is a canonical/bootstrap type: its seeder re-aligns the prompt on the next run and will patch this rollback away if the seed differs.'
+          : 'Trust streak reset; historical success/failure totals preserved. The restored type re-earns trust through consecutive approved final results. description is not versioned and was kept as-is.',
     };
   } finally {
     db.close();

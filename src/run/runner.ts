@@ -1,5 +1,5 @@
-import { eligibleProjectRun, projectRunPathsMatch, resolveProjectRegistryOwner } from '../projects/runAuthority.js';
-import type { RegistryOwner } from '../contracts/registryOwner.js';
+import { assertProjectRunAuthority } from '../projects/runAuthority.js';
+import { ledgerDbPath, setLedgerScope, type LedgerScope } from '../core/ledger.js';
 import { dirname, resolve } from 'node:path';
 import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { setMaxListeners } from 'node:events';
@@ -29,6 +29,7 @@ import { L2Atom } from '../atoms/L2Atom.js';
 import { depthModeSchema, type DepthMode } from '../contracts/depthRouting.js';
 import { runDepthTask } from './depth.js';
 import { SkillRegistry } from '../skills/registry.js';
+import { reconcilePlatformSkills } from '../skills/migratePlatform.js';
 import { isTraceRunId, TraceRecorder, runLabelFromGoal } from '../viz/trace.js';
 import { formatDecompositionReport, formatTimeoutPostMortem } from '../viz/report.js';
 import { RecordingLlmClient } from '../viz/recordingLlm.js';
@@ -211,7 +212,7 @@ export function formatUsage(profile: TaskProfile): string {
     ...RUNNER_BOOLEAN_FLAGS,
     ...RUNNER_NEGATABLE_FLAGS.flatMap((flag) => [flag, `--no-${stripDashes(flag)}`]),
     '--seed <dir>',
-    '--depth <deep|short> (depth pilot, common final acceptance; local backend)',
+    '--depth <deep|short> (supervision depth, common final acceptance)',
     '--worker-image <sha256:digest> (requires container mode)',
   ];
   return [
@@ -224,6 +225,10 @@ export function formatUsage(profile: TaskProfile): string {
     `  --help, -h`,
     ``,
     `Without a goal the run uses this family's default goal.`,
+    ...(profile.depthExperiment?.defaultMode ? [
+      `New runs default to ${profile.depthExperiment.defaultMode} supervision; --depth overrides it.`,
+      `Short supervision enters at L2 and may restart once through L3.`,
+    ] : []),
     `Every run needs ATOMA_MODEL_L1, ATOMA_MODEL_L2 and ATOMA_MODEL_L3 set to a`,
     `<api|sub|own>:<vendor>:<model> selector.`,
     ``,
@@ -487,8 +492,12 @@ export async function startTask(
   const useClaudeCli = referencedTransports(selectors).includes('claude-cli');
 
   const args = parseRunnerArgs(argv);
-  if (args.depth && !profile.depthExperiment) throw new RunnerConfigError('This profile has no depth experiment contract');
-  if (args.depth && args.container) throw new RunnerConfigError('The depth pilot currently requires the local backend with confirmed process teardown');
+  // Baselines and seeded comparison runs keep their explicit protocol. New
+  // ordinary runs use the family's depth policy unless the caller overrides it.
+  if (!args.depth && !args.baseline && !args.seed && profile.depthExperiment?.defaultMode) {
+    args.depth = profile.depthExperiment.defaultMode;
+  }
+  if (args.depth && !profile.depthExperiment) throw new RunnerConfigError('This profile has no supervision depth contract');
   const goal = args.goal ?? profile.defaultGoal;
   // AMBIENT BY DESIGN, unlike the lifecycle toggles and tier pins: the
   // project coordinator sets these on a per-run CHILD PROCESS env, so two
@@ -645,14 +654,28 @@ export async function startTask(
   const tenantRun = process.env['ATOMA_TENANT_RUN'] === '1';
   const projectPaths = { dbPath, runId: requestedRunId ?? '', workspacePath: workspaceRoot,
     skillsPath: skillsDirPath(), runsPath: runsDir };
-  let registryOwner: RegistryOwner = { kind: 'operator' };
+  // WHO THIS RUN IS, for the lifecycle ledger (T7). Every counter bump this
+  // process makes carries it, from choke points that know nothing about
+  // organisations. A tenant run is the organisation, project and principal
+  // the host recorded — the record `assertProjectRunAuthority` proves and
+  // used to discard; an operator run is the CLI on this machine. The run id
+  // joins once `beginRun` has fixed it.
+  let runScope: LedgerScope = { actorType: 'cli' };
   if (tenantRun) {
-    if (!args.container || process.env['ATOMA_PREFILTER_CACHE'] !== '0' || promotion.enabled || direct.enabled) {
-      throw new RunnerConfigError('project registry requires container isolation and tenant lifecycle settings');
-    }
-    try { registryOwner = resolveProjectRegistryOwner(projectPaths); }
-    catch { throw new RunnerConfigError('project registry launch is unavailable or denied'); }
+    // Container isolation is the one precondition of a tenant launch. The
+    // lifecycle — learning, promotion, dispatch, the prefilter cache — is the
+    // same as any run's (docs/platform-trust-2026-09-15.md).
+    if (!args.container) throw new RunnerConfigError('project run requires container isolation');
+    // The registry and the skills catalog are the platform's, shared by every
+    // run; what a tenant run still has to prove is that it IS the registered
+    // run the host launched, on the exact paths the host recorded.
+    let authority;
+    try { authority = assertProjectRunAuthority(projectPaths); }
+    catch { throw new RunnerConfigError('project run launch is unavailable or denied'); }
+    runScope = { orgId: authority.orgId, projectId: authority.projectId,
+      actorType: 'principal', actorId: authority.requestedByPrincipalId };
   }
+  setLedgerScope(runScope);
   let recordedRetrieval = false;
   if (tenantRun) {
     try { recordedRetrieval = projectRunHasRetrievalReceipt(dbPath, projectPaths.runId); }
@@ -664,11 +687,8 @@ export async function startTask(
       try { haystackLaunch = readHaystackLaunch(process.env); }
       catch (error) { throw new RunnerConfigError((error as Error).message); }
     }
-    // Search never unlocks local shell access to the control plane.
-    if (!args.container || process.env['ATOMA_PREFILTER_CACHE'] !== '0' ||
-        process.env['ATOMA_SKILL_PROMOTE'] !== '0' || process.env['ATOMA_SKILL_DIRECT'] !== '0') {
-      throw new RunnerConfigError('project retrieval requires container isolation and tenant lifecycle settings');
-    }
+    // Retrieval runs in the container like everything else a tenant run does.
+    if (!args.container) throw new RunnerConfigError('project retrieval requires container isolation');
     try {
       const prepared = openProjectRunHaystack(projectPaths, haystackLaunch);
       retrievalBinding = prepared.binding; prepareRetrieval = prepared.prepare;
@@ -676,13 +696,7 @@ export async function startTask(
   }
   const recorder = new TraceRecorder(runsDir);
   const db = openDb(dbPath);
-  const registry = new RecordingRegistry(db, recorder, registryOwner, tenantRun ? () => {
-    try {
-      const run = eligibleProjectRun(db, projectPaths.runId);
-      return !!run && registryOwner.kind === 'project' && run.orgId === registryOwner.orgId &&
-        run.projectId === registryOwner.projectId && projectRunPathsMatch(run, projectPaths);
-    } catch { return false; }
-  } : undefined);
+  const registry = new RecordingRegistry(db, recorder);
   const metrics = new InMemoryMetrics();
   const runSignals: RunSignalCounts = {
     deterministic: 0,
@@ -740,6 +754,9 @@ export async function startTask(
         egress: args.egress,
         ...(egressAllowlist ? { egressAllowlist } : {}),
         runId: `${profile.id}-${process.pid}`,
+        ...(tenantRun && runScope.orgId && runScope.projectId && requestedRunId ? {
+          projectWorkspace: { orgId: runScope.orgId, projectId: runScope.projectId, runId: requestedRunId },
+        } : {}),
       })
     : localToolBackend({ workspaceRoot, logger: consoleLogger });
     return retrievalBinding
@@ -773,13 +790,24 @@ export async function startTask(
     const initialL3Type = args.depth ? undefined : profile.seedL3(seedCtx);
     profile.seedCatalog(seedCtx);
 
-    // Skill store — shared by every atom in the run. Skills are
-    // filesystem-backed under ATOMA_SKILLS_DIR (default ./skills) so
-    // they survive across invocations. L1 atoms hydrate their `skills()`
-    // accessor from this registry on demand; L2 runs a Haiku
-    // skill-prefilter against the matched L1's skills before entering
-    // each supervise loop.
-    const skillRegistry = new SkillRegistry(skillsDirPath());
+    // Skill store — shared by every atom in the run. Bodies are
+    // filesystem-backed under ATOMA_SKILLS_DIR (default ./skills); their
+    // trust is rows in THIS store, on the registry's own handle, so a skill
+    // counter and its lifecycle event share one connection and one
+    // transaction (W4). L1 atoms hydrate their `skills()` accessor from this
+    // registry on demand; L2 runs a Haiku skill-prefilter against the matched
+    // L1's skills before entering each supervise loop.
+    const skillRegistry = new SkillRegistry(skillsDirPath(), { db });
+    if (resolve(ledgerDbPath()) !== resolve(dbPath)) {
+      // Every handle-less reader (CLIs, MCP readers) resolves the ledger's
+      // store; this run writes the registry's. Equal in production by
+      // configuration, and loud when they are not, because the split would
+      // otherwise show as counters that "never move".
+      console.warn(
+        `⚠ ATOMA_LEDGER_DB (${ledgerDbPath()}) differs from the run store (${dbPath}): skill trust and its events are written to the run store`
+      );
+    }
+    reconcilePlatformSkills({ db, skillsRoot: skillRegistry.rootDir });
     console.log(`skills root: ${skillRegistry.rootDir}`);
 
     if (args.depth) {
@@ -803,7 +831,7 @@ export async function startTask(
           return { actor: tissue, handle: (task, context) => tissue.handle(task, context) };
         },
         restart: async () => {
-          if (!backend.drain) throw new Error('Depth pilot backend cannot confirm process exit');
+          if (!backend.drain) throw new Error('Depth routing backend cannot confirm process exit');
           await backend.drain();
           signal.throwIfAborted();
           profile.prepareWorkspace(workspaceRoot, true);
@@ -913,7 +941,7 @@ export async function startTask(
     }
   };
 
-  recorder.beginRun(task, `${profile.traceLabelPrefix}${runLabelFromGoal(goal, 80)}`, {
+  const vizRun = recorder.beginRun(task, `${profile.traceLabelPrefix}${runLabelFromGoal(goal, 80)}`, {
     ...(requestedRunId ? { runId: requestedRunId } : {}),
     initialTypes: [
       ...registry.listByTier(1),
@@ -921,6 +949,10 @@ export async function startTask(
       ...registry.listByTier(3),
     ],
   });
+  // The trace run id IS the project run id for a tenant run (the coordinator
+  // passes it as ATOMA_RUN_ID); for an operator run it is the one the recorder
+  // just minted. Either way it is the id `platform_events.run_id` uses.
+  setLedgerScope({ ...runScope, runId: vizRun.id });
   // LAST-RESORT WATCHDOG. `AbortSignal.timeout` above is ADVISORY — it
   // cancels work that OBSERVES it, and a transport wedged on a dropped
   // connection observes nothing, leaving `l3.handle` pending forever with

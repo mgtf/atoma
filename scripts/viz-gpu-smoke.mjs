@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import puppeteer from 'puppeteer';
 import { assertLiveMarkBead, assertPointerLitMark } from './viz-mark-bead-probe.mjs';
+import { assertMobileProjects } from './viz-mobile-probe.mjs';
 
 const packageMetadata = JSON.parse(
   await readFile(new URL('../package.json', import.meta.url), 'utf8')
@@ -815,6 +816,43 @@ try {
     // every arm here gates on `load` plus the app's own readiness attribute.
     await page.goto(`http://127.0.0.1:${port}/?atomaDiag=1`, { waitUntil: 'load' });
     await page.waitForSelector('.gpu-ui-host[data-gpu-backend]', { timeout: READY_TIMEOUT_MS });
+    await page.bringToFront();
+    await page.waitForFunction(() => globalThis.__ATOMA_GPU__?.app.ticker.started);
+    await page.evaluate(() => {
+      const { app } = globalThis.__ATOMA_GPU__;
+      globalThis.__ATOMA_ACTIVITY_PROBE__ = { ticks: 0, draws: 0 };
+      app.ticker.add(() => { globalThis.__ATOMA_ACTIVITY_PROBE__.ticks++; });
+      const render = app.renderer.render.bind(app.renderer);
+      app.renderer.render = (...args) => {
+        globalThis.__ATOMA_ACTIVITY_PROBE__.draws++;
+        return render(...args);
+      };
+    });
+    await page.waitForFunction(() => globalThis.__ATOMA_ACTIVITY_PROBE__.draws > 2);
+    const backgroundCover = await browser.newPage();
+    try {
+      await backgroundCover.bringToFront();
+      await page.waitForFunction(
+        () => !document.hasFocus() && !globalThis.__ATOMA_GPU__.app.ticker.started,
+        { polling: 50 }
+      );
+      const before = await page.evaluate(() => ({ ...globalThis.__ATOMA_ACTIVITY_PROBE__ }));
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const after = await page.evaluate(() => ({ ...globalThis.__ATOMA_ACTIVITY_PROBE__ }));
+      if (before.ticks !== after.ticks || before.draws !== after.draws) {
+        throw new Error(`inactive GPU work continued: ${JSON.stringify({ before, after })}`);
+      }
+      await page.bringToFront();
+      await page.waitForFunction(
+        (draws) => globalThis.__ATOMA_GPU__.app.ticker.started &&
+          globalThis.__ATOMA_ACTIVITY_PROBE__.draws > draws,
+        {}, after.draws
+      );
+      console.log('viz GPU background suspension: zero ticks/draws; foreground resumed');
+    } finally {
+      await backgroundCover.close();
+      await page.bringToFront();
+    }
     const rasteriser = await readRasteriser(page);
     const softwareRastered = SOFTWARE_RASTERISERS.test(rasteriser);
     await assertLiveMarkBead(page);
@@ -2060,9 +2098,15 @@ try {
       };
       let updateBuildAvailable = false;
       let updateProbes = 0;
+      const accountSwitchRequests = [];
       const updateShell = await (await fetch(`http://127.0.0.1:${port}/`)).text();
       accountPage.on('request', (request) => {
         const path = new URL(request.url()).pathname;
+        if (path === '/auth/logout' || path === '/auth/login') {
+          accountSwitchRequests.push({ path, method: request.method(), search: new URL(request.url()).search });
+          void request.respond({ status: 200, contentType: 'text/html', body: '<h1>Choose an account</h1>' });
+          return;
+        }
         if (updateBuildAvailable && path === '/' && !request.isNavigationRequest()) {
           updateProbes += 1;
           void request.respond({ status: 200, contentType: 'text/html', headers: { 'cache-control': 'no-store' },
@@ -2294,6 +2338,7 @@ try {
         }
         await accountPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 200)));
       }
+      await assertMobileProjects(accountPage, projectId);
       await accountPage.setViewport({ width: 1280, height: 800, deviceScaleFactor: 2 });
       // The orb only exists at this width, and the re-render that brings it
       // back is one frame — which on a software rasteriser is seconds.
@@ -2550,6 +2595,19 @@ try {
         filledByHand,
         webgpuErrors: await readWebGpuErrors(accountPage),
       };
+      // Exercise the actual canvas row after a full bundle reload above.
+      await clickUntil('account.menu.toggle', hasTarget('auth.switchAccount'), 'account switch menu did not open');
+      await Promise.all([
+        accountPage.waitForNavigation({ waitUntil: 'load', timeout: READY_TIMEOUT_MS }),
+        clickAccountTarget('auth.switchAccount'),
+      ]);
+      if (JSON.stringify(accountSwitchRequests) !== JSON.stringify([
+        { path: '/auth/logout', method: 'POST', search: '' },
+        { path: '/auth/login', method: 'GET', search: '?select_account=1' },
+      ])) {
+        throw new Error(`canvas account switch did not log out before selecting: ${JSON.stringify(accountSwitchRequests)}`);
+      }
+      console.log('viz account switch ok: canvas action logs out then requests account selection');
     } finally {
       await accountPage.close();
     }

@@ -25,7 +25,9 @@ import {
   filePathFromArgs,
   skillEventSubtitle,
   skillEventTitle,
+  type StructuredDetailField,
   type StructuredDetailNode,
+  type StructuredDetailSection,
 } from '../../../client/structured-detail.js';
 import type { AtomView, RunStatus } from '../../../client/run-utils.js';
 import type { VizEvent, VizRun } from '../../../client/types.js';
@@ -38,6 +40,16 @@ import {
   layoutFilterChipBlock,
   layoutRunFilterBlocks,
 } from '../chip-layout.js';
+import {
+  DETAIL_BADGE_MIN_WIDTH,
+  DETAIL_BADGE_TEXT_PAD,
+  DETAIL_CARD_PAD,
+  DETAIL_CARD_TEXT_PAD,
+  DETAIL_SECTION_INSET,
+  detailNodeWidth,
+  layoutDetailRows,
+  type DetailMeasure,
+} from '../detail-layout.js';
 import {
   detailToneColor,
   eventAccent,
@@ -80,9 +92,24 @@ const EVENT_TITLE_X = 11;
 const EVENT_DECISION_INSET = 118;
 const EVENT_COLUMN_GAP = 10;
 const EVENT_ACTOR_MIN_WIDTH = 64;
+/** Enough for `L1 CarbonDioxide`, the longest molecule name plus its tier. */
+const EVENT_ACTOR_MAX_WIDTH = 120;
 /** Mean advance of 11px bold in the UI face; only bounds the truncation. */
 const EVENT_TITLE_CHAR_PX = 6.4;
-/** Characters the card's second line can show at 9px across the pane. */
+/**
+ * The card is ONE LINE. It had two — title and actor above, body and footer
+ * below — which spent 64px of row on 37px of content and put about ten steps
+ * on a screen (owner request, 2026-09-21). Everything it says now shares one
+ * band, `TIMELINE_ROW_HEIGHT` is 40, and the detail pane — not the card — is
+ * where a step is read.
+ *
+ * Tops inside the resulting 30px card, each face's line box centred against
+ * the 11px title's: 11px is 14.85px of line box, 10px is 13.5, 9px is 12.15.
+ */
+const EVENT_TITLE_TOP = 7;
+const EVENT_DECISION_TOP = 8;
+const EVENT_ACTOR_TOP = 9;
+const EVENT_DETAIL_TOP = 9;
 
 /**
  * Roughly two lines of the 13px summary title at the right pane's width.
@@ -603,7 +630,19 @@ export function drawRuns(
       : 22;
   const railInset = 28;
   const labelGutter = 46;
-  const branchCardOffset = 10;
+  /**
+   * Card indent per branch lane. Ten pixels against a 7px corner radius read
+   * as a misalignment rather than a nesting, and at the 40px row the cards sit
+   * close enough vertically that the step has to carry the hierarchy on its
+   * own (owner request, 2026-09-21). Bounded by a TOTAL indent budget the same
+   * way `laneSpacing` bounds the rail's spread: a deep tree indents less per
+   * lane instead of eating the card's one line, which is the only place the
+   * step could have come from.
+   */
+  const branchCardOffset =
+    timeline.maxLane > 0
+      ? Math.floor(Math.min(16, 72 / timeline.maxLane))
+      : 16;
   const railX = (lane: number) => leftX + railInset + lane * laneSpacing;
   const cardBaseX = railX(timeline.maxLane) + labelGutter;
   const cardBaseWidth = Math.min(
@@ -736,10 +775,24 @@ export function drawRuns(
           second: '2-digit',
         })
       : '';
+  /**
+   * The run's opening and closing cards. They carried a two-line layout —
+   * title at `y + 8`, facts at `y + 28` — from when a row was 64px tall. At
+   * the 40px row the panel is 30px and the facts line was drawn BELOW its own
+   * cartouche, unboxed, over whatever followed (owner report, 2026-09-21).
+   *
+   * One line now, laid out with the event card's geometry and its priority
+   * rule: `facts` is the numeric tail and is always drawn, `prose` is the
+   * flexible part — an abort reason or a task description — and is fitted to
+   * whatever the numbers leave. The reverse dropped the duration, the call
+   * count and the cost exactly on the failed runs whose error was long enough
+   * to be worth reading.
+   */
   const bookend = (
     row: number,
     accent: number,
     title: string,
+    prose: string,
     facts: string
   ): void => {
     const y =
@@ -752,16 +805,32 @@ export function drawRuns(
     panel.stroke({ color: accent, width: 1.2, alpha: 0.75 });
     panel.eventMode = 'none';
     listLayer.addChild(panel);
-    ctx.text(listLayer, title, cardBaseX + 11, y + 8, {
-      size: 11,
-      weight: '700',
-      color: accent,
-    });
-    if (facts) {
-      ctx.text(listLayer, truncate(facts, 150), cardBaseX + 11, y + 28, {
+    const titleLabel = ctx.text(
+      listLayer,
+      title,
+      cardBaseX + EVENT_TITLE_X,
+      y + EVENT_TITLE_TOP,
+      { size: 11, weight: '700', color: accent, singleLine: true }
+    );
+    const detailX =
+      cardBaseX + EVENT_TITLE_X + titleLabel.width + EVENT_COLUMN_GAP;
+    const detailWidth = Math.max(
+      0,
+      cardBaseX + cardBaseWidth - EVENT_TITLE_X - detailX
+    );
+    const factsAdvance = ctx.measureText(facts ? ` · ${facts}` : '', { size: 9 });
+    const detail = [
+      ctx.fitText(prose, Math.max(0, detailWidth - factsAdvance), { size: 9 }),
+      facts,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    if (detail) {
+      ctx.text(listLayer, detail, detailX, y + EVENT_DETAIL_TOP, {
         size: 9,
         color: GPU_COLORS.muted,
-        width: cardBaseWidth - 22,
+        width: detailWidth,
+        singleLine: true,
       });
     }
     const marker = new Graphics();
@@ -777,8 +846,8 @@ export function drawRuns(
     0,
     statusColor,
     `${runOver ? snapshot.t('timeline.runEnded') : snapshot.t('timeline.runUnfinished')} · ${statusLabel}`,
+    run.error ?? '',
     [
-      run.error,
       fmtMs(run.durationMs),
       snapshot.t('runs.calls', { count: run.totals?.calls ?? 0 }),
       fmtCost(run.totals?.costUsd),
@@ -791,9 +860,8 @@ export function drawRuns(
     totalRows - 1,
     GPU_COLORS.primary,
     snapshot.t('timeline.runStarted'),
-    [clockTime(Date.parse(run.startedAt)), run.task?.description ?? '']
-      .filter(Boolean)
-      .join(' · ')
+    run.task?.description ?? '',
+    clockTime(Date.parse(run.startedAt))
   );
 
   timeline.items.slice(itemStart, itemStart + count).forEach((item) => {
@@ -839,30 +907,28 @@ export function drawRuns(
       cardContent,
       truncate(copy.title, Math.max(8, Math.min(28, Math.floor(titleBudget / EVENT_TITLE_CHAR_PX)))),
       EVENT_TITLE_X,
-      6,
-      { size: 11, weight: '700', color: eventAccent(event) }
+      EVENT_TITLE_TOP,
+      { size: 11, weight: '700', color: eventAccent(event), singleLine: true }
     );
-    const rawMeta = copy.meta.replace(/(?: · )?⑂ [^ ·]+/g, '').trim();
-    const actor = rawMeta.split(' · ')[0] ?? '';
-    // Measured, not estimated: the estimate above only bounds the truncation.
-    const actorX = Math.max(118, EVENT_TITLE_X + titleLabel.width + EVENT_COLUMN_GAP);
-    const actorWidth = decisionX - actorX - EVENT_COLUMN_GAP;
-    if (actor && actorWidth >= EVENT_ACTOR_MIN_WIDTH) {
-      ctx.text(cardContent, truncate(actor, 28), actorX, 7, {
-        size: 9,
-        color: GPU_COLORS.muted,
-        width: actorWidth,
-      });
-    }
     if (copy.decision) {
-      ctx.text(cardContent, copy.decision, cardWidth - 118, 6, {
+      ctx.text(cardContent, copy.decision, decisionX, EVENT_DECISION_TOP, {
         size: 10,
         color: copy.decision.startsWith('✕') || copy.decision.startsWith('↑')
           ? GPU_COLORS.warning
           : GPU_COLORS.success,
         weight: '700',
+        singleLine: true,
       });
     }
+    const rawMeta = copy.meta.replace(/(?: · )?⑂ [^ ·]+/g, '').trim();
+    const actor = rawMeta.split(' · ')[0] ?? '';
+    // Measured, not estimated: the estimate above only bounds the truncation.
+    const actorX = Math.max(118, EVENT_TITLE_X + titleLabel.width + EVENT_COLUMN_GAP);
+    // The decision column is only RESERVED when there is a decision to draw;
+    // a tool card spends those 118px on its own facts instead.
+    const detailRight = copy.decision
+      ? decisionX - EVENT_COLUMN_GAP
+      : cardWidth - EVENT_TITLE_X;
     // The FOOTER is never the part that gets cut. It carries the facts the
     // card exists to report — served model, tokens, cache read, cost — while
     // the body is prose that survives truncation gracefully. Truncating the
@@ -873,14 +939,35 @@ export function drawRuns(
     // the next fixed-height card. Reserve measured space for the footer.
     const footer = copy.footer.replace(/\s+/g, ' ').trim();
     const body = copy.body.replace(/\s+/g, ' ').trim();
-    const detailWidth = Math.max(0, cardWidth - 22);
-    const bodyBudget = Math.max(0, detailWidth - ctx.measureText(
-      footer ? ` · ${footer}` : '', { size: 9 }
-    ));
+    const footerAdvance = ctx.measureText(footer ? ` · ${footer}` : '', { size: 9 });
+    // Priority on the single line: the title, then the footer's facts, then
+    // the actor, then the body. The molecule is named again in the atom lanes
+    // and in the detail pane, so the actor yields to the numbers — but it
+    // outranks the prose, which truncates gracefully and never disappears
+    // without the ellipsis saying so.
+    const actorRoom = Math.min(
+      EVENT_ACTOR_MAX_WIDTH,
+      detailRight - actorX - footerAdvance - EVENT_COLUMN_GAP
+    );
+    const actorText =
+      actor && actorRoom >= EVENT_ACTOR_MIN_WIDTH
+        ? ctx.fitText(actor, actorRoom, { size: 9 })
+        : '';
+    let detailX = actorX;
+    if (actorText) {
+      const actorLabel = ctx.text(cardContent, actorText, actorX, EVENT_ACTOR_TOP, {
+        size: 9,
+        color: GPU_COLORS.muted,
+        singleLine: true,
+      });
+      detailX = actorX + actorLabel.width + EVENT_COLUMN_GAP;
+    }
+    const detailWidth = Math.max(0, detailRight - detailX);
+    const bodyBudget = Math.max(0, detailWidth - footerAdvance);
     const detail = [ctx.fitText(body, bodyBudget, { size: 9 }), footer]
       .filter(Boolean)
       .join(' · ');
-    ctx.text(cardContent, detail, 11, 25, {
+    ctx.text(cardContent, detail, detailX, EVENT_DETAIL_TOP, {
       size: 9,
       color: event.error ? GPU_COLORS.error : GPU_COLORS.muted,
       width: detailWidth,
@@ -1421,10 +1508,42 @@ function drawEventDetail(
         width: width - 36,
       }
     );
-    ctx.text(ctx.root, event.preview ?? '', x + 18, y + 142, {
-      size: 10,
-      color: GPU_COLORS.muted,
-      width: width - 36,
+    // The injected text used to be drawn straight onto the pane at a fixed y,
+    // with no mask and no scroll, so anything past the pane's bottom edge was
+    // simply gone — while the `chars` count beside it announced how much
+    // (2026-09-21). It now shares the scrolled, masked layer every other kind
+    // uses, and mono, because this is the literal tail of a system prompt.
+    const contextTop = y + 140;
+    const contextBottom = y + height - 14;
+    const contextHeight = Math.max(40, contextBottom - contextTop);
+    ctx.detailBounds = new Rectangle(x + 12, contextTop - 6, width - 24, contextHeight + 6);
+    const contextLayer = new Container();
+    contextLayer.label = `event-detail:${event.id}`;
+    contextLayer.position.y = -ctx.detailScrollY;
+    ctx.root.addChild(contextLayer);
+    contextLayer.mask = ctx.detailMask(x + 12, contextTop - 6, width - 24, contextHeight + 6);
+    const contextText = ctx.text(
+      contextLayer,
+      truncate(event.preview ?? '', DETAIL_RAW_VALUE_CAP),
+      x + 18,
+      contextTop,
+      {
+        size: 10,
+        mono: true,
+        color: DETAIL_VALUE_COLOR,
+        width: width - 42,
+      }
+    );
+    ctx.detailScrollMax = Math.max(0, contextTop + contextText.height - contextBottom + 8);
+    ctx.detailScrollY = Math.min(ctx.detailScrollY, ctx.detailScrollMax);
+    contextLayer.position.y = -ctx.detailScrollY;
+    drawScrollbarThumb(ctx.root, {
+      x,
+      y: contextTop,
+      width,
+      height: contextHeight,
+      scrollY: ctx.detailScrollY,
+      maxScroll: ctx.detailScrollMax,
     });
     return;
   }
@@ -1438,7 +1557,10 @@ function drawEventDetail(
     event.kind === 'llm'
       ? tryParseJson(raw)
       : event.kind === 'tool' && !event.error
-        ? { args: event.args ?? {}, result: event.result }
+        // Declaration order no longer decides the pane's order — the shared
+        // projection ranks `result` above `args` — but the payload is written
+        // outcome-first anyway, so the two agree on sight.
+        ? { result: event.result, args: event.args ?? {} }
         : !event.error
           ? event
           : undefined;
@@ -1475,10 +1597,10 @@ function drawEventDetail(
   const contentBottom =
     envelope.length === 0 && bodyNodes.length === 0
       ? detailTop +
-        ctx.text(detailLayer, truncate(raw, 8000), x + 18, detailTop, {
+        ctx.text(detailLayer, truncate(raw, DETAIL_RAW_VALUE_CAP), x + 18, detailTop, {
           size: 10,
           mono: true,
-          color: 0xcbd5e1,
+          color: DETAIL_VALUE_COLOR,
           width: width - 42,
         }).height
       : drawStructuredDetailNodes(
@@ -1502,6 +1624,203 @@ function drawEventDetail(
   });
 }
 
+/**
+ * Detail-card geometry. Every number below was an unnamed literal inside
+ * `drawStructuredDetailNodes`, and two of them disagreed with each other: the
+ * label's height was DISCARDED and the value drawn at a fixed `+25`, so a
+ * label that wrapped — reachable in French, where `activeSkillFollowed`
+ * becomes "Respect de la recette" — drew its own second line under the badge.
+ * Named and related here so one set of facts lays a card out, and the value
+ * now starts under the label that was actually drawn.
+ */
+const DETAIL_LABEL_TOP = 7;
+const DETAIL_LABEL_SIZE = 9;
+const DETAIL_VALUE_SIZE = 10;
+/** Air between the label BLOCK and the value. */
+const DETAIL_VALUE_GAP = 6;
+const DETAIL_BADGE_HEIGHT = 24;
+/** The value's inset inside its pill. */
+const DETAIL_BADGE_TEXT_INSET = 10;
+const DETAIL_BADGE_BOTTOM_PAD = 10;
+const DETAIL_TEXT_BOTTOM_PAD = 11;
+const DETAIL_CARD_MIN_HEIGHT = 58;
+const DETAIL_CARD_GAP_Y = 8;
+const DETAIL_SECTION_TITLE_TOP = 3;
+const DETAIL_SECTION_HEADER_GAP = 10;
+/** The fixed header advance the pane used to have, kept as a FLOOR. */
+const DETAIL_SECTION_HEADER_MIN = 29;
+const DETAIL_SECTION_RAIL_LIFT = 4;
+const DETAIL_SECTION_RAIL_TAIL = 7;
+const DETAIL_SECTION_TRAILING = 5;
+const DETAIL_FIELD_VALUE_CAP = 4000;
+const DETAIL_RAW_VALUE_CAP = 8000;
+/**
+ * The slate a detail value is drawn in. NOT `GPU_COLORS.text` (0xe6edf7):
+ * this is the dimmer tone the pane has always used, kept byte-identical.
+ */
+const DETAIL_VALUE_COLOR = 0xcbd5e1;
+const DETAIL_LABEL_FACE = { size: DETAIL_LABEL_SIZE, weight: '600' } as const;
+
+/**
+ * Widths through the exact faces `drawDetailFieldContent` draws with, so the
+ * pairing decision and the draw cannot disagree.
+ */
+function detailMeasure(ctx: RendererCtx): DetailMeasure {
+  return {
+    label: (value) => ctx.measureText(value, DETAIL_LABEL_FACE),
+    value: (field) =>
+      ctx.measureText(field.value, {
+        size: DETAIL_VALUE_SIZE,
+        weight: field.presentation === 'badge' ? '700' : '400',
+        mono: field.presentation === 'code',
+      }),
+  };
+}
+
+/**
+ * One card's content, returning the height it needs. The caller takes the MAX
+ * over a row and fills both backgrounds with it, so two paired cards are one
+ * band rather than two ragged boxes.
+ *
+ * A paired label and value were both MEASURED to fit one line, so they are
+ * drawn `singleLine`: if a font fallback ever proves the measurement wrong the
+ * label squeezes on its x-axis instead of wrapping into its neighbour's card.
+ */
+function drawDetailFieldContent(
+  ctx: RendererCtx,
+  parent: Container,
+  node: StructuredDetailField,
+  cardX: number,
+  top: number,
+  cardWidth: number,
+  paired: boolean,
+  measure: DetailMeasure
+): number {
+  const inner = cardWidth - DETAIL_CARD_TEXT_PAD;
+  const label = ctx.text(
+    parent,
+    node.label,
+    cardX + DETAIL_CARD_PAD,
+    top + DETAIL_LABEL_TOP,
+    {
+      ...DETAIL_LABEL_FACE,
+      color: GPU_COLORS.muted,
+      width: inner,
+      ...(paired ? { singleLine: true } : {}),
+    }
+  );
+  // Rounded so a one-line 9px label (12.15px of line box) still yields the
+  // pane's historical 25px value offset rather than a fractional one, which
+  // would multiply the retained label pool's distinct style keys.
+  const valueTop = Math.round(DETAIL_LABEL_TOP + label.height + DETAIL_VALUE_GAP);
+  if (node.presentation === 'badge') {
+    const accent = detailToneColor(node.tone);
+    const badgeWidth = Math.min(
+      inner,
+      Math.max(
+        DETAIL_BADGE_MIN_WIDTH,
+        Math.ceil(measure.value(node)) + DETAIL_BADGE_TEXT_PAD + 4
+      )
+    );
+    const badge = new Graphics();
+    badge.roundRect(
+      cardX + DETAIL_CARD_PAD,
+      top + valueTop,
+      badgeWidth,
+      DETAIL_BADGE_HEIGHT,
+      6
+    );
+    badge.fill({ color: accent, alpha: node.tone === 'neutral' ? 0.08 : 0.18 });
+    badge.stroke({ color: accent, width: 1, alpha: 0.75 });
+    parent.addChild(badge);
+    ctx.text(
+      parent,
+      node.value,
+      cardX + DETAIL_CARD_PAD + DETAIL_BADGE_TEXT_INSET,
+      top + valueTop + 5,
+      {
+        size: DETAIL_VALUE_SIZE,
+        weight: '700',
+        color: node.tone === 'neutral' ? GPU_COLORS.text : accent,
+        width: badgeWidth - DETAIL_BADGE_TEXT_PAD,
+        // A 24px pill can never hold two lines, whatever the measurement said.
+        singleLine: true,
+      }
+    );
+    return valueTop + DETAIL_BADGE_HEIGHT + DETAIL_BADGE_BOTTOM_PAD;
+  }
+  const valueText = ctx.text(
+    parent,
+    truncate(node.value, DETAIL_FIELD_VALUE_CAP),
+    cardX + DETAIL_CARD_PAD,
+    top + valueTop,
+    {
+      size: DETAIL_VALUE_SIZE,
+      mono: node.presentation === 'code',
+      color: node.tone === 'info' ? GPU_COLORS.cyan : DETAIL_VALUE_COLOR,
+      width: inner,
+      ...(paired ? { singleLine: true } : {}),
+    }
+  );
+  return valueTop + valueText.height + DETAIL_TEXT_BOTTOM_PAD;
+}
+
+/** A section's own header and rail, with its children laid out one level in. */
+function drawDetailSection(
+  ctx: RendererCtx,
+  parent: Container,
+  node: StructuredDetailSection,
+  nodeX: number,
+  nodeWidth: number,
+  cursor: number,
+  x: number,
+  width: number,
+  depth: number
+): number {
+  const rail = new Graphics();
+  parent.addChild(rail);
+  const title = node.count === undefined ? node.label : `${node.label} · ${node.count}`;
+  const titleLabel = ctx.text(parent, title, nodeX + DETAIL_CARD_PAD, cursor + DETAIL_SECTION_TITLE_TOP, {
+    size: depth === 0 ? 12 : 10,
+    color: depth === 0 ? GPU_COLORS.primary : GPU_COLORS.text,
+    weight: '700',
+    width: nodeWidth - DETAIL_CARD_TEXT_PAD,
+  });
+  // Read back rather than fixed, for the same reason as a card's value: a
+  // heading that wrapped used to have its rail start inside its second line.
+  const headerHeight = Math.max(
+    DETAIL_SECTION_HEADER_MIN,
+    Math.round(DETAIL_SECTION_TITLE_TOP + titleLabel.height + DETAIL_SECTION_HEADER_GAP)
+  );
+  const railTop = cursor + headerHeight - DETAIL_SECTION_RAIL_LIFT;
+  let bottom = drawStructuredDetailNodes(
+    ctx,
+    parent,
+    node.children,
+    x,
+    cursor + headerHeight,
+    width,
+    depth + 1
+  );
+  rail
+    .moveTo(nodeX + 2, railTop)
+    .lineTo(nodeX + 2, Math.max(railTop, bottom - DETAIL_SECTION_RAIL_TAIL));
+  rail.stroke({
+    color: depth === 0 ? GPU_COLORS.primary : GPU_COLORS.border,
+    width: depth === 0 ? 2 : 1,
+    alpha: 0.65,
+  });
+  bottom += DETAIL_SECTION_TRAILING;
+  return bottom;
+}
+
+/**
+ * Lays a projected payload out under `startY` and returns the ABSOLUTE bottom
+ * of what it drew, in the same space as `startY` and including the last row's
+ * trailing air. `detailScrollMax` is derived from that number, so the cursor
+ * advances once per ROW and never per card: pairing can only shorten the pane,
+ * never desynchronise its scroll bound.
+ */
 function drawStructuredDetailNodes(
   ctx: RendererCtx,
   parent: Container,
@@ -1511,91 +1830,58 @@ function drawStructuredDetailNodes(
   width: number,
   depth = 0
 ): number {
+  const nodeX = x + depth * DETAIL_SECTION_INSET;
+  const nodeWidth = detailNodeWidth(width, depth);
+  const measure = detailMeasure(ctx);
   let cursor = startY;
-  for (const node of nodes) {
-    const inset = depth * 12;
-    const nodeX = x + inset;
-    const nodeWidth = Math.max(120, width - inset);
-    if (node.kind === 'field') {
-      const background = new Graphics();
-      parent.addChild(background);
-      ctx.text(parent, node.label, nodeX + 10, cursor + 7, {
-        size: 9,
-        color: GPU_COLORS.muted,
-        weight: '600',
-        width: nodeWidth - 20,
-      });
-      if (node.presentation === 'badge') {
-        const accent = detailToneColor(node.tone);
-        const badgeWidth = Math.min(
-          nodeWidth - 20,
-          Math.max(72, node.value.length * 6.4 + 22)
-        );
-        const badge = new Graphics();
-        badge.roundRect(nodeX + 10, cursor + 25, badgeWidth, 24, 6);
-        badge.fill({ color: accent, alpha: node.tone === 'neutral' ? 0.08 : 0.18 });
-        badge.stroke({ color: accent, width: 1, alpha: 0.75 });
-        parent.addChild(badge);
-        ctx.text(parent, node.value, nodeX + 20, cursor + 30, {
-          size: 10,
-          color: node.tone === 'neutral' ? GPU_COLORS.text : accent,
-          weight: '700',
-          width: badgeWidth - 18,
-        });
-        background.roundRect(nodeX, cursor, nodeWidth, 59, 7);
-        background.fill({ color: GPU_COLORS.panelRaised, alpha: 0.55 });
-        background.stroke({ color: GPU_COLORS.border, width: 1, alpha: 0.65 });
-        cursor += 67;
-        continue;
-      }
-
-      const valueText = ctx.text(
+  for (const row of layoutDetailRows(nodes, nodeWidth, measure)) {
+    const first = row.cards[0]!;
+    if (first.node.kind === 'section') {
+      cursor = drawDetailSection(
+        ctx,
         parent,
-        truncate(node.value, 4000),
-        nodeX + 10,
-        cursor + 25,
-        {
-          size: 10,
-          mono: node.presentation === 'code',
-          color: node.tone === 'info' ? GPU_COLORS.cyan : 0xcbd5e1,
-          width: nodeWidth - 20,
-        }
+        first.node,
+        nodeX,
+        nodeWidth,
+        cursor,
+        x,
+        width,
+        depth
       );
-      const fieldHeight = Math.max(58, valueText.height + 36);
-      background.roundRect(nodeX, cursor, nodeWidth, fieldHeight, 7);
-      background.fill({ color: GPU_COLORS.panelRaised, alpha: 0.55 });
-      background.stroke({ color: GPU_COLORS.border, width: 1, alpha: 0.65 });
-      cursor += fieldHeight + 8;
       continue;
     }
-
-    const rail = new Graphics();
-    parent.addChild(rail);
-    const title = node.count === undefined ? node.label : `${node.label} · ${node.count}`;
-    ctx.text(parent, title, nodeX + 10, cursor + 3, {
-      size: depth === 0 ? 12 : 10,
-      color: depth === 0 ? GPU_COLORS.primary : GPU_COLORS.text,
-      weight: '700',
-      width: nodeWidth - 20,
+    // Every background is allocated BEFORE its own labels so it paints behind
+    // them, and filled AFTER the row's height is known so both cards of a
+    // pair share one band.
+    const backgrounds = row.cards.map(() => {
+      const background = new Graphics();
+      parent.addChild(background);
+      return background;
     });
-    const railTop = cursor + 25;
-    cursor += 29;
-    cursor = drawStructuredDetailNodes(
-      ctx,
-      parent,
-      node.children,
-      x,
-      cursor,
-      width,
-      depth + 1
-    );
-    rail.moveTo(nodeX + 2, railTop).lineTo(nodeX + 2, Math.max(railTop, cursor - 7));
-    rail.stroke({
-      color: depth === 0 ? GPU_COLORS.primary : GPU_COLORS.border,
-      width: depth === 0 ? 2 : 1,
-      alpha: 0.65,
+    const paired = row.cards.length > 1;
+    let rowHeight = DETAIL_CARD_MIN_HEIGHT;
+    for (const card of row.cards) {
+      rowHeight = Math.max(
+        rowHeight,
+        drawDetailFieldContent(
+          ctx,
+          parent,
+          card.node as StructuredDetailField,
+          nodeX + card.dx,
+          cursor,
+          card.width,
+          paired,
+          measure
+        )
+      );
+    }
+    backgrounds.forEach((background, index) => {
+      const card = row.cards[index]!;
+      background.roundRect(nodeX + card.dx, cursor, card.width, rowHeight, 7);
+      background.fill({ color: GPU_COLORS.panelRaised, alpha: 0.55 });
+      background.stroke({ color: GPU_COLORS.border, width: 1, alpha: 0.65 });
     });
-    cursor += 5;
+    cursor += rowHeight + DETAIL_CARD_GAP_Y;
   }
   return cursor;
 }

@@ -28,7 +28,7 @@ import Database from 'better-sqlite3';
 /** The store. Trust counters, version history and the lifecycle ledger. */
 export const DEFAULT_DB_PATH = './atoma.db';
 
-/** Learned recipe bodies. Still filesystem-backed — see AGENTS.md for why. */
+/** Learned recipe BODIES, filesystem-backed; their trust is `skill_meta` in the store (W4). */
 export const DEFAULT_SKILLS_DIR = './skills';
 
 /**
@@ -47,8 +47,8 @@ export function storeDbPath(
 }
 
 /** Resolve the skills root: explicit flag → `ATOMA_SKILLS_DIR` → default. */
-export function skillsDirPath(explicit?: string): string {
-  return explicit ?? process.env['ATOMA_SKILLS_DIR'] ?? DEFAULT_SKILLS_DIR;
+export function skillsDirPath(explicit?: string, env: NodeJS.ProcessEnv = process.env): string {
+  return explicit ?? env['ATOMA_SKILLS_DIR'] ?? DEFAULT_SKILLS_DIR;
 }
 
 /**
@@ -67,16 +67,42 @@ export function skillsDirPath(explicit?: string): string {
  */
 const handles = new Map<string, { db: Database.Database; applied: Set<string> }>();
 
-export function openStoreHandle(path: string, ddl: string): Database.Database {
+/**
+ * How long a product-store writer waits for another writer's lock before it
+ * gives up. ONE definition: better-sqlite3 applies a default of the same
+ * value that is invisible at these call sites, so a driver upgrade changing
+ * it would silently change this store's contention contract. The stores that
+ * already spelled the number (projects, preview) now read it from here.
+ *
+ * Deliberately NOT shared with the lease probes: `codexHomeLease` and
+ * `retrievalLaunch` set `busy_timeout = 0` because for them a wait is a
+ * wrong answer, not a slow one.
+ */
+export const STORE_BUSY_TIMEOUT_MS = 5000;
+
+/**
+ * `migrate`, when given, runs right after the DDL and under the same
+ * once-per-(handle, table) rule: it is where a table that has GROWN columns
+ * since some stores were created adds them (`ALTER TABLE ... ADD COLUMN` has
+ * no IF NOT EXISTS, so it cannot live in the DDL string). Callers that share
+ * one DDL must share one migrate too — the first open on a handle decides.
+ */
+export function openStoreHandle(
+  path: string,
+  ddl: string,
+  migrate?: (db: Database.Database) => void
+): Database.Database {
   let h = handles.get(path);
   if (!h) {
     const db = new Database(path);
     db.pragma('journal_mode = WAL');
+    db.pragma(`busy_timeout = ${STORE_BUSY_TIMEOUT_MS}`);
     h = { db, applied: new Set() };
     handles.set(path, h);
   }
   if (!h.applied.has(ddl)) {
     h.db.exec(ddl);
+    migrate?.(h.db);
     h.applied.add(ddl);
   }
   return h.db;

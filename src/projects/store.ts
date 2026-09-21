@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
+import { orgRunLimitSchema, type OrgRunCapacity } from '../contracts/projects.js';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { openStoreHandle } from '../core/stores.js';
+import { openStoreHandle, STORE_BUSY_TIMEOUT_MS } from '../core/stores.js';
 import { runStatsSchema, type RunStats } from '../contracts/runStats.js';
+import { ledgerRows, runPayerLedgerSchema, type RunPayerLedger } from '../contracts/runPayers.js';
 import {
   artifactManifestSchema,
   commitShaSchema,
@@ -48,6 +50,10 @@ import { artifactManifestHash } from './artifacts.js';
  * control-plane UUID has been allocated.
  */
 export const PROJECT_TABLES_DDL = `
+CREATE TABLE IF NOT EXISTS org_run_limits (
+  org_id TEXT PRIMARY KEY REFERENCES auth_organisations(org_id),
+  max_concurrent INTEGER NOT NULL CHECK (max_concurrent IN (0, 1))
+);
 CREATE TABLE IF NOT EXISTS projects (
   project_id                    TEXT PRIMARY KEY,
   org_id                        TEXT NOT NULL REFERENCES auth_organisations(org_id),
@@ -91,6 +97,7 @@ CREATE TABLE IF NOT EXISTS project_runs (
   workspace_path                TEXT NOT NULL,
   runs_path                     TEXT NOT NULL,
   log_path                      TEXT NOT NULL,
+  skills_path                   TEXT,
   trace_id                      TEXT,
   stats_json                    TEXT CHECK (stats_json IS NULL OR json_valid(stats_json)),
   artifact_manifest_json        TEXT CHECK (artifact_manifest_json IS NULL OR json_valid(artifact_manifest_json)),
@@ -171,6 +178,47 @@ BEGIN
   SELECT RAISE(ABORT, 'project run identity and host paths are immutable');
 END;
 
+/*
+ * WHO PAID FOR THIS RUN, DURABLY, FOR EVERY RUN.
+ *
+ * The three-row RunPayerLedger is built for every run, but it only ever
+ * survived the process when a run touched a CLI subscription: the
+ * onSubscriptionTransport hook journals it, and nothing else did. A run
+ * funded entirely by an organisation or host API key left no payer record at
+ * all, so the one question a hosted platform must answer about a finished run
+ * — who paid for it — had no answer for exactly the runs a bill depends on.
+ *
+ * Three rows per run, written in the SAME transaction as the queued->running
+ * transition (startProjectRun), so a tenant run cannot be observed as running
+ * while nobody knows who pays for it. NOT a universal invariant of the table:
+ * the synthetic retrieval-benchmark harness in cli/retrievalProjectAttempt.ts
+ * transitions its own rows directly, and its bookkeeping source run has no
+ * payer because it spends nothing. Every run the coordinator starts has one.
+ * The rows are immutable: the ledger describes a decision already taken, and
+ * a payer that could be edited afterwards would be worth nothing as evidence.
+ *
+ * NO SECRETS. A row names a selector, a transport, a payer KIND and which
+ * level chose it — never a credential, and never tenant-supplied text.
+ */
+CREATE TABLE IF NOT EXISTS project_run_payers (
+  project_run_id TEXT NOT NULL REFERENCES project_runs(project_run_id),
+  tier           TEXT NOT NULL CHECK (tier IN ('l1','l2','l3')),
+  org_id         TEXT NOT NULL REFERENCES auth_organisations(org_id),
+  selection      TEXT NOT NULL,
+  provider       TEXT NOT NULL,
+  payer          TEXT NOT NULL CHECK (payer IN ('host-subscription','principal-subscription','org-key','host-key','host-selfhosted')),
+  source         TEXT NOT NULL CHECK (source IN ('account','org','host')),
+  recorded_at    TEXT NOT NULL,
+  PRIMARY KEY (project_run_id, tier)
+);
+CREATE INDEX IF NOT EXISTS project_run_payers_org_idx ON project_run_payers(org_id, payer);
+
+CREATE TRIGGER IF NOT EXISTS project_run_payers_immutable
+BEFORE UPDATE ON project_run_payers
+BEGIN
+  SELECT RAISE(ABORT, 'a recorded payer is immutable');
+END;
+
 CREATE TRIGGER IF NOT EXISTS project_publications_identity_immutable
 BEFORE UPDATE OF project_run_id, org_id, idempotency_key, manifest_hash
 ON project_publications
@@ -248,6 +296,8 @@ interface ProjectRunRow {
   workspace_path: string;
   runs_path: string;
   log_path: string;
+  skills_path?: string | null;
+  bytes_expired_at?: string | null;
   trace_id: string | null;
   stats_json: string | null;
   artifact_manifest_json: string | null;
@@ -345,11 +395,13 @@ function runFromRow(row: ProjectRunRow): ProjectRun {
     requestedByPrincipalId: row.requested_by_principal_id,
     requestKey: row.request_key,
     goal: row.goal,
+    bytesExpiredAt: row.bytes_expired_at ?? null,
     status: row.status,
     hostPaths: {
       workspacePath: row.workspace_path,
       runsPath: row.runs_path,
       logPath: row.log_path,
+      ...(row.skills_path ? { skillsPath: row.skills_path } : {}),
     },
     ...(row.repository_base_json ? { repositoryBase: parseJson(row.repository_base_json, 'repository base') } : {}),
     traceId: row.trace_id,
@@ -488,7 +540,7 @@ export class ProjectStore {
     this.db = db;
     this.closeOnClose = options.closeOnClose ?? false;
     this.db.pragma('foreign_keys = ON');
-    this.db.pragma('busy_timeout = 5000');
+    this.db.pragma(`busy_timeout = ${STORE_BUSY_TIMEOUT_MS}`);
     if (options.initialize !== false) {
       this.db.exec(PROJECT_TABLES_DDL);
       // ADDITIVE MIGRATION. `CREATE TABLE IF NOT EXISTS` does nothing to a
@@ -510,6 +562,9 @@ export class ProjectStore {
       for (const [table, column] of [
         ['projects', 'repository_source_json'],
         ['project_runs', 'repository_base_json'],
+        ['project_runs', 'skills_path'],
+        ['project_runs', 'bytes_expired_at'],
+        ['project_runs', 'bytes_deleted_at'],
         ['project_publications', 'pull_request_url'],
         ['project_publications', 'seed_commit_sha'],
       ]) {
@@ -728,6 +783,7 @@ export class ProjectStore {
 
   listAllRunTraces(): Array<{
     id: string;
+    orgId: string;
     file: string;
     projectId: string;
     projectName: string;
@@ -735,12 +791,13 @@ export class ProjectStore {
   }> {
     const rows = this.db
       .prepare(
-        `SELECT r.project_run_id, r.trace_id, r.runs_path, r.project_id, p.name AS project_name, p.slug AS project_slug
+        `SELECT r.org_id, r.project_run_id, r.trace_id, r.runs_path, r.project_id, p.name AS project_name, p.slug AS project_slug
          FROM project_runs r
          JOIN projects p ON p.project_id = r.project_id AND p.org_id = r.org_id
          ORDER BY r.created_at DESC, r.project_run_id ASC`
       )
       .all() as Array<{
+      org_id: string;
       project_run_id: string;
       trace_id: string | null;
       runs_path: string;
@@ -750,6 +807,7 @@ export class ProjectStore {
     }>;
     const out: Array<{
       id: string;
+      orgId: string;
       file: string;
       projectId: string;
       projectName: string;
@@ -764,6 +822,7 @@ export class ProjectStore {
       if (!file) continue;
       out.push({
         id: row.project_run_id,
+        orgId: row.org_id,
         file,
         projectId: row.project_id,
         projectName: row.project_name,
@@ -879,24 +938,25 @@ export class ProjectStore {
     }));
   }
 
-  findAnyRunTraceFile(idInput: string): string | null {
+  findAnyRunTraceFile(idInput: string, onRead?: (orgId: string) => void): string | null {
     if (!isRunLookupId(idInput)) return null;
     const asUuid = projectRunIdSchema.safeParse(idInput);
     const row = (
       asUuid.success
         ? this.db
             .prepare(
-              `SELECT project_run_id, trace_id, runs_path FROM project_runs
+              `SELECT org_id, project_run_id, trace_id, runs_path FROM project_runs
                WHERE project_run_id = ? OR trace_id = ?`
             )
             .get(asUuid.data, asUuid.data)
         : this.db
             .prepare(
-              `SELECT project_run_id, trace_id, runs_path FROM project_runs WHERE trace_id = ?`
+              `SELECT org_id, project_run_id, trace_id, runs_path FROM project_runs WHERE trace_id = ?`
             )
             .get(idInput)
-    ) as { project_run_id: string; trace_id: string | null; runs_path: string } | undefined;
+    ) as { org_id: string; project_run_id: string; trace_id: string | null; runs_path: string } | undefined;
     if (!row) return null;
+    onRead?.(row.org_id);
     return resolveProjectRunTraceFile({
       projectRunId: row.project_run_id,
       runsPath: row.runs_path,
@@ -996,6 +1056,31 @@ export class ProjectStore {
     return runFromRow(existing);
   }
 
+  runCapacity(orgIdInput: string): OrgRunCapacity {
+    const orgId = organisationIdSchema.parse(orgIdInput);
+    const limit = this.db.prepare('SELECT max_concurrent AS value FROM org_run_limits WHERE org_id = ?')
+      .get(orgId) as { value: number } | undefined;
+    const count = this.db.prepare("SELECT COUNT(*) AS value FROM project_runs WHERE org_id = ? AND status IN ('queued','running')")
+      .get(orgId) as { value: number };
+    return { maxConcurrent: orgRunLimitSchema.parse(limit?.value ?? 1), active: count.value, globalMaxConcurrent: 1 };
+  }
+
+  setRunLimit(orgIdInput: string, value: number): void {
+    const orgId = organisationIdSchema.parse(orgIdInput);
+    const limit = orgRunLimitSchema.parse(value);
+    this.db.prepare(`INSERT INTO org_run_limits (org_id, max_concurrent) VALUES (?, ?)
+      ON CONFLICT(org_id) DO UPDATE SET max_concurrent = excluded.max_concurrent`).run(orgId, limit);
+  }
+
+  assertRunCapacity(orgId: string): void {
+    const capacity = this.runCapacity(orgId);
+    if (capacity.active >= capacity.maxConcurrent) {
+      throw new ProjectStateConflict(capacity.maxConcurrent === 0
+        ? 'New runs are suspended for this organisation'
+        : 'Organisation concurrent run limit reached');
+    }
+  }
+
   createProjectRun(input: {
     readonly orgId: string;
     readonly projectId: string;
@@ -1003,6 +1088,7 @@ export class ProjectStore {
     readonly request: CreateProjectRunInput;
     readonly hostPaths: ProjectRunHostPaths;
     readonly projectRunId?: string;
+    readonly enforceCapacity?: boolean;
   }): { readonly run: ProjectRun; readonly created: boolean } | null {
     const orgId = organisationIdSchema.parse(input.orgId);
     const projectId = projectIdSchema.parse(input.projectId);
@@ -1019,13 +1105,14 @@ export class ProjectStore {
       if (existing) {
         return { run: existing, created: false } as const;
       }
+      if (input.enforceCapacity) this.assertRunCapacity(orgId);
       const now = new Date().toISOString();
       this.db
         .prepare(
           `INSERT INTO project_runs (
              project_run_id, project_id, org_id, requested_by_principal_id, request_key,
-             goal, status, workspace_path, runs_path, log_path, created_at, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)`
+             goal, status, workspace_path, runs_path, log_path, skills_path, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`
         )
         .run(
           requestedRunId,
@@ -1037,6 +1124,7 @@ export class ProjectStore {
           paths.workspacePath,
           paths.runsPath,
           paths.logPath,
+          paths.skillsPath ?? null,
           now,
           now
         );
@@ -1252,6 +1340,80 @@ export class ProjectStore {
       ).changes;
     if (changed !== 1) throw new ProjectStateConflict('run CAS lost to a concurrent transition');
     return this.getProjectRun(orgId, projectRunId)!;
+  }
+
+  /**
+   * A run starts and its payer ledger become visible together — the mirror of
+   * `completeProjectRun`. Anything that reads `running` can therefore read
+   * who pays for it, and a crash between the two is not a reachable state.
+   */
+  startProjectRun(input: {
+    readonly orgId: string;
+    readonly projectRunId: string;
+    readonly payers: RunPayerLedger;
+  }): ProjectRun | null {
+    const orgId = organisationIdSchema.parse(input.orgId);
+    const projectRunId = projectRunIdSchema.parse(input.projectRunId);
+    const payers = runPayerLedgerSchema.parse(input.payers);
+    return this.db.transaction(() => {
+      const started = this.transitionProjectRun({
+        orgId,
+        projectRunId,
+        from: 'queued',
+        to: 'running',
+      });
+      if (!started) return null;
+      // `transitionProjectRun` treats a same-status transition as an
+      // idempotent replay, so a second start must be one here too — but only
+      // a replay that says the same thing. A start that renamed the payer
+      // would rewrite evidence through the back door the immutability trigger
+      // exists to close.
+      const existing = this.getRunPayers(orgId, projectRunId);
+      if (existing) {
+        if (JSON.stringify(existing) !== JSON.stringify(payers)) {
+          throw new ProjectStateConflict('run start replay carries different payers');
+        }
+        return started;
+      }
+      const now = new Date().toISOString();
+      const insert = this.db.prepare(
+        `INSERT INTO project_run_payers
+           (project_run_id, tier, org_id, selection, provider, payer, source, recorded_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      );
+      for (const [tier, row] of ledgerRows(payers)) {
+        insert.run(projectRunId, tier, orgId, row.selection, row.provider, row.payer, row.source, now);
+      }
+      return started;
+    }).immediate();
+  }
+
+  /**
+   * The payer rows of one run, in tier order. A per-run read, deliberately
+   * NOT an org-wide cost surface: what a tenant may be shown about spend is
+   * an open product decision, and this is the evidence underneath it.
+   */
+  getRunPayers(orgIdInput: string, projectRunIdInput: string): RunPayerLedger | null {
+    const orgId = organisationIdSchema.parse(orgIdInput);
+    const projectRunId = projectRunIdSchema.parse(projectRunIdInput);
+    const rows = this.db
+      .prepare(
+        `SELECT tier, selection, provider, payer, source
+         FROM project_run_payers WHERE project_run_id = ? AND org_id = ?`
+      )
+      .all(projectRunId, orgId) as Array<{
+      tier: string;
+      selection: string;
+      provider: string;
+      payer: string;
+      source: string;
+    }>;
+    if (rows.length === 0) return null;
+    const byTier = Object.fromEntries(
+      rows.map((row) => [row.tier, { selection: row.selection, provider: row.provider, payer: row.payer, source: row.source }])
+    );
+    const parsed = runPayerLedgerSchema.safeParse(byTier);
+    return parsed.success ? parsed.data : null;
   }
 
   /** Delivery and its immutable file inventory become visible together. */

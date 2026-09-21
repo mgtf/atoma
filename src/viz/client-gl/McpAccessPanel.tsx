@@ -90,9 +90,36 @@ export function McpAccessPanel({
 }: McpAccessPanelProps) {
   const [label, setLabel] = useState('');
   const [client, setClient] = useState<McpClient>('codex');
+  const [setupExpanded, setSetupExpanded] = useState(false);
   const operator = mode === 'operator';
   const ready = !loading && !error && Boolean(mcpUrl);
   const live = tokens.filter((token) => token.revokedAt === null);
+  const hasUsedConnection = !operator && live.some((token) => token.lastUsedAt !== null);
+  const showSetup = !hasUsedConnection || setupExpanded;
+  const authorizedAccess = (
+    <>
+      <p className="gpu-org-models-title">{t('settings.mcpConnections')}</p>
+      {live.length > 0 ? (
+        <ul className="gpu-mcp-tokens" aria-label={t('settings.mcpConnections')}>
+          {live.map((token) => (
+            <li key={token.tokenId} className="gpu-subscription-card">
+              <div className="gpu-subscription-card-head">
+                <span className="gpu-subscription-name">{token.label}</span>
+                <button type="button" disabled={busy} onClick={() => void onRevoke(token.tokenId)}>
+                  {t('settings.mcpRevoke')}
+                </button>
+              </div>
+              <p>{t('settings.mcpTokenFacts', {
+                org: token.orgName,
+                created: formatDateTime(token.createdAt, locale),
+                lastUsed: token.lastUsedAt ? formatDateTime(token.lastUsedAt, locale) : t('settings.mcpNeverUsed'),
+              })}</p>
+            </li>
+          ))}
+        </ul>
+      ) : ready ? <p className="gpu-subscription-message">{t('settings.mcpNoConnections')}</p> : null}
+    </>
+  );
 
   return (
     <section className="gpu-mcp-access" aria-labelledby="mcp-access-title">
@@ -109,6 +136,8 @@ export function McpAccessPanel({
         </div>
       ) : null}
 
+      {hasUsedConnection ? authorizedAccess : null}
+
       <article className="gpu-subscription-card">
         <div className="gpu-subscription-card-head">
           <span className="gpu-subscription-name">{t('settings.mcpAddress')}</span>
@@ -123,11 +152,18 @@ export function McpAccessPanel({
         ) : (
           <p>{loading ? t('settings.subscriptionState.loading') : t('settings.mcpAddressUnknown')}</p>
         )}
-        <p>{t(operator ? 'settings.mcpLocalSteps' : 'settings.mcpConnectSteps')}</p>
+        {showSetup && !loading ? <p>{t(operator ? 'settings.mcpLocalSteps' : 'settings.mcpConnectSteps')}</p> : null}
       </article>
 
-      {ready && mcpUrl ? (
-        <article className="gpu-subscription-card">
+      {hasUsedConnection ? (
+        <button type="button" aria-expanded={showSetup} aria-controls="mcp-setup-guide"
+          onClick={() => setSetupExpanded(!setupExpanded)}>
+          {t(showSetup ? 'settings.mcpHideSetup' : 'settings.mcpConnectAnother')}
+        </button>
+      ) : null}
+
+      {ready && mcpUrl && showSetup ? (
+        <article id="mcp-setup-guide" className="gpu-subscription-card">
           <label className="gpu-mcp-label">
             <span>{t('settings.mcpChooseClient')}</span>
             <select className="gpu-dom-input" value={client} onChange={event => setClient(event.target.value as McpClient)}>
@@ -164,26 +200,7 @@ export function McpAccessPanel({
 
       {!operator ? (
         <>
-          <p className="gpu-org-models-title">{t('settings.mcpConnections')}</p>
-          {live.length > 0 ? (
-            <ul className="gpu-mcp-tokens" aria-label={t('settings.mcpConnections')}>
-              {live.map((token) => (
-                <li key={token.tokenId} className="gpu-subscription-card">
-                  <div className="gpu-subscription-card-head">
-                    <span className="gpu-subscription-name">{token.label}</span>
-                    <button type="button" disabled={busy} onClick={() => void onRevoke(token.tokenId)}>
-                      {t('settings.mcpRevoke')}
-                    </button>
-                  </div>
-                  <p>{t('settings.mcpTokenFacts', {
-                    org: token.orgName,
-                    created: formatDateTime(token.createdAt, locale),
-                    lastUsed: token.lastUsedAt ? formatDateTime(token.lastUsedAt, locale) : t('settings.mcpNeverUsed'),
-                  })}</p>
-                </li>
-              ))}
-            </ul>
-          ) : ready ? <p className="gpu-subscription-message">{t('settings.mcpNoConnections')}</p> : null}
+          {!hasUsedConnection ? authorizedAccess : null}
 
           <details className="gpu-subscription-card" open={minted ? true : undefined} data-testid="mcp-manual-access">
             <summary>{t('settings.mcpAdvancedTokens')}</summary>

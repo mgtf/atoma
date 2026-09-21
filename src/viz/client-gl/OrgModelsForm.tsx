@@ -29,7 +29,14 @@ import type {
 import { useAccountSubscriptions } from './queries.js';
 
 /** The five Settings sections, in tab order. ONE list: the bar and the panels both walk it. */
-export const SETTINGS_TABS = ['general', 'models', 'subscriptions', 'keys', 'mcp'] as const;
+/**
+ * Tab ORDER is the reading order of a first setup: who you are, then what pays
+ * for a run (a subscription, else a key), then the models those choices make
+ * available, and last the MCP address. Models sits after the two credential
+ * tabs because an empty account arms its tiers from the subscription it just
+ * connected, so the pins are already filled by the time it is reached.
+ */
+export const SETTINGS_TABS = ['general', 'subscriptions', 'keys', 'models', 'mcp'] as const;
 export type SettingsTab = (typeof SETTINGS_TABS)[number];
 
 /**
@@ -97,10 +104,10 @@ export function OrgModelsForm({
     organisation !== null && roleCanUsePersonalSubscriptions(organisation.viewerRole);
   const subscriptions = useAccountSubscriptions(enabled && canUsePersonalSubscriptions);
 
-  const refresh = useCallback(async (): Promise<boolean> => {
+  const refresh = useCallback(async (models = false): Promise<boolean> => {
     try {
       const [nextAccount, nextOrg] = await Promise.all([
-        api.accountModels(),
+        api.accountModels(models),
         api.orgModels(),
       ]);
       setAccount(nextAccount);
@@ -293,6 +300,15 @@ export function OrgModelsForm({
                 <dt>{t('settings.projects')}</dt>
                 <dd>{organisation.projectCount}</dd>
               </div>
+              {organisation.runCapacity ? (
+                <div>
+                  <dt>{t('settings.runCapacity')}</dt>
+                  <dd>{t('settings.runCapacityValue', {
+                    active: organisation.runCapacity.active,
+                    limit: organisation.runCapacity.maxConcurrent,
+                  })}</dd>
+                </div>
+              ) : null}
               {organisation.pendingInvitations !== null ? (
                 <div>
                   <dt>{t('settings.pendingInvitations')}</dt>
@@ -324,6 +340,15 @@ export function OrgModelsForm({
       <section {...panelProps('models')}>
         <p className="gpu-org-models-title">{t('settings.models')}</p>
         <p className="gpu-org-models-hint">{t('settings.modelsHint')}</p>
+        {account.personalSubscriptions?.codex && (
+          <>
+            <button type="button" disabled={busy} onClick={() => {
+              setBusy(true);
+              void refresh(true).finally(() => setBusy(false));
+            }}>{t('settings.refreshModels')}</button>
+            <p role="status">{t(`settings.modelCatalogue.${account.personalCodexModels?.state ?? 'unavailable'}`)}</p>
+          </>
+        )}
         {!canPickAccountModels && !canManageOrg ? (
           <p className="gpu-org-models-hint" role="note">
             {t('settings.modelsNeedKey')}
@@ -355,6 +380,7 @@ export function OrgModelsForm({
                 ollamaAvailable,
                 hostSubscriptions,
                 personalSubscriptions: account.personalSubscriptions,
+                personalCodexModels: account.personalCodexModels,
                 personalSubscriptionState,
                 retainPersonalCodexFamily,
                 hostCodexSelected,
@@ -713,6 +739,7 @@ export function PersonalSubscriptionsPanel({
  * property to leave to a manual check.
  */
 export interface CatalogueUnlocks {
+  readonly personalCodexModels?: VizAccountModels['personalCodexModels'];
   readonly billedKeyReady: boolean;
   readonly ollamaAvailable: boolean;
   /** The operator's login, when the server offered it to THIS requester. */
@@ -747,6 +774,7 @@ export function providerIsUnlocked(
   if (provider.id === PERSONAL_CHATGPT_ID) {
     return (
       opts.personalSubscriptions?.codex === true && opts.personalSubscriptionState === 'connected'
+      && opts.personalCodexModels?.state === 'ready'
     );
   }
   // NO BLANKET ADMIN UNLOCK. A platform admin picking a billed model still
@@ -777,7 +805,7 @@ function catalogOptions(
     if (provider.id === PERSONAL_CHATGPT_ID && opts.hostCodexSelected) return false;
     return true;
   });
-  return families.map((provider) => {
+  const options = families.map((provider) => {
     // The honest label: ollama compute is the platform's, and where the
     // deployment declared no endpoint the family stays visible but locked —
     // hiding it would make the operator's choice look like a client bug.
@@ -819,11 +847,23 @@ function catalogOptions(
       </optgroup>
     );
   });
+  const present = families.some((provider) => provider.models.some((model) =>
+    `${provider.selectorPrefix}:${model.id}` === selected && (!model.tiers || model.tiers.includes(tier))
+  ));
+  if (selected && !present) options.unshift(
+    <option key="unavailable-selection" value={selected} disabled>
+      {t('settings.modelUnavailable', { model: selected })}
+    </option>
+  );
+  return options;
 }
 
 /** The personal Codex family appears when usable, or while one of its pins remains selected. */
 export function personalSubscriptionFamilies(opts: CatalogueUnlocks): VizLlmCatalogEntry[] {
   if (opts.hostCodexSelected) return [];
   if (!opts.personalSubscriptions?.codex && !opts.retainPersonalCodexFamily) return [];
-  return [PRINCIPAL_CHATGPT_SUBSCRIPTION_FAMILY as unknown as VizLlmCatalogEntry];
+  return [{
+    ...PRINCIPAL_CHATGPT_SUBSCRIPTION_FAMILY,
+    models: (opts.personalCodexModels?.models ?? []).map((model) => ({ id: model.id, label: model.label })),
+  }];
 }

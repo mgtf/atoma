@@ -143,6 +143,8 @@ describe('project run environment', () => {
         OPENAI_API_KEY: 'unreferenced-must-not-cross',
         ATOMA_GITHUB_APP_PRIVATE_KEY: 'must-not-cross',
         ATOMA_AUTH_GITHUB_CLIENT_SECRET: 'must-not-cross-either',
+        ATOMA_LAUNCHER_SOCKET: '/run/atoma/launcher.sock',
+        ATOMA_WORKER_IMAGE: 'registry.example/worker@sha256:' + 'a'.repeat(64),
       },
     });
     expect(env['ANTHROPIC_API_KEY']).toBe('model-key');
@@ -150,6 +152,8 @@ describe('project run environment', () => {
     expect(env['ATOMA_REQUIRE_ISOLATION']).toBe('1');
     expect(env['ATOMA_CONTAINER']).toBe('1');
     expect(env['ATOMA_EGRESS']).toBe('1');
+    expect(env['ATOMA_LAUNCHER_SOCKET']).toBe('/run/atoma/launcher.sock');
+    expect(env['ATOMA_WORKER_IMAGE']).toBe('registry.example/worker@sha256:' + 'a'.repeat(64));
     expect(env['ATOMA_GITHUB_APP_PRIVATE_KEY']).toBeUndefined();
     expect(env['ATOMA_AUTH_GITHUB_CLIENT_SECRET']).toBeUndefined();
     // No `ATOMA_LLM`: every tier carries its own selector.
@@ -157,28 +161,24 @@ describe('project run environment', () => {
     expect(env['ATOMA_MODEL_L1']).toBe(ANTHROPIC_PINS.ATOMA_MODEL_L1);
   });
 
-  it('lets a tenant run LEARN, and keeps promotion, dispatch and the shared cache off', () => {
+  it('lets a tenant run learn, promote, dispatch and cache like any run', () => {
     // The platform's own point: a project's runs get cheaper as it grows.
     // Measured before this was on — two delivered runs, $0.59, learnedSkills 0.
     const env = runEnv({
       ...BASE,
-      skillsPath: '/control/projects/p1/skills',
+      skillsPath: '/control/skills',
       hostEnv: { PATH: '/bin', ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
     });
     expect(env['ATOMA_SKILL_LEARN']).toBe('1');
     expect(env['ATOMA_EVENT_SKILLS']).toBe('1');
-    // What makes that safe: skills are partitioned per PROJECT, so nothing
-    // learned here can reach another project, let alone another organisation.
-    expect(env['ATOMA_SKILLS_DIR']).toBe('/control/projects/p1/skills');
-    // PROMOTION stays off explicitly, because a project run is seeded from the
-    // last delivered workspace and a seed enables promotion by default — so
-    // silence here would promote tenant scripts as a side effect of seeding.
-    expect(env['ATOMA_SKILL_PROMOTE']).toBe('0');
-    expect(env['ATOMA_SKILL_DIRECT']).toBe('0');
-    // And the prefilter cache stays off for a different reason: it is the one
-    // lifecycle store that is NOT per project — it lives in the shared product
-    // store.
-    expect(env['ATOMA_PREFILTER_CACHE']).toBe('0');
+    // The host selects the one platform catalog.
+    expect(env['ATOMA_SKILLS_DIR']).toBe(resolvePath('/control/skills'));
+    // A run is a run: nothing pins promotion, dispatch or the prefilter cache
+    // off for a tenant. The runner's own defaults apply — a seeded workspace
+    // enables promotion, dispatch is on, the cache is the platform's.
+    expect(env['ATOMA_SKILL_PROMOTE']).toBeUndefined();
+    expect(env['ATOMA_SKILL_DIRECT']).toBeUndefined();
+    expect(env['ATOMA_PREFILTER_CACHE']).toBeUndefined();
   });
 
   it('refuses host-level subscriptions, the old spellings and bearer tokens', () => {
@@ -699,11 +699,11 @@ describe('ProjectRunCoordinator', () => {
     expect(finished.traceId).toBe(started.projectRunId);
     expect(finished.artifactManifest?.files.map((file) => file.path)).toEqual(['index.html']);
     expect(driver.mock.calls[0]?.[0].extraArgs).toContain('--container');
-    // The two vetoes travel as FLAGS because they are the final word over both
-    // the environment and the seed; learning is not among them any more.
-    expect(driver.mock.calls[0]?.[0].extraArgs).toContain('--no-promote-skills');
-    expect(driver.mock.calls[0]?.[0].extraArgs).toContain('--no-direct-skills');
-    expect(driver.mock.calls[0]?.[0].extraArgs).not.toContain('--no-learn-skills');
+    // No lifecycle veto travels: a project run promotes, dispatches and learns
+    // like any run (docs/platform-trust-2026-09-15.md).
+    for (const veto of ['--no-promote-skills', '--no-direct-skills', '--no-learn-skills']) {
+      expect(driver.mock.calls[0]?.[0].extraArgs).not.toContain(veto);
+    }
     expect(runLease.attachChild).toHaveBeenCalledWith(4242);
     expect(runLease.release).toHaveBeenCalledOnce();
     expect(publisher.publish).toHaveBeenCalledOnce();
@@ -992,6 +992,7 @@ describe('ProjectRunCoordinator', () => {
       store: f.store,
       dbPath: f.dbPath,
       projectsRoot: f.root,
+      skillsDir: join(f.root, 'skills'),
       hostEnv: { ...haystackTestEnvironment(f.root), PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
       driver,
       acquireLease: async () => lease(),
@@ -1014,6 +1015,8 @@ describe('ProjectRunCoordinator', () => {
     );
     await coordinator.waitForIdle();
     expect(driver.mock.calls[0]?.[0].env?.['ATOMA_RUNS_DIR']).toBe(tracesDir);
+    expect(driver.mock.calls[0]?.[0].env?.['ATOMA_SKILLS_DIR']).toBe(join(f.root, 'skills'));
+    expect(f.store.getProjectRun(f.viewer.orgId, started.projectRunId)?.hostPaths.skillsPath).toBe(join(f.root, 'skills'));
     const failed = f.store.getProjectRun(f.viewer.orgId, started.projectRunId)!;
     expect(failed.status).toBe('failed');
     expect(failed.error).toMatch(/API key is invalid/);
@@ -1317,6 +1320,22 @@ describe('the subscription-transport door, at the coordinator', () => {
     expect(seen).toEqual([]);
   });
 
+  it.each(['removed', 'stale', 'missing-resolver'] as const)('refuses a personal model before spawning when %s', async (state) => {
+    const f = fixture();
+    const driver = deliveringDriver();
+    const coordinator = new ProjectRunCoordinator({
+      store: f.store, dbPath: f.dbPath, projectsRoot: f.root,
+      hostEnv: { ...haystackTestEnvironment(f.root), ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
+      driver: driver as unknown as ProjectRunDriver, acquireLease: async () => lease(),
+      tierModelsFor: () => ({ l1: 'own:openai:future-model', l2: null, l3: null }),
+      principalCodexProfileFor: () => ({ profileId: 'generation', homePath: join(f.root, 'profile'), profilesRoot: f.root }),
+      ...(state === 'missing-resolver' ? {} : { principalCodexModelsFor: async () => ({
+        state: state === 'stale' ? 'stale' as const : 'ready' as const, checkedAt: null, models: [],
+      }) }),
+    });
+    await expectRefused(f, coordinator, driver, state, /ChatGPT/);
+  });
+
   it("resolves a personal Codex generation from the run's requesting principal", async () => {
     const f = fixture();
     const lookedUp: string[] = [];
@@ -1335,6 +1354,7 @@ describe('the subscription-transport door, at the coordinator', () => {
         l2: 'own:openai:gpt-5.6-terra',
         l3: null,
       }),
+      principalCodexModelsFor: async () => ({ state: 'ready', checkedAt: null, models: [{ id: 'gpt-5.6-terra', label: 'Terra', isDefault: true, defaultReasoningEffort: 'medium', supportedReasoningEfforts: ['medium'] }] }),
       principalCodexProfileFor: (principalId) => {
         lookedUp.push(principalId);
         return {
@@ -1354,7 +1374,7 @@ describe('the subscription-transport door, at the coordinator', () => {
       request: { idempotencyKey: 'personal-codex', goal: 'Build a clock.' },
     });
     await coordinator.waitForIdle();
-    expect(lookedUp).toEqual([f.viewer.principalId]);
+    expect(lookedUp).toEqual([f.viewer.principalId, f.viewer.principalId]);
     expect(seen).toEqual([
       { principalId: f.viewer.principalId, payer: 'principal-subscription' },
     ]);

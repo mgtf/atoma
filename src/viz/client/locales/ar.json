@@ -1127,5 +1127,18 @@
   "depth.entry.deep": "ابدأ بنسيج يشرف على الخلايا والجزيئات.",
   "depth.entry.short": "ابدأ بخلية تشرف على الجزيئات.",
   "depth.deepening": "استنفدت خلية الدخول محاولات إعادة المحاولة. أعد البدء بإشراف النسيج.",
-  "depth.coverage": "تمت تغطية {{covered}} من أصل {{total}} من التزامات التسليم"
+  "depth.coverage": "تمت تغطية {{covered}} من أصل {{total}} من التزامات التسليم",
+  "welcome.handheld.blocked": "غير متاح على الأجهزة المحمولة بعد",
+  "welcome.handheld.hint": "لا يزال Atoma قيد الاستكمال للهواتف والأجهزة اللوحية. يمكنك المتابعة بصلاحية وصول كاملة، لكن بعض الشاشات قد لا تعمل جيدًا بعد على الأجهزة المحمولة.",
+  "welcome.handheld.continue": "اسمح لي على الأقل بالوصول إلى حسابي",
+  "settings.runCapacity": "عمليات run المتزامنة",
+  "settings.runCapacityValue": "{{active}} نشطة / {{limit}} مسموح بها (عملية run واحدة في كل مرة على هذا المضيف)",
+  "auth.switchAccount": "تبديل الحساب",
+  "settings.refreshModels": "تحديث نماذج ChatGPT",
+  "settings.modelCatalogue.ready": "النماذج التي أبلغ عنها حساب ChatGPT المتصل.",
+  "settings.modelCatalogue.stale": "فشل التحديث. تظهر النماذج المُبلغ عنها سابقًا، ولكن لا يمكن تحديدها.",
+  "settings.modelCatalogue.unavailable": "دليل نماذج ChatGPT غير متاح. حدّث للمحاولة مرة أخرى.",
+  "settings.modelUnavailable": "{{model}} — غير متاح",
+  "settings.mcpConnectAnother": "ربط عميل آخر",
+  "settings.mcpHideSetup": "إخفاء دليل الإعداد"
 }

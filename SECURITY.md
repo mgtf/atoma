@@ -29,16 +29,23 @@ Only the latest release and `main` receive fixes.
 ## Scope
 
 In scope: anything that lets a run escape its workspace or container, reach a
-network it was not granted, read another organisation's data, bypass the OAuth
-gate or the platform-admin flag, or forge audit-ledger entries.
+network it was not granted, read another organisation's projects, workspaces,
+run traces, searchable documents or credentials, bypass the OAuth gate or the
+platform-admin flag, or forge audit-ledger entries.
 
-Out of scope: the cost or behaviour of third-party models, and findings that
-require an operator to have already granted the attacker platform-admin.
+Out of scope: the cost or behaviour of third-party models; findings that require
+an operator to have already granted the attacker platform-admin; and the shared
+agent registry, skill catalogue, trust counters and lifecycle ledger, which
+every organisation's runs read and write by design
+([One registry, one trust](docs/platform-trust-2026-09-15.md)). Wording a
+supervisor derived from one organisation's documents can reach another
+organisation's runs through a shared prompt or recipe; that consequence is
+documented, not a vulnerability report.
 
 ## What is enforced today
 
 The enforced model, and its known gaps, is documented in
 [`docs/how-it-works.md`](docs/how-it-works.md) under "The safety model". The
-README's Status section states plainly what is not built, including the
-absence of full tenant isolation. A report that restates a documented gap is
-welcome as a discussion, not as a vulnerability.
+README's Status section states plainly what is shared between organisations and
+what is not. A report that restates a documented gap is welcome as a discussion,
+not as a vulnerability.

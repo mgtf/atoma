@@ -1,6 +1,8 @@
+import { PlatformEventLog } from '../src/platform/events.js';
+import { projectRetrievalFixture } from './helpers/projectRetrievalLaunch.js';
 import { haystackTestEnvironment } from './helpers/haystack.js';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -8,7 +10,10 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthStore, sha256Hex, type Viewer } from '../src/auth/store.js';
 import { closeStoreHandles } from '../src/core/stores.js';
+import { readLedger } from '../src/core/ledger.js';
 import { SkillRegistry } from '../src/skills/registry.js';
+import { AtomRegistry } from '../src/registry/atomRegistry.js';
+import { openDb } from '../src/registry/db.js';
 import { resetRunsForTest, startRun, type RunDriver } from '../src/mcp/run.js';
 import { FAMILIES_URI, operatorRunUri } from '../src/mcp/resources.js';
 import { McpHttpHost } from '../src/mcp/http.js';
@@ -174,9 +179,18 @@ describe('the catalogue by tier', () => {
     const asMember = names({ kind: 'principal', viewer: viewer('org:member'), tokenId: 't' }, TENANT_HOST);
     const asAdmin = names({ kind: 'principal', viewer: viewer('org:admin'), tokenId: 't' }, TENANT_HOST);
     const asPlatform = names({ kind: 'principal', viewer: viewer('org:viewer', true), tokenId: 't' }, TENANT_HOST);
-    expect(asViewer).toEqual(['atoma_families', 'atoma_projects_list', 'atoma_project_runs', 'atoma_run_status', 'atoma_run_trace', 'atoma_run_preview']);
-    expect(asMember).toEqual([...asViewer, 'atoma_project_create', 'atoma_run_start', 'atoma_run_cancel', 'atoma_publication_retry']);
-    expect(asAdmin).toEqual([...asMember, 'atoma_org_members', 'atoma_org_models']);
+    // The viewer ladder: the organisation's own readers plus the two platform
+    // commons the viz shows every signed-in role — registry and skill catalog.
+    expect(asViewer).toEqual([
+      'atoma_families', 'atoma_projects_list', 'atoma_project_runs', 'atoma_run_status', 'atoma_run_trace', 'atoma_run_preview',
+      'atoma_registry_list', 'atoma_registry_show', 'atoma_skills_list', 'atoma_registry_history', 'atoma_skills_show',
+    ]);
+    // Each rung adds exactly its own rows (the table interleaves the tiers).
+    const above = (lower: string[], upper: string[]) => upper.filter((name) => !lower.includes(name));
+    expect(asMember).toEqual(expect.arrayContaining(asViewer));
+    expect(above(asViewer, asMember)).toEqual(['atoma_project_create', 'atoma_run_start', 'atoma_run_cancel', 'atoma_publication_retry']);
+    expect(asAdmin).toEqual(expect.arrayContaining(asMember));
+    expect(above(asMember, asAdmin)).toEqual(['atoma_org_members', 'atoma_org_models']);
     // The tray needs the host's notification builder; this host has none, so
     // the platform ladder is the whole table minus that one row.
     expect(asPlatform).toEqual(MCP_TOOL_NAMES.filter((name) => !['atoma_notifications', 'atoma_benchmark_start'].includes(name)));
@@ -191,10 +205,16 @@ describe('the catalogue by tier', () => {
     expect(asOperator).toContain('atoma_operator_run_start');
     expect(asOperator).toContain('atoma_registry_list');
     expect(asOperator).toContain('atoma_run_trace');
-    // The readers and writes the roadmap owed, all platform-tier.
-    for (const owed of ['atoma_skills_show', 'atoma_ledger_tail', 'atoma_costs', 'atoma_registry_history', 'atoma_verdicts_list', 'atoma_verdict_show', 'atoma_sentinel_health', 'atoma_skill_reset', 'atoma_skill_drop', 'atoma_skill_merge', 'atoma_registry_rollback']) {
+    // The operator-only readers and writes the roadmap owed, all platform-tier:
+    // skill analytics and the four lifecycle writes included.
+    for (const owed of ['atoma_ledger_tail', 'atoma_costs', 'atoma_skills_stats', 'atoma_skills_review', 'atoma_verdicts_list', 'atoma_verdict_show', 'atoma_sentinel_health', 'atoma_skill_reset', 'atoma_skill_drop', 'atoma_skill_merge', 'atoma_registry_rollback']) {
       expect(asOperator).toContain(owed);
       expect(asAdmin).not.toContain(owed);
+    }
+    // The commons readers reach the operator too: one table, one row each.
+    for (const commons of ['atoma_registry_list', 'atoma_registry_show', 'atoma_registry_history', 'atoma_skills_list', 'atoma_skills_show']) {
+      expect(asOperator).toContain(commons);
+      expect(asViewer).toContain(commons);
     }
   });
 
@@ -243,14 +263,15 @@ describe('the HTTP host', () => {
     const client = await connect(url, 'member-token');
     const names = await toolNames(client);
     expect(names).toContain('atoma_run_start');
+    expect(names).toContain('atoma_registry_list');
     expect(names).not.toContain('atoma_org_members');
-    expect(names).not.toContain('atoma_registry_list');
+    expect(names).not.toContain('atoma_skills_stats');
     // Not registered on this session at all: the server answers "unknown tool",
-    // never the registry.
-    const refused = await client.callTool({ name: 'atoma_registry_list', arguments: {} });
+    // never the skill analytics.
+    const refused = await client.callTool({ name: 'atoma_skills_stats', arguments: {} });
     expect(refused.isError).toBe(true);
     expect(JSON.stringify(refused.content)).toMatch(/not found|unknown tool/i);
-    expect(JSON.stringify(refused.content)).not.toContain('molecule');
+    expect(JSON.stringify(refused.content)).not.toContain('threshold');
     await client.close();
   });
 
@@ -339,7 +360,7 @@ describe('operator writes over MCP — attributed and journaled', () => {
   function skillsFixture(): { dir: string; l1: string } {
     const dir = mkdtempSync(join(tmpdir(), 'atoma-mcp-writes-'));
     dirs.push(dir);
-    for (const k of ['ATOMA_DB_PATH', 'ATOMA_SKILLS_DIR', 'ATOMA_LEDGER_DB']) saved[k] = process.env[k];
+    for (const k of ['ATOMA_DB_PATH', 'ATOMA_SKILLS_DIR', 'ATOMA_LEDGER_DB', 'ATOMA_TRUST_THRESHOLD']) saved[k] = process.env[k];
     process.env['ATOMA_DB_PATH'] = join(dir, 'atoma.db');
     process.env['ATOMA_LEDGER_DB'] = join(dir, 'atoma.db');
     process.env['ATOMA_SKILLS_DIR'] = join(dir, 'skills');
@@ -393,6 +414,134 @@ describe('operator writes over MCP — attributed and journaled', () => {
     expect(rollback.isError).toBe(true);
     expect(JSON.stringify(rollback.content)).toMatch(/refused/);
     await operator.close();
+  });
+
+  it('reports recovered trust and resets only its streak on an attributed rollback', async () => {
+    const { dir } = skillsFixture();
+    process.env['ATOMA_TRUST_THRESHOLD'] = '4';
+    const db = openDb(join(dir, 'atoma.db'));
+    const registry = new AtomRegistry(db);
+    const type = registry.create(1, { description: 'fixture', systemPrompt: 'original behavior', tools: [], params: {}, createdBy: 'test' });
+    registry.recordFailure(type.name);
+    registry.recordSuccess(type.name);
+    registry.patch(type.name, { systemPromptReplace: 'revised behavior' }, 'test');
+    for (let i = 0; i < 4; i++) registry.recordSuccess(type.name);
+    registry.patch(type.name, { descriptionReplace: 'clearer capability label' }, 'test');
+    db.close();
+
+    const events: unknown[] = [];
+    const admin = viewer('org:owner', true);
+    const { url } = await listen(() => ({ kind: 'principal', viewer: admin, tokenId: 'a' }), { ...TENANT_HOST, emit: (event) => { events.push(event); } });
+    const client = await connect(url);
+    try {
+      const earned = { successes: 5, failures: 1, consecutiveSuccesses: 4, trusted: true };
+      const list = await client.callTool({ name: 'atoma_registry_list', arguments: {} });
+      expect(list.structuredContent).toMatchObject({ trustThreshold: 4, types: [expect.objectContaining({ name: type.name, ...earned })] });
+      const show = await client.callTool({ name: 'atoma_registry_show', arguments: { name: type.name } });
+      expect(show.structuredContent).toMatchObject({ trustThreshold: 4, atom: earned });
+
+      const rollback = await client.callTool({ name: 'atoma_registry_rollback', arguments: { name: type.name, toVersion: 1 } });
+      expect(rollback.isError).not.toBe(true);
+      expect(rollback.structuredContent).toMatchObject({
+        noop: false,
+        trustThreshold: 4,
+        trustBefore: { successes: 5, failures: 1, consecutiveSuccesses: 4 },
+        trustAfter: { successes: 5, failures: 1, consecutiveSuccesses: 0 },
+        journaled: true,
+        note: expect.stringMatching(/historical success\/failure totals preserved/),
+      });
+      expect(events).toEqual([expect.objectContaining({
+        kind: 'registry.rolled_back', actorId: admin.principalId,
+        detail: expect.objectContaining({ trustBefore: { successes: 5, failures: 1, consecutiveSuccesses: 4 } }),
+      })]);
+      // The LIFECYCLE row the registry appended names the same principal (T7):
+      // the write ran under the request's ledger scope in a process that
+      // serves every organisation and therefore has no process-wide one.
+      {
+        const store = openDb(join(dir, 'atoma.db'));
+        try {
+          // The fixture's own `patch` above also reset trust; only the rollback ran under the request.
+          const reset = readLedger(store).filter((event) => event.kind === 'type-trust-reset' && event.detail?.['reason'] === 'rollback');
+          expect(reset).toEqual([expect.objectContaining({
+            entity: type.name,
+            detail: expect.objectContaining({ reason: 'rollback' }),
+            scope: { orgId: admin.orgId, actorType: 'principal', actorId: admin.principalId },
+          })]);
+        } finally { store.close(); }
+      }
+      const history = await client.callTool({ name: 'atoma_registry_history', arguments: { name: type.name } });
+      expect(history.structuredContent).toMatchObject({ trustThreshold: 4, trust: { successes: 5, failures: 1, consecutiveSuccesses: 0, trusted: false } });
+    } finally {
+      await client.close();
+    }
+  });
+});
+
+describe('the platform commons over MCP — registry and skill catalog', () => {
+  const saved: Record<string, string | undefined> = {};
+  afterEach(() => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  it('serves a viewer the platform registry with host paths redacted, and the platform the whole payload', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-mcp-commons-'));
+    dirs.push(dir);
+    for (const k of ['ATOMA_DB_PATH', 'ATOMA_SKILLS_DIR']) saved[k] = process.env[k];
+    const dbPath = join(dir, 'atoma.db');
+    process.env['ATOMA_DB_PATH'] = dbPath;
+    process.env['ATOMA_SKILLS_DIR'] = join(dir, 'skills');
+    // ONE platform registry (docs/platform-trust-2026-09-15.md): one molecule
+    // with a recipe under it, read by whoever asks.
+    const seed = { tools: [], params: {}, createdBy: 'seed' };
+    const shared = (() => {
+      const db = openDb(dbPath);
+      try {
+        return new AtomRegistry(db).create(1, { ...seed, description: 'Shared capability', systemPrompt: 'Shared routing guidance' });
+      } finally { db.close(); }
+    })();
+    new SkillRegistry(join(dir, 'skills')).save(shared.atomId, { id: 'verify-browser-behaviour', description: 'Verify browser behaviour', whenToUse: 'When a browser interaction needs proof', kind: 'llm', body: 'Inspect the resulting state.' });
+
+    const callers: Record<string, McpCaller> = {
+      'viewer-token': { kind: 'principal', viewer: viewer('org:viewer'), tokenId: 'v' },
+      'platform-token': { kind: 'principal', viewer: viewer('org:owner', true), tokenId: 'p' },
+    };
+    const { url } = await listen((req) => {
+      const bearer = /^Bearer (.+)$/.exec(String(req.headers.authorization ?? ''))?.[1];
+      return bearer ? callers[bearer] ?? null : null;
+    }, TENANT_HOST);
+    const asViewer = await connect(url, 'viewer-token');
+    const asPlatform = await connect(url, 'platform-token');
+    try {
+      const names = await toolNames(asViewer);
+      for (const commons of ['atoma_registry_list', 'atoma_registry_show', 'atoma_registry_history', 'atoma_skills_list', 'atoma_skills_show']) expect(names).toContain(commons);
+      for (const operatorOnly of ['atoma_skills_stats', 'atoma_skills_review', 'atoma_registry_rollback', 'atoma_skill_drop']) expect(names).not.toContain(operatorOnly);
+
+      // The store is named by basename only: the host's filesystem layout is
+      // operator information. (The path is JSON-escaped, hence the slice.)
+      const hostPath = JSON.stringify(dir).slice(1, -1);
+      const list = await asViewer.callTool({ name: 'atoma_registry_list', arguments: {} });
+      expect(list.structuredContent).toMatchObject({ store: 'atoma.db', types: [expect.objectContaining({ name: shared.name, description: 'Shared capability' })] });
+      expect(JSON.stringify(list)).not.toContain(hostPath);
+      const show = await asViewer.callTool({ name: 'atoma_registry_show', arguments: { name: shared.name } });
+      expect(show.structuredContent).toMatchObject({ store: 'atoma.db', atom: { name: shared.name, systemPrompt: 'Shared routing guidance' } });
+      const history = await asViewer.callTool({ name: 'atoma_registry_history', arguments: { name: shared.name } });
+      expect(history.structuredContent).toMatchObject({ store: 'atoma.db' });
+      const skills = await asViewer.callTool({ name: 'atoma_skills_list', arguments: {} });
+      expect(skills.structuredContent).toMatchObject({ skillsDir: 'skills', namespaces: [{ l1: shared.name, l1Key: shared.atomId, skills: [expect.objectContaining({ id: 'verify-browser-behaviour' })] }] });
+      const skill = await asViewer.callTool({ name: 'atoma_skills_show', arguments: { l1: shared.name, id: 'verify-browser-behaviour' } });
+      expect(skill.structuredContent).toMatchObject({ skillsDir: 'skills' });
+      expect(JSON.stringify(skill.structuredContent)).toContain('Inspect the resulting state.');
+      expect(JSON.stringify(skill.structuredContent)).not.toContain(hostPath);
+
+      // The platform payload is the old one, host path included.
+      const whole = await asPlatform.callTool({ name: 'atoma_registry_list', arguments: {} });
+      expect(whole.structuredContent).toMatchObject({ store: dbPath });
+      const wholeSkills = await asPlatform.callTool({ name: 'atoma_skills_list', arguments: {} });
+      expect(wholeSkills.structuredContent).toMatchObject({ skillsDir: join(dir, 'skills') });
+    } finally { await asViewer.close(); await asPlatform.close(); }
   });
 });
 
@@ -743,4 +892,29 @@ it('exposes registered benchmarks only to platform callers and drives cancellati
     await platform.experimental.tasks.cancelTask(second.task.taskId);
     await vi.waitFor(() => expect(aborted).toBe(true));
   } finally { finish?.(); await member.close(); await platform.close(); }
+});
+
+it('journals a platform-admin MCP trace read under the foreign organisation', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'atoma-mcp-cross-read-'));
+  dirs.push(root);
+  const a = projectRetrievalFixture(root, { subject: 'admin', slug: 'admin' });
+  const b = projectRetrievalFixture(root, { subject: 'foreign', slug: 'foreign' });
+  const run = b.makeRun();
+  mkdirSync(run.layout.runsPath, { recursive: true });
+  writeFileSync(join(run.layout.runsPath, `${run.run.projectRunId}.json`), JSON.stringify({
+    id: run.run.projectRunId, label: 'Foreign trace', startedAt: '2026-09-20T12:00:00Z', events: [],
+  }));
+  const journal = PlatformEventLog.open(a.dbPath);
+  const service = new ProjectService({ store: a.projects, github: null,
+    coordinator: {} as ProjectRunCoordinator, auditRead: read => journal.recordCrossOrgRead(read) });
+  const { url } = await listen(() => ({ kind: 'principal', viewer: { ...a.viewer, platformAdmin: true }, tokenId: 'admin' }),
+    { ...NO_TENANT, auth: a.auth, projects: { store: a.projects, service }, journal });
+  const client = await connect(url);
+  try {
+    const response = await client.callTool({ name: 'atoma_run_trace', arguments: { runId: run.run.projectRunId } });
+    expect(response.isError).not.toBe(true);
+    const events = journal.list({ kind: 'admin.cross_org_read' }).events;
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ actorId: a.viewer.principalId, orgId: b.viewer.orgId, detail: { surface: 'mcp.trace' } });
+  } finally { await client.close(); }
 });

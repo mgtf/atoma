@@ -17,6 +17,11 @@ import { witnessesFromPayload, type Witness } from '../contracts/witness.js';
 import { renderObservation } from '../contracts/attestation.js';
 import { SkillRegistry } from '../skills/registry.js';
 import { namespaceOf, type SkillNamespace } from '../skills/namespace.js';
+import {
+  ValidationLedger,
+  internalValidationFailureDetail,
+  toolInvocationSucceeded,
+} from './validationLedger.js';
 
 const LOOPBACK_HTTP_URL_RE =
   /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(?:[:/?#]|$)/i;
@@ -44,16 +49,7 @@ export function withAutomaticLoopbackHttpRecording(executor: ToolExecutor): Tool
 }
 
 /** A transport-level success, not merely "the executor did not throw". */
-export function toolInvocationSucceeded(info: ToolInvocationInfo): boolean {
-  if (info.error !== undefined) return false;
-  if (!info.result || typeof info.result !== 'object') return true;
-  const result = info.result as Record<string, unknown>;
-  if (result['unchanged'] === true) return false;
-  if ('ok' in result && result['ok'] !== true) return false;
-  if (typeof result['error'] === 'string' && result['error'].length > 0) return false;
-  if (typeof result['exitCode'] === 'number' && result['exitCode'] !== 0) return false;
-  return true;
-}
+export { toolInvocationSucceeded } from './validationLedger.js';
 
 export function shellInvocationRunsFile(
   args: Record<string, unknown>,
@@ -101,6 +97,10 @@ export function proofObligationLines(task: Task): string[] {
     `itself or drives state through window.* hooks does NOT count, and when the`,
     `smoke drives its own state the runtime discards the external interactions`,
     `too — keep the smoke to ASSERTIONS about the state the interactions produced.`,
+    `If replaying the sequence would repeat a control and then reset it, split the`,
+    `proof into TWO validate_html calls — the control up to the milestone with a`,
+    `read-only smoke, then one change plus the reset with a read-only smoke — never`,
+    `into a smoke that drives the steps itself.`,
   ];
 }
 
@@ -124,6 +124,7 @@ export class L1Atom extends Atom {
 
   constructor(args: {
     atomId?: string;
+    registryVersion?: number;
     name: string;
     ordinal: number;
     systemPrompt: string;
@@ -134,6 +135,7 @@ export class L1Atom extends Atom {
   }) {
     super({
       atomId: args.atomId,
+      registryVersion: args.registryVersion,
       name: args.name,
       ordinal: args.ordinal,
       systemPrompt: args.systemPrompt,
@@ -208,6 +210,9 @@ export class L1Atom extends Atom {
     // about skills can omit the arg and get a skill-less atom.
     let skills: readonly Skill[] = [];
     if (skillRegistry) {
+      skillRegistry.registerNamespace(namespaceOf(type), {
+        name: type.name, tools: type.tools.map((tool) => tool.name),
+      });
       try {
         skills = skillRegistry.loadFor(namespaceOf(type));
       } catch {
@@ -219,6 +224,7 @@ export class L1Atom extends Atom {
     }
     return new L1Atom({
       atomId: type.atomId,
+      registryVersion: type.version,
       name: type.name,
       ordinal: type.ordinal,
       systemPrompt: type.systemPrompt,
@@ -365,18 +371,19 @@ export class L1Atom extends Atom {
       .filter((l): l is string => typeof l === 'string' && l.length > 0)
       .join('\n');
 
-    // Track the OUTCOME of each validate_html call observed during the
-    // tool loop so we can gate the final result on it (#3). The L1
-    // narrow prompt tells the model "only return success when ok:true"
-    // but Haiku sometimes claims a success summary after seeing an
-    // ok:false last call — the result then looks green to the parser,
-    // the supervisor's ground-truth probe re-validates and rejects on
-    // the actual 404 / failedRequests, and we land in a cascade of
-    // validator rejections the model can't reason its way out of.
-    // Recording the last validate_html ok flag here lets us annotate
-    // the summary so the supervisor validator sees the contradiction
-    // transparently on the FIRST pass, before spiralling.
-    let lastValidateHtml: { ok: boolean; summary: string } | null = null;
+    // Track what the molecule's own validate_html calls PROVED about the
+    // artefact, so the final result can be gated on it (#3). The L1 narrow
+    // prompt tells the model "only return success when ok:true" but Haiku
+    // sometimes claims a success summary after seeing an ok:false last
+    // call — the result then looks green to the parser, the supervisor's
+    // ground-truth probe re-validates and rejects on the actual 404 /
+    // failedRequests, and we land in a cascade of validator rejections the
+    // model can't reason its way out of. The ledger annotates the summary
+    // so the supervisor validator sees the contradiction transparently on
+    // the FIRST pass, before spiralling — and, since 2026-09-15, it keeps a
+    // successful observation of an UNCHANGED document standing through a
+    // later pre-flight refusal, which observed nothing (`validationLedger.ts`).
+    const validation = new ValidationLedger();
     const observedToolCalls: Array<{ name: string; ok: boolean }> = [];
     const writtenSkillScratchFiles = new Set<string>();
     let activeScriptSkillExecuted = false;
@@ -406,27 +413,7 @@ export class L1Atom extends Atom {
           shellInvocationRunsFile(info.args, path)
         );
       }
-      if (info.name !== 'validate_html') return;
-      const r = info.result as Record<string, unknown> | undefined;
-      if (!r || typeof r !== 'object') return;
-      const ok = r['ok'] === true;
-      const errors = Array.isArray(r['errors']) ? (r['errors'] as unknown[]) : [];
-      const failedRequests = Array.isArray(r['failedRequests'])
-        ? (r['failedRequests'] as unknown[])
-        : [];
-      const smokeResult = r['smokeResult'];
-      const smokeErr =
-        smokeResult && typeof smokeResult === 'object' && 'error' in smokeResult
-          ? String((smokeResult as Record<string, unknown>)['error'])
-          : null;
-      const parts: string[] = [];
-      if (errors.length > 0) parts.push(`${errors.length} console error(s)`);
-      if (failedRequests.length > 0) parts.push(`${failedRequests.length} failed request(s)`);
-      if (smokeErr) parts.push(`smoke: ${smokeErr.slice(0, 80)}`);
-      lastValidateHtml = {
-        ok,
-        summary: parts.length > 0 ? parts.join(', ') : ok ? 'clean load' : 'unknown failure',
-      };
+      validation.observe(info);
     };
 
     const resp = await ctx.llm.complete(
@@ -458,16 +445,20 @@ export class L1Atom extends Atom {
     // loop a chance to retry.
     const { output, summary: rawSummary } = parsePayloadTolerant(resp.text);
 
-    // Validation-gate annotation (#3). When the L1 called
-    // validate_html at least once AND the LAST outcome was ok:false,
-    // rewrite the summary to include an explicit INTERNAL VALIDATION
-    // FAILED banner. The supervisor validator (Haiku) then sees the
-    // contradiction directly in the RESULT payload — no need to wait
-    // for its own ground-truth probe to re-run validate_html and
-    // produce the same signal via a longer path.
+    // Validation-gate annotation (#3). When the ledger's disposition is a
+    // failure — the last EXECUTED validate_html was not ok, every call was
+    // refused pre-flight, or the observed document was rewritten after its
+    // last successful observation — rewrite the summary to include an
+    // explicit INTERNAL VALIDATION FAILED banner. The supervisor validator
+    // (Haiku) then sees the contradiction directly in the RESULT payload —
+    // no need to wait for its own ground-truth probe to re-run validate_html
+    // and produce the same signal via a longer path. A standing observation
+    // of the unchanged artefact is NOT rewritten: the validator judges it
+    // with the transport attestations and its own probe in view.
+    const validationFailure = internalValidationFailureDetail(validation.disposition());
     const summary =
-      lastValidateHtml && !(lastValidateHtml as { ok: boolean }).ok
-        ? `${INTERNAL_VALIDATION_FAILED_PREFIX} — last validate_html: ${(lastValidateHtml as { summary: string }).summary}] ${rawSummary}`
+      validationFailure !== null
+        ? `${INTERNAL_VALIDATION_FAILED_PREFIX} — ${validationFailure}] ${rawSummary}`
         : rawSummary;
 
     return {

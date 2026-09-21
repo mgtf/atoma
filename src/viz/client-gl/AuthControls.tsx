@@ -167,7 +167,7 @@ export function AuthControls({
     }
   }, [fetchImpl, navigate, switchingOrganisationId]);
 
-  const signOut = useCallback(async (): Promise<void> => {
+  const signOut = useCallback(async (selectAccount = false): Promise<void> => {
     if (signingOutRef.current) return;
     signingOutRef.current = true;
     setFailure(false);
@@ -183,8 +183,8 @@ export function AuthControls({
       // grace: without this a same-tab re-login would inherit the dismissal
       // and never re-offer notifications.
       clearSessionPushDismissal();
-      // Back to the arrival gate: signed out, it offers the providers again.
-      navigate('/');
+      // Account switching must ask the provider to choose, not reuse its session.
+      navigate(selectAccount ? '/auth/login?select_account=1' : '/');
     } catch {
       setFailure(true);
     } finally {
@@ -195,6 +195,7 @@ export function AuthControls({
 
   const activate = useCallback((id: string): void => {
     if (id === 'auth.signOut') void signOut();
+    else if (id === 'auth.switchAccount') void signOut(true);
     else if (id.startsWith('org.switch.')) void switchOrganisation(id.slice('org.switch.'.length));
   }, [signOut, switchOrganisation]);
 
@@ -229,7 +230,7 @@ export function AuthControls({
  *
  * The orb and its dropdown are Pixi objects: a keyboard or a screen reader
  * cannot reach either. This is the same account surface as real DOM — the
- * toggle, the identity, the role, the organisations, Settings and Sign out —
+ * toggle, the identity, the role, the organisations and account actions —
  * and it is what the GPU smokes drive too. It reads the SAME store state as
  * the GL menu, so the two cannot disagree about whether the menu is open.
  */
@@ -284,6 +285,13 @@ function AccountBridge({
             ))}
           <button type="button" onClick={() => setView('settings')}>
             {t('nav.settings')}
+          </button>
+          <button
+            type="button"
+            disabled={signingOut}
+            onClick={() => activate('auth.switchAccount')}
+          >
+            {t('auth.switchAccount')}
           </button>
           <button
             type="button"

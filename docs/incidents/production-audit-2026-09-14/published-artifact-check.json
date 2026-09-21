@@ -1,0 +1,30 @@
+{
+  "commit": "8fda88b6ff491aa31e7a3a667dc072cb889fc232",
+  "checks": [
+    {
+      "name": "published regression suite",
+      "exitCode": 0,
+      "stdout": "\n> network-postcard@1.0.0 test\n> node --test\n\n✔ a transport rejection replaces a prior successful export record (72.835541ms)\n✔ unreadable JSON replaces a prior successful export record (2.031896ms)\n✔ a successful recovery replaces an error and exports its own result (3.892584ms)\nℹ tests 3\nℹ suites 0\nℹ pass 3\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 228.413296\n",
+      "stderr": ""
+    },
+    {
+      "name": "HTTP /health",
+      "status": 200
+    },
+    {
+      "name": "HTTP /",
+      "status": 200
+    },
+    {
+      "name": "HTTP /app.js",
+      "status": 200
+    },
+    {
+      "name": "browser",
+      "exitCode": 0,
+      "stdout": "{\"ok\":true,\"method\":\"real Chromium pointer clicks; intercepted deterministic API responses\",\"externalNetworkTested\":false,\"checks\":[\"initial export disabled; no download\",\"successful result and Blob match\",\"pending next request disables both buttons, then replaces prior result\",\"HTTP 502 replaces success with its own error\",\"transport rejection replaces previous result\",\"invalid JSON replaces previous result\",\"recovery exports the new successful result\"]}\n",
+      "stderr": ""
+    }
+  ],
+  "ok": true
+}

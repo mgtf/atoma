@@ -51,7 +51,7 @@ export const CHATGPT_SUBSCRIPTION_MODELS = [
   'gpt-5.4-mini',
 ] as const;
 
-export type ChatGptSubscriptionModel = (typeof CHATGPT_SUBSCRIPTION_MODELS)[number];
+export type ChatGptSubscriptionModel = string;
 
 /** The stored spelling of the host's Claude login on one tier. */
 export function hostClaudeSelection(alias: HostSubscriptionAlias): string {
@@ -102,8 +102,9 @@ export function principalChatGptSubscriptionModel(
 function codexModelOf(value: string, mode: 'sub' | 'own'): ChatGptSubscriptionModel | null {
   const selector = tryParseModelSelector(value);
   if (!selector || selector.mode !== mode || selector.vendor !== 'openai') return null;
+  if (mode === 'own') return selector.model;
   return (CHATGPT_SUBSCRIPTION_MODELS as readonly string[]).includes(selector.model)
-    ? (selector.model as ChatGptSubscriptionModel)
+    ? selector.model
     : null;
 }
 

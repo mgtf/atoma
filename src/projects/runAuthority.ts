@@ -2,7 +2,6 @@ import Database from 'better-sqlite3';
 import { dirname, join, resolve } from 'node:path';
 import { roleAtLeast, type OrgRole } from '../auth/store.js';
 import { projectRunIdSchema, type ProjectRun } from '../contracts/projects.js';
-import type { RegistryOwner } from '../contracts/registryOwner.js';
 import { ProjectStore } from './store.js';
 
 /** Current run, project and requesting member; stored identifiers alone grant nothing. */
@@ -22,15 +21,22 @@ export interface ProjectRunPaths {
 export function projectRunPathsMatch(run: ProjectRun, input: ProjectRunPaths): boolean {
   return resolve(input.workspacePath) === resolve(run.hostPaths.workspacePath) &&
     resolve(input.runsPath) === resolve(run.hostPaths.runsPath) &&
-    resolve(input.skillsPath) === join(dirname(dirname(dirname(resolve(run.hostPaths.workspacePath)))), 'skills');
+    resolve(input.skillsPath) === (run.hostPaths.skillsPath
+      ? resolve(run.hostPaths.skillsPath)
+      : join(dirname(dirname(dirname(resolve(run.hostPaths.workspacePath)))), 'skills'));
 }
 
-/** Resolves before any writable handle or provider is opened, even with retrieval disabled. */
-export function resolveProjectRegistryOwner(input: ProjectRunPaths): RegistryOwner {
+/**
+ * The run the host registered, or `denied`. Checked before any writable
+ * handle or provider is opened, even with retrieval disabled: the registry
+ * and skills are the platform's, so this is not about WHICH rows a run may
+ * see but about whether this process is the run the host launched at all.
+ */
+export function assertProjectRunAuthority(input: ProjectRunPaths): ProjectRun {
   const db = new Database(input.dbPath, { readonly: true, fileMustExist: true, timeout: 0 });
   try {
     const run = eligibleProjectRun(db, input.runId);
     if (!run || !projectRunPathsMatch(run, input)) throw new Error('denied');
-    return { kind: 'project', orgId: run.orgId, projectId: run.projectId };
+    return run;
   } finally { db.close(); }
 }

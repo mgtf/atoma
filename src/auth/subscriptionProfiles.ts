@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { CodexModelCache, readCodexModels } from './codexModels.js';
+import { UNAVAILABLE_CODEX_MODELS, type CodexModelInventory } from '../contracts/codexModels.js';
 import {
   closeSync,
   chmodSync,
@@ -46,6 +48,15 @@ export const MAX_PENDING_CODEX_LOGINS = MAX_CODEX_APP_SERVER_PROCESSES;
 const MAX_CODEX_LOGIN_TTL_MS = 30 * 60 * 1_000;
 const FAILED_ATTEMPT_TTL_MS = 60_000;
 const CODEX_STATUS_FRESH_MS = 5 * 60 * 1_000;
+/**
+ * Every released Codex up to 0.154 sends `account/login/completed` BEFORE it
+ * reloads its in-memory auth cache, and `account/read` answers from that
+ * cache. An immediate read therefore sees no account although auth.json is
+ * already written (prod incident 2026-09-15). Give the provider a bounded
+ * window to settle, woken early by its `account/updated` notification.
+ */
+export const DEFAULT_LOGIN_ACCOUNT_SETTLE_MS = 5_000;
+const LOGIN_ACCOUNT_RETRY_MS = 200;
 
 export class CodexSubscriptionConflictError extends Error {
   constructor(message: string) {
@@ -108,8 +119,10 @@ export interface AccountSubscriptionServiceOptions {
   readonly spawnFn?: CodexAppServerSpawn;
   readonly requestTimeoutMs?: number;
   readonly loginTtlMs?: number;
+  /** How long a completed login may take to expose its account; see DEFAULT_LOGIN_ACCOUNT_SETTLE_MS. */
+  readonly loginAccountSettleMs?: number;
   readonly now?: () => number;
-  readonly onConnected?: (event: { principalId: string; orgId: string }) => void;
+  readonly onConnected?: (event: { principalId: string; orgId: string }) => void | Promise<void>;
   readonly onDisconnected?: (event: { principalId: string; orgId: string }) => void;
 }
 
@@ -250,12 +263,14 @@ function completion(value: unknown): { success: boolean; loginId: string | null 
  * generation receipt, while Codex alone reads/writes credential bytes.
  */
 export class AccountSubscriptionService {
+  private readonly modelCache = new CodexModelCache(() => this.now());
   private readonly auth: AuthStore;
   private readonly root: string;
   private readonly sourceEnv: NodeJS.ProcessEnv;
   private readonly spawnFn: CodexAppServerSpawn | undefined;
   private readonly requestTimeoutMs: number | undefined;
   private readonly loginTtlMs: number;
+  private readonly loginAccountSettleMs: number;
   private readonly now: () => number;
   private readonly onConnected: AccountSubscriptionServiceOptions['onConnected'];
   private readonly onDisconnected: AccountSubscriptionServiceOptions['onDisconnected'];
@@ -288,6 +303,12 @@ export class AccountSubscriptionService {
       options.loginTtlMs > 0
         ? Math.min(Math.trunc(options.loginTtlMs), MAX_CODEX_LOGIN_TTL_MS)
         : DEFAULT_CODEX_LOGIN_TTL_MS;
+    this.loginAccountSettleMs =
+      options.loginAccountSettleMs !== undefined &&
+      Number.isFinite(options.loginAccountSettleMs) &&
+      options.loginAccountSettleMs >= 0
+        ? Math.trunc(options.loginAccountSettleMs)
+        : DEFAULT_LOGIN_ACCOUNT_SETTLE_MS;
     this.now = options.now ?? Date.now;
     this.onConnected = options.onConnected;
     this.onDisconnected = options.onDisconnected;
@@ -485,6 +506,27 @@ export class AccountSubscriptionService {
       // An observer cannot undo the local disconnect or leak its credential.
     }
     return true;
+  }
+
+  /** Discover only through this principal's current private generation. */
+  async codexModels(principalId: string, refresh = false, cachedOnly = false): Promise<CodexModelInventory> {
+    const profile = this.codexProfileForRun(principalId);
+    if (!profile || this.closed) return UNAVAILABLE_CODEX_MODELS;
+    if (cachedOnly) return this.modelCache.peek(`${principalId}:${profile.profileId}`);
+    const inventory = await this.modelCache.get(`${principalId}:${profile.profileId}`, async () => {
+      const connection = await this.open(profile.homePath, AbortSignal.any([this.lifecycle.signal, AbortSignal.timeout(30_000)]));
+      try {
+        if (!accountIsChatGpt(await connection.request('account/read', { refreshToken: false }))) {
+          throw new Error('ChatGPT authentication is required');
+        }
+        return await readCodexModels((method, params) => connection.request(method, params));
+      } finally {
+        await connection.closeAndWait();
+      }
+    }, refresh);
+    // A disconnect/reconnect during discovery must never publish the old account's catalogue.
+    return this.codexProfileForRun(principalId)?.profileId === profile.profileId
+      ? inventory : UNAVAILABLE_CODEX_MODELS;
   }
 
   /** Synchronous launch-time resolver: no network and no fallback profile. */
@@ -700,14 +742,25 @@ export class AccountSubscriptionService {
     attempt.state = 'completing';
     try {
       if (!attempt.connection) throw new Error('Codex login connection was closed');
-      const account = await attempt.connection.request('account/read', { refreshToken: false });
+      const account = await this.readSettledAccount(attempt, attempt.connection);
       if (
         this.attempts.get(attempt.principalId)?.attemptId !== attempt.attemptId ||
         attempt.state !== 'completing'
       ) {
         return;
       }
-      if (!accountIsChatGpt(account) || !this.secureCredentialFile(attempt)) {
+      if (!accountIsChatGpt(account)) {
+        // Stable text only: no principal, path, code or provider payload.
+        console.warn(
+          '[account subscriptions] Codex reported a completed login but no ChatGPT account within the settle window'
+        );
+        this.failAttempt(attempt, 'authentication-required');
+        return;
+      }
+      if (!this.secureCredentialFile(attempt)) {
+        console.warn(
+          '[account subscriptions] Codex login completed but its credential file failed the private-ownership checks'
+        );
         this.failAttempt(attempt, 'authentication-required');
         return;
       }
@@ -734,7 +787,7 @@ export class AccountSubscriptionService {
         await this.removeProfileWhenIdle(attempt.principalId, previous.profileId);
       }
       try {
-        this.onConnected?.({ principalId: attempt.principalId, orgId: attempt.orgId });
+        await this.onConnected?.({ principalId: attempt.principalId, orgId: attempt.orgId });
       } catch {
         // An observer cannot roll back a completed provider-owned login.
       }
@@ -742,6 +795,47 @@ export class AccountSubscriptionService {
       if (this.attempts.get(attempt.principalId)?.attemptId === attempt.attemptId) {
         this.failAttempt(attempt, 'login-failed');
       }
+    }
+  }
+
+  /**
+   * Read the account until Codex exposes a ChatGPT one or the settle window
+   * closes. Never refreshes tokens; a closed connection or a cancelled attempt
+   * ends the loop with the last observation.
+   */
+  private async readSettledAccount(
+    attempt: PendingAttempt,
+    connection: CodexAppServerConnection
+  ): Promise<unknown> {
+    const deadline = this.now() + this.loginAccountSettleMs;
+    let wake: (() => void) | null = null;
+    const unsubscribe = connection.onNotification((notification) => {
+      if (notification.method === 'account/updated') wake?.();
+    });
+    try {
+      while (true) {
+        const account = await connection.request('account/read', { refreshToken: false });
+        if (accountIsChatGpt(account)) return account;
+        const remaining = deadline - this.now();
+        if (
+          remaining <= 0 ||
+          this.attempts.get(attempt.principalId)?.attemptId !== attempt.attemptId ||
+          attempt.state !== 'completing'
+        ) {
+          return account;
+        }
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, Math.min(LOGIN_ACCOUNT_RETRY_MS, remaining));
+          timer.unref?.();
+          wake = () => {
+            clearTimeout(timer);
+            resolve();
+          };
+        });
+        wake = null;
+      }
+    } finally {
+      unsubscribe();
     }
   }
 

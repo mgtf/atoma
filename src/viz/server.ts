@@ -1,4 +1,5 @@
-import { operatorRegistryPredicate } from '../registry/db.js';
+import { assertPersonalCodexModels, UNAVAILABLE_CODEX_MODELS } from '../contracts/codexModels.js';
+import { openDb, unfoldedRegistryPredicate } from '../registry/db.js';
 import { updateOrgModels } from '../auth/orgModels.js';
 import { createServer, request as httpRequest } from 'node:http';
 import { randomBytes } from 'node:crypto';
@@ -10,8 +11,8 @@ import Database from 'better-sqlite3';
 import { SkillRegistry } from '../skills/registry.js';
 import { readBoundedRunFile, sortRunIndex, summarizeTraceFile } from './runIndex.js';
 import type { VizRunIndexEntry } from './trace.js';
-import { openStoreHandle, skillsDirPath, storeDbPath } from '../core/stores.js';
-import { LEDGER_TABLE_DDL, readLedgerTail } from '../core/ledger.js';
+import { skillsDirPath, storeDbPath } from '../core/stores.js';
+import { openLedgerHandle, readLedgerTail } from '../core/ledger.js';
 import { LAUNCHABLE_PROFILES } from '../run/profiles/index.js';
 import { assessShareability, type ShareAssessment } from '../skills/shareability.js';
 import { taxonomyForTier, type AgentRank } from '../core/taxonomy.js';
@@ -36,6 +37,7 @@ import {
   selectionsMixCodexOwners,
 } from '../contracts/runPayers.js';
 import { operatorTierDefaults } from '../contracts/tierModels.js';
+import { armStarterChatGptPins } from '../auth/accountModels.js';
 import {
   ORG_ROLES,
   sha256Hex,
@@ -116,7 +118,7 @@ import {
 import { PreviewManager } from '../preview/manager.js';
 import { PreviewHttpService } from '../preview/httpService.js';
 import { previewOpenOptionsSchema } from '../contracts/preview.js';
-import { DockerLauncher } from '../launcher/docker.js';
+import { connectContainerLauncher } from '../launcher/connect.js';
 import { DEFAULT_WORKER_IMAGE } from '../tools/containerExecutor.js';
 import { PushStore } from './push/store.js';
 import { PushNotifier } from './push/notifier.js';
@@ -356,7 +358,6 @@ function loadBurnin(): {
   return { rows, csvPath: BURNIN_CSV };
 }
 const SKILLS_DIR = resolve(skillsDirPath(cli.skillsDir));
-const skillRegistry = new SkillRegistry(SKILLS_DIR);
 
 /**
  * Resolve the list of DB paths we'll serve: the explicit `--db` flags if any
@@ -391,6 +392,40 @@ function resolveDbs(): { id: string; label: string; path: string; exists: boolea
 }
 
 const DBS = resolveDbs();
+// Skill bodies from `--skills-dir`, their trust from the primary store this
+// server serves — the cached writable handle the admin ledger already uses,
+// so the Skills tab and `/api/admin/ledger` read one file (W4).
+const skillRegistry = new SkillRegistry(SKILLS_DIR, { db: openLedgerHandle(DBS[0]!.path) });
+
+/**
+ * FOLD BEFORE SERVING.
+ *
+ * `openDb` is what migrates a store still partitioned by the 2026-09-09 owner
+ * key into the one platform registry (`docs/platform-trust-2026-09-15.md`).
+ * This server never called it: every store access below is a READ-ONLY handle,
+ * so on a deployed host — where the server is the only process that always
+ * runs — the fold waited for the next run that never came, while the readers,
+ * which no longer filter by owner, showed one row per owner.
+ *
+ * That shipped on 2026-09-15 and doubled every type in the production
+ * Registry: 23 rows where the catalogue has 12. The fold belongs at startup,
+ * before anything serves.
+ *
+ * Idempotent and cheap once folded. A store that cannot be folded is LOUD but
+ * never fatal: the readers below fall back to the owner-filtered rows they
+ * showed before the fold, so a failed migration degrades to the old view
+ * instead of publishing duplicates.
+ */
+for (const entry of DBS) {
+  if (!entry.exists) continue;
+  try {
+    openDb(entry.path).close();
+  } catch (error) {
+    console.error(
+      `[viz] registry fold failed for ${entry.path} — serving owner-filtered rows: ${(error as Error).message}`
+    );
+  }
+}
 
 /**
  * THE AUTH GATE (SaaS A2). Opt-in via the HOST environment
@@ -491,7 +526,7 @@ const ACCOUNT_SUBSCRIPTIONS: AccountSubscriptionService | null = AUTH?.store
       ...(process.env[ACCOUNT_PROFILES_ROOT_ENV]?.trim()
         ? { profilesRoot: process.env[ACCOUNT_PROFILES_ROOT_ENV].trim() }
         : {}),
-      onConnected: ({ principalId, orgId }) => {
+      onConnected: async ({ principalId, orgId }) => {
         emit({
           kind: 'principal.subscription_connected',
           actorType: 'principal',
@@ -500,6 +535,17 @@ const ACCOUNT_SUBSCRIPTIONS: AccountSubscriptionService | null = AUTH?.store
           summary: 'Personal Codex subscription connected',
           detail: { provider: 'codex' },
         });
+        try {
+          const inventory = await ACCOUNT_SUBSCRIPTIONS?.codexModels(principalId);
+          const defaultModel = inventory?.state === 'ready'
+            ? inventory.models.find((model) => model.isDefault)?.id : undefined;
+          armStarterChatGptPins(AUTH.store!, { principalId, orgId }, process.env, emit, defaultModel);
+        } catch (error) {
+          // A convenience, never a precondition: a failed write leaves the
+          // member exactly where a connected subscription without pins
+          // already leaves them, choosing their models in Settings.
+          console.error('[viz subscriptions] could not arm the starter ChatGPT pins', error);
+        }
       },
       onDisconnected: ({ principalId, orgId }) => {
         emit({
@@ -740,6 +786,7 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
     store: projectStore,
     dbPath,
     projectsRoot: PROJECTS_ROOT,
+    skillsDir: SKILLS_DIR,
     ...(publisher ? { publisher } : {}),
     // Describe the deliverable while the workspace is still this run's. The
     // adapter stays one call wide; `src/preview/service.ts` owns what a
@@ -774,6 +821,7 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
       ? {
           principalCodexProfileFor: (principalId: string) =>
             ACCOUNT_SUBSCRIPTIONS.codexProfileForRun(principalId),
+          principalCodexModelsFor: (principalId: string) => ACCOUNT_SUBSCRIPTIONS.codexModels(principalId, true),
         }
       : {}),
     // A run billed to a host or requester login is journaled, never pushed.
@@ -854,6 +902,10 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
   }
   const projects = new ProjectService({
     store: projectStore,
+    auditRead: (read) => {
+      if (!EVENTS) throw new Error('Cross-organisation audit unavailable');
+      return EVENTS.recordCrossOrgRead(read);
+    },
     coordinator,
     github: githubStore,
     events: emit,
@@ -931,8 +983,8 @@ const PREVIEW_RUNTIME_PROMISE: Promise<PreviewRuntime | null> = (async () => {
   previewStore.reconcileInterrupted();
   const claims = new PreviewClaimRegistry();
   const routes = new PreviewRouteTable();
-  const launcher = new DockerLauncher({
-    image: DEFAULT_WORKER_IMAGE,
+  const launcher = await connectContainerLauncher({
+    image: process.env['ATOMA_WORKER_IMAGE'] ?? DEFAULT_WORKER_IMAGE,
     previewImage: config.image,
     previewRuntime: config.runtime,
   });
@@ -1284,10 +1336,10 @@ function avatarUrlFor(store: AuthStore, principalId: string): string | null {
  * without shipping an unauthenticated app shell to an unauthenticated
  * browser. English, no external assets, no scripts.
  */
-function loginPage(message?: string, invitationToken?: string): string {
+function loginPage(message?: string, invitationToken?: string, selectAccount = false): string {
   const inviteParam = invitationToken ? `&amp;invite=${encodeURIComponent(invitationToken)}` : '';
   const providers = (AUTH_RUNTIME?.providers ?? [])
-    .map((p) => `<a class="btn" href="/auth/login?provider=${p.id}${inviteParam}">${escapeHtml(p.label)}</a>`)
+    .map((p) => `<a class="btn" href="/auth/login?provider=${p.id}${inviteParam}${selectAccount ? '&amp;select_account=1' : ''}">${escapeHtml(p.label)}</a>`)
     .join('');
   const notice = message ? `<p class="msg">${escapeHtml(message)}</p>` : '';
   return `<!doctype html>
@@ -1619,10 +1671,11 @@ function listOrganisationRunIndex(orgId: string): VizRunIndexEntry[] {
   return sortRunIndex(entries);
 }
 
-function listAllRunIndex(): VizRunIndexEntry[] {
+function listAllRunIndex(viewer: Viewer): VizRunIndexEntry[] {
   if (!PROJECTS_RUNTIME) return [];
   const entries: VizRunIndexEntry[] = [];
   for (const row of PROJECTS_RUNTIME.store.listAllRunTraces()) {
+    PROJECTS_RUNTIME.projects.auditRead(viewer, row.orgId, 'runs.index');
     const summary = summarizeTraceFile(row.file);
     if (!summary) continue;
     entries.push({
@@ -1640,7 +1693,7 @@ function listIndex(viewer: Viewer | null): VizRunIndexEntry[] {
   if (AUTH) {
     if (!PROJECTS_RUNTIME || !viewer) return [];
     // The platform admin reads every organisation's project traces.
-    return viewer.platformAdmin ? sortRunIndex([...listAllRunIndex(), ...BENCHMARK_RUNS.list(true)]) : listOrganisationRunIndex(viewer.orgId);
+    return viewer.platformAdmin ? sortRunIndex([...listAllRunIndex(viewer), ...BENCHMARK_RUNS.list(true)]) : listOrganisationRunIndex(viewer.orgId);
   }
   return sortRunIndex([...listOperatorRunIndex(), ...BENCHMARK_RUNS.list(true)]);
 }
@@ -1649,7 +1702,7 @@ function resolveRunFile(id: string, viewer: Viewer | null): string | null {
   if (AUTH) {
     if (!PROJECTS_RUNTIME || !viewer) return null;
     return viewer.platformAdmin
-      ? PROJECTS_RUNTIME.store.findAnyRunTraceFile(id) ?? BENCHMARK_RUNS.resolve(id, true)
+      ? PROJECTS_RUNTIME.store.findAnyRunTraceFile(id, (orgId) => PROJECTS_RUNTIME.projects.auditRead(viewer, orgId, 'runs.trace')) ?? BENCHMARK_RUNS.resolve(id, true)
       : PROJECTS_RUNTIME.store.findOrgRunTraceFile(viewer.orgId, id);
   }
   const primary = join(RUNS_DIR, `${id}.json`);
@@ -1731,7 +1784,7 @@ function countsOf(path: string): { 1: number; 2: number; 3: number; total: numbe
   try {
     db = openReadOnly(path);
     const rows = db
-      .prepare(`SELECT tier, COUNT(*) as n FROM atom_types WHERE ${operatorRegistryPredicate(db)} GROUP BY tier`)
+      .prepare(`SELECT tier, COUNT(*) as n FROM atom_types WHERE ${unfoldedRegistryPredicate(db)} GROUP BY tier`)
       .all() as { tier: number; n: number }[];
     const out = { ...zero };
     for (const r of rows) {
@@ -1756,6 +1809,17 @@ function listRegistries(): RegistrySummary[] {
   }));
 }
 
+/**
+ * Shape a registry summary for its REQUESTER. The store's host path is
+ * operator information: the ungated developer and the platform admin read it
+ * whole; an organisation member gets the basename only — enough to label the
+ * store, nothing about the host's filesystem layout.
+ */
+function registrySummaryFor(registry: RegistrySummary, viewer: Viewer | null): RegistrySummary {
+  if (!AUTH || viewer?.platformAdmin) return registry;
+  return { ...registry, path: basename(registry.path) };
+}
+
 function dumpRegistry(id: string): { registry: RegistrySummary; types: RegistryType[] } | null {
   const entry = DBS.find((d) => d.id === id);
   if (!entry) return null;
@@ -1768,7 +1832,7 @@ function dumpRegistry(id: string): { registry: RegistrySummary; types: RegistryT
   const db = openReadOnly(entry.path);
   try {
     const rows = db
-      .prepare(`SELECT * FROM atom_types WHERE ${operatorRegistryPredicate(db)} ORDER BY tier ASC, ordinal ASC`)
+      .prepare(`SELECT * FROM atom_types WHERE ${unfoldedRegistryPredicate(db)} ORDER BY tier ASC, ordinal ASC`)
       .all() as Array<{
         tier: number;
         ordinal: number;
@@ -1786,7 +1850,7 @@ function dumpRegistry(id: string): { registry: RegistrySummary; types: RegistryT
 
     const versions = db
       .prepare(
-        `SELECT tier, ordinal, version, system_prompt, tools_json, params_json, modified_by, modified_at, reason FROM atom_type_versions WHERE ${operatorRegistryPredicate(db)} ORDER BY version ASC`
+        `SELECT tier, ordinal, version, system_prompt, tools_json, params_json, modified_by, modified_at, reason FROM atom_type_versions WHERE ${unfoldedRegistryPredicate(db)} ORDER BY version ASC`
       )
       .all() as Array<{
         tier: number;
@@ -1905,7 +1969,7 @@ function listSkillNamespaces(): SkillNamespaceSummary[] {
 }
 
 function listSkillsForL1(l1Name: string): SkillSummary[] {
-  const skills = skillRegistry.loadFor(l1Name);
+  const skills = skillRegistry.loadFor(resolveSkillNamespace(l1Name));
   return skills.map((s) => ({
     id: s.id,
     description: s.description,
@@ -1919,18 +1983,67 @@ function listSkillsForL1(l1Name: string): SkillSummary[] {
 }
 
 /**
+ * The kept identity an absorbed atom id folded into, from whichever exposed
+ * registry records the merge. Null when no registry knows the fold.
+ */
+function keptNamespaceFor(absorbedAtomId: string): string | null {
+  for (const reg of listRegistries()) {
+    if (!reg.exists) continue;
+    let db: Database.Database | null = null;
+    try {
+      db = new Database(reg.path, { readonly: true, fileMustExist: true });
+      if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='atom_id_merges'").get()) continue;
+      const row = db.prepare('SELECT kept_atom_id FROM atom_id_merges WHERE absorbed_atom_id = ?').get(absorbedAtomId) as
+        | { kept_atom_id: string }
+        | undefined;
+      if (row) return row.kept_atom_id;
+    } catch {
+      /* unreadable registry — try the next one */
+    } finally {
+      db?.close();
+    }
+  }
+  return null;
+}
+
+/**
+ * Follow atom_id_merges to the namespace a request's identity reads under NOW.
+ * A trace or bookmark carries the identity an atom HAD when the skill was
+ * learned; once the registry fold absorbed that identity, the recipes moved
+ * under the kept one and the historical URL dangles. Traces stay byte-honest,
+ * so the typed viz boundary resolves the alias rather than asking history to
+ * be rewritten. Chain-follows (A→B→C) behind a seen-set; an id with no folder
+ * and no merge row is returned unchanged so the caller answers its ordinary
+ * not-found.
+ */
+function resolveSkillNamespace(requested: string): string {
+  if (existsSync(join(SKILLS_DIR, requested))) return requested;
+  const seen = new Set([requested]);
+  let current = requested;
+  for (;;) {
+    const kept = keptNamespaceFor(current);
+    if (!kept || seen.has(kept)) return current;
+    seen.add(kept);
+    if (existsSync(join(SKILLS_DIR, kept))) return kept;
+    current = kept;
+  }
+}
+
+/**
  * Tools the named atom declares, read from whichever exposed registry holds
  * it. Needed to judge a skill body's scope; absent DB → empty, which makes
  * the shareability check skip its tool findings rather than invent them.
  */
 /** Resolve a namespace key back to the molecule's display name. */
 function displayNameForAtomId(atomId: string): string | null {
+  const published = skillRegistry.namespaceInfo(atomId);
+  if (published) return published.name;
   for (const reg of listRegistries()) {
     if (!reg.exists) continue;
     let db: Database.Database | null = null;
     try {
       db = new Database(reg.path, { readonly: true, fileMustExist: true });
-      const row = db.prepare(`SELECT name FROM atom_types WHERE ${operatorRegistryPredicate(db)} AND atom_id = ?`).get(atomId) as
+      const row = db.prepare(`SELECT name FROM atom_types WHERE ${unfoldedRegistryPredicate(db)} AND atom_id = ?`).get(atomId) as
         | { name: string }
         | undefined;
       if (row) return row.name;
@@ -1944,12 +2057,14 @@ function displayNameForAtomId(atomId: string): string | null {
 }
 
 function toolNamesForAtomId(atomName: string): string[] {
+  const published = skillRegistry.namespaceInfo(atomName);
+  if (published) return published.tools;
   for (const reg of listRegistries()) {
     if (!reg.exists) continue;
     let db: Database.Database | null = null;
     try {
       db = new Database(reg.path, { readonly: true, fileMustExist: true });
-      const row = db.prepare(`SELECT tools_json FROM atom_types WHERE ${operatorRegistryPredicate(db)} AND atom_id = ?`).get(atomName) as
+      const row = db.prepare(`SELECT tools_json FROM atom_types WHERE ${unfoldedRegistryPredicate(db)} AND atom_id = ?`).get(atomName) as
         | { tools_json: string }
         | undefined;
       if (row) return (JSON.parse(row.tools_json) as { name: string }[]).map((t) => t.name);
@@ -1966,7 +2081,12 @@ function getSkillById(
   l1Name: string,
   skillId: string
 ): (SkillSummary & { body: string; shareability: ShareAssessment }) | null {
-  const skills = skillRegistry.loadFor(l1Name);
+  // The namespace is resolved ONCE and drives every lookup below: the body
+  // lives under the kept identity, and so do the declared tools the
+  // shareability check judges the body against — an absorbed id has neither
+  // its folder nor its registry row anymore.
+  const namespace = resolveSkillNamespace(l1Name);
+  const skills = skillRegistry.loadFor(namespace);
   const found = skills.find((s) => s.id === skillId);
   if (!found) return null;
   return {
@@ -1983,7 +2103,7 @@ function getSkillById(
     // reads a skill. Same data as `npm run skills -- review`; surfacing the
     // verdict here follows the viz's own rule that a card should show the
     // DECISION, not just the artefact.
-    shareability: assessShareability({ skill: found, ownerToolNames: toolNamesForAtomId(l1Name) }),
+    shareability: assessShareability({ skill: found, ownerToolNames: toolNamesForAtomId(namespace) }),
   };
 }
 
@@ -2114,7 +2234,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         return;
       }
       if (!providerId) {
-        sendAuthHtml(res, 200, loginPage(undefined, invitationToken ?? undefined));
+        sendAuthHtml(res, 200, loginPage(undefined, invitationToken ?? undefined, url.searchParams.get('select_account') === '1'));
         return;
       }
       const provider = authProvider(providerId);
@@ -2172,6 +2292,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         redirectUri: AUTH_RUNTIME.redirectUri,
         state,
         codeChallenge: pkce.challenge,
+        selectAccount: url.searchParams.get('select_account') === '1',
       });
       writeAuthRedirect(
         res,
@@ -2650,17 +2771,15 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       return;
     }
 
-    // OPERATOR SURFACES. The registry, skill store and burn-in APIs are
-    // instance-global: org runs mutate the shared registry and these routes
-    // read it in full (atom names, system prompts, skill bodies). Behind the
-    // org gate they belong to the PLATFORM ADMIN alone — an invitation must
-    // not grant read access to operator-level state (review 2026-08-20 §2.2).
-    const operatorApi =
-      pathname === '/api/registries' ||
-      pathname.startsWith('/api/registry/') ||
-      pathname === '/api/skills' ||
-      pathname.startsWith('/api/skills/') ||
-      pathname === '/api/burnin';
+    // OPERATOR SURFACES. Burn-in is instance-global operator state; behind the
+    // org gate it belongs to the PLATFORM ADMIN alone — an invitation must not
+    // grant read access to operator-level state (review 2026-08-20 §2.2).
+    // The registry readers left this list on 2026-09-15, as the skill readers
+    // did: there is ONE registry and ONE trust for every run on the platform
+    // (`docs/platform-trust-2026-09-15.md`), so what a member reads here is
+    // exactly what their own runs read and earn on. `registrySummaryFor`
+    // redacts the store's host path for non-admins.
+    const operatorApi = pathname === '/api/burnin';
     if (operatorApi && !viewer.platformAdmin) {
       sendJson(res, 403, { error: 'platform admin required' });
       return;
@@ -2688,9 +2807,15 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       return HOST_SUBSCRIPTION_FAMILIES.map((family) => ({ family }));
     };
 
-    const subscriptionPayload = (): Record<string, unknown> => {
+    const subscriptionPayload = async (): Promise<Record<string, unknown>> => {
       const offers = hostSubscriptionOffers();
       return {
+        personalCodexModels: roleAtLeast(viewer.role, 'org:member')
+          ? await ACCOUNT_SUBSCRIPTIONS?.codexModels(
+              viewer.principalId, url.searchParams.get('refresh') === '1',
+              PROJECTS_RUNTIME?.coordinator.hasActiveRunForPrincipal(viewer.principalId) ?? false
+            ) ?? UNAVAILABLE_CODEX_MODELS
+          : UNAVAILABLE_CODEX_MODELS,
         personalSubscriptions: {
           codex:
             roleAtLeast(viewer.role, 'org:member') &&
@@ -2834,7 +2959,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           // pin without one falls through at run time, so the picker greys
           // the family instead of offering a dormant choice.
           ollamaAvailable: Boolean(process.env['OLLAMA_BASE_URL']?.trim()),
-          ...subscriptionPayload(),
+          ...await subscriptionPayload(),
         });
         return;
       }
@@ -2910,6 +3035,18 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           return;
         }
         const before = authStore.modelPins(viewer.principalId);
+        if (requested && typeof requested === 'object') {
+          const changes = Object.entries(requested).filter(([tier, value]) =>
+            value !== before[tier as keyof typeof before]
+          ).map(([, value]) => typeof value === 'string' ? value : null);
+          if (changes.some((value) => value && isPrincipalSubscriptionSelection(value))) {
+            const inventory = await ACCOUNT_SUBSCRIPTIONS?.codexModels(viewer.principalId) ?? UNAVAILABLE_CODEX_MODELS;
+            try { assertPersonalCodexModels(changes, inventory); } catch (error) {
+              sendJson(res, 409, { error: error instanceof Error ? error.message : 'ChatGPT models unavailable' });
+              return;
+            }
+          }
+        }
         const pins = authStore.setModelPins(viewer.principalId, requested);
         // Journaled at the moment of the CHOICE. The run rows that follow are
         // written by whoever launches, which may be someone else entirely, so
@@ -2935,7 +3072,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           defaults: operatorTierDefaults(process.env),
           catalog: LLM_PROVIDER_CATALOG,
           ollamaAvailable: Boolean(process.env['OLLAMA_BASE_URL']?.trim()),
-          ...subscriptionPayload(),
+          ...await subscriptionPayload(),
         });
       } catch {
         sendJson(res, 400, { error: 'each tier must be null or one of the offered models' });
@@ -3105,6 +3242,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         name: organisation.name,
         createdAt: organisation.createdAt,
         viewerRole: viewer.role,
+        runCapacity: PROJECTS_RUNTIME?.store.runCapacity(viewer.orgId) ?? null,
         members: organisation.members.map((member) => ({
           principalId: member.principalId,
           displayName: member.displayName,
@@ -3279,7 +3417,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         // `readLedgerTail` is bounded, newest-first and fail-open: a store
         // without the table reads empty rather than 500-ing the admin surface.
         sendJson(res, 200, {
-          events: readLedgerTail(limit, openStoreHandle(DBS[0]!.path, LEDGER_TABLE_DDL)),
+          events: readLedgerTail(limit, openLedgerHandle(DBS[0]!.path)),
         });
         return;
       }
@@ -3707,7 +3845,12 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         return;
       }
       if (req.method === 'GET') {
-        sendJson(res, 200, PROJECTS_RUNTIME.projects.listProjects(viewer));
+        try {
+          sendJson(res, 200, PROJECTS_RUNTIME.projects.listProjects(viewer));
+        } catch (error) {
+          if (!(error instanceof ProjectHttpError)) throw error;
+          sendJson(res, error.status, { error: error.message });
+        }
         return;
       }
       if (req.method === 'POST') {
@@ -3970,7 +4113,11 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
   }
 
   if (pathname === '/api/runs') {
-    sendJson(res, 200, listIndex(AUTH?.resolve(req) ?? null));
+    try { sendJson(res, 200, listIndex(AUTH?.resolve(req) ?? null)); }
+    catch (error) {
+      if (!(error instanceof ProjectHttpError)) throw error;
+      sendJson(res, error.status, { error: error.message });
+    }
     return;
   }
 
@@ -3980,7 +4127,13 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       sendJson(res, 400, { error: 'bad id' });
       return;
     }
-    const file = resolveRunFile(id, AUTH?.resolve(req) ?? null);
+    let file: string | null;
+    try { file = resolveRunFile(id, AUTH?.resolve(req) ?? null); }
+    catch (error) {
+      if (!(error instanceof ProjectHttpError)) throw error;
+      sendJson(res, error.status, { error: error.message });
+      return;
+    }
     if (!file) {
       sendJson(res, 404, { error: 'not found' });
       return;
@@ -4051,7 +4204,8 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
   }
 
   if (pathname === '/api/registries') {
-    sendJson(res, 200, listRegistries());
+    const viewer = AUTH?.resolve(req) ?? null;
+    sendJson(res, 200, listRegistries().map((registry) => registrySummaryFor(registry, viewer)));
     return;
   }
 
@@ -4116,7 +4270,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         sendJson(res, 404, { error: 'unknown registry id', id });
         return;
       }
-      sendJson(res, 200, dump);
+      sendJson(res, 200, { ...dump, registry: registrySummaryFor(dump.registry, AUTH?.resolve(req) ?? null) });
     } catch (err) {
       sendJson(res, 500, { error: (err as Error).message });
     }

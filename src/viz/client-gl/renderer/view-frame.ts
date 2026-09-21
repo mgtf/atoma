@@ -26,6 +26,8 @@ export const VIEW_FRAME_TITLE_SIZE = 16;
 export const VIEW_FRAME_CONTENT_TOP = 46;
 /** How far the subtitle sits from the title's own left edge. */
 const SUBTITLE_X = 200;
+/** Narrow columns: the gap between the measured title and its subtitle. */
+const SUBTITLE_TITLE_GAP = 12;
 
 export interface ViewFrame {
   readonly x: number;
@@ -126,22 +128,37 @@ export function drawViewFrame(
     2
   );
   surface.label = 'view-frame-primary';
-  ctx.text(ctx.root, title, frame.innerX, frame.y + VIEW_FRAME_TITLE_Y, {
+  const titleStyle = {
     size: VIEW_FRAME_TITLE_SIZE,
     weight: '700',
+  } as const;
+  const fittedTitle = ctx.fitText(title, frame.innerWidth, titleStyle);
+  ctx.text(ctx.root, fittedTitle, frame.innerX, frame.y + VIEW_FRAME_TITLE_Y, {
+    ...titleStyle,
+    width: frame.innerWidth,
+    singleLine: true,
   });
   if (subtitle) {
-    const compact = frame.innerWidth < SUBTITLE_X + 100;
+    const subtitleY = frame.y + VIEW_FRAME_TITLE_Y + 5;
+    const subtitleStyle = { size: 11, color: GPU_COLORS.muted } as const;
+    // A narrow column (a phone) keeps the subtitle ON THE TITLE LINE, measured
+    // from the title's own width and ellipsised to what is left. It used to
+    // stack under the title, which put it exactly where
+    // `VIEW_FRAME_CONTENT_TOP` starts the content — and the DOM project form
+    // sits there, so the count was drawn under the form (2026-09-15).
+    const titleWidth = ctx.measureText(fittedTitle, titleStyle);
+    const subtitleX = frame.innerX + Math.max(
+      titleWidth + SUBTITLE_TITLE_GAP,
+      frame.innerWidth >= SUBTITLE_X + 100 ? SUBTITLE_X : 0
+    );
+    const available = Math.max(0, frame.innerX + frame.innerWidth - subtitleX);
+    if (available === 0) return;
     ctx.text(
       ctx.root,
-      subtitle,
-      compact ? frame.innerX : frame.innerX + SUBTITLE_X,
-      frame.y + VIEW_FRAME_TITLE_Y + (compact ? 22 : 5),
-      {
-        size: 11,
-        color: GPU_COLORS.muted,
-        width: compact ? frame.innerWidth : Math.max(0, frame.innerWidth - SUBTITLE_X),
-      }
+      ctx.fitText(subtitle, available, subtitleStyle),
+      subtitleX,
+      subtitleY,
+      { ...subtitleStyle, width: available, singleLine: true }
     );
   }
 }

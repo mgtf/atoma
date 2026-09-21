@@ -198,11 +198,13 @@ export const launcherWorkspaceHandleSchema = z
     ownerId: launcherOwnerIdSchema,
     id: z.string().min(1).max(255),
     /**
-     * Where the caller writes. Present only while the backend is host-local;
-     * a volume-backed backend hands back an id the caller streams into
-     * instead. Callers must treat its absence as normal.
+     * Where the caller writes the shared file projection. This is not mount authority;
+     * the launcher mounts the issued volume, never this caller-supplied field. A backend
+     * without a shared projection may omit it.
      */
     hostPath: z.string().min(1).max(4096).optional(),
+    /** Issued volume identity; hostPath is only its shared file projection. */
+    volume: z.string().min(1).max(255).optional(),
   })
   .strict();
 
@@ -226,6 +228,12 @@ export const launcherUnitSummarySchema = z
   })
   .strict();
 
+/** Numeric ownership required when the caller fills a preview workspace. */
+export const launcherPreviewOwnershipSchema = z
+  .object({ uid: z.number().int().nonnegative(), gid: z.number().int().nonnegative() })
+  .strict();
+export type LauncherPreviewOwnership = z.infer<typeof launcherPreviewOwnershipSchema>;
+
 export type LauncherOwnerId = z.infer<typeof launcherOwnerIdSchema>;
 export type LauncherUnitKind = z.infer<typeof launcherUnitKindSchema>;
 export type LauncherNetworkKind = z.infer<typeof launcherNetworkKindSchema>;
@@ -246,6 +254,9 @@ export type LauncherWorkspaceHandle = z.infer<typeof launcherWorkspaceHandleSche
  * escape hatch: each one would reopen Invariant 2.
  */
 export interface ContainerLauncher {
+  /** Release a transport when its caller is finished. Local backends need none. */
+  close?(): void | Promise<void>;
+
   /**
    * The engine-side name an owner's object WILL have, without creating it.
    *
@@ -281,10 +292,10 @@ export interface ContainerLauncher {
    * Kubernetes `ownerReferences` — implements this as a no-op, which is
    * precisely the kind of difference the swap is meant to absorb.
    */
-  armHardExitCleanup(family: LauncherFamily, ownerId: LauncherOwnerId): void;
+  armHardExitCleanup(family: LauncherFamily, ownerId: LauncherOwnerId): void | Promise<void>;
 
   /** Disarm it, once every object for that owner is provably gone. */
-  disarmHardExitCleanup(family: LauncherFamily, ownerId: LauncherOwnerId): void;
+  disarmHardExitCleanup(family: LauncherFamily, ownerId: LauncherOwnerId): void | Promise<void>;
 
   /**
    * Create one network for one owner. Creation only: the caller decides when
@@ -300,6 +311,13 @@ export interface ContainerLauncher {
    * is how durable objects leak.
    */
   removeNetwork(handle: LauncherNetworkHandle): Promise<boolean>;
+
+  /**
+   * The same removal against an absolute wall-clock deadline (milliseconds
+   * since the Unix epoch), shared by every removal in the caller's teardown.
+   * Expiry returns false; it must never renew the budget for the next network.
+   */
+  removeNetworkBefore(handle: LauncherNetworkHandle, deadlineMs: number): Promise<boolean>;
 
   /**
    * Start one unit from its profile, attached to the networks named by
@@ -329,6 +347,13 @@ export interface ContainerLauncher {
    * launcher decides where it lives and is the only thing that mounts it.
    */
   createWorkspace(ownerId: LauncherOwnerId): Promise<LauncherWorkspaceHandle>;
+
+  /**
+   * Launcher-selected ownership for a root-side preview copy, or null when
+   * no ownership change is required. This reports profile policy; callers
+   * cannot choose the unit's identity through this operation.
+   */
+  previewOwnership(): LauncherPreviewOwnership | null;
 
   /** Remove it and everything in it. Safe to call twice. */
   removeWorkspace(handle: LauncherWorkspaceHandle): Promise<void>;

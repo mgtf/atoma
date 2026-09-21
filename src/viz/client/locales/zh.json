@@ -1127,5 +1127,18 @@
   "depth.entry.deep": "从一个监督细胞和分子的组织开始。",
   "depth.entry.short": "从一个监督分子的细胞开始。",
   "depth.deepening": "入口细胞已用尽重试次数。改由组织监督重新开始。",
-  "depth.coverage": "{{total}}项交付义务中已覆盖{{covered}}项"
+  "depth.coverage": "{{total}}项交付义务中已覆盖{{covered}}项",
+  "welcome.handheld.blocked": "暂不支持移动设备",
+  "welcome.handheld.hint": "Atoma 的手机和平板版本仍在完善中。你可以继续使用全部功能，但部分页面在移动设备上可能尚未正常适配。",
+  "welcome.handheld.continue": "至少让我访问我的账户",
+  "settings.runCapacity": "并发 run 数",
+  "settings.runCapacityValue": "{{active}} 个活跃 / 允许 {{limit}} 个（此主机一次只能运行一个 run）",
+  "auth.switchAccount": "切换账号",
+  "settings.refreshModels": "刷新ChatGPT模型",
+  "settings.modelCatalogue.ready": "由已连接的ChatGPT账户报告的模型。",
+  "settings.modelCatalogue.stale": "刷新失败。当前显示的是此前报告的模型，但无法选择。",
+  "settings.modelCatalogue.unavailable": "ChatGPT模型目录不可用。请刷新后重试。",
+  "settings.modelUnavailable": "{{model}}—不可用",
+  "settings.mcpConnectAnother": "连接其他客户端",
+  "settings.mcpHideSetup": "隐藏设置指南"
 }

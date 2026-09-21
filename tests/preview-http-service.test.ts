@@ -14,7 +14,7 @@ import { PreviewRouteTable } from '../src/preview/gatewayServer.js';
 import { PreviewManager } from '../src/preview/manager.js';
 import { PreviewHttpService } from '../src/preview/httpService.js';
 import { recordDeliveredPreview } from '../src/preview/service.js';
-import { DockerLauncher } from '../src/launcher/docker.js';
+import { createContainerLauncher } from '../src/launcher/docker.js';
 import type { PreviewCopyOwnership } from '../src/preview/policy.js';
 import type { PreviewConfig } from '../src/preview/config.js';
 import type {
@@ -61,6 +61,13 @@ const config: PreviewConfig = {
 };
 
 class WorkspaceOnlyLauncher implements ContainerLauncher {
+  previewOwnership(): null {
+    return null;
+  }
+  async removeNetworkBefore(): Promise<boolean> {
+    return true;
+  }
+
   constructor(private readonly rootDir: string) {}
   networkName(spec: LauncherNetworkSpec): string {
     return `net-${spec.kind}-${spec.ownerId}`;
@@ -648,8 +655,17 @@ describe('joining a preview generation', () => {
 
 describe('root-owned Node preview copies', () => {
   it.each([false, true])('hands private copied files to the container uid (inFlight=%s)', async (inFlight) => {
-    vi.spyOn(process, 'getuid').mockReturnValue(0);
-    const ownership = new DockerLauncher({ image: config.image }).previewOwnership();
+    // Windows has no getuid to spy on; simulate the root host only while
+    // constructing the launcher, then restore the actual platform surface.
+    const getuid = Object.getOwnPropertyDescriptor(process, 'getuid');
+    let ownership: ReturnType<ContainerLauncher['previewOwnership']>;
+    try {
+      Object.defineProperty(process, 'getuid', { configurable: true, value: () => 0 });
+      ownership = createContainerLauncher({ image: config.image }).previewOwnership();
+    } finally {
+      if (getuid) Object.defineProperty(process, 'getuid', getuid);
+      else Reflect.deleteProperty(process, 'getuid');
+    }
     expect(ownership?.uid).toBeGreaterThan(0);
     const a = actor('root');
     const p = seedProject(a, 'root');

@@ -14,6 +14,8 @@ npm run viz:shot -- --auth                          # logged-in member, Projects
 npm run viz:shot -- --auth --repository-mode fork   # existing-repository creation form
 npm run viz:shot -- --auth --select-first           # first project selected: run list + run form
 npm run viz:shot -- --auth --view Runs              # any nav tab by its label
+npm run viz:shot -- --auth --view Skills --select-first # member reads a shared recipe
+npm run viz:shot -- --auth --view Registry --select-first # member reads a shared agent type
 npm run viz:shot -- --auth --view Settings          # account menu, not a rail tab
 npm run viz:shot -- --auth --view Settings --scroll-end  # org directory at the foot of the form
 npm run viz:shot -- --auth --camera overview        # neutral, undeformed whole-scene pose
@@ -23,10 +25,18 @@ npm run viz:shot -- --out /tmp/before.png           # explicit destination
 npm run viz:shot -- --url http://127.0.0.1:5173     # attach to a dev stack already running
 npm run viz:shot -- --debug                         # page console + failed requests on stderr
 npm run viz:shot -- --width 528 --height 800        # narrow/compact layouts
+npm run viz:shot -- --auth --select-first --touch-probe  # native mobile swipe regression
+npm run viz:shot -- --handheld                      # phone: direct login or authenticated project entry
 ```
 
 PNGs default to `screenshots/<view>-<auth-mode>-<camera>.png` (git-ignored). Viewport
 defaults to 1600×900 at deviceScaleFactor 2.
+
+`--touch-probe` requires `--auth --select-first` on Projects. It resizes to
+390×600, checks the compact rail, and sends native Chrome touch events over a
+run row. The list must move without opening the run. The captured image shows
+the result after scrolling. Use `--camera overview` or `--camera focus` to
+exercise either camera pose. The same probe is part of `viz:smoke`.
 
 ## What each mode renders
 
@@ -44,6 +54,11 @@ defaults to 1600×900 at deviceScaleFactor 2.
   (+ commit receipt), failed (+ error line) and cost display. `/api/runs` and
   its trace are stubbed too, so `--view Runs` renders a full run: summary card
   with the metric tiles, branch filter chips, and a two-phase forked timeline.
+- **`--handheld`** — emulates a phone (390×844, DPR 3, native touch). Captures
+  `<out>-gate.png` and taps the real canvas entry control. Anonymous entry
+  must reach the OAuth route (intercepted before external sign-in); with
+  `--auth`, entry must reach the project form without a disclaimer and writes
+  `<out>-projects.png`. The pointer-capability media query must match.
 - **`--select-first`** — clicks the first project row through the canvas hit
   targets (`?atomaDiag=1`), so the expanded run list and the run form render.
 - **`--scroll-end`** — Settings only: scrolls `.gpu-org-models-form` to its

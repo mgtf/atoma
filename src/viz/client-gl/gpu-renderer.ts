@@ -272,6 +272,8 @@ export const NAV_HOVER_SCALE = 1.045;
  * as hanging out of the row it belonged to.
  */
 export const BUTTON_LABEL_INSET = 10;
+/** Minimum vertical finger travel before the touch scroll router engages. */
+export const TOUCH_SCROLL_SLOP_PX = 6;
 /**
  * A button label at rest. Buttons are now BUILT at `GPU_COLORS.text` and
  * tinted down to this, rather than built dim and re-coloured on hover: hover
@@ -280,6 +282,8 @@ export const BUTTON_LABEL_INSET = 10;
  */
 const BUTTON_LABEL_IDLE = 0xa9b5ca;
 const BUTTON_LABEL_IDLE_TINT = multiplyTint(GPU_COLORS.text, BUTTON_LABEL_IDLE);
+/** A disabled button stays legible — it is saying why it cannot be used. */
+const BUTTON_DISABLED_ALPHA = 0.62;
 const FPS_BITMAP_FONT_NAME = 'AtomaFps';
 const FPS_BITMAP_FONT_CACHE_KEY = `${FPS_BITMAP_FONT_NAME}-bitmap`;
 const FPS_BITMAP_STYLE = new TextStyle({
@@ -525,6 +529,22 @@ export class GpuRenderer {
   private avatarOrbsRetained = new Set<string>();
   private host: HTMLElement | null = null;
   private initialized = false;
+  private suspended = false;
+  private pendingSnapshot: GpuRenderSnapshot | null = null;
+
+  private readonly syncRenderActivity = () => {
+    const suspended = document.hidden || !document.hasFocus();
+    this.suspended = suspended;
+    if (suspended) {
+      this.app.stop();
+      return;
+    }
+    if (!this.initialized) return;
+    const pending = this.pendingSnapshot;
+    this.pendingSnapshot = null;
+    if (pending) this.render(pending, true);
+    this.app.start();
+  };
   private snapshot: GpuRenderSnapshot | null = null;
   /** The current bounded timeline window; dropped before scene teardown. */
   runsScroll: { origin: number; min: number; max: number; move: (offset: number) => void } | null = null;
@@ -704,11 +724,81 @@ export class GpuRenderer {
   private readonly wheel = (event: WheelEvent) => {
     if (!this.snapshot) return;
     event.preventDefault();
+    this.scrollAt(event.clientX, event.clientY, event.deltaY, event.shiftKey);
+  };
+
+  /**
+   * A one-finger vertical drag on the canvas scrolls whatever pane sits under
+   * the point the finger LANDED on — the pane is resolved once, from the
+   * start point, so a finger that wanders over a neighbouring pane keeps
+   * driving the one it began in, as a native scroller would.
+   *
+   * The finger's travel is converted through the live camera before it
+   * becomes a scroll delta: under the zoomed focus pose one client pixel is
+   * less than one scene pixel, and the content must stay glued to the finger
+   * in the SCENE, not slide faster than it.
+   *
+   * `touch-action: pan-y` on the canvas is the other half of this gesture.
+   * It lets the browser recognise the drag as a pan and fire `pointercancel`,
+   * which is what stops Pixi from reporting a tap on the row the finger began
+   * on when it lifts. These listeners are passive: they never cancel the
+   * browser's own gesture, they only read it.
+   */
+  private touchScroll: {
+    readonly id: number;
+    readonly startX: number;
+    readonly startY: number;
+    lastY: number;
+    armed: boolean;
+  } | null = null;
+
+  private readonly touchStart = (event: TouchEvent) => {
+    if (event.touches.length !== 1) {
+      this.touchScroll = null;
+      return;
+    }
+    const touch = event.touches[0]!;
+    this.touchScroll = {
+      id: touch.identifier,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      lastY: touch.clientY,
+      armed: false,
+    };
+  };
+
+  private readonly touchMove = (event: TouchEvent) => {
+    const drag = this.touchScroll;
+    if (!drag || !this.snapshot) return;
+    const touch = Array.from(event.changedTouches).find((t) => t.identifier === drag.id);
+    if (!touch) return;
+    if (!drag.armed) {
+      if (Math.abs(touch.clientY - drag.startY) < TOUCH_SCROLL_SLOP_PX) return;
+      drag.armed = true;
+    }
+    const from = this.clientToRendererPosition(drag.startX, drag.lastY);
+    const to = this.clientToRendererPosition(drag.startX, touch.clientY);
+    drag.lastY = touch.clientY;
+    const delta = from.y - to.y;
+    if (delta !== 0) this.scrollAt(drag.startX, drag.startY, delta, false);
+  };
+
+  private readonly touchEnd = () => {
+    this.touchScroll = null;
+  };
+
+  /**
+   * ONE scroll router for wheel ticks and touch drags. `clientX/Y` name the
+   * pane (welcome turn slider, notification tray, run picker, detail pane, or
+   * the current view); `deltaY` is in renderer pixels, positive downwards.
+   */
+  private scrollAt(clientX: number, clientY: number, deltaY: number, shiftKey: boolean) {
+    if (!this.snapshot) return;
     if (!this.snapshot.state.entered && this.turnSliderBounds) {
-      const local = this.clientToRendererPosition(event.clientX, event.clientY);
+      const local = this.clientToRendererPosition(clientX, clientY);
       if (this.turnSliderBounds.contains(local.x, local.y)) {
-        const step = event.shiftKey ? 10 : 1;
-        const delta = event.deltaY > 0 ? step : event.deltaY < 0 ? -step : 0;
+        const step = shiftKey ? 10 : 1;
+        const delta = deltaY > 0 ? step : deltaY < 0 ? -step : 0;
         if (delta !== 0) {
           pinMarkTurnDegrees((markTurnDegrees() + delta + 360) % 360);
         }
@@ -717,13 +807,13 @@ export class GpuRenderer {
     }
     if (this.snapshot.state.notificationsMenuOpen && this.notificationsBounds) {
       const { x: localX, y: localY } = this.clientToRendererPosition(
-        event.clientX,
-        event.clientY
+        clientX,
+        clientY
       );
       if (this.notificationsBounds.contains(localX, localY)) {
         const next = Math.max(
           0,
-          Math.min(this.notificationsScrollMax, this.notificationsScrollY + event.deltaY)
+          Math.min(this.notificationsScrollMax, this.notificationsScrollY + deltaY)
         );
         if (next !== this.notificationsScrollY) {
           this.notificationsScrollY = next;
@@ -732,7 +822,7 @@ export class GpuRenderer {
         // The bottom of the tray asks for the older page, exactly the
         // journal's gesture: announced through the activation channel, where
         // the handler is idempotent against a fetch already in flight.
-        if (event.deltaY > 0 && next >= this.notificationsScrollMax) {
+        if (deltaY > 0 && next >= this.notificationsScrollMax) {
           this.snapshot.onActivate('notifications.more');
         }
         return;
@@ -743,14 +833,14 @@ export class GpuRenderer {
       this.runPickerBounds
     ) {
       const { x: localX, y: localY } = this.clientToRendererPosition(
-        event.clientX,
-        event.clientY
+        clientX,
+        clientY
       );
       if (this.runPickerBounds.contains(localX, localY)) {
         const current = this.snapshot.state.runPickerScrollY;
         const next = Math.max(
           0,
-          Math.min(this.runPickerScrollMax, current + event.deltaY)
+          Math.min(this.runPickerScrollMax, current + deltaY)
         );
         this.snapshot.onRunPickerScroll(next - current);
         return;
@@ -758,13 +848,13 @@ export class GpuRenderer {
     }
     if (this.detailBounds) {
       const { x: localX, y: localY } = this.clientToRendererPosition(
-        event.clientX,
-        event.clientY
+        clientX,
+        clientY
       );
       if (this.detailBounds.contains(localX, localY)) {
         const next = Math.max(
           0,
-          Math.min(this.detailScrollMax, this.detailScrollY + event.deltaY)
+          Math.min(this.detailScrollMax, this.detailScrollY + deltaY)
         );
         if (next !== this.detailScrollY) {
           this.detailScrollY = next;
@@ -779,7 +869,7 @@ export class GpuRenderer {
     // scroll. Every draw sets its own max (Infinity here let Registry and
     // Skills wheel into the void — 2026-08-14 review).
     const maximum = this.scrollMax[view] ?? 0;
-    const next = Math.max(0, Math.min(maximum, current + event.deltaY));
+    const next = Math.max(0, Math.min(maximum, current + deltaY));
     this.snapshot.onScroll(view, next - current);
     // REACHED THE BOTTOM. The wheel handler is the only place that knows a
     // view's scroll maximum, so it is the only place that can say a downward
@@ -787,10 +877,10 @@ export class GpuRenderer {
     // in order to ask for the next page. Announced through the ordinary
     // activation channel rather than a second callback; the handler makes it
     // idempotent (a fetch already in flight, or no next page, is a no-op).
-    if (event.deltaY > 0 && maximum > 0 && next >= maximum) {
+    if (deltaY > 0 && maximum > 0 && next >= maximum) {
       this.snapshot.onActivate(`scroll.end.${view}`);
     }
-  };
+  }
 
   /**
    * The tuning drag lives on the CANVAS, not on the row.
@@ -1030,6 +1120,7 @@ export class GpuRenderer {
   };
 
   private readonly renderCameraFrame = () => {
+    if (this.suspended) return;
     // The mark has published this frame's optics. Idle chrome pays no field
     // tick, layout read or draw; an illuminated gem reuses the one receiver.
     this.setFarFieldActive(this.farFieldScenery || readMarkFieldLight().length > 0 ||
@@ -1102,6 +1193,7 @@ export class GpuRenderer {
     const antialias = params.get('atomaQuality') !== 'performance';
     try {
       await this.app.init({
+        autoStart: false,
         resizeTo: host,
         preference: forceWebGl ? ['webgl'] : ['webgpu', 'webgl'],
         antialias,
@@ -1115,6 +1207,7 @@ export class GpuRenderer {
       this.app.destroy();
       this.app = new Application();
       await this.app.init({
+        autoStart: false,
         resizeTo: host,
         preference: ['webgl'],
         antialias,
@@ -1195,6 +1288,11 @@ export class GpuRenderer {
     // eslint-disable-next-line @typescript-eslint/unbound-method -- The ticker supplies the Application context.
     this.app.ticker.add(this.app.render, this.app, UPDATE_PRIORITY.LOW);
     this.app.canvas.addEventListener('wheel', this.wheel, { passive: false });
+    // Touch scrolling reads the browser's pan; it never cancels it (passive).
+    this.app.canvas.addEventListener('touchstart', this.touchStart, { passive: true });
+    this.app.canvas.addEventListener('touchmove', this.touchMove, { passive: true });
+    this.app.canvas.addEventListener('touchend', this.touchEnd, { passive: true });
+    this.app.canvas.addEventListener('touchcancel', this.touchEnd, { passive: true });
     // On window, not the canvas: a drag that wanders off the canvas must keep
     // tracking, and its release must disarm wherever it happens. Tuning and
     // the welcome turn slider share these listeners — both hold a KEY (or a
@@ -1269,6 +1367,10 @@ export class GpuRenderer {
       };
     }
     this.initialized = true;
+    window.addEventListener('focus', this.syncRenderActivity);
+    window.addEventListener('blur', this.syncRenderActivity);
+    document.addEventListener('visibilitychange', this.syncRenderActivity);
+    this.syncRenderActivity();
   }
 
   destroy() {
@@ -1280,6 +1382,12 @@ export class GpuRenderer {
     // destroyed Application (2026-08-27, 3.14). One frame wide, and reachable
     // every HMR reload. Nulling it here is what makes those guards false.
     this.snapshot = null;
+    this.pendingSnapshot = null;
+    this.suspended = true;
+    this.app.stop();
+    window.removeEventListener('focus', this.syncRenderActivity);
+    window.removeEventListener('blur', this.syncRenderActivity);
+    document.removeEventListener('visibilitychange', this.syncRenderActivity);
     this.runsScroll = null;
     this.cameraFrameUnsubscribe?.();
     this.cameraFrameUnsubscribe = null;
@@ -1331,6 +1439,11 @@ export class GpuRenderer {
     }
     this.animatedLayers.clear();
     this.app.canvas.removeEventListener('wheel', this.wheel);
+    this.app.canvas.removeEventListener('touchstart', this.touchStart);
+    this.app.canvas.removeEventListener('touchmove', this.touchMove);
+    this.app.canvas.removeEventListener('touchend', this.touchEnd);
+    this.app.canvas.removeEventListener('touchcancel', this.touchEnd);
+    this.touchScroll = null;
     window.removeEventListener('pointermove', this.tuningPointerMove);
     window.removeEventListener('pointerup', this.tuningPointerUp);
     window.removeEventListener('pointercancel', this.tuningPointerUp);
@@ -1357,6 +1470,12 @@ export class GpuRenderer {
    * it also samples saturates at vsync and cannot show this.
    */
   render(snapshot: GpuRenderSnapshot, forceRebuild = false) {
+    // Keep only the latest data while inactive; rebuilding can itself upload
+    // textures. Camera callbacks are gated separately from the Pixi ticker.
+    if (this.suspended) {
+      this.pendingSnapshot = snapshot;
+      return;
+    }
     const startedAt = performance.now();
     try {
       if (forceRebuild || !this.tryScrollRuns(snapshot)) this.renderScene(snapshot);
@@ -2882,10 +3001,17 @@ export class GpuRenderer {
     /** Optional top offset for compound buttons that draw secondary copy. */
     labelY?: number,
     /** Accessible name when the visual label is a spinner glyph. */
-    accessibleLabel?: string
+    accessibleLabel?: string,
+    /**
+     * Drawn but inert: no tap, no hover, dimmed. The handheld gate's pressed
+     * Continue is the one caller today — a control that must stay readable
+     * while it says it can no longer be used.
+     */
+    disabled = false
   ) {
     const container = new Container();
     container.position.set(x, y);
+    if (disabled) container.alpha = BUTTON_DISABLED_ALPHA;
     this.addSurfaceShadow(container, width, height, {
       radius: 7,
       alpha: 0.4,
@@ -2938,11 +3064,13 @@ export class GpuRenderer {
         });
       }
     }
-    container.eventMode = 'static';
+    // `eventMode = 'none'` is the disabled state: no tap, and no hover tint
+    // either, so the control cannot look live under a finger.
+    container.eventMode = disabled ? 'none' : 'static';
     container.cursor = spinning ? 'wait' : 'pointer';
     container.hitArea = new Rectangle(0, 0, width, height);
     container.on('pointertap', () => {
-      if (spinning) return;
+      if (spinning || disabled) return;
       onActivate(id);
     });
     container.on('pointerover', () => {

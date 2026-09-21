@@ -34,6 +34,12 @@ import {
 } from '../pointer-light.js';
 import { markBeadVisible, markClockIsPinned, markElapsedMs } from './mark-clock.js';
 import { createMarkShell } from './mark-shell.js';
+import {
+  MARK_SURGE,
+  markCoreSurge,
+  markSurgeGain,
+  writeMarkCoreScreen,
+} from './mark-surge.js';
 import { prefersReducedMotion } from './motion.js';
 import { VIZ_VISUAL_DEPTH } from '../visual-depth.js';
 import { ATOMA_CURSOR_HOTSPOT, atomaCursorPoints } from '../pointer-cursor.js';
@@ -394,7 +400,9 @@ function fieldSpillsToSample(
   container: { x: number; y: number },
   scale: number,
   radiusPx: number,
-  projection: MarkProjection
+  projection: MarkProjection,
+  /** The surge's field multiplier; 1 at rest. */
+  intensityGain = 1
 ) {
   return spills.map((spill) => {
     const rgb = markColorToRgb(spill.color);
@@ -410,7 +418,7 @@ function fieldSpillsToSample(
       r: rgb.r,
       g: rgb.g,
       b: rgb.b,
-      intensity: spill.intensity,
+      intensity: spill.intensity * intensityGain,
     };
   });
 }
@@ -739,6 +747,7 @@ export function attachAtomaMark(
   let observedScreenW = Number.NaN;
   let observedScreenH = Number.NaN;
   let observedPinned: boolean | null = null;
+  let observedSurge = Number.NaN;
   let urgentPointerActive: boolean | null = null;
   let urgentBeadVisible: boolean | null = null;
   let urgentPinned: boolean | null = null;
@@ -762,6 +771,9 @@ export function attachAtomaMark(
     frameScale = frame.scale;
     crystal.scale.set(frame.scale * visualScale);
     const beadVisible = markBeadVisible();
+    // Read ONCE per frame, like the pointer light: the handheld gate's rAF
+    // loop writes it, and nothing here may rebuild the scene to follow it.
+    const surge = markCoreSurge();
     const scale = visualScale * frame.scale;
     const pointer = renderer ? readPointerLight() : null;
     // Compact chrome only lights the receiver during pointer interaction;
@@ -819,7 +831,8 @@ export function attachAtomaMark(
       markY !== observedMarkY ||
       visualScale !== observedVisualScale ||
       screenChanged ||
-      pinned !== observedPinned;
+      pinned !== observedPinned ||
+      surge !== observedSurge;
     if (backdropInputChanged) {
       backdropDirty = true;
       causticDirty = true;
@@ -851,13 +864,15 @@ export function attachAtomaMark(
     observedScreenW = screenW;
     observedScreenH = screenH;
     observedPinned = pinned;
+    observedSurge = surge;
     urgentPointerActive = pointerActive;
     urgentBeadVisible = beadVisible;
     urgentPinned = pinned;
     urgentScreenW = screenW;
     urgentScreenH = screenH;
     envInvalidated = false;
-    shell?.update(frame, { beadVisible, lamp, pointerClip });
+    const shellGain = markSurgeGain(surge, MARK_SURGE.shellIntensity);
+    shell?.update(frame, { beadVisible, lamp, pointerClip, coreGain: shellGain });
     // Lantern light belongs on the far-field mesh. The bead throws from
     // inside; the pointer lamp sits in front and has to go THROUGH the glass
     // to reach the same wall — same rear windows, stained by the faces.
@@ -886,7 +901,14 @@ export function attachAtomaMark(
         writeMarkFieldLight([]);
       } else {
         writeMarkFieldLight(
-          fieldSpillsToSample(merged, container, scale, localRadius, projection)
+          fieldSpillsToSample(
+            merged,
+            container,
+            scale,
+            localRadius * markSurgeGain(surge, MARK_SURGE.fieldRadius),
+            projection,
+            markSurgeGain(surge, MARK_SURGE.fieldIntensity)
+          )
         );
       }
       // The CAST is CPU ray traced. Its published sample stays live between
@@ -956,18 +978,41 @@ export function attachAtomaMark(
     const { x: coreX, y: coreY } = frame.corePosition;
     traceSilhouette(interiorMask, frame.silhouette);
     traceSilhouette(glassMask, frame.silhouette);
+    // THE SURGE (renderer/mark-surge.ts): the handheld gate pushes the bead
+    // past rest — it swells, its bloom saturates, the transmitted glow and
+    // the shader's wall light follow — until the DOM flood takes over. At
+    // rest every gain is exactly 1 and this block draws what it always did.
+    const coreGain = markSurgeGain(surge, MARK_SURGE.coreScale);
+    const glowGain = markSurgeGain(surge, MARK_SURGE.glassGlow);
     core.position.set(coreX, coreY);
-    core.scale.set(frame.coreScale * (1 + frame.pulse * 0.035));
+    core.scale.set(frame.coreScale * (1 + frame.pulse * 0.035) * coreGain);
     core.visible = beadVisible;
-    bloom.alpha = 0.76 + frame.pulse * 0.24;
+    bloom.alpha = Math.min(
+      1,
+      (0.76 + frame.pulse * 0.24) * markSurgeGain(surge, MARK_SURGE.bloomAlpha)
+    );
     const forward = 0.55 + (frame.coreDepth + 1) * 0.225;
     transmittedPool.position.set(coreX, coreY);
-    transmittedPool.alpha = forward * (0.85 + frame.pulse * 0.15);
+    transmittedPool.alpha = Math.min(1, forward * (0.85 + frame.pulse * 0.15) * glowGain);
     transmittedPool.visible = beadVisible;
     transmittedCore.position.set(coreX, coreY);
-    transmittedCore.scale.set(frame.coreScale);
-    transmittedCore.alpha = forward * (0.88 + frame.pulse * 0.12);
+    transmittedCore.scale.set(frame.coreScale * coreGain);
+    transmittedCore.alpha = Math.min(1, forward * (0.88 + frame.pulse * 0.12) * glowGain);
     transmittedCore.visible = beadVisible;
+    if (surge > 0 && projection) {
+      // Publish where the light IS, so the DOM flood grows from the bead and
+      // not from the viewport's middle: the bead wanders and the hero bobs.
+      const stageX = container.x + ATOMA_MARK_LOCAL_CENTER +
+        (coreX - ATOMA_MARK_LOCAL_CENTER) * scale;
+      const stageY = container.y + ATOMA_MARK_LOCAL_CENTER +
+        (coreY - ATOMA_MARK_LOCAL_CENTER) * scale;
+      const client = projection.stageToClient(stageX, stageY);
+      writeMarkCoreScreen({
+        clientX: client.clientX,
+        clientY: client.clientY,
+        radiusPx: ATOMA_MARK_CORE_RADIUS * frame.coreScale * coreGain * scale * client.pixelScale,
+      });
+    }
     // Last, so the texture holds THIS frame's interior: the front glass is
     // about to be drawn by the scene and will sample what we leave here.
     //
@@ -1047,6 +1092,7 @@ export function attachAtomaMark(
       if (destroyed) return;
       destroyed = true;
       writeMarkFieldCaustic(null);
+      writeMarkCoreScreen(null);
       // Display subtree first (meshes detach from geometry/shader), then the
       // shell's GPU resources, then the textures the passes ping-pong.
       cursorEcho?.destroy();

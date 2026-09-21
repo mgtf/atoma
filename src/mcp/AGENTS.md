@@ -33,12 +33,18 @@ Neighbours:
   which has no organisations, shows the operator the operator tools and
   nothing tenant-shaped.
 - THE LADDER (`identity.ts`): `viewer` reads an organisation's projects, runs
-  and traces; `member` starts, cancels and publishes its runs; `admin` reads
-  the organisation's members and sets its model defaults; `platform` — the
+  and traces, plus the two platform commons the viz shows every signed-in role
+  (since 2026-09-15): the one registry (`atoma_registry_list`, `_show`,
+  `_history`) and the one skill catalog (`atoma_skills_list`, `_show`) every
+  run reads and earns on; below `platform` the payload's `store` and
+  `skillsDir` are basenames, never host paths (`commonsForTier`);
+  `member` starts, cancels and publishes its runs; `admin` reads the
+  organisation's members and sets its model defaults; `platform` — the
   platform-admin flag, or the operator on the ungated loopback — everything
-  above plus operator runs, registry, skills, ledger, the operator corpus,
-  friction, the journal and every organisation. A platform admin READS every
-  organisation and WRITES only in its active one, exactly as the HTTP routes.
+  above plus operator runs, skill analytics (`stats`, `review`), the four
+  writes, ledger, the operator corpus, friction, the journal and every
+  organisation. A platform admin READS every organisation and WRITES only in
+  its active one, exactly as the HTTP routes.
 - ONE SESSION, ONE SERVER, ONE CALLER (`http.ts`). `initialize` authenticates
   the caller and builds a server holding exactly their tools; every later
   request must present the same caller or the session ends with a 401. Hiding
@@ -184,7 +190,10 @@ Neighbours:
   `atoma_skill_drop`, `atoma_skill_merge`, `atoma_registry_rollback`. They
   call the SAME store methods the CLI calls (`SkillRegistry.resetCounters/
   drop/merge`, `AtomRegistry.rollback`), so the lifecycle ledger rows are the
-  CLI's rows and `ledger check` projects the same counters.
+  CLI's rows and `ledger check` projects the same counters. Each call runs
+  under `withLedgerScope(ledgerScopeOf(actor), …)`: this process serves every
+  organisation, so the lifecycle row names the bearer's principal per request
+  rather than a process-wide scope (T7).
 - THE CLI'S REFUSALS, IN THE CLI'S WORDS: dropping or absorbing a skill with
   recorded successes is refused without `force`; a rollback to the live
   version is a no-op the registry itself reports. A second door must never be
@@ -200,7 +209,9 @@ Neighbours:
   to name.
 - Writes open the store through `openDb` (schema and migrations), exactly as
   the CLI does, and close it before returning. The readers' readonly handles
-  are not a write path and must not become one.
+  are not a write path and must not become one; a reader that needs skill
+  trust (`ledgerCheck`) hands its readonly handle to `SkillRegistry`, which
+  only checks for the `skill_meta` table there and never creates it.
 
 ## Prompts and completions
 

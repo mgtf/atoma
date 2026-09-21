@@ -96,6 +96,22 @@ Neighbours:
 - Ledger writes are fail-open for run execution but attributable and ordered.
   A ledger failure cannot take down the product; impossible counter directions
   must be surfaced by `ledger check`.
+- The ledger table has TWO writable open paths (`openDb`, the cached
+  `openLedgerHandle`) and ONE schema step, `ensureLedgerSchema`. Never add a
+  column to one path: `appendLedger` swallows its failure, so the other path
+  loses every event silently. Read-only readers never migrate and must read
+  an older table shape without inventing values. The skill trust table
+  (`skill_meta`, W4) is created in that same step and nowhere else; a
+  `SkillRegistry` handed a bare handle only checks for it, and a read-only
+  handle on a store without it reads the legacy sidecars.
+- Scope is process state, set once per process (`setLedgerScope`) or per
+  synchronous operation (`withLedgerScope`), never a parameter threaded into
+  the supervise loop. A multi-tenant process uses the latter only; a promise
+  inside it is refused because it would outlive the scope.
+- `entity` is the display label and `entity_id` the stable key (T4); the
+  projection groups by `ledgerEntityKey`. The backfill resolves labels
+  against the current store and leaves the rest NULL — never rewrite
+  `entity`, never invent an id for a label that no longer resolves.
 
 ## Metrics and traces
 

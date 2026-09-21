@@ -88,6 +88,38 @@ function exchange(clientId: string, authorizationCode: string, changes: Record<s
 interface Tokens { access_token: string; refresh_token: string; expires_in: number }
 
 describe('MCP OAuth over HTTP', () => {
+  it('switches accounts without granting access or reusing the displayed consent', async () => {
+    auth.grantPlatformAdmin(viewer.principalId);
+    const clientId = await register();
+    const existing = await (await exchange(clientId, await code(clientId))).json() as Tokens;
+    const request = /name="request" value="([^"]+)"/.exec(await (await consent(clientId)).text())![1]!;
+    expect((await post('/oauth/authorize', { request, decision: 'switch' }, { cookie, origin: 'https://evil.example' })).status).toBe(403);
+    const switched = await post('/oauth/authorize', { request, decision: 'switch' }, { cookie, origin: base });
+    expect(switched.headers.get('location')).toBe('/auth/login?select_account=1');
+    expect(auth.resolveSession(cookie.split('=')[1]!)).toBeNull();
+    expect(auth.resolveApiToken(existing.access_token)?.principalId).toBe(viewer.principalId);
+    const returnCookie = switched.headers.getSetCookie().find(c => c.startsWith('atoma_mcp_return='))!;
+    const nextRequest = parseCookieHeader(returnCookie)[0]!.value;
+    expect(nextRequest).not.toBe(request);
+    const second = auth.completeLogin({ provider: 'github', subject: 'normal-user', displayName: 'Normal User',
+      email: 'normal@example.com', emailVerified: false }, null)!.viewer;
+    const secondCookie = `${SESSION_COOKIE}=${issueSession(auth, second, { secure: false }).token}`;
+    expect((await post('/oauth/authorize', { request, decision: 'allow' }, { cookie: secondCookie, origin: base })).status).toBe(400);
+    expect((await post('/oauth/authorize', { request: nextRequest, decision: 'allow' }, { cookie: secondCookie, origin: base })).status).toBe(403);
+    const page = await fetch(`${base}/oauth/authorize?request=${nextRequest}`, { headers: { cookie: secondCookie } });
+    const html = await page.text();
+    expect(html).toContain('Normal User'); expect(html).toContain('normal@example.com');
+    expect(html).not.toContain('OAuth Test');
+    expect(html).not.toContain('Platform administrator');
+    const approved = await post('/oauth/authorize', { request: nextRequest, decision: 'allow' }, { cookie: secondCookie, origin: base });
+    const location = new URL(approved.headers.get('location')!);
+    expect(location.searchParams.get('state')).toBe('client-state');
+    const tokens = await (await exchange(clientId, location.searchParams.get('code')!)).json() as Tokens;
+    expect(auth.resolveApiToken(tokens.access_token)?.principalId).toBe(second.principalId);
+    expect(auth.resolveApiToken(tokens.access_token)?.platformAdmin).toBe(false);
+    expect(auth.listApiTokens(viewer.principalId)).toHaveLength(1);
+  });
+
   it('discovers, consents, exchanges, calls the real MCP and revokes through existing API-token ownership', async () => {
     const denied = await fetch(`${base}/mcp`);
     expect(denied.status).toBe(401); expect(denied.headers.get('www-authenticate')).toContain('resource_metadata=');

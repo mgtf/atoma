@@ -1,4 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
+import { AtomRegistry } from '../src/registry/atomRegistry.js';
+import { openDb } from '../src/registry/db.js';
 import {
   trustThreshold,
   promoteThreshold,
@@ -33,12 +35,20 @@ describe('lifecycle thresholds are operator-configurable', () => {
   });
 
   it('a raised trust threshold really delays the fast-path', () => {
-    const type = { successes: 3, failures: 0 } as never as Parameters<typeof shouldTrustType>[0];
-    expect(shouldTrustType(type)).toBe(true);
-    process.env['ATOMA_TRUST_THRESHOLD'] = '5';
-    expect(shouldTrustType(type)).toBe(false);
-    expect(shouldTrustSkill({ successes: 3, failures: 0 })).toBe(false);
-    expect(shouldTrustSkill({ successes: 5, failures: 0 })).toBe(true);
+    const db = openDb(':memory:');
+    try {
+      const registry = new AtomRegistry(db);
+      const created = registry.create(1, { description: 'Reader', systemPrompt: 'Read the source.',
+        tools: [], params: {}, createdBy: 'test' });
+      registry.recordFailure(created.name);
+      for (let i = 0; i < 3; i++) registry.recordSuccess(created.name);
+      const type = registry.getByName(created.name)!;
+      expect(shouldTrustType(type)).toBe(true);
+      process.env['ATOMA_TRUST_THRESHOLD'] = '5';
+      expect(shouldTrustType(type)).toBe(false);
+      expect(shouldTrustSkill({ successes: 3, failures: 0 })).toBe(false);
+      expect(shouldTrustSkill({ successes: 5, failures: 0 })).toBe(true);
+    } finally { db.close(); }
   });
 
   it('garbage or non-positive values fall back to the DEFAULT — never to a weaker gate', () => {

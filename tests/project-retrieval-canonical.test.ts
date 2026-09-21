@@ -18,14 +18,15 @@ describe('dedicated project documentation molecule', () => {
       expect(added.tools.map(t => t.name)).toContain(projectRetrievalDeclaration.name);
       expect(added.tools.map(t => t.name)).not.toContain('validate_html');
       expect(added.description).toContain('authorized project documentation');
+      registry.recordFailure(added.name);
       registry.recordSuccess(added.name);
-      expect(ensureCanonicalProjectDocsL1(registry, all)).toMatchObject({ atomId: added.atomId, version: added.version, successes: 1 });
+      expect(ensureCanonicalProjectDocsL1(registry, all)).toMatchObject({ atomId: added.atomId, version: added.version, successes: 1, failures: 1, consecutiveSuccesses: 1 });
       const disabled = ensureCanonicalProjectDocsL1(registry, worker)!;
       expect(disabled.tools.map(t => t.name)).not.toContain(projectRetrievalDeclaration.name);
       expect(disabled.systemPrompt).not.toContain(projectRetrievalDeclaration.name);
-      expect(disabled.successes).toBe(0);
-      expect(ensureCanonicalProjectDocsL1(registry, all)?.atomId).toBe(added.atomId);
-      for (const type of unrelated) expect(registry.getByName(type.name)).toMatchObject({ version: type.version, successes: 1, tools: type.tools });
+      expect(disabled).toMatchObject({ successes: 1, failures: 1, consecutiveSuccesses: 0 });
+      expect(ensureCanonicalProjectDocsL1(registry, all)).toMatchObject({ atomId: added.atomId, successes: 1, failures: 1, consecutiveSuccesses: 0 });
+      for (const type of unrelated) expect(registry.getByName(type.name)).toMatchObject({ version: type.version, successes: 1, failures: 0, consecutiveSuccesses: 1, tools: type.tools });
     } finally { db.close(); }
   });
 });

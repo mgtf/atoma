@@ -1,5 +1,12 @@
 # Project registry ownership
 
+> **SUPERSEDED 2026-09-15.** The owner decided that a run is a run: one
+> registry, one skill catalog, one set of trust counters for the whole
+> platform. `openDb` folds the partition described here back into that one
+> table ([platform-trust-2026-09-15.md](platform-trust-2026-09-15.md)). This
+> record stays as the evidence for why the partition existed and how its
+> stores were laid out.
+
 Date: 2026-09-09. Corrective increment for the
 [downstream retrieval audit](incidents/project-retrieval-record-2026-09-09.md#project-retrieval-downstream-privacy-audit).
 Retrieval remains opt-in. No provider, embedding or reranker call is added.

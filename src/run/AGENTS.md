@@ -83,7 +83,9 @@ Neighbours:
 
 ## Run accounting
 
-- The opt-in build depth pilot (`--depth deep|short`) keeps model pins and
+- New ordinary build runs default to short-first supervision. `--depth deep`
+  explicitly enters through L3; `--depth short` selects the default. Baseline
+  and seeded comparison runs retain their existing protocol. Depth routing keeps model pins and
   one run deadline, cost ledger and trace. Its profile freezes the delivery
   `proofFloor` before routing, without adding it to phase `proofObligations`.
   Deep enters through L3; short plans and executes
@@ -97,8 +99,9 @@ Neighbours:
   cover the new attempt. Mechanical plan/result one-shot memos reset per
   attempt and stay fork-shared within it. Lifecycle settings are resolved
   once at launch and stay identical in both attempts; `--depth` does not
-  override them. This pilot currently requires the local backend;
-  container teardown does not yet provide this confirmed-exit contract.
+  override them. Both local and container backends confirm teardown before
+  replacement; container removal is confirmed by the engine before egress
+  teardown. An unavailable engine or remaining worker prevents replacement.
 - Design and remaining measurement protocol:
   [depth experiment](../../docs/depth-routing-experiment-2026-09-13.md).
 

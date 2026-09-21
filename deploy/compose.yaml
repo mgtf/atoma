@@ -1,0 +1,103 @@
+name: atoma
+services:
+  launcher:
+    image: ${ATOMA_LAUNCHER_IMAGE:?Set a published launcher digest}
+    network_mode: host
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 30s
+    environment:
+      NODE_ENV: production
+      ATOMA_LAUNCHER_SOCKET: /srv/atoma/control/launcher.sock
+      ATOMA_LAUNCHER_WORKER_SOCKET_ROOT: /srv/atoma/worker-sockets
+      ATOMA_LAUNCHER_WORKSPACE_ROOT: /srv/atoma/workspaces
+      ATOMA_LAUNCHER_STATE_ROOT: /srv/atoma/launcher-state
+      ATOMA_LAUNCHER_PREVIEW_USER: 10001:10001
+      ATOMA_LAUNCHER_WORKER_IMAGE: ${ATOMA_WORKER_IMAGE:?Set a published worker digest}
+      ATOMA_LAUNCHER_PREVIEW_IMAGE: ${ATOMA_PREVIEW_IMAGE:?Set a published preview digest}
+      ATOMA_LAUNCHER_RUN_WORKSPACES: '{"operator":"/srv/atoma/workspaces/operator"}'
+      ATOMA_EGRESS_ALLOWLIST: ${ATOMA_EGRESS_ALLOWLIST:?Set the approved workload hostnames}
+    volumes:
+      - {type: bind, source: /var/run/docker.sock, target: /var/run/docker.sock, bind: {create_host_path: false}}
+      - {type: bind, source: /srv/atoma/control, target: /srv/atoma/control, bind: {create_host_path: false}}
+      - {type: bind, source: /srv/atoma/worker-sockets, target: /srv/atoma/worker-sockets, bind: {create_host_path: false}}
+      - {type: bind, source: /srv/atoma/workspaces, target: /srv/atoma/workspaces, bind: {create_host_path: false}}
+      - {type: bind, source: /srv/atoma/launcher-state, target: /srv/atoma/launcher-state, bind: {create_host_path: false}}
+    healthcheck:
+      test: [CMD, node, --input-type=module, -e, "const {SocketLauncher}=await import('/app/dist/launcher/client.js'); const c=await SocketLauncher.connect(process.env.ATOMA_LAUNCHER_SOCKET); c.close();"]
+      interval: 15s
+      timeout: 10s
+      retries: 4
+      start_period: 60s
+  web:
+    image: ${ATOMA_WEB_IMAGE:?Set a published web digest}
+    network_mode: host
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 60s
+    depends_on:
+      launcher: {condition: service_healthy, restart: true}
+    env_file:
+      - path: ${ATOMA_WEB_ENV_FILE:?Set the absolute private web environment file}
+        format: raw
+    environment:
+      NODE_ENV: production
+      HOME: /srv/atoma/product/home
+      ATOMA_DB_PATH: /srv/atoma/product/atoma.db
+      ATOMA_LEDGER_DB: /srv/atoma/product/atoma.db
+      ATOMA_SKILLS_DIR: /srv/atoma/product/skills
+      ATOMA_RUNS_DIR: /srv/atoma/product/runs
+      ATOMA_PROJECTS_ROOT: /srv/atoma/product/projects
+      ATOMA_ACCOUNT_PROFILES_ROOT: /srv/atoma/product/account-profiles
+      ATOMA_SUPERVISOR_DIR: /srv/atoma/product/supervisor
+      ATOMA_DEPLOY_LOCK_PATH: /srv/atoma/product/deploy.lock
+      ATOMA_BUILD_WORKSPACE: /srv/atoma/workspaces/operator
+      ATOMA_CONTAINER: '1'
+      ATOMA_VIZ_AUTH: '1'
+      ATOMA_VIZ_PUBLIC_ORIGIN: https://${ATOMA_PUBLIC_HOST:?Set the public hostname}
+      ATOMA_VIZ_TRUSTED_PROXIES: 127.0.0.1,::1
+      ATOMA_LAUNCHER_SOCKET: /srv/atoma/control/launcher.sock
+      ATOMA_LAUNCHER_WORKSPACE_ROOT: /srv/atoma/workspaces
+      ATOMA_LAUNCHER_WORKSPACE_ID: operator
+      ATOMA_WORKER_IMAGE: ${ATOMA_WORKER_IMAGE:?Set a published worker digest}
+      ATOMA_PREVIEW: '1'
+      ATOMA_PREVIEW_DOMAIN: ${ATOMA_PREVIEW_DOMAIN:?Set the preview namespace}
+      ATOMA_PREVIEW_IMAGE: ${ATOMA_PREVIEW_IMAGE:?Set a published preview digest}
+      ATOMA_PREVIEW_RUNTIME: runsc
+      ATOMA_PREVIEW_ALLOW_RUNC_DEV: '0'
+      ATOMA_PREVIEW_ALLOW_HTTP_DEV: '0'
+      ATOMA_PREVIEW_GATEWAY_HOST: 127.0.0.1
+      ATOMA_PREVIEW_GATEWAY_PORT: '4311'
+      ATOMA_EGRESS_ALLOWLIST: ${ATOMA_EGRESS_ALLOWLIST:?Set the approved workload hostnames}
+    volumes:
+      - {type: bind, source: /srv/atoma/product, target: /srv/atoma/product, bind: {create_host_path: false}}
+      - {type: bind, source: /srv/atoma/workspaces, target: /srv/atoma/workspaces, bind: {create_host_path: false}}
+      - {type: bind, source: /srv/atoma/control, target: /srv/atoma/control, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: /srv/atoma/worker-sockets, target: /srv/atoma/worker-sockets, read_only: true, bind: {create_host_path: false}}
+    healthcheck:
+      test: [CMD, node, --input-type=module, -e, "const r=await fetch('http://127.0.0.1:4111/',{redirect:'manual',signal:AbortSignal.timeout(4000)}); if(r.status!==200 && r.status!==302) process.exit(1);"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 90s
+  gateway:
+    image: ${ATOMA_GATEWAY_IMAGE:?Set a published Caddy digest}
+    network_mode: host
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp, /data, /config]
+    security_opt: [no-new-privileges:true]
+    depends_on:
+      web: {condition: service_healthy}
+    environment:
+      ATOMA_PUBLIC_HOST: ${ATOMA_PUBLIC_HOST:?Set the public hostname}
+      ATOMA_PREVIEW_DOMAIN: ${ATOMA_PREVIEW_DOMAIN:?Set the preview namespace}
+    volumes:
+      - {type: bind, source: ./Caddyfile, target: /etc/caddy/Caddyfile, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: /srv/atoma/certs, target: /certs, read_only: true, bind: {create_host_path: false}}

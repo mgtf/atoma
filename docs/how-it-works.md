@@ -23,9 +23,18 @@ The curated identity pools mirror expected population: 118 molecule names for th
 numerous L1 workers, 40 cell names for L2, and 20 botanical tissue names for the small
 L3 layer. Numeric tiers remain the stable storage and routing contract.
 
+Since 2026-09-14, ordinary build runs enter at L2 by default. L2 supervises
+L1 work without an initial L3 planning layer. If the entry cell exhausts its
+supervision retries, the runner stops and archives that attempt and starts
+once through L3, sharing the original deadline and accounting. Both paths
+receive independent root acceptance. `--depth deep` starts directly at L3;
+baseline and seeded comparisons retain their existing protocol.
+
 ```mermaid
 graph TB
-    APP([Your goal]) --> L3
+    APP([Your goal]) --> L2A
+    APP -. explicit deep .-> L3
+    L2A -. deepen after exhausted supervision .-> L3
     L3["<b>L3 — Tissues</b><br/>frontier model<br/><i>breaks the goal into phases</i>"] --> L2A
     L3 --> L2B
     L2A["<b>L2 — Cells</b><br/>mid-tier model<br/><i>routes a phase to a worker,<br/>then judges the result</i>"] --> L1A
@@ -219,6 +228,10 @@ development step.
 ---
 
 ## 3. Flow — a task, end to end
+
+The sequence below shows the full topology selected by `--depth deep` or
+reached after deepening. The default short path enters at L2 and returns its
+result directly to the runner's final acceptance.
 
 ```mermaid
 sequenceDiagram
@@ -441,9 +454,10 @@ otherwise occur. They now share a transaction.
 **Recipes stay on disk, and that is a decision rather than an omission.** `SKILL.md` is the
 portable interchange format — it can be read, grepped, hand-edited and exported to other agent
 tooling verbatim. Sidecars carry skill counters and provenance. Project workspaces, traces and skills
-live below `orgs/<orgId>/projects/<projectId>/`; the operator paths above remain
-separate. Agent trust is still instance-global. The intended shared skill commons
-with per-organisation trust is a design boundary, not a shipped guarantee.
+live below `orgs/<orgId>/projects/<projectId>/`; the registry and the skills
+catalog are the platform's, one of each, and every run — the operator's or an
+organisation's — reads them and earns trust on them alike
+([`platform-trust-2026-09-15.md`](platform-trust-2026-09-15.md)).
 
 The machine-global MCP run lease uses `~/.atoma/mcp-run-lock.db`; private subscription
 profiles and their locks have their own operational storage. Supervisor verdicts
@@ -540,12 +554,11 @@ Recorded so nobody has to discover it in a demo:
 - **No full multi-tenancy.** The web console is open on loopback by default and has an optional
   multi-organisation login gate. A first login creates a personal organisation unless it redeems
   an invitation; a principal may join several organisations and choose an active one.
-  Authenticated projects, their run workspaces, traces and project skills are scoped to that
-  organisation for now, while a platform admin can read across organisations. Skills are
-  meant to become a commons shared across organisations, with trust earned per organisation;
-  the partitioning is containment, not the premise. The atom catalogue, atom
-  trust and lifecycle ledger remain instance-global, so this is not yet safe for mutually
-  untrusted organisations; see the dated boundary in
+  Authenticated projects, their run workspaces and traces are scoped to that
+  organisation, while a platform admin can read across organisations. The agent registry,
+  the skills catalog, their trust counters and the lifecycle ledger are ONE per platform by
+  decision (a run is a run), so this is not a deployment shape for mutually untrusted
+  organisations; see the dated boundary in
   [`saas-architecture.md`](saas-architecture.md).
 - **Self-hosting requires operator setup.** The repository includes a compiled
   deployment workflow and host templates, but deploying requires a configured host,
@@ -573,7 +586,7 @@ Recorded so nobody has to discover it in a demo:
 |---|---|
 | Why does mechanism X exist? | `AGENTS.md` for the active contract, then its linked engineering-record entry |
 | What was tried and rejected? | `docs/incidents/engineering-record-2026-08-14.md` § *Considered and rejected* |
-| What would multi-tenancy require? | [`saas-architecture.md`](saas-architecture.md) Layer 2 invariants and Layer 3 Track A/Track B roadmap |
+| What would a hosted deployment require? | [`saas-architecture.md`](saas-architecture.md) Layer 2 invariants and Layer 3 remaining work (W1–W14) |
 | What does a real run look like? | `npm run viz` for existing traces; `npm run viz:demo` writes a mocked run, and `npm run preview:demo` opens a seeded authenticated preview without paid inference |
 | How does another agent drive atoma? | Claude Code: `claude mcp add atoma --transport http <origin>/mcp --header "Authorization: Bearer <token>"`. Codex CLI: an `[mcp_servers.atoma]` table in `~/.codex/config.toml` with `url` and `bearer_token_env_var = "ATOMA_MCP_TOKEN"`. One MCP, the tools your role admits, plus a goal-template prompt per task family at the platform tier |
 | Are the economics real? | `npm run burnin` measures a new corpus using model quota; historical CSVs were archived at the 2026-08-18 reset |

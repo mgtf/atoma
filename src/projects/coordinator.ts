@@ -1,4 +1,7 @@
+import { assertPersonalCodexModels, CODEX_MODEL_CAPABILITIES_ENV, type CodexModelInventory } from '../contracts/codexModels.js';
+import { projectWorkspaceRelative } from '../contracts/launcherVolumes.js';
 import { randomUUID } from 'node:crypto';
+import { migratePlatformSkills, reconcilePlatformSkills } from '../skills/migratePlatform.js';
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -13,16 +16,17 @@ import type {
 } from '../contracts/projects.js';
 import type { TierModelPins } from '../contracts/tierModels.js';
 import { PERSONAL_CODEX_PROFILE_ROOT_ENV } from '../core/codexHomeLease.js';
+import { skillsDirPath } from '../core/stores.js';
 import { LLM_PROVIDER_CATALOG, findProvider } from '../core/providerCatalog.js';
 import {
   ledgerTouchesAnySubscription,
   ledgerTouchesSubscription,
+  payerForSelector,
   principalSubscriptionTiers,
   runPayerLedgerSchema,
   subscriptionTiers,
   subscriptionTransports,
   tierPayerRow,
-  type PayerKind,
   type RunPayerLedger,
   type TierPayer,
 } from '../contracts/runPayers.js';
@@ -97,6 +101,7 @@ export interface ProjectCoordinatorOptions {
   readonly hostEnv?: NodeJS.ProcessEnv;
   /** Host root whose layout is `orgs/<orgId>/projects/<projectId>/runs/<runId>`. */
   readonly projectsRoot?: string;
+  readonly skillsDir?: string;
   readonly driver?: ProjectRunDriver;
   readonly acquireLease?: RunLeaseAcquirer;
   readonly publisher?: ProjectRunPublisher;
@@ -146,6 +151,7 @@ export interface ProjectCoordinatorOptions {
   readonly principalCodexProfileFor?: (
     principalId: string
   ) => PrincipalCodexProfile | null;
+  readonly principalCodexModelsFor?: (principalId: string) => Promise<CodexModelInventory>;
   /**
    * Observer fired when a run spends any CLI subscription (host or requesting
    * principal). The payer ledger distinguishes them; the caller journals it,
@@ -246,6 +252,7 @@ const FORWARDED_HOST_ENV = [
   'DOCKER_HOST',
   'DOCKER_CONFIG',
   'ATOMA_EGRESS_ALLOWLIST',
+  'ATOMA_LAUNCHER_SOCKET', 'ATOMA_LAUNCHER_WORKSPACE_ID', 'ATOMA_WORKER_IMAGE',
   'HTTPS_PROXY',
   'HTTP_PROXY',
   'NO_PROXY',
@@ -522,15 +529,23 @@ export function projectRunEnvironment(input: {
     }
     const selector = parseModelSelector(chosen.value, variable);
     environment[variable] = chosen.value;
-    let payer: PayerKind;
-    if (selector.mode === 'sub') payer = 'host-subscription';
-    else if (selector.mode === 'own') payer = 'principal-subscription';
-    else {
+    // THE PAYER RULE IS THE CONTRACT'S, NOT THIS FUNCTION'S. This block used
+    // to re-derive it, which left `payerForSelector` with no caller anywhere
+    // and two definitions of "who paid" free to drift apart unobserved. Only
+    // the second fact it needs is local: whether the organisation brought the
+    // key for this vendor. The `vendorSources` entry is a separate output —
+    // the credential injection below reads it — so it is still recorded here.
+    let orgBroughtKey = false;
+    if (selector.mode === 'api') {
       const source = vendorCredentialSource(selector.vendor, orgKeys, input.hostEnv);
       vendorSources.set(selector.vendor, source);
-      payer = source === 'selfhosted' ? 'host-selfhosted' : source === 'org' ? 'org-key' : 'host-key';
+      orgBroughtKey = source === 'org';
     }
-    ledger[key] = tierPayerRow({ selection: chosen.value, payer, source: chosen.level });
+    ledger[key] = tierPayerRow({
+      selection: chosen.value,
+      payer: payerForSelector(selector, orgBroughtKey),
+      source: chosen.level,
+    });
   }
   const payers: RunPayerLedger = runPayerLedgerSchema.parse(ledger);
 
@@ -620,28 +635,14 @@ export function projectRunEnvironment(input: {
     // runs should get cheaper as their project grows. It was off, and two
     // delivered runs measured what that costs — $0.59 spent, `learnedSkills:
     // 0`, nothing carried into the next run.
-    //
-    // What makes it safe here is `ATOMA_SKILLS_DIR` above: it points at
-    // `<projectRoot>/skills`, so what a run learns is partitioned PER PROJECT.
-    // Nothing crosses to another project, let alone another organisation, and
-    // the cross-tenant question stays where it belongs — a reviewed offer with
-    // a human gate (`docs/platform-skill-offer-review-2026-08-23.md`).
     ATOMA_SKILL_LEARN: '1',
     ATOMA_EVENT_SKILLS: '1',
-    // PROMOTION AND DETERMINISTIC DISPATCH STAY OFF. A project run is
-    // `--seed`ed from the previous delivered workspace, which is itself the
-    // maintenance-mode signal that enables promotion by default — so leaving
-    // these unset would promote tenant scripts to trusted executables as a
-    // side effect of the seeding. Promotion is what turns a learned recipe
-    // into something that RUNS without a model reading it, and that needs
-    // measurement this product has not done for tenant work.
-    ATOMA_SKILL_PROMOTE: '0',
-    ATOMA_SKILL_DIRECT: '0',
-    // The prefilter cache stays off for a different reason: it is the one
-    // lifecycle store that is NOT partitioned per project — it lives in the
-    // shared product store, so one tenant's cached planning decisions would be
-    // readable to the next. Partitioning it is its own change.
-    ATOMA_PREFILTER_CACHE: '0',
+    // A RUN IS A RUN (docs/platform-trust-2026-09-15.md): promotion,
+    // deterministic dispatch and the prefilter cache follow the same defaults
+    // as any run on this host — a seeded workspace enables promotion, direct
+    // dispatch is on unless the host says ATOMA_SKILL_DIRECT=0, and the cache
+    // is the platform's. Nothing is pinned to '0' here any more, and no veto
+    // flag travels below; a host that wants them off says so in its own env.
     // THE SECOND GATE'S INPUT. A tenant run's child re-checks, at launch,
     // that every machine-bound selector it can see was authorised HERE —
     // `assertTransportHonoursCredentials` in `src/run/providers.ts`.
@@ -660,7 +661,7 @@ export function projectRunEnvironment(input: {
   return { environment, payers };
 }
 
-function previousDeliveredRun(
+export function previousDeliveredRun(
   store: ProjectStore,
   orgId: string,
   projectId: string
@@ -669,6 +670,7 @@ function previousDeliveredRun(
   if (!runs) return null;
   for (const run of runs) {
     if (run.status !== 'delivered') continue;
+    if (run.bytesExpiredAt) throw new ProjectStateConflict('The previous delivered workspace has expired; restore it before continuing this project');
     try {
       if (lstatSync(run.hostPaths.workspacePath).isDirectory()) {
         return run;
@@ -849,14 +851,15 @@ export function projectRunHostLayout(
   root: string,
   orgId: string,
   projectId: string,
-  runId: string
+  runId: string,
+  workspaceRoot?: string
 ) {
   const projectRoot = path.join(path.resolve(root), 'orgs', orgId, 'projects', projectId);
   const runRoot = path.join(projectRoot, 'runs', runId);
   return {
     projectRoot,
     runRoot,
-    workspacePath: path.join(runRoot, 'workspace'),
+    workspacePath: workspaceRoot ? path.join(path.resolve(workspaceRoot), projectWorkspaceRelative({ orgId, projectId, runId })) : path.join(runRoot, 'workspace'),
     runsPath: path.join(runRoot, 'traces'),
     logPath: path.join(runRoot, 'run.log'),
     skillsPath: path.join(projectRoot, 'skills'),
@@ -865,10 +868,12 @@ export function projectRunHostLayout(
 }
 
 export class ProjectRunCoordinator {
+  private readonly principalCodexModelsFor?: (principalId: string) => Promise<CodexModelInventory>;
   private readonly store: ProjectStore;
   private readonly dbPath: string;
   private readonly hostEnv: NodeJS.ProcessEnv;
   private readonly root: string;
+  private readonly skillsRoot: string;
   private readonly driver: ProjectRunDriver;
   private readonly acquireLease: RunLeaseAcquirer;
   private readonly publisher?: ProjectRunPublisher;
@@ -895,11 +900,15 @@ export class ProjectRunCoordinator {
     this.dbPath = path.resolve(options.dbPath);
     this.hostEnv = { ...(options.hostEnv ?? process.env) };
     this.root = path.resolve(options.projectsRoot ?? DEFAULT_PROJECTS_ROOT);
+    this.skillsRoot = path.resolve(skillsDirPath(options.skillsDir, this.hostEnv));
+    migratePlatformSkills({ dbPath: this.dbPath, projectsRoot: this.root, skillsRoot: this.skillsRoot });
+    reconcilePlatformSkills({ db: this.dbPath, skillsRoot: this.skillsRoot });
     this.driver = options.driver ?? spawnRun;
     this.acquireLease = options.acquireLease ?? acquireRunLease;
     this.publisher = options.publisher;
     if (options.onRunFinished) this.onRunFinished = options.onRunFinished;
     if (options.tierModelsFor) this.tierModelsFor = options.tierModelsFor;
+    if (options.principalCodexModelsFor) this.principalCodexModelsFor = options.principalCodexModelsFor;
     if (options.orgTierModelsFor) this.orgTierModelsFor = options.orgTierModelsFor;
     if (options.orgProviderKeyFor) this.orgProviderKeyFor = options.orgProviderKeyFor;
     if (options.platformAdmins) this.platformAdmins = options.platformAdmins;
@@ -1037,6 +1046,7 @@ export class ProjectRunCoordinator {
     );
     const existing = findRetry();
     if (existing) return existing;
+    this.store.assertRunCapacity(input.orgId);
     // Every new project run carries search. Validate before taking the lease or
     // reserving a run; read-only service startup and idempotent retries still work.
     let retrievalLaunch: ReturnType<typeof readHaystackLaunch>;
@@ -1044,12 +1054,14 @@ export class ProjectRunCoordinator {
     catch (error) {
       throw new ProjectRunConfigurationError((error as Error).message);
     }
+    if (this.hostEnv['ATOMA_LAUNCHER_SOCKET'] && !this.hostEnv['ATOMA_LAUNCHER_WORKSPACE_ROOT']) throw new ProjectRunConfigurationError('Launcher workspace root is required for project runs');
     const candidateRunId = randomUUID();
     const candidatePaths = projectRunHostLayout(
       this.root,
       input.orgId,
       input.projectId,
-      candidateRunId
+      candidateRunId,
+      this.hostEnv['ATOMA_LAUNCHER_SOCKET'] ? this.hostEnv['ATOMA_LAUNCHER_WORKSPACE_ROOT'] : undefined
     );
     let lease: RunLease;
     try {
@@ -1072,10 +1084,12 @@ export class ProjectRunCoordinator {
         principalId: input.principalId,
         request: input.request,
         projectRunId: candidateRunId,
+        enforceCapacity: true,
         hostPaths: {
           workspacePath: candidatePaths.workspacePath,
           runsPath: candidatePaths.runsPath,
           logPath: candidatePaths.logPath,
+          skillsPath: this.skillsRoot,
         },
       });
     } catch (error) {
@@ -1108,7 +1122,7 @@ export class ProjectRunCoordinator {
     );
     const paths = {
       ...run.hostPaths,
-      skillsPath: layout.skillsPath,
+      skillsPath: run.hostPaths.skillsPath ?? layout.skillsPath,
       artifactManifestPath: layout.artifactManifestPath,
     };
     const subscriptionGrant = this.resolveSubscriptionGrant(input.principalId);
@@ -1131,6 +1145,17 @@ export class ProjectRunCoordinator {
         ...(principalCodexProfile ? { principalCodexProfile } : {}),
       });
       environment = built.environment;
+      if (principalSubscriptionTiers(built.payers).length > 0) {
+        if (!this.principalCodexModelsFor) {
+          throw new ProjectRunConfigurationError('ChatGPT model discovery is unavailable. Refresh your models in Settings.');
+        }
+        const inventory = await this.principalCodexModelsFor(input.principalId);
+        assertPersonalCodexModels(Object.values(built.payers).map((row) => row.selection), inventory);
+        if (this.resolvePrincipalCodexProfile(input.principalId)?.profileId !== principalCodexProfile?.profileId) {
+          throw new ProjectRunConfigurationError('Your ChatGPT connection changed. Start the run again.');
+        }
+        environment[CODEX_MODEL_CAPABILITIES_ENV] = JSON.stringify(inventory.models);
+      }
       // FIRED FROM THE LEDGER, not from the host env. A run may now spend the
       // subscription on some tiers and a key on others, so "did this run touch
       // a CLI login" is a question about what was RESOLVED — the old
@@ -1146,11 +1171,15 @@ export class ProjectRunCoordinator {
           payers: built.payers,
         });
       }
-      this.store.transitionProjectRun({
+      // The run starts and its payer ledger lands in one transaction. A run
+      // observed as `running` therefore always says who pays for it, whatever
+      // funded it — the subscription hook above journals only the runs that
+      // touch a CLI login, and an organisation- or host-key run used to leave
+      // no durable payer record at all.
+      this.store.startProjectRun({
         orgId: input.orgId,
         projectRunId: run.projectRunId,
-        from: 'queued',
-        to: 'running',
+        payers: built.payers,
       });
     } catch (error) {
       try {
@@ -1176,10 +1205,10 @@ export class ProjectRunCoordinator {
       controller,
     });
 
-    const seedRun = previousDeliveredRun(this.store, input.orgId, input.projectId);
-    let seedFrom = seedRun?.hostPaths.workspacePath;
     let driven: Promise<string>;
     try {
+      const seedRun = previousDeliveredRun(this.store, input.orgId, input.projectId);
+      let seedFrom = seedRun?.hostPaths.workspacePath;
       const deadlineAt = Date.now() + this.timeoutMs;
       const launch = () => this.driver({
         goal: run.goal,
@@ -1190,13 +1219,10 @@ export class ProjectRunCoordinator {
         signal: controller.signal,
         cleanWorkspace: true,
         extraArgs: [
+          // Container isolation is the one thing a tenant launch insists on.
+          // No lifecycle veto travels: a project run promotes, dispatches and
+          // caches like any run (docs/platform-trust-2026-09-15.md).
           '--container',
-          // `--no-learn-skills` is gone; the two vetoes below remain, and they
-          // are the FINAL word over both the environment and the seed
-          // (`src/skills/AGENTS.md`). Without them a seeded workspace would
-          // re-enable promotion underneath the env above.
-          '--no-promote-skills',
-          '--no-direct-skills',
           ...(seedFrom ? ['--seed', seedFrom] : []),
         ],
         env: environment,
@@ -1390,6 +1416,7 @@ export class ProjectRunCoordinator {
     }
     const run = this.store.getProjectRun(orgId, projectRunId);
     if (!run) return null;
+    if (run.bytesExpiredAt) throw new ProjectStateConflict('Run bytes have expired; restore them before publication');
     if (run.status !== 'delivered' || !run.artifactManifest || !run.artifactManifestHash) {
       throw new ProjectStateConflict('publication retry requires a delivered run with artifacts');
     }

@@ -1127,5 +1127,18 @@
   "depth.entry.deep": "कोशिकाओं और अणुओं का पर्यवेक्षण करने वाले ऊतक से शुरू करें।",
   "depth.entry.short": "अणुओं का पर्यवेक्षण करने वाली कोशिका से शुरू करें।",
   "depth.deepening": "प्रवेश कोशिका के पुनः प्रयास समाप्त हो गए। ऊतक पर्यवेक्षण के साथ फिर से शुरू करें।",
-  "depth.coverage": "{{total}} में से {{covered}} डिलीवरी दायित्व पूरे किए गए"
+  "depth.coverage": "{{total}} में से {{covered}} डिलीवरी दायित्व पूरे किए गए",
+  "welcome.handheld.blocked": "अभी मोबाइल पर उपलब्ध नहीं है",
+  "welcome.handheld.hint": "फ़ोन और टैबलेट के लिए atoma पर अभी भी काम चल रहा है। आप पूर्ण ऐक्सेस के साथ जारी रख सकते हैं, लेकिन हो सकता है कि कुछ स्क्रीन अभी मोबाइल पर ठीक से काम न करें।",
+  "welcome.handheld.continue": "मुझे कम से कम अपने खाते को ऐक्सेस करने दें",
+  "settings.runCapacity": "समवर्ती run",
+  "settings.runCapacityValue": "{{active}} सक्रिय / {{limit}} अनुमत (इस होस्ट पर एक बार में एक run)",
+  "auth.switchAccount": "खाता बदलें",
+  "settings.refreshModels": "ChatGPT मॉडल रीफ़्रेश करें",
+  "settings.modelCatalogue.ready": "आपके कनेक्ट किए गए ChatGPT खाते द्वारा बताए गए मॉडल।",
+  "settings.modelCatalogue.stale": "रीफ़्रेश विफल रहा। पहले बताए गए मॉडल दिखाए गए हैं, लेकिन उन्हें चुना नहीं जा सकता।",
+  "settings.modelCatalogue.unavailable": "ChatGPT मॉडल कैटलॉग उपलब्ध नहीं है। फिर से प्रयास करने के लिए रीफ़्रेश करें।",
+  "settings.modelUnavailable": "{{model}} — उपलब्ध नहीं",
+  "settings.mcpConnectAnother": "कोई अन्य क्लाइंट कनेक्ट करें",
+  "settings.mcpHideSetup": "सेटअप गाइड छिपाएँ"
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env tsx
-import { operatorRegistryPredicate } from '../registry/db.js';
+import { unfoldedRegistryPredicate } from '../registry/db.js';
 /**
  * atoma skills CLI — inspect and manage the filesystem-backed skill store.
  *
@@ -23,6 +23,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { SkillRegistry } from '../skills/registry.js';
 import { resolveMoleculeRef } from '../skills/namespace.js';
+import { openLedgerHandle, setLedgerScope } from '../core/ledger.js';
 import { skillsDirPath, storeDbPath } from '../core/stores.js';
 import { assessShareability } from '../skills/shareability.js';
 import { exportSkillToSpec } from '../skills/exportSpec.js';
@@ -112,7 +113,7 @@ function displayNamesByAtomId(dbFlag?: string): Map<string, string> {
   if (!existsSync(dbPath)) return out;
   const db = new Database(dbPath, { readonly: true });
   try {
-    for (const r of db.prepare(`SELECT atom_id, name FROM atom_types WHERE ${operatorRegistryPredicate(db)}`).all() as {
+    for (const r of db.prepare(`SELECT atom_id, name FROM atom_types WHERE ${unfoldedRegistryPredicate(db)}`).all() as {
       atom_id: string | null;
       name: string;
     }[]) {
@@ -353,7 +354,7 @@ function cmdExport(registry: SkillRegistry, l1: string, id: string, outDir: stri
     '  base-spec frontmatter (name + description only — portable to any Agent Skills runtime,'
   );
   console.log('  including the claude.ai upload path, which rejects non-spec keys).');
-  console.log(`  counters/refusal stamps stay home in _meta.json — trust is runtime-local.`);
+  console.log(`  counters/refusal stamps stay home in the store (skill_meta) — trust is runtime-local.`);
 }
 
 function cmdForgive(
@@ -376,7 +377,7 @@ function cmdForgive(
       reason,
     });
     if (!meta) {
-      console.error(`forgive: ${l1}/${id} has an unreadable _meta.json — repair it before mutating counters`);
+      console.error(`forgive: ${l1}/${id} has an unreadable legacy _meta.json that was never imported — repair it before mutating counters`);
       process.exit(1);
     }
     console.log(
@@ -474,7 +475,7 @@ function cmdReview(registry: SkillRegistry, l1Filter?: string, dbFlag?: string):
   if (existsSync(dbPath)) {
     const db = new Database(dbPath, { readonly: true });
     try {
-      for (const r of db.prepare(`SELECT atom_id, name, tools_json FROM atom_types WHERE ${operatorRegistryPredicate(db)}`).all() as {
+      for (const r of db.prepare(`SELECT atom_id, name, tools_json FROM atom_types WHERE ${unfoldedRegistryPredicate(db)}`).all() as {
         atom_id: string | null;
         name: string;
         tools_json: string;
@@ -536,7 +537,18 @@ function main(): void {
     if (args.positional.length > 0) process.exit(1);
     return;
   }
-  const registry = new SkillRegistry(dirFrom(args.flags));
+  // Bodies from `--dir`, their trust from `--db` (W4): the two halves of one
+  // catalog, so an operator inspecting a copy names both. A read on a machine
+  // with no store yet must not create one; a mutating verb opens it.
+  const storePath = storeDbPath(args.flags['db']);
+  const mutating = ['drop', 'merge', 'forgive', 'reset'].includes(args.command);
+  const registry = new SkillRegistry(
+    dirFrom(args.flags),
+    existsSync(storePath) || mutating ? { db: openLedgerHandle(storePath) } : {}
+  );
+  // Whatever this process appends to the lifecycle ledger, the CLI did it:
+  // possession of the machine is the identity, as the MCP writes note.
+  setLedgerScope({ actorType: 'cli' });
   const moleculeFilter = args.flags['molecule'] ?? args.flags['l1'];
 
   switch (args.command) {

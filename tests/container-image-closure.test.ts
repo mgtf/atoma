@@ -240,3 +240,34 @@ describe('preview image — it must hold nothing of atoma', () => {
     expect(rootPkg.scripts?.['build:preview']).toContain('docker/preview.Dockerfile');
   });
 });
+
+describe('launcher image closure', () => {
+  it('packages the compiled service import closure without product stores or tool execution modules', () => {
+    const graph = importClosure(resolve(SRC, 'launcher/main.ts'));
+    const definition = readFileSync(resolve(REPO, 'docker/launcher.Dockerfile'), 'utf8');
+    const copies = [...definition.matchAll(/^COPY\s+(.+)$/gm)].flatMap(match => match[1]!.trim().split(/\s+/).slice(0, -1));
+    for (const file of graph.files) {
+      const compiled = `dist/${relative(SRC, file).split(sep).join('/').replace(/\.ts$/, '.js')}`;
+      expect(copies.some(source => compiled === source || compiled.startsWith(source + '/')), compiled).toBe(true);
+    }
+    const manifest = JSON.parse(readFileSync(resolve(REPO, 'docker/launcher-package.json'), 'utf8')) as { dependencies: Record<string, string> };
+    for (const spec of graph.external) expect(manifest.dependencies).toHaveProperty(packageName(spec));
+    expect(graph.files.has(resolve(SRC, 'tools/builtin.ts'))).toBe(false);
+    expect(graph.files.has(resolve(SRC, 'core/stores.ts'))).toBe(false);
+  });
+});
+
+// The web owns the complete control-plane runtime, including spawned CLI entrypoints.
+describe('web image closure', () => {
+  it('packages server, run and retrieval entrypoints with production dependencies', () => {
+    const definition = readFileSync(resolve(REPO, 'docker/web.Dockerfile'), 'utf8');
+    expect(definition).toMatch(/^COPY dist \.\/dist$/m);
+    expect(definition).toContain('COPY scripts/retrieval-haystack.py');
+    expect(definition).toContain('test -f dist/viz/client/index.html');
+    const manifest = JSON.parse(readFileSync(resolve(REPO, 'package.json'), 'utf8')) as { dependencies: Record<string, string> };
+    for (const entry of ['viz/server.ts', 'cli/build-app.ts', 'cli/haystackConfig.ts']) {
+      const graph = importClosure(resolve(SRC, entry));
+      for (const spec of graph.external) expect(manifest.dependencies, spec).toHaveProperty(packageName(spec));
+    }
+  });
+});

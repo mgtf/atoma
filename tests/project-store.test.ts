@@ -941,4 +941,90 @@ describe('a repository belongs to one project', () => {
       'legacy-two',
     ]);
   });
+  describe('the payer ledger a run leaves behind', () => {
+    // W5. The three-row ledger was built for every run but only ever survived
+    // the process when a run touched a CLI subscription, because the
+    // subscription hook was the one thing that journaled it. A run funded by
+    // an organisation or host API key — the ordinary paid run, the one a bill
+    // depends on — left no durable record of who paid at all.
+    const apiKeyOnly = {
+      l1: { selection: 'api:zai:glm-4.5-air', provider: 'zai-api', payer: 'org-key', source: 'org' },
+      l2: { selection: 'api:anthropic:claude-sonnet-5', provider: 'anthropic-api', payer: 'host-key', source: 'host' },
+      l3: { selection: 'api:anthropic:claude-opus-5', provider: 'anthropic-api', payer: 'host-key', source: 'host' },
+    } as const;
+
+    function queuedRun(owner: Actor) {
+      const project = createProject(owner, `payers-${randomUUID().slice(0, 8)}`);
+      const created = store.createProjectRun({
+        orgId: owner.orgId,
+        projectId: project.projectId,
+        principalId: owner.principalId,
+        request: runRequest(`payers-${randomUUID().slice(0, 8)}`, 'Build something billable.'),
+        hostPaths: hostPaths(),
+      });
+      if (!created) throw new Error('fixture run was not created');
+      return created.run;
+    }
+
+    it('records three rows for a run no subscription ever touched', () => {
+      const alice = actor('payer-a');
+      const run = queuedRun(alice);
+      const started = store.startProjectRun({
+        orgId: alice.orgId,
+        projectRunId: run.projectRunId,
+        payers: apiKeyOnly,
+      });
+      expect(started?.status).toBe('running');
+      expect(store.getRunPayers(alice.orgId, run.projectRunId)).toEqual(apiKeyOnly);
+    });
+
+    it('replays the same start idempotently, and refuses one that renames the payer', () => {
+      const alice = actor('payer-b');
+      const run = queuedRun(alice);
+      store.startProjectRun({ orgId: alice.orgId, projectRunId: run.projectRunId, payers: apiKeyOnly });
+      // A retried start is not an error — transitionProjectRun already treats
+      // a same-status transition as a replay, so this must agree with it.
+      expect(
+        store.startProjectRun({ orgId: alice.orgId, projectRunId: run.projectRunId, payers: apiKeyOnly })
+          ?.status
+      ).toBe('running');
+      // But a replay that says something DIFFERENT would rewrite evidence
+      // through the back door the immutability trigger exists to close.
+      expect(() =>
+        store.startProjectRun({
+          orgId: alice.orgId,
+          projectRunId: run.projectRunId,
+          payers: { ...apiKeyOnly, l1: { ...apiKeyOnly.l1, payer: 'host-key' } },
+        })
+      ).toThrow(ProjectStateConflict);
+      // Still exactly three rows, and still the original answer.
+      const rows = db
+        .prepare('SELECT COUNT(*) AS n FROM project_run_payers WHERE project_run_id = ?')
+        .get(run.projectRunId) as { n: number };
+      expect(rows.n).toBe(3);
+      expect(store.getRunPayers(alice.orgId, run.projectRunId)).toEqual(apiKeyOnly);
+    });
+
+    it('refuses to rewrite a payer after the fact', () => {
+      const alice = actor('payer-c');
+      const run = queuedRun(alice);
+      store.startProjectRun({ orgId: alice.orgId, projectRunId: run.projectRunId, payers: apiKeyOnly });
+      // The ledger describes a decision already taken. A payer that could be
+      // edited afterwards would be worth nothing as evidence of who paid.
+      expect(() =>
+        db
+          .prepare("UPDATE project_run_payers SET payer = 'org-key' WHERE project_run_id = ?")
+          .run(run.projectRunId)
+      ).toThrow(/immutable/);
+    });
+
+    it('does not answer for another organisation, and says nothing about a queued run', () => {
+      const alice = actor('payer-d');
+      const mallory = actor('payer-e');
+      const run = queuedRun(alice);
+      expect(store.getRunPayers(alice.orgId, run.projectRunId)).toBeNull();
+      store.startProjectRun({ orgId: alice.orgId, projectRunId: run.projectRunId, payers: apiKeyOnly });
+      expect(store.getRunPayers(mallory.orgId, run.projectRunId)).toBeNull();
+    });
+  });
 });

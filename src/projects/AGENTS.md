@@ -117,11 +117,14 @@ list. These values come from the host snapshot, never a tenant prompt.
   preference level. Disconnect is refused while that principal has an active
   run, so credential deletion cannot race an already captured generation.
 
-- The door does NOT change the lifecycle settings a project run pins. Those
-  are stated once, under "What a tenant run may learn" below.
+- The door does NOT change what a project run may learn or execute. That is
+  stated once, under "What a tenant run may learn" below.
 
 ## Readers outside this subsystem
 
+- Public run `durationS` is persisted project elapsed time (`endedAt` minus
+  `startedAt`), including host finalization, not the narrower trace duration.
+  A missing endpoint or reversed interval remains unknown (`null`).
 - `listLiveRunTraces()` is the ONE read that exposes which project runs are
   executing, and it exists for the sentinel
   ([src/sentinel](../sentinel/AGENTS.md)). It has to: each project run writes
@@ -190,26 +193,23 @@ list. These values come from the host snapshot, never a tenant prompt.
   the point of the platform: a tenant's runs get cheaper as their project
   grows. It was off, and two delivered runs measured the cost of that —
   $0.59 spent, `learnedSkills: 0`, nothing carried forward.
-- What makes it safe TODAY is PARTITIONING, not restraint: `ATOMA_SKILLS_DIR`
-  points at `<projectRoot>/skills`, so what a run learns belongs to that
-  project alone. Nothing reaches another project, let alone another
-  organisation, yet. That is containment, not the premise: skills are a
-  platform commons, and the organisation bounds trust and execution rights,
-  not knowledge ([the premise](../../docs/saas-architecture.md#skills-are-a-commons)).
-  Sharing a body arrives with the body/trust split; the human gate applies to
-  execution rights, i.e. compiled scripts and direct dispatch
-  ([offer review](../../docs/platform-skill-offer-review-2026-08-23.md)).
-- PROMOTION and DETERMINISTIC DISPATCH stay off, and explicitly: a project run
-  is `--seed`ed from the previous delivered workspace, and a seeded workspace
-  is the maintenance-mode signal that enables promotion BY DEFAULT. Silence
-  would therefore promote tenant scripts to trusted executables as a side
-  effect of seeding. `--no-promote-skills` and `--no-direct-skills` also
-  travel as FLAGS, because those are the final word over both the environment
-  and the seed ([src/skills](../skills/AGENTS.md)).
-- The PREFILTER CACHE stays off for a different reason, and the difference
-  matters: it is the one lifecycle store that is not partitioned per project.
-  It lives in the shared product store, so one tenant's cached planning
-  decisions would be readable to the next. Partitioning it is its own change.
+- `ATOMA_SKILLS_DIR` points at the host's ONE catalog, and `ATOMA_DB_PATH` at
+  the host's ONE registry: a tenant run reads and earns exactly what every
+  other run does ([platform trust record](../../docs/platform-trust-2026-09-15.md)).
+  New run receipts persist the selected skills path, and launch authority
+  (`assertProjectRunAuthority`) compares workspace, runs and skills paths to
+  that receipt before any writable handle — it gates the launch, never the
+  rows. Legacy receipts retain their recorded layout. The coordinator folds
+  old partitions with backups before admitting new work
+  ([skill storage contract](../skills/AGENTS.md)).
+- PROMOTION, DETERMINISTIC DISPATCH and the PREFILTER CACHE follow the same
+  defaults as any run on the host (a run is a run,
+  [platform trust record](../../docs/platform-trust-2026-09-15.md)): a seeded
+  workspace enables promotion, dispatch is on unless the host env says
+  `ATOMA_SKILL_DIRECT=0`, and the cache is the platform's. The coordinator
+  pins none of them and sends no veto flag; the one thing a tenant launch
+  insists on is `--container`. A host that wants a lifecycle stage off says
+  so in its own environment, for every run alike.
 - A measurement that depends on PROMOTION or deterministic dispatch therefore
   still cannot be run as a project run. Learning, now, can.
 - A FAILED run records what it cost. The outcome vocabulary is
@@ -298,8 +298,8 @@ list. These values come from the host snapshot, never a tenant prompt.
 
 - ONE place decides how long a project run may take: `projectRunTimeoutMs`,
   which reads an explicit argument, then `ATOMA_PROJECT_TIMEOUT_MS`, then the
-  15-minute default, and REFUSES anything malformed or outside 60s..7200s
-  rather than falling back — a run that quietly gets 15 minutes when the
+  30-minute default, and REFUSES anything malformed or outside 60s..7200s
+  rather than falling back — a run that quietly gets 30 minutes when the
   operator asked for 40 is the same defect wearing a different hat.
 - `ATOMA_BUILD_TIMEOUT_MS` is the CHILD's variable and is inert on the host:
   `spawnRun` writes it from this value AFTER spreading the caller's
@@ -346,3 +346,13 @@ list. These values come from the host snapshot, never a tenant prompt.
   publication uses that exact base and persists a PR URL when applicable.
   Old projects retain their existing publication and seed behaviour. The source
   choice is immutable; imported visibility is inherited, never chosen locally.
+
+## Retention and admission
+
+Finished run bytes are eligible after 90 days; current active-project seeds
+and unfinished publications hold them. Offline maintenance preserves run
+metadata, payers and lifecycle_events; expiry never changes delivery status.
+Per-org admission defaults to one (zero suspends), with the global lease still
+limiting the host to one run. Recheck inside reservation after idempotency.
+The operator commands and offline prerequisites live in
+[W9/W10](../../docs/project-maintenance.md).

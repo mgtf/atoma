@@ -175,8 +175,8 @@ export function focusRailChromeLayout(
 }
 
 export const SIDEBAR_GROUPS: readonly { key: string; views: readonly ViewName[] }[] = [
-  { key: 'workspace', views: ['projects', 'runs', 'docs'] },
-  { key: 'operate', views: ['registry', 'skills', 'burnin'] },
+  { key: 'workspace', views: ['projects', 'runs', 'registry', 'skills', 'docs'] },
+  { key: 'operate', views: ['burnin'] },
   { key: 'admin', views: ADMIN_VIEWS },
 ];
 
@@ -296,14 +296,19 @@ export function drawSidebar(
   layoutHeight: number = height,
   navigationTop: number = GPU_LAYOUT.headerHeight
 ): void {
-  const iconOnly = snapshot.state.sceneCameraMode === 'focus';
+  // Focus collapses to tiles by design; a rail narrower than the labelled
+  // floor (a phone, where `sidebarWidthForViewport` hands back the compact
+  // width) collapses too, because a label with 20px to live in is an
+  // ellipsis, not a destination.
+  const focused = snapshot.state.sceneCameraMode === 'focus';
+  const iconOnly = focused || width < GPU_LAYOUT.sidebarMinWidth;
 
   // Wash, not an opaque slab — the same 0.42 the header bar uses, so the far
   // field still reads behind both pieces of overview chrome. Focus has no
   // header and its compact controls already own individual surfaces; keeping
   // this full-height slab there leaves a rectangular veil under the crystal
   // and across the gap before the rounded content frame.
-  if (!iconOnly) {
+  if (!focused) {
     const band = new Graphics();
     band.label = 'sidebar-band';
     band.rect(
@@ -317,8 +322,13 @@ export function drawSidebar(
     ctx.root.addChild(band);
   }
 
+  // Focus tiles hug the trailing edge because the camera crops the rail to
+  // that edge; the overview compact rail is fully on screen, so its tiles
+  // sit centred in the strip instead.
   const buttonX = iconOnly
-    ? Math.max(0, width - FOCUS_SIDEBAR_BUTTON_WIDTH)
+    ? focused
+      ? Math.max(0, width - FOCUS_SIDEBAR_BUTTON_WIDTH)
+      : Math.max(0, (width - FOCUS_SIDEBAR_BUTTON_WIDTH) / 2)
     : SIDEBAR_PAD + NAV_ICON_RENDER_SIZE + NAV_ICON_OUTSIDE_GAP;
   const itemWidth = iconOnly
     ? Math.min(width, FOCUS_SIDEBAR_BUTTON_WIDTH)

@@ -48,6 +48,7 @@ interface SpawnRecord {
   readonly process: FakeProcess;
   readonly requests: Record<string, unknown>[];
   loginId: string | null;
+  nullAccountReads: number;
 }
 
 function fakeProcess(onMessage: (message: Record<string, unknown>) => void): FakeProcess {
@@ -87,11 +88,18 @@ class CodexHarness {
   holdCancel = false;
   holdAccountRead = false;
   holdInitialize = false;
+  /**
+   * Real Codex (≤0.154) notifies `account/login/completed` before reloading
+   * its auth cache, so the first `account/read` calls still see no account.
+   */
+  nullAccountReads = 0;
+  /** Emit `account/updated` after the last empty read, as Codex does once it reloads. */
+  updateAfterNullReads = false;
 
   readonly spawn: CodexAppServerSpawn = (input) => {
     const record = {} as SpawnRecord;
     const process = fakeProcess((message) => this.handle(record, message));
-    Object.assign(record, { input, process, requests: [], loginId: null });
+    Object.assign(record, { input, process, requests: [], loginId: null, nullAccountReads: 0 });
     this.records.push(record);
     return process.child;
   };
@@ -124,6 +132,10 @@ class CodexHarness {
   private handle(record: SpawnRecord, message: Record<string, unknown>): void {
     record.requests.push(message);
     const method = message['method'];
+    if (method === 'model/list') {
+      send(record.process, { id: message['id'], result: { data: [{ model: 'future-model', displayName: 'Future', isDefault: true, defaultReasoningEffort: 'low', supportedReasoningEfforts: [{ reasoningEffort: 'low' }] }], nextCursor: null } });
+      return;
+    }
     if (method === 'initialized') return;
     if (method === 'initialize') {
       if (this.holdInitialize) return;
@@ -145,7 +157,22 @@ class CodexHarness {
     }
     if (method === 'account/login/cancel' && this.holdCancel) return;
     if (method === 'account/read') {
-      if (!this.holdAccountRead) this.respondAccountRead(record);
+      if (this.holdAccountRead) return;
+      if (record.nullAccountReads < this.nullAccountReads) {
+        record.nullAccountReads++;
+        send(record.process, {
+          id: message['id'],
+          result: { account: null, requiresOpenaiAuth: true },
+        });
+        if (this.updateAfterNullReads && record.nullAccountReads === this.nullAccountReads) {
+          send(record.process, {
+            method: 'account/updated',
+            params: { authMode: 'chatgpt', planType: 'plus' },
+          });
+        }
+        return;
+      }
+      this.respondAccountRead(record);
       return;
     }
     send(record.process, { id: message['id'], result: {} });
@@ -299,6 +326,22 @@ describe('principal Codex profile platform boundary', () => {
 });
 
 describe.skipIf(process.platform === 'win32')('principal Codex profile service', () => {
+  it('discovers models in the exact private generation and invalidates on disconnect', async () => {
+    const alice = viewer('catalogue-alice');
+    const harness = new CodexHarness();
+    const instance = service(harness);
+    const profile = createStoredProfile(path.join(temporaryRoot, 'profiles'), alice.principalId);
+    store.setPrincipalSubscription({ principalId: alice.principalId, provider: 'codex', profileId: profile.profileId });
+    const inventory = await instance.codexModels(alice.principalId);
+    expect(inventory.state).toBe('ready');
+    expect(inventory.models.map((model) => model.id)).toEqual(['future-model']);
+    expect(harness.records[0]!.input.env['CODEX_HOME']).toBe(profile.homePath);
+    expect(harness.records[0]!.process.kill).toHaveBeenCalled();
+    await instance.codexModels(alice.principalId);
+    expect(harness.records).toHaveLength(1);
+    store.deletePrincipalSubscription(alice.principalId, 'codex');
+    expect((await instance.codexModels(alice.principalId)).state).toBe('unavailable');
+  });
   it('connects one principal without exposing the credential, path or account email', async () => {
     const alice = viewer('alice');
     const bob = viewer('bob');
@@ -339,6 +382,77 @@ describe.skipIf(process.platform === 'win32')('principal Codex profile service',
     if (process.platform !== 'win32') {
       expect(lstatSync(aliceProfile!.homePath).mode & 0o777).toBe(0o700);
       expect(lstatSync(path.join(aliceProfile!.homePath, 'auth.json')).mode & 0o777).toBe(0o600);
+    }
+  });
+
+  it('waits for Codex to reload its auth cache after announcing a completed login', async () => {
+    // Every released Codex up to 0.154 sends account/login/completed BEFORE
+    // auth_manager.reload(); account/read answers from the stale cache first.
+    const alice = viewer('alice');
+    const harness = new CodexHarness();
+    harness.nullAccountReads = 2;
+    harness.updateAfterNullReads = true;
+    const subscriptions = service(harness);
+
+    await subscriptions.startCodexLogin(alice.principalId, alice.orgId);
+    const record = harness.records[0]!;
+    harness.complete(record);
+    await vi.waitFor(() => {
+      expect(store.principalSubscription(alice.principalId, 'codex')?.state).toBe('connected');
+    });
+    const reads = record.requests.filter((request) => request['method'] === 'account/read');
+    expect(reads).toHaveLength(3);
+    expect(reads.every((request) => (request['params'] as { refreshToken: boolean }).refreshToken === false)).toBe(true);
+    const status = await subscriptions.status(alice.principalId, { verify: false });
+    expect(status.codex.state).toBe('connected');
+    expect(status.codexAttempt).toBeNull();
+    expect(subscriptions.codexProfileForRun(alice.principalId)).not.toBeNull();
+  });
+
+  it('fails a completed login only after the account settle window closes', async () => {
+    const alice = viewer('alice');
+    const harness = new CodexHarness();
+    harness.nullAccountReads = Number.POSITIVE_INFINITY;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const subscriptions = new AccountSubscriptionService({
+        auth: store,
+        profilesRoot: path.join(temporaryRoot, 'profiles'),
+        sourceEnv: { PATH: process.env['PATH'] },
+        spawnFn: harness.spawn,
+        requestTimeoutMs: 100,
+        loginAccountSettleMs: 450,
+      });
+      services.push(subscriptions);
+      await subscriptions.startCodexLogin(alice.principalId, alice.orgId);
+      const record = harness.records[0]!;
+      const profile = record.input.env['CODEX_HOME']!;
+      harness.complete(record);
+      await vi.waitFor(
+        () => {
+          expect(record.requests.filter((request) => request['method'] === 'account/read').length).toBeGreaterThanOrEqual(2);
+        },
+        { timeout: 2_000 }
+      );
+      expect(store.principalSubscription(alice.principalId, 'codex')).toBeNull();
+      await vi.waitFor(
+        async () => {
+          const status = await subscriptions.status(alice.principalId, { verify: false });
+          expect(status.codexAttempt?.state).toBe('error');
+          expect(status.codexAttempt?.reason).toBe('authentication-required');
+        },
+        { timeout: 2_000 }
+      );
+      expect(store.principalSubscription(alice.principalId, 'codex')).toBeNull();
+      await vi.waitFor(() => {
+        expect(existsSync(profile)).toBe(false);
+      });
+      expect(warn).toHaveBeenCalledTimes(1);
+      const logged = JSON.stringify(warn.mock.calls);
+      expect(logged).not.toContain(alice.principalId);
+      expect(logged).not.toContain(profile);
+    } finally {
+      warn.mockRestore();
     }
   });
 

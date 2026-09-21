@@ -1,0 +1,45 @@
+{
+  "checkedAt": "2026-09-14T22:50:38.879Z",
+  "results": [
+    {
+      "label": "fresh",
+      "sha256": "2b1276a534ae051a6348a6ef0ee7019918bbfde4ce161299c1b2162d882d176b",
+      "sequence": [
+        "0",
+        "1",
+        "2",
+        "3"
+      ],
+      "expected": [
+        "0",
+        "1",
+        "2",
+        "3"
+      ],
+      "pageErrors": [],
+      "ok": true
+    },
+    {
+      "label": "seeded",
+      "sha256": "1c6ea109bde376f351edbdf1f2ba431ff6263efbc6cfdf859090bfd9820db53f",
+      "sequence": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "0",
+        "1"
+      ],
+      "expected": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "0",
+        "1"
+      ],
+      "pageErrors": [],
+      "ok": true
+    }
+  ]
+}
