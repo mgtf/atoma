@@ -1133,5 +1133,12 @@
   "welcome.handheld.continue": "Me permettre au moins d’accéder à mon compte",
   "settings.runCapacity": "Runs simultanés",
   "settings.runCapacityValue": "{{active}} actifs / {{limit}} autorisés (un run à la fois sur cet hôte)",
-  "auth.switchAccount": "Changer de compte"
+  "auth.switchAccount": "Changer de compte",
+  "settings.refreshModels": "Actualiser les modèles ChatGPT",
+  "settings.modelCatalogue.ready": "Modèles signalés par ton compte ChatGPT connecté.",
+  "settings.modelCatalogue.stale": "Échec de l’actualisation. Les modèles précédemment signalés sont affichés, mais ne peuvent pas être sélectionnés.",
+  "settings.modelCatalogue.unavailable": "Le catalogue de modèles ChatGPT est indisponible. Actualise-le pour réessayer.",
+  "settings.modelUnavailable": "{{model}} — indisponible",
+  "settings.mcpConnectAnother": "Connecter un autre client",
+  "settings.mcpHideSetup": "Masquer le guide de configuration"
 }

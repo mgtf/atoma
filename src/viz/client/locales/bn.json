@@ -1133,5 +1133,12 @@
   "welcome.handheld.continue": "অন্তত আমাকে আমার অ্যাকাউন্টে অ্যাক্সেস করতে দিন",
   "settings.runCapacity": "একযোগে run",
   "settings.runCapacityValue": "{{active}}টি সক্রিয় / {{limit}}টি অনুমোদিত (এই হোস্টে একবারে একটি run)",
-  "auth.switchAccount": "অ্যাকাউন্ট পরিবর্তন করুন"
+  "auth.switchAccount": "অ্যাকাউন্ট পরিবর্তন করুন",
+  "settings.refreshModels": "ChatGPT মডেলগুলো রিফ্রেশ করুন",
+  "settings.modelCatalogue.ready": "আপনার সংযুক্ত ChatGPT অ্যাকাউন্ট থেকে জানানো মডেলগুলো।",
+  "settings.modelCatalogue.stale": "রিফ্রেশ ব্যর্থ হয়েছে। আগে জানানো মডেলগুলো দেখানো হচ্ছে, তবে নির্বাচন করা যাবে না।",
+  "settings.modelCatalogue.unavailable": "ChatGPT মডেল ক্যাটালগ উপলভ্য নয়। আবার চেষ্টা করতে রিফ্রেশ করুন।",
+  "settings.modelUnavailable": "{{model}} — উপলভ্য নয়",
+  "settings.mcpConnectAnother": "অন্য ক্লায়েন্ট সংযুক্ত করুন",
+  "settings.mcpHideSetup": "সেটআপ নির্দেশিকা লুকান"
 }

@@ -1133,5 +1133,12 @@
   "welcome.handheld.continue": "Setidaknya izinkan saya mengakses akun saya",
   "settings.runCapacity": "run bersamaan",
   "settings.runCapacityValue": "{{active}} aktif / {{limit}} diizinkan (satu run setiap kalinya di host ini)",
-  "auth.switchAccount": "Ganti akun"
+  "auth.switchAccount": "Ganti akun",
+  "settings.refreshModels": "Segarkan model ChatGPT",
+  "settings.modelCatalogue.ready": "Model yang dilaporkan oleh akun ChatGPT Anda yang terhubung.",
+  "settings.modelCatalogue.stale": "Penyegaran gagal. Model yang dilaporkan sebelumnya ditampilkan, tetapi tidak dapat dipilih.",
+  "settings.modelCatalogue.unavailable": "Katalog model ChatGPT tidak tersedia. Segarkan untuk mencoba lagi.",
+  "settings.modelUnavailable": "{{model}} — tidak tersedia",
+  "settings.mcpConnectAnother": "Hubungkan klien lain",
+  "settings.mcpHideSetup": "Sembunyikan panduan penyiapan"
 }

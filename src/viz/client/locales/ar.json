@@ -1133,5 +1133,12 @@
   "welcome.handheld.continue": "اسمح لي على الأقل بالوصول إلى حسابي",
   "settings.runCapacity": "عمليات run المتزامنة",
   "settings.runCapacityValue": "{{active}} نشطة / {{limit}} مسموح بها (عملية run واحدة في كل مرة على هذا المضيف)",
-  "auth.switchAccount": "تبديل الحساب"
+  "auth.switchAccount": "تبديل الحساب",
+  "settings.refreshModels": "تحديث نماذج ChatGPT",
+  "settings.modelCatalogue.ready": "النماذج التي أبلغ عنها حساب ChatGPT المتصل.",
+  "settings.modelCatalogue.stale": "فشل التحديث. تظهر النماذج المُبلغ عنها سابقًا، ولكن لا يمكن تحديدها.",
+  "settings.modelCatalogue.unavailable": "دليل نماذج ChatGPT غير متاح. حدّث للمحاولة مرة أخرى.",
+  "settings.modelUnavailable": "{{model}} — غير متاح",
+  "settings.mcpConnectAnother": "ربط عميل آخر",
+  "settings.mcpHideSetup": "إخفاء دليل الإعداد"
 }

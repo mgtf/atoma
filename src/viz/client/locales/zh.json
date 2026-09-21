@@ -1133,5 +1133,12 @@
   "welcome.handheld.continue": "至少让我访问我的账户",
   "settings.runCapacity": "并发 run 数",
   "settings.runCapacityValue": "{{active}} 个活跃 / 允许 {{limit}} 个（此主机一次只能运行一个 run）",
-  "auth.switchAccount": "切换账号"
+  "auth.switchAccount": "切换账号",
+  "settings.refreshModels": "刷新ChatGPT模型",
+  "settings.modelCatalogue.ready": "由已连接的ChatGPT账户报告的模型。",
+  "settings.modelCatalogue.stale": "刷新失败。当前显示的是此前报告的模型，但无法选择。",
+  "settings.modelCatalogue.unavailable": "ChatGPT模型目录不可用。请刷新后重试。",
+  "settings.modelUnavailable": "{{model}}—不可用",
+  "settings.mcpConnectAnother": "连接其他客户端",
+  "settings.mcpHideSetup": "隐藏设置指南"
 }

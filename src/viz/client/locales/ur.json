@@ -1133,5 +1133,12 @@
   "welcome.handheld.continue": "کم از کم مجھے اپنے اکاؤنٹ تک رسائی دیں",
   "settings.runCapacity": "بیک وقت runs",
   "settings.runCapacityValue": "{{active}} فعال / {{limit}} کی اجازت (اس ہوسٹ پر ایک وقت میں ایک run)",
-  "auth.switchAccount": "اکاؤنٹ تبدیل کریں"
+  "auth.switchAccount": "اکاؤنٹ تبدیل کریں",
+  "settings.refreshModels": "ChatGPT ماڈلز تازہ کریں",
+  "settings.modelCatalogue.ready": "آپ کے منسلک ChatGPT اکاؤنٹ کے رپورٹ کردہ ماڈلز۔",
+  "settings.modelCatalogue.stale": "تازہ کاری ناکام رہی۔ پہلے رپورٹ کیے گئے ماڈلز دکھائے جا رہے ہیں، لیکن انہیں منتخب نہیں کیا جا سکتا۔",
+  "settings.modelCatalogue.unavailable": "ChatGPT ماڈل کیٹلاگ دستیاب نہیں ہے۔ دوبارہ کوشش کرنے کے لیے تازہ کریں۔",
+  "settings.modelUnavailable": "{{model}} — دستیاب نہیں",
+  "settings.mcpConnectAnother": "کوئی اور کلائنٹ منسلک کریں",
+  "settings.mcpHideSetup": "سیٹ اپ گائیڈ چھپائیں"
 }
