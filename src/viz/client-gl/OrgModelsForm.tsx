@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   CHATGPT_SUBSCRIPTION_FAMILY,
   HOST_SUBSCRIPTION_FAMILY,
@@ -100,6 +101,7 @@ export function OrgModelsForm({
   const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null);
   const [draftKeys, setDraftKeys] = useState<Record<string, string>>({});
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
+  const queryClient = useQueryClient();
   const canUsePersonalSubscriptions =
     organisation !== null && roleCanUsePersonalSubscriptions(organisation.viewerRole);
   const subscriptions = useAccountSubscriptions(enabled && canUsePersonalSubscriptions);
@@ -136,6 +138,29 @@ export function OrgModelsForm({
     try {
       await action();
       if (await refresh()) setStatus(t(successKey));
+    } catch (error) {
+      setStatus(null);
+      onError(error instanceof Error ? error.message : t('settings.actionFailed'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * Hand the host subscription to one member, or take it back. The member
+   * list lives in the organisation query, not in this form's own state, so
+   * the fresh answer comes from invalidating that query — never from
+   * patching a row locally, which would show an authority the server may
+   * have refused.
+   */
+  const applyDelegation = async (principalId: string, delegated: boolean): Promise<void> => {
+    setBusy(true);
+    setStatus(null);
+    try {
+      await api.setSubscriptionDelegate(principalId, delegated);
+      await queryClient.invalidateQueries({ queryKey: ['viz', 'org'] });
+      await refresh();
+      setStatus(t(delegated ? 'settings.subscriptionDelegated' : 'settings.subscriptionDelegationWithdrawn'));
     } catch (error) {
       setStatus(null);
       onError(error instanceof Error ? error.message : t('settings.actionFailed'));
@@ -319,19 +344,55 @@ export function OrgModelsForm({
             <p className="gpu-org-models-hint">
               {t('settings.members', { count: organisation.members.length })}
             </p>
+            {/*
+              The delegation control appears only where it can be exercised:
+              this organisation is the one the deployment declares for its own
+              login session, and the viewer may hand that spend out. Both facts
+              are the server's answer, never inferred here from a chip.
+            */}
+            {organisation.subscriptionDelegation?.available &&
+            organisation.subscriptionDelegation.mayManage ? (
+              <p className="gpu-org-models-hint" role="note">
+                {t('settings.subscriptionDelegateHint')}
+              </p>
+            ) : null}
             <ul className="gpu-org-directory-members">
-              {organisation.members.map((member) => (
-                <li key={member.principalId}>
-                  <span>{member.displayName}</span>
-                  <span className="gpu-org-directory-meta">
-                    {t(`auth.role.${member.role}`)}
-                    {member.platformAdmin ? ` · ${t('auth.platformAdmin')}` : ''}
-                    {member.joinedAt
-                      ? ` · ${t('settings.joined', { date: formatDate(member.joinedAt, locale) })}`
-                      : ''}
-                  </span>
-                </li>
-              ))}
+              {organisation.members.map((member) => {
+                const delegated = member.subscriptionDelegate === true;
+                // A platform admin already spends the host login by flag, so a
+                // toggle beside their name would offer an authority they
+                // cannot lose here and did not need.
+                const mayToggle =
+                  organisation.subscriptionDelegation?.available === true &&
+                  organisation.subscriptionDelegation.mayManage &&
+                  !member.platformAdmin;
+                return (
+                  <li key={member.principalId}>
+                    <span>{member.displayName}</span>
+                    <span className="gpu-org-directory-meta">
+                      {t(`auth.role.${member.role}`)}
+                      {member.platformAdmin ? ` · ${t('auth.platformAdmin')}` : ''}
+                      {delegated ? ` · ${t('auth.subscriptionDelegate')}` : ''}
+                      {member.joinedAt
+                        ? ` · ${t('settings.joined', { date: formatDate(member.joinedAt, locale) })}`
+                        : ''}
+                    </span>
+                    {mayToggle ? (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void applyDelegation(member.principalId, !delegated)}
+                      >
+                        {t(
+                          delegated
+                            ? 'settings.subscriptionDelegateWithdraw'
+                            : 'settings.subscriptionDelegateGrant'
+                        )}
+                      </button>
+                    ) : null}
+                  </li>
+                );
+              })}
             </ul>
           </section>
         ) : null}

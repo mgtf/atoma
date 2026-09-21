@@ -130,6 +130,16 @@ export const platformEventKindSchema = z.enum([
   'admin.cross_org_read',
   'admin.granted',
   'admin.revoked',
+  /**
+   * A platform admin, or the operator CLI, let ONE member of the declared
+   * host-subscription organisation spend the machine's own login session —
+   * or took that permission back. It sits in the `admin.` family because it
+   * hands out operator spend, not organisation self-service: the delegate
+   * gains no other operator power, and the row is what answers "who allowed
+   * this person to bill our subscription, and when".
+   */
+  'admin.subscription_delegated',
+  'admin.subscription_revoked',
   'invitation.created',
   /**
    * An API token — a principal's bearer for the MCP — was minted or revoked.
@@ -356,6 +366,8 @@ export const PLATFORM_EVENT_SEVERITY: Record<PlatformEventKind, PlatformEventSev
   'admin.cross_org_read': 'security',
   'admin.granted': 'security',
   'admin.revoked': 'security',
+  'admin.subscription_delegated': 'security',
+  'admin.subscription_revoked': 'security',
   'invitation.created': 'security',
   'token.created': 'security',
   'token.revoked': 'security',

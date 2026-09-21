@@ -44,6 +44,43 @@ Loopback HTTP keeps its development cookie names and paths.
   What the flag unlocks is a routing question, answered in
   [`src/viz`](../viz/AGENTS.md).
 
+## Host-subscription delegation
+
+- ONE ROW, ONE ORGANISATION (`auth_subscription_delegates`,
+  `subscriptionDelegates.ts`): a member of the DECLARED organisation
+  (`ATOMA_HOST_SUBSCRIPTION_ORG`) may name the machine's own login session
+  (`sub:` selectors) on a tier WITHOUT holding the platform-admin flag. It
+  separates "may spend the operator's subscription" from "holds every
+  operator power", which were the same fact until 2026-09-22 — handing a
+  colleague the first meant handing them burn-in, the operator corpus,
+  cross-organisation reads and the four writes.
+- It changes exactly ONE of the three facts the coordinator re-asks per run:
+  the requester's authority. The pin is still the delegate's OWN account pin
+  (never an org default, never the host env), and the run must still belong
+  to the declared organisation. See [src/projects](../projects/AGENTS.md).
+- MEMBERSHIP-SCOPED, not principal-scoped, and the store checks it: a
+  delegation for someone who cannot launch a run there is an authority nobody
+  could exercise and nobody would think to withdraw. The same person in
+  another organisation is not a delegate.
+- MINTED BY AN OPERATOR ACT ONLY — the CLI by possession of the machine
+  (`grant-subscription` / `revoke-subscription`), or a platform admin's own
+  authenticated session. A delegate can never delegate further. The rule
+  lives in ONE body that all three doors call (CLI, `/api/org/
+  subscription-delegates/:principalId`, `atoma_subscription_delegates`);
+  never re-check it in a door.
+- Granting and withdrawing are `admin.subscription_delegated` /
+  `admin.subscription_revoked` (severity `security`, pushed to platform
+  admins), journaled at the moment of the decision, from whichever process
+  decided. A no-op journals nothing.
+- WITHDRAWAL LEAVES THE PINS: they are data, refused by name at the next
+  launch, exactly as for a revoked flag. Erasing them would lose "who chose
+  this payer".
+- The table post-dates the first stores and is deliberately absent from
+  `AUTH_TABLE_NAMES`: a read-only open of an older product DB answers "no
+  delegates" instead of refusing the whole schema.
+- Design and the owner's decision:
+  [docs/subscription-delegation-2026-09-22.md](../../docs/subscription-delegation-2026-09-22.md).
+
 ## Personal provider subscriptions
 
 - A provider subscription belongs to one principal, never an organisation.

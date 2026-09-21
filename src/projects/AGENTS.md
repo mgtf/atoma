@@ -73,11 +73,14 @@ list. These values come from the host snapshot, never a tenant prompt.
   candidate for every tier; a `sub:` at either level would be a payer-bearing
   default nobody chose, and is refused whatever the requester's flag. The
   former whole-deployment regime (`ATOMA_LLM=claude-cli`) no longer exists.
-- Authority is re-asked PER RUN and is never handed in: the platform-admin
-  flag through the fail-closed `resolveSubscriptionGrant`, plus
-  `ATOMA_HOST_SUBSCRIPTION_ORG` naming the ONE organisation where the
-  operator's own login may be spent, plus a match against this run's org. A
-  stored pin is data; permission is not storable. `platformAdmins` is passed
+- Authority is re-asked PER RUN and is never handed in: through the
+  fail-closed `resolveSubscriptionGrant`, EITHER the platform-admin flag OR a
+  host-subscription delegation for this principal in THIS organisation
+  ([src/auth](../auth/AGENTS.md)), plus `ATOMA_HOST_SUBSCRIPTION_ORG` naming
+  the ONE organisation where the operator's own login may be spent, plus a
+  match against this run's org. Both resolvers fail closed, and the run is
+  never told which one answered. A stored pin is data; permission is not
+  storable. `platformAdmins` is passed
   to the coordinator as a QUESTION, never as an answer — absent resolver,
   `false`, or a throwing resolver all mean refusal — deliberately the opposite
   of `tierModelsFor`, which is fail-open: a preferences lookup must not block

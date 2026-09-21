@@ -143,6 +143,17 @@ export interface ProjectCoordinatorOptions {
    */
   readonly platformAdmins?: (principalId: string) => boolean;
   /**
+   * The SECOND authority for the same door, asked with the same fail-closed
+   * rules: has a platform admin delegated the host subscription to THIS
+   * principal IN THIS ORGANISATION (`src/auth/subscriptionDelegates.ts`)?
+   *
+   * It takes the organisation because the delegation is membership-scoped,
+   * where the operator flag is instance-wide. Neither widens what a `sub:`
+   * pin may do: the pin still has to be the requester's own account pin, and
+   * the run still has to belong to the declared organisation.
+   */
+  readonly subscriptionDelegates?: (principalId: string, orgId: string) => boolean;
+  /**
    * Resolve the requesting principal's CURRENT personal Codex generation.
    * The resolver is asked at launch, never trusted from an HTTP request. A
    * missing/throwing resolver is a hard refusal only when a personal sentinel
@@ -310,9 +321,11 @@ function vendorCredentialSource(
  * credential is exactly the audit lie this feature exists to avoid.
  *
  * The authority is asked HERE, per run, and is never handed in as an answer —
- * `resolveSubscriptionGrant` is fail-closed and reads the platform-admin flag
- * that only the operator CLI can mint. A stored pin is data; permission is not
- * storable.
+ * `resolveSubscriptionGrant` is fail-closed and reads either the platform-admin
+ * flag, which only the operator CLI can mint, or a delegation a platform admin
+ * granted to this principal IN THIS ORGANISATION
+ * (`src/auth/subscriptionDelegates.ts`). A stored pin is data; permission is
+ * asked again here, whichever of the two answers it.
  */
 function assertSubscriptionPinIsHonourable(input: {
   readonly tier: TierNumber;
@@ -333,8 +346,9 @@ function assertSubscriptionPinIsHonourable(input: {
   }
   if (!input.grant) {
     throw new ProjectRunConfigurationError(
-      `${where} names the host subscription, but the requesting account no longer holds the ` +
-        'platform-admin flag. Clear the pin in Settings, or have the flag restored'
+      `${where} names the host subscription, but the requesting account is neither a platform ` +
+        'admin nor a delegate of it in this organisation. Clear the pin in Settings, or have the ' +
+        'delegation restored'
     );
   }
   if (!input.declaredOrg) {
@@ -885,6 +899,7 @@ export class ProjectRunCoordinator {
     provider: ProviderKeyProvider
   ) => string | null;
   private readonly platformAdmins?: (principalId: string) => boolean;
+  private readonly subscriptionDelegates?: (principalId: string, orgId: string) => boolean;
   private readonly principalCodexProfileFor?: (
     principalId: string
   ) => PrincipalCodexProfile | null;
@@ -912,6 +927,7 @@ export class ProjectRunCoordinator {
     if (options.orgTierModelsFor) this.orgTierModelsFor = options.orgTierModelsFor;
     if (options.orgProviderKeyFor) this.orgProviderKeyFor = options.orgProviderKeyFor;
     if (options.platformAdmins) this.platformAdmins = options.platformAdmins;
+    if (options.subscriptionDelegates) this.subscriptionDelegates = options.subscriptionDelegates;
     if (options.principalCodexProfileFor) {
       this.principalCodexProfileFor = options.principalCodexProfileFor;
     }
@@ -1004,13 +1020,31 @@ export class ProjectRunCoordinator {
    * ungated developer path uses the CLI runner directly and never comes
    * through here.
    */
-  private resolveSubscriptionGrant(principalId: string): { principalId: string } | undefined {
-    if (!this.platformAdmins) return undefined;
+  private resolveSubscriptionGrant(
+    principalId: string,
+    orgId: string
+  ): { principalId: string } | undefined {
+    // TWO WAYS IN, ONE DOOR. The flag answers for the operator themself; the
+    // delegation answers for one member of the declared organisation. Both
+    // are asked here, per run, and BOTH fail closed — an absent resolver, a
+    // `false`, or a throw all mean no. Order matters only for cost: the flag
+    // is the cheaper lookup and the common case on a single-operator host.
+    if (this.platformAdmins) {
+      try {
+        if (this.platformAdmins(principalId)) return { principalId };
+      } catch (error) {
+        process.stderr.write(
+          `[atoma projects] platform-admin lookup failed for ${principalId}; refusing the subscription transport: ${String(error)}\n`
+        );
+        return undefined;
+      }
+    }
+    if (!this.subscriptionDelegates) return undefined;
     try {
-      return this.platformAdmins(principalId) ? { principalId } : undefined;
+      return this.subscriptionDelegates(principalId, orgId) ? { principalId } : undefined;
     } catch (error) {
       process.stderr.write(
-        `[atoma projects] platform-admin lookup failed for ${principalId}; refusing the subscription transport: ${String(error)}\n`
+        `[atoma projects] subscription-delegate lookup failed for ${principalId} in ${orgId}; refusing the subscription transport: ${String(error)}\n`
       );
       return undefined;
     }
@@ -1125,7 +1159,7 @@ export class ProjectRunCoordinator {
       skillsPath: run.hostPaths.skillsPath ?? layout.skillsPath,
       artifactManifestPath: layout.artifactManifestPath,
     };
-    const subscriptionGrant = this.resolveSubscriptionGrant(input.principalId);
+    const subscriptionGrant = this.resolveSubscriptionGrant(input.principalId, input.orgId);
     const principalCodexProfile = this.resolvePrincipalCodexProfile(input.principalId);
     let environment: NodeJS.ProcessEnv;
     try {

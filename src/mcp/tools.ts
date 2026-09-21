@@ -1,6 +1,10 @@
 import { basename } from 'node:path';
 import { TRUST_THRESHOLD_SUCCESSES } from '../atoms/cost.js';
 import { updateOrgModels } from '../auth/orgModels.js';
+import {
+  declaredHostSubscriptionOrg,
+  setSubscriptionDelegate,
+} from '../auth/subscriptionDelegates.js';
 import type { PlatformEventSink } from '../contracts/platformEvents.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
@@ -990,6 +994,51 @@ export const MCP_TOOLS: readonly McpToolSpec[] = [
           annotations: READ_ONLY,
         },
         () => jsonResult(ctx.deps.auth!.listOrganisationsWithMembers())
+      ),
+  },
+  {
+    name: 'atoma_subscription_delegates',
+    tier: 'platform',
+    needs: ['auth', 'projects'],
+    register: (server, ctx) =>
+      server.registerTool(
+        'atoma_subscription_delegates',
+        {
+          title: 'Who may spend the host subscription',
+          description:
+            'Read the members allowed to name this machine’s own login session (sub: selectors) in the declared host-subscription organisation, or change one: pass principalId with delegated true to grant, false to withdraw. A delegate gains no other operator power, still chooses the subscription per tier in their own Settings, and can only spend it on runs of the declared organisation.',
+          inputSchema: {
+            principalId: z.string().min(1).optional().describe('Omit to read.'),
+            delegated: z.boolean().optional().describe('Required with principalId.'),
+          },
+          annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+        },
+        (args) =>
+          guarded(() => {
+            const viewer = ctx.viewer();
+            const auth = ctx.deps.auth!;
+            if (args.principalId === undefined) {
+              return {
+                organisation: declaredHostSubscriptionOrg() ?? null,
+                delegates: auth.listSubscriptionDelegates(viewer.orgId),
+              };
+            }
+            if (args.delegated === undefined) {
+              throw new McpToolRefused('pass delegated: true to grant, false to withdraw');
+            }
+            if (!ctx.deps.emit) {
+              throw new McpToolRefused('delegating the host subscription requires the audit journal');
+            }
+            return setSubscriptionDelegate({
+              auth,
+              actor: { kind: 'principal', viewer },
+              principalRef: args.principalId,
+              orgId: viewer.orgId,
+              declaredOrg: declaredHostSubscriptionOrg(),
+              delegated: args.delegated,
+              emit: ctx.deps.emit,
+            });
+          })
       ),
   },
 ];

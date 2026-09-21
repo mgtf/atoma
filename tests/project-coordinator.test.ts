@@ -30,6 +30,7 @@ import {
   projectRunHostLayout,
   projectRunTimeoutMs,
   runnerFailureDetail,
+  type SubscriptionTransportUse,
 } from '../src/projects/coordinator.js';
 import { ProjectStore } from '../src/projects/store.js';
 import { unsupportedRunHostMessage } from '../src/run/platform.js';
@@ -367,8 +368,12 @@ describe('project run environment', () => {
 
     // NO GRANT: refused, never fallen through. A revoked authority that
     // quietly became a billed credential is the audit lie this prevents.
+    // The grant carries no reason on purpose — the coordinator resolves it
+    // from the flag OR a delegation, and a run may not be told which.
     const { subscriptionTransport: _grant, ...noGrant } = base;
-    expect(() => projectRunEnvironment(noGrant)).toThrow(/no longer holds the platform-admin flag/);
+    expect(() => projectRunEnvironment(noGrant)).toThrow(
+      /neither a platform admin nor a delegate of it in this organisation/
+    );
     // NO DECLARATION: refused, and told which variable is missing.
     expect(() =>
       projectRunEnvironment({
@@ -1292,6 +1297,73 @@ describe('the subscription-transport door, at the coordinator', () => {
     expect(passed.env?.['ATOMA_SUBSCRIPTION_TIERS']).toBe('l1,l2,l3');
     expect(passed.env?.['ANTHROPIC_API_KEY']).toBeUndefined();
     expect(run.projectRunId).toBeTruthy();
+  });
+
+  it('lets a DELEGATE through without the operator flag, and refuses when the delegation lookup fails', async () => {
+    const f = fixture();
+    const seen: Array<{ principalId: string; transport: string }> = [];
+    const driver = deliveringDriver();
+    const options = {
+      store: f.store,
+      dbPath: f.dbPath,
+      projectsRoot: f.root,
+      // Same host as the admin case above: no credential anywhere, so the
+      // run is startable ONLY if the delegation authorises the account pins.
+      hostEnv: {
+        ...haystackTestEnvironment(f.root),
+        PATH: process.env['PATH'],
+        ATOMA_HOST_SUBSCRIPTION_ORG: f.viewer.orgId,
+      },
+      driver: driver as unknown as ProjectRunDriver,
+      acquireLease: async () => lease(),
+      tierModelsFor: () => ({
+        l1: CLAUDE_CLI_PINS.ATOMA_MODEL_L1,
+        l2: CLAUDE_CLI_PINS.ATOMA_MODEL_L2,
+        l3: CLAUDE_CLI_PINS.ATOMA_MODEL_L3,
+      }),
+      onSubscriptionTransport: (info: SubscriptionTransportUse) =>
+        seen.push({ principalId: info.principalId, transport: info.transport }),
+    };
+    // NO platformAdmins resolver at all: the delegation is the whole
+    // authority, and it is asked with the run's organisation.
+    const asked: Array<[string, string]> = [];
+    const coordinator = new ProjectRunCoordinator({
+      ...options,
+      subscriptionDelegates: (principalId, orgId) => {
+        asked.push([principalId, orgId]);
+        return principalId === f.viewer.principalId && orgId === f.viewer.orgId;
+      },
+    });
+    await coordinator.start({
+      orgId: f.viewer.orgId,
+      principalId: f.viewer.principalId,
+      projectId: f.project.projectId,
+      request: { idempotencyKey: 'delegate-run', goal: 'Build a clock.' },
+    });
+    await coordinator.waitForIdle();
+    expect(asked).toEqual([[f.viewer.principalId, f.viewer.orgId]]);
+    expect(seen).toEqual([{ principalId: f.viewer.principalId, transport: 'claude-cli' }]);
+    const passed = driver.mock.calls[0]![0] as SpawnRunOptions;
+    expect(passed.env?.['ATOMA_MODEL_L1']).toBe('sub:anthropic:haiku');
+    expect(passed.env?.['ATOMA_SUBSCRIPTION_TIERS']).toBe('l1,l2,l3');
+    expect(passed.env?.['ANTHROPIC_API_KEY']).toBeUndefined();
+
+    // FAIL CLOSED, like the flag: a lookup that throws is a refusal, never a
+    // fall-through onto a billed credential nobody chose.
+    const broken = new ProjectRunCoordinator({
+      ...options,
+      subscriptionDelegates: () => {
+        throw new Error('delegation table unavailable');
+      },
+    });
+    await expect(
+      broken.start({
+        orgId: f.viewer.orgId,
+        principalId: f.viewer.principalId,
+        projectId: f.project.projectId,
+        request: { idempotencyKey: 'delegate-run-broken', goal: 'Build a clock.' },
+      })
+    ).rejects.toThrow(/neither a platform admin nor a delegate/);
   });
 
   it('says nothing when the host is NOT on a subscription transport', async () => {

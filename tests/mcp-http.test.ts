@@ -191,6 +191,10 @@ describe('the catalogue by tier', () => {
     expect(above(asViewer, asMember)).toEqual(['atoma_project_create', 'atoma_run_start', 'atoma_run_cancel', 'atoma_publication_retry']);
     expect(asAdmin).toEqual(expect.arrayContaining(asMember));
     expect(above(asMember, asAdmin)).toEqual(['atoma_org_members', 'atoma_org_models']);
+    // Handing out the host's own login is operator spend, not organisation
+    // self-service: an org admin never sees the row, a platform admin does.
+    expect(asAdmin).not.toContain('atoma_subscription_delegates');
+    expect(asPlatform).toContain('atoma_subscription_delegates');
     // The tray needs the host's notification builder; this host has none, so
     // the platform ladder is the whole table minus that one row.
     expect(asPlatform).toEqual(MCP_TOOL_NAMES.filter((name) => !['atoma_notifications', 'atoma_benchmark_start'].includes(name)));

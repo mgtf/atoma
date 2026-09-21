@@ -1140,5 +1140,11 @@
   "projects.sourceRepository": "Source GitHub repository",
   "projects.pullRequest": "Pull request",
   "projects.sourceHint.fork": "The first run creates your fork. Each run publishes changes directly there.",
-  "projects.sourceHint.pullRequest": "Each run opens a pull request. Merge it before starting dependent work."
+  "projects.sourceHint.pullRequest": "Each run opens a pull request. Merge it before starting dependent work.",
+  "auth.subscriptionDelegate": "Host subscription",
+  "settings.subscriptionDelegateHint": "This is the organisation where runs may spend this machine’s own Claude and ChatGPT login. Delegating lets a member select it per tier in their own settings; it grants no other operator power.",
+  "settings.subscriptionDelegateGrant": "Delegate host subscription",
+  "settings.subscriptionDelegateWithdraw": "Withdraw host subscription",
+  "settings.subscriptionDelegated": "Host subscription delegated.",
+  "settings.subscriptionDelegationWithdrawn": "Host subscription delegation withdrawn."
 }

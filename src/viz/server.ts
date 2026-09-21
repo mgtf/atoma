@@ -50,6 +50,12 @@ import {
 } from '../auth/store.js';
 import { resolveSecretEncryption, SECRET_ENCRYPTION_ENV } from '../auth/secretEncryption.js';
 import {
+  declaredHostSubscriptionOrg,
+  mayManageSubscriptionDelegations,
+  setSubscriptionDelegate,
+  SubscriptionDelegationError,
+} from '../auth/subscriptionDelegates.js';
+import {
   AccountSubscriptionService,
   ACCOUNT_PROFILES_ROOT_ENV,
   CodexSubscriptionCapacityError,
@@ -815,7 +821,11 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
     // answer — the coordinator asks it — and absent without a gate, where
     // there are no accounts to be admin of.
     ...(AUTH?.store
-      ? { platformAdmins: (principalId: string) => AUTH.store!.isPlatformAdmin(principalId) }
+      ? {
+          platformAdmins: (principalId: string) => AUTH.store!.isPlatformAdmin(principalId),
+          subscriptionDelegates: (principalId: string, orgId: string) =>
+            AUTH.store!.isSubscriptionDelegate(principalId, orgId),
+        }
       : {}),
     ...(ACCOUNT_SUBSCRIPTIONS
       ? {
@@ -2793,8 +2803,19 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
     // viewer's ACTIVE organisation is the declared one. The picker greys the
     // family when it is offered-but-unusable and hides it entirely otherwise.
     const hostSubscriptionOffers = (): Array<{ family: unknown; reason?: string }> | undefined => {
-      if (!viewer.platformAdmin) return undefined;
-      const declared = process.env['ATOMA_HOST_SUBSCRIPTION_ORG']?.trim();
+      const declared = declaredHostSubscriptionOrg(process.env);
+      // A DELEGATE IS NOT A SHRUNKEN ADMIN. The flag is instance-wide, so an
+      // admin is told WHY the family is unusable here (undeclared, wrong
+      // organisation) and the picker greys it. A delegation only ever exists
+      // inside the declared organisation, so for a delegate the family is
+      // either usable or not theirs to see at all — an offer they cannot use
+      // would name a payer that is none of their business.
+      if (!viewer.platformAdmin) {
+        if (!declared || viewer.orgId !== declared) return undefined;
+        return AUTH.store?.isSubscriptionDelegate(viewer.principalId, viewer.orgId)
+          ? HOST_SUBSCRIPTION_FAMILIES.map((family) => ({ family }))
+          : undefined;
+      }
       if (!declared) {
         return HOST_SUBSCRIPTION_FAMILIES.map((family) => ({ family, reason: 'undeclared' }));
       }
@@ -3228,6 +3249,52 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
     // member sees who else is in the organisation they belong to. Emails are
     // deliberately absent — provider emails are display attributes and
     // GitHub's is not even a verified-email assertion.
+    // WHO ELSE MAY SPEND THE MACHINE'S OWN LOGIN. The second door onto
+    // `setSubscriptionDelegate`; the CLI is the first and the MCP the third,
+    // and all three share that body so the rule has one spelling. PUT grants,
+    // DELETE withdraws, both scoped to the viewer's ACTIVE organisation — a
+    // platform admin writes only where they are, exactly as the other routes.
+    const subscriptionDelegateMatch = /^\/api\/org\/subscription-delegates\/([^/]+)$/.exec(pathname);
+    if (subscriptionDelegateMatch) {
+      const authStore = AUTH.store!;
+      if (!mayManageSubscriptionDelegations(viewer)) {
+        sendJson(res, 403, { error: 'platform admin required' });
+        return;
+      }
+      if (req.method !== 'PUT' && req.method !== 'DELETE') {
+        res.writeHead(405, { allow: 'PUT, DELETE', 'content-length': '0', 'cache-control': 'no-store' });
+        res.end();
+        return;
+      }
+      if (!sameOrigin(req, res)) return;
+      const principalId = decodePathComponent(subscriptionDelegateMatch[1]!);
+      if (!principalId || principalId.length > 128) {
+        sendJson(res, 400, { error: 'invalid principal id' });
+        return;
+      }
+      try {
+        const result = setSubscriptionDelegate({
+          auth: authStore,
+          actor: { kind: 'principal', viewer },
+          principalRef: principalId,
+          orgId: viewer.orgId,
+          declaredOrg: declaredHostSubscriptionOrg(process.env),
+          delegated: req.method === 'PUT',
+          emit,
+        });
+        sendJson(res, 200, {
+          principalId: result.principalId,
+          delegated: result.delegated,
+          already: result.already,
+        });
+      } catch (error) {
+        sendJson(res, error instanceof SubscriptionDelegationError ? 400 : 500, {
+          error: (error instanceof Error ? error.message : String(error)).slice(0, 500),
+        });
+      }
+      return;
+    }
+
     if (pathname === '/api/org') {
       if (!methodAllowed(req, res, 'GET')) return;
       const authStore = AUTH.store!;
@@ -3249,6 +3316,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           role: member.role,
           joinedAt: member.joinedAt,
           platformAdmin: member.platformAdmin,
+          subscriptionDelegate: member.subscriptionDelegate,
           avatarUrl: member.avatarEtag
             ? `/auth/avatar/${encodeURIComponent(member.principalId)}?v=${member.avatarEtag.slice(0, 16)}`
             : null,
@@ -3256,6 +3324,14 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         projectCount: PROJECTS_RUNTIME
           ? PROJECTS_RUNTIME.store.listProjects(viewer.orgId).length
           : 0,
+        // Whether the delegation control belongs on this screen at all: the
+        // deployment declared an organisation for its own login AND this is
+        // that organisation. `mayManage` is the platform-admin flag, decided
+        // here rather than inferred in the browser from a chip.
+        subscriptionDelegation: {
+          available: declaredHostSubscriptionOrg(process.env) === viewer.orgId,
+          mayManage: mayManageSubscriptionDelegations(viewer),
+        },
         // Only owners and admins can mint invitations, so only they are told
         // how many are outstanding.
         pendingInvitations: canSeeInvitations

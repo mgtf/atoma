@@ -42,9 +42,11 @@ Neighbours:
   organisation's members and sets its model defaults; `platform` — the
   platform-admin flag, or the operator on the ungated loopback — everything
   above plus operator runs, skill analytics (`stats`, `review`), the four
-  writes, ledger, the operator corpus, friction, the journal and every
-  organisation. A platform admin READS every organisation and WRITES only in
-  its active one, exactly as the HTTP routes.
+  writes, ledger, the operator corpus, friction, the journal, every
+  organisation, and who may spend the host's own login
+  (`atoma_subscription_delegates`, the third door onto
+  [src/auth](../auth/AGENTS.md)'s one body). A platform admin READS every
+  organisation and WRITES only in its active one, exactly as the HTTP routes.
 - ONE SESSION, ONE SERVER, ONE CALLER (`http.ts`). `initialize` authenticates
   the caller and builds a server holding exactly their tools; every later
   request must present the same caller or the session ends with a 401. Hiding

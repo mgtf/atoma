@@ -304,6 +304,11 @@ export interface VizOrganisationMember {
   role: string;
   joinedAt?: string;
   platformAdmin?: boolean;
+  /**
+   * May spend the host's own login session in THIS organisation without
+   * holding the operator flag. Absent on an older server.
+   */
+  subscriptionDelegate?: boolean;
   /** Same-origin avatar URL, versioned by content hash; null when there is none. */
   avatarUrl?: string | null;
 }
@@ -323,6 +328,13 @@ export interface VizOrganisation {
   projectCount: number;
   /** Null unless the viewer is an owner or admin — only they can mint them. */
   pendingInvitations: number | null;
+  /**
+   * The host-subscription delegation control, decided server-side: whether
+   * this organisation is the one the deployment declares for its own login
+   * session, and whether the viewer may hand that spend out. Absent on an
+   * older server, which is the same as "not available".
+   */
+  subscriptionDelegation?: { available: boolean; mayManage: boolean };
 }
 
 /** Picker capabilities only; detailed connection state comes from its own endpoint. */

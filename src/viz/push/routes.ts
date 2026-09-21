@@ -359,6 +359,29 @@ const PUSH_ROUTE_SOURCES: Record<PlatformEventKind, PushRouteSource | null> = {
       fr: { title: 'Atoma — admin plateforme retiré', body: '{{name}} n’est plus admin' },
     },
   },
+  // Operator SPEND changing hands is the same class of fact as the flag
+  // itself, so it reaches the same audience. The delegate is not notified:
+  // they see the offer appear in Settings, which is the actionable surface.
+  'admin.subscription_delegated': {
+    audience: { platformAdmins: true },
+    vars: (event) => ({ name: text(event, 'displayName') }),
+    copy: {
+      en: {
+        title: 'Atoma — host subscription delegated',
+        body: '{{name}} may now spend this machine’s own login session',
+      },
+    },
+  },
+  'admin.subscription_revoked': {
+    audience: { platformAdmins: true },
+    vars: (event) => ({ name: text(event, 'displayName') }),
+    copy: {
+      en: {
+        title: 'Atoma — host subscription delegation withdrawn',
+        body: '{{name}} may no longer spend this machine’s own login session',
+      },
+    },
+  },
   // The minter already knows; the journal keeps the record.
   'invitation.created': null,
   'auth.rate_limited': null,

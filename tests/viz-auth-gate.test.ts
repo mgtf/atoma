@@ -2203,3 +2203,126 @@ it('audits all four HTTP cross-org read paths and refuses reads if the journal f
     expect((await fetch(`${base}/auth/whoami`, { headers: cookie })).status).toBe(200);
   } finally { db.close(); }
 }, 120_000);
+
+/**
+ * THE SECOND DOOR onto `setSubscriptionDelegate` (the CLI is the first, the
+ * MCP tool the third). What it has to prove is not that a row appears, but
+ * that the row MOVES THE PAYER DOOR for somebody who holds no operator flag:
+ * the same account pin that was refused 403 before the delegation is accepted
+ * after it, and refused again once it is withdrawn.
+ */
+it('delegates the host subscription to a plain member, and withdraws it', async () => {
+  const instance = tempInstance();
+  const subject = 9911;
+  // Seeded BEFORE the server starts: the declared organisation is an env var,
+  // and the id only exists once a founder has logged in. The browser login
+  // below lands on this same principal because identities join on
+  // (provider, subject), never on email.
+  const seed = new Database(instance.dbPath);
+  let orgId = '';
+  let founderId = '';
+  let memberId = '';
+  let memberSession = '';
+  try {
+    const auth = new AuthStore(seed);
+    const founder = auth.completeLogin({ provider: 'github', subject: String(subject),
+      displayName: 'Founder', email: null, emailVerified: false }, null)!;
+    orgId = founder.viewer.orgId;
+    founderId = founder.viewer.principalId;
+    const invitation = auth.createInvitation({ orgId, token: 'member-joins', role: 'org:member', ttlMs: 60_000 });
+    const member = auth.completeLogin({ provider: 'github', subject: 'delegate-member',
+      displayName: 'Member', email: null, emailVerified: false }, invitation.tokenHash)!;
+    memberId = member.viewer.principalId;
+    // A real session row for the member, minted through the production API the
+    // login flow itself uses: two browser identities cannot share one fake
+    // provider, and the point here is the member's OWN request.
+    memberSession = randomBytes(32).toString('base64url');
+    auth.createSession({ principalId: memberId, orgId, token: memberSession, ttlMs: 600_000 });
+  } finally {
+    seed.close();
+  }
+
+  const provider = await startFakeProvider({ port: await freePort(), subject });
+  const port = await freePort();
+  const base = `http://127.0.0.1:${port}`;
+  const running = startViz(
+    [...instance.args, '--port', String(port)],
+    { ...providerEnv(provider, base), ATOMA_HOST_SUBSCRIPTION_ORG: orgId }
+  );
+  await waitReady(running, `${base}/auth/whoami`);
+  const jar = new CookieJar();
+  expect((await fetchWithJar(jar, `${base}/auth/login?provider=github`)).status).toBe(200);
+  const cookie = { cookie: jar.header(base)! };
+  const asMember = { cookie: `atoma_session=${memberSession}` };
+  const delegatePath = `${base}/api/org/subscription-delegates/${encodeURIComponent(memberId)}`;
+  const pinBody = JSON.stringify({ pins: { l1: 'sub:anthropic:sonnet', l2: null, l3: null } });
+  const pinAsMember = () => fetch(`${base}/api/account/models`, {
+    method: 'PUT',
+    headers: { ...asMember, 'content-type': 'application/json', origin: base },
+    body: pinBody,
+  });
+
+  // BEFORE: the founder is not a platform admin yet, so neither door opens.
+  expect((await fetch(delegatePath, { method: 'PUT', headers: { ...cookie, origin: base } })).status).toBe(403);
+  expect(await (await fetch(`${base}/api/org`, { headers: cookie })).json()).toMatchObject({
+    subscriptionDelegation: { available: true, mayManage: false },
+  });
+  expect((await pinAsMember()).status).toBe(403);
+
+  const db = new Database(instance.dbPath);
+  try {
+    new AuthStore(db).grantPlatformAdmin(founderId);
+    // The flag is not a cross-site pass: the origin check still runs first.
+    expect((await fetch(delegatePath, {
+      method: 'PUT', headers: { ...cookie, origin: 'https://evil.example' },
+    })).status).toBe(403);
+
+    const granted = await fetch(delegatePath, { method: 'PUT', headers: { ...cookie, origin: base } });
+    expect(granted.status).toBe(200);
+    expect(await granted.json()).toMatchObject({ principalId: memberId, delegated: true, already: false });
+    expect(db.prepare("SELECT actor_id, org_id FROM platform_events WHERE kind = 'admin.subscription_delegated'").get())
+      .toMatchObject({ actor_id: founderId, org_id: orgId });
+
+    const card = await (await fetch(`${base}/api/org`, { headers: cookie })).json() as {
+      members: Array<{ principalId: string; platformAdmin: boolean; subscriptionDelegate: boolean }>;
+    };
+    expect(card.members.find((member) => member.principalId === memberId))
+      .toMatchObject({ subscriptionDelegate: true, platformAdmin: false });
+
+    // THE POINT: the member may now name the host login on a tier, and is
+    // offered the family they could not see a moment ago — with no operator
+    // power anywhere else (the admin control plane still refuses them).
+    expect((await pinAsMember()).status).toBe(200);
+    const models = await (await fetch(`${base}/api/account/models`, { headers: asMember })).json() as {
+      pins: { l1: string | null };
+      hostSubscriptions?: Array<{ family: { id: string }; reason?: string }>;
+    };
+    expect(models.pins.l1).toBe('sub:anthropic:sonnet');
+    // ONE delegation, BOTH host logins: the two families are offered
+    // together, and to a delegate they are never offered-but-unusable —
+    // a delegation only exists inside the declared organisation.
+    expect(models.hostSubscriptions?.map((offer) => offer.family.id)).toEqual(['sub:anthropic', 'sub:openai']);
+    expect(models.hostSubscriptions?.every((offer) => offer.reason === undefined)).toBe(true);
+    expect((await fetch(`${base}/api/burnin`, { headers: asMember })).status).toBe(403);
+    // And a delegate cannot widen the circle: the door itself stays admin-only.
+    expect((await fetch(`${base}/api/org/subscription-delegates/${encodeURIComponent(founderId)}`, {
+      method: 'PUT', headers: { ...asMember, origin: base },
+    })).status).toBe(403);
+
+    // Idempotent, and a no-op journals nothing.
+    expect(await (await fetch(delegatePath, { method: 'PUT', headers: { ...cookie, origin: base } })).json())
+      .toMatchObject({ already: true });
+    expect(db.prepare("SELECT count(*) AS n FROM platform_events WHERE kind = 'admin.subscription_delegated'").get())
+      .toEqual({ n: 1 });
+
+    // WITHDRAWN: the stored pin survives as data, and is refused again.
+    const withdrawn = await fetch(delegatePath, { method: 'DELETE', headers: { ...cookie, origin: base } });
+    expect(withdrawn.status).toBe(200);
+    expect(db.prepare('SELECT count(*) AS n FROM auth_subscription_delegates').get()).toEqual({ n: 0 });
+    expect(db.prepare("SELECT model_l1 FROM auth_principal_model_pins WHERE principal_id = ?").pluck().get(memberId))
+      .toBe('sub:anthropic:sonnet');
+    expect((await pinAsMember()).status).toBe(403);
+  } finally {
+    db.close();
+  }
+});

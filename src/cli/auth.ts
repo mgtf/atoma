@@ -14,6 +14,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { authPublicOrigin, VIZ_PUBLIC_ORIGIN_ENV } from '../auth/gate.js';
 import { AuthStore, ORG_ROLES, type OrgRole } from '../auth/store.js';
+import { declaredHostSubscriptionOrg, setSubscriptionDelegate } from '../auth/subscriptionDelegates.js';
 import { eventLabel } from '../contracts/platformEvents.js';
 import { storeDbPath } from '../core/stores.js';
 import { PlatformEventLog } from '../platform/events.js';
@@ -30,6 +31,8 @@ usage:
   npm run auth -- invite --org <org-id> [--role <role>] [--ttl-hours <hours>] [--db path]
   npm run auth -- grant-admin --principal <id-or-email> [--db path]
   npm run auth -- revoke-admin --principal <id-or-email> [--db path]
+  npm run auth -- grant-subscription --principal <id-or-email> [--org <org-id>] [--db path]
+  npm run auth -- revoke-subscription --principal <id-or-email> [--org <org-id>] [--db path]
   npm run auth -- token --principal <id-or-email> --org <org-id-or-name> [--label <text>] [--db path]
 
 roles:
@@ -41,6 +44,14 @@ platform admin:
   run by the operator against the store on disk, can mint it. An email
   reference must match exactly one principal.
 
+host subscription:
+  grant-subscription/revoke-subscription let ONE member of the declared
+  organisation (ATOMA_HOST_SUBSCRIPTION_ORG, the default for --org) name
+  this machine's own login session on a tier, WITHOUT the operator flag.
+  They still choose it themselves in Settings, and the run still has to
+  belong to that organisation. Revoking leaves their pins in place; the
+  next run refuses them by name.
+
 token:
   Mints a principal's bearer for the MCP (<origin>/mcp), bound to ONE
   organisation the principal belongs to. Shown once, never stored in clear;
@@ -50,10 +61,13 @@ token:
 flags:
   --db <path>              use this product store
   --label <text>           what this token is for (token)
-  --org <org-id>           target organisation (required for invite)
+  --org <org-id>           target organisation (required for invite;
+                           host-subscription commands default to the
+                           declared ATOMA_HOST_SUBSCRIPTION_ORG)
   --role <role>            invitation role (default org:member)
   --ttl-hours <hours>      invitation lifetime, 0 < hours <= 720 (default 24)
-  --principal <id-or-email> principal to grant/revoke platform admin
+  --principal <id-or-email> principal to grant/revoke platform admin or the
+                           host-subscription delegation
   --help                   show this help`;
 
 function safeTerminal(value: string): string {
@@ -109,6 +123,20 @@ function list(store: AuthStore, dbPath: string): void {
       console.log(`  ${safeTerminal(admin.displayName)} (${admin.principalId}) since ${admin.grantedAt}`);
     }
   }
+
+  // Listed beside the flag because they answer the same question — who may
+  // spend this machine's own login session — with different blast radii.
+  const delegates = store.listSubscriptionDelegates();
+  if (delegates.length === 0) {
+    console.log('0 host-subscription delegate(s)');
+  } else {
+    console.log(`${delegates.length} host-subscription delegate(s):`);
+    for (const delegate of delegates) {
+      console.log(
+        `  ${safeTerminal(delegate.displayName)} (${delegate.principalId}) @ ${delegate.orgId} since ${delegate.grantedAt}`
+      );
+    }
+  }
 }
 
 export function runAuthCli(
@@ -131,7 +159,15 @@ export function runAuthCli(
     console.error(USAGE);
     return 1;
   }
-  const KNOWN_COMMANDS = ['list', 'invite', 'grant-admin', 'revoke-admin', 'token'];
+  const KNOWN_COMMANDS = [
+    'list',
+    'invite',
+    'grant-admin',
+    'revoke-admin',
+    'grant-subscription',
+    'revoke-subscription',
+    'token',
+  ];
   if (parsed.positional.length > 0 || !KNOWN_COMMANDS.includes(command)) {
     console.error(`unknown auth command or argument: ${safeTerminal(parsed.positional[0] ?? command)}`);
     console.error(USAGE);
@@ -144,7 +180,9 @@ export function runAuthCli(
     console.error(`--${missingValue} requires a non-empty value`);
     return 1;
   }
-  if (command !== 'invite' && command !== 'token' && (
+  const delegationCommand =
+    command === 'grant-subscription' || command === 'revoke-subscription';
+  if (command !== 'invite' && command !== 'token' && !delegationCommand && (
     parsed.flags['org'] !== undefined ||
     parsed.flags['role'] !== undefined ||
     parsed.flags['ttl-hours'] !== undefined
@@ -153,16 +191,22 @@ export function runAuthCli(
     return 1;
   }
   const adminCommand = command === 'grant-admin' || command === 'revoke-admin';
-  if (!adminCommand && command !== 'token' && parsed.flags['principal'] !== undefined) {
-    console.error('--principal is valid only with auth grant-admin / revoke-admin');
+  if (!adminCommand && !delegationCommand && command !== 'token' && parsed.flags['principal'] !== undefined) {
+    console.error(
+      '--principal is valid only with auth grant-admin / revoke-admin / grant-subscription / revoke-subscription'
+    );
     return 1;
   }
   const principalRef = parsed.flags['principal']?.trim() ?? '';
-  if (adminCommand && !principalRef) {
+  if ((adminCommand || delegationCommand) && !principalRef) {
     console.error(`--principal is required with auth ${command}`);
     return 1;
   }
   const orgId = parsed.flags['org']?.trim() ?? '';
+  if (delegationCommand && (parsed.flags['role'] !== undefined || parsed.flags['ttl-hours'] !== undefined)) {
+    console.error('--role and --ttl-hours are valid only with auth invite');
+    return 1;
+  }
   if (command === 'token' && (parsed.flags['role'] !== undefined || parsed.flags['ttl-hours'] !== undefined)) {
     console.error('--role and --ttl-hours are valid only with auth invite');
     return 1;
@@ -259,6 +303,48 @@ export function runAuthCli(
         console.log('Shown once. Register it as a bearer on the MCP URL, e.g.');
         console.log(`  claude mcp add atoma --transport http <origin>/mcp --header "Authorization: Bearer ${minted.token}"`);
         return 0;
+      } finally {
+        store.close();
+      }
+    }
+
+    if (delegationCommand) {
+      if (!existsSync(dbPath)) {
+        console.error(`no store at ${dbPath} — the principal must sign in first`);
+        return 1;
+      }
+      const declaredOrg = declaredHostSubscriptionOrg(env);
+      const store = AuthStore.open(dbPath);
+      try {
+        // The CLI acts by possession of the machine, exactly as grant-admin
+        // does; every other rule — declared organisation, membership,
+        // journaling — belongs to the shared body, not to this door.
+        const result = setSubscriptionDelegate({
+          auth: store,
+          actor: { kind: 'cli' },
+          principalRef,
+          ...(orgId ? { orgId } : {}),
+          declaredOrg,
+          delegated: command === 'grant-subscription',
+          emit: (event) => PlatformEventLog.open(dbPath).append(event),
+        });
+        const verb = result.delegated ? 'delegated to' : 'withdrawn from';
+        console.log(
+          result.already
+            ? result.delegated
+              ? `${safeTerminal(result.displayName)} (${result.principalId}) already holds the host subscription in ${result.orgId}.`
+              : `${safeTerminal(result.displayName)} (${result.principalId}) held no host-subscription delegation in ${result.orgId}.`
+            : `Host subscription ${verb} ${safeTerminal(result.displayName)} (${result.principalId}) in ${result.orgId}.`
+        );
+        if (result.delegated && !result.already) {
+          console.log('They still have to select it per tier in Settings; nothing is pinned for them.');
+        }
+        return 0;
+      } catch (error) {
+        console.error(
+          `auth ${command} failed: ${safeTerminal(error instanceof Error ? error.message : String(error))}`
+        );
+        return 1;
       } finally {
         store.close();
       }

@@ -191,6 +191,13 @@ CREATE TABLE IF NOT EXISTS auth_platform_admins (
   granted_at   TEXT NOT NULL,
   granted_by   TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS auth_subscription_delegates (
+  org_id       TEXT NOT NULL REFERENCES auth_organisations(org_id),
+  principal_id TEXT NOT NULL REFERENCES auth_principals(principal_id),
+  granted_at   TEXT NOT NULL,
+  granted_by   TEXT NOT NULL,
+  PRIMARY KEY (org_id, principal_id)
+);
 CREATE TABLE IF NOT EXISTS auth_avatars (
   principal_id TEXT PRIMARY KEY REFERENCES auth_principals(principal_id),
   mime         TEXT NOT NULL CHECK (mime IN ('image/png','image/jpeg','image/webp','image/gif')),
@@ -393,6 +400,12 @@ export interface OrganisationMember {
   joinedAt: string;
   /** Instance-wide operator flag, shown as a chip beside the member. */
   platformAdmin: boolean;
+  /**
+   * May spend the HOST's own login session in THIS organisation, without
+   * holding the operator flag. Scoped to the membership, never to the
+   * principal: the same person in another organisation is not a delegate.
+   */
+  subscriptionDelegate: boolean;
   /** Content hash of the stored avatar, or null when there is none. */
   avatarEtag: string | null;
 }
@@ -1256,6 +1269,123 @@ export class AuthStore {
   }
 
   /**
+   * SUBSCRIPTION DELEGATION — who, besides a platform admin, may name the
+   * host's own login session on a tier.
+   *
+   * The delegation is a MEMBERSHIP-scoped row, not a principal-scoped flag:
+   * the operator's login may only ever be spent in the one organisation the
+   * deployment declares (`ATOMA_HOST_SUBSCRIPTION_ORG`), so an authority that
+   * travelled with the person would outlive the reason it was given. Minting
+   * it stays an operator act — the CLI on the machine, or a platform admin's
+   * own authenticated session — and it is re-asked, fail-closed, at every
+   * run: like the platform-admin flag, it is never derived from an OAuth
+   * claim, and a stored pin remains data rather than permission.
+   *
+   * The table post-dates the first stores, and `AUTH_TABLE_NAMES` therefore
+   * does NOT list it: a read-only open of an older product DB must still
+   * answer "no delegates" rather than refusing the whole schema.
+   */
+  private subscriptionDelegatesTablePresent(): boolean {
+    return Boolean(
+      this.db
+        .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'auth_subscription_delegates'`)
+        .get()
+    );
+  }
+
+  isSubscriptionDelegate(principalId: string, orgId: string): boolean {
+    if (!this.subscriptionDelegatesTablePresent()) return false;
+    return (
+      this.db
+        .prepare('SELECT 1 FROM auth_subscription_delegates WHERE principal_id = ? AND org_id = ?')
+        .get(principalId, orgId) !== undefined
+    );
+  }
+
+  /**
+   * Delegate the host subscription to one member of one organisation.
+   *
+   * MEMBERSHIP IS THE PRECONDITION, checked here rather than by the callers:
+   * three doors mint this row (CLI, HTTP, MCP) and a rule stated three times
+   * is a rule with three future spellings. A principal who is not a member of
+   * that organisation could never launch a run there, so the delegation would
+   * be an authority nobody could exercise and nobody would think to revoke.
+   */
+  grantSubscriptionDelegate(
+    ref: string,
+    orgId: string,
+    grantedBy: string
+  ): { principalId: string; displayName: string; already: boolean } {
+    const principal = this.resolvePrincipalRef(ref);
+    const membership = this.db
+      .prepare('SELECT 1 FROM auth_memberships WHERE principal_id = ? AND org_id = ?')
+      .get(principal.principalId, orgId);
+    if (!membership) {
+      throw new Error(
+        `${principal.displayName} is not a member of organisation ${orgId}; invite them before delegating the host subscription`
+      );
+    }
+    const changed = this.db
+      .prepare(
+        `INSERT INTO auth_subscription_delegates (org_id, principal_id, granted_at, granted_by)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(org_id, principal_id) DO NOTHING`
+      )
+      .run(orgId, principal.principalId, new Date().toISOString(), grantedBy).changes;
+    return { ...principal, already: changed === 0 };
+  }
+
+  /**
+   * Withdraw the delegation. The member's stored pins are deliberately left
+   * alone: they are data, and the next run refuses them by name — the same
+   * asymmetry a revoked platform-admin flag already has, and the one that
+   * keeps "who chose this payer" readable after the authority is gone.
+   */
+  revokeSubscriptionDelegate(
+    ref: string,
+    orgId: string
+  ): { principalId: string; displayName: string; already: boolean } {
+    const principal = this.resolvePrincipalRef(ref);
+    if (!this.subscriptionDelegatesTablePresent()) {
+      return { ...principal, already: true };
+    }
+    const changed = this.db
+      .prepare('DELETE FROM auth_subscription_delegates WHERE principal_id = ? AND org_id = ?')
+      .run(principal.principalId, orgId).changes;
+    return { ...principal, already: changed === 0 };
+  }
+
+  /** Every live delegation, newest last; empty on a store that predates the table. */
+  listSubscriptionDelegates(
+    orgId?: string
+  ): Array<{ principalId: string; displayName: string; orgId: string; grantedAt: string; grantedBy: string }> {
+    if (!this.subscriptionDelegatesTablePresent()) return [];
+    return (
+      this.db
+        .prepare(
+          `SELECT d.principal_id, d.org_id, d.granted_at, d.granted_by, p.display_name
+           FROM auth_subscription_delegates d
+           JOIN auth_principals p ON p.principal_id = d.principal_id
+           WHERE (? IS NULL OR d.org_id = ?)
+           ORDER BY d.granted_at ASC, d.principal_id ASC`
+        )
+        .all(orgId ?? null, orgId ?? null) as Array<{
+        principal_id: string;
+        org_id: string;
+        granted_at: string;
+        granted_by: string;
+        display_name: string;
+      }>
+    ).map((row) => ({
+      principalId: row.principal_id,
+      displayName: row.display_name,
+      orgId: row.org_id,
+      grantedAt: row.granted_at,
+      grantedBy: row.granted_by,
+    }));
+  }
+
+  /**
    * Change the active organisation of exactly one opaque session.
    *
    * Membership is checked in the same immediate transaction as the UPDATE;
@@ -1431,15 +1561,20 @@ export class AuthStore {
     createdAt: string;
     members: OrganisationMember[];
   }> {
+    // The delegation table post-dates the first stores; a read-only open of
+    // one that predates it must project "no delegates", not fail the listing.
+    const delegates = this.subscriptionDelegatesTablePresent();
     const members = this.db
       .prepare(
         `SELECT m.org_id, m.principal_id, m.role, m.created_at, p.display_name,
                 a.etag AS avatar_etag,
-                CASE WHEN pa.principal_id IS NULL THEN 0 ELSE 1 END AS platform_admin
+                CASE WHEN pa.principal_id IS NULL THEN 0 ELSE 1 END AS platform_admin,
+                ${delegates ? 'CASE WHEN sd.principal_id IS NULL THEN 0 ELSE 1 END' : '0'} AS subscription_delegate
          FROM auth_memberships m
          JOIN auth_principals p ON p.principal_id = m.principal_id
          LEFT JOIN auth_avatars a ON a.principal_id = m.principal_id
          LEFT JOIN auth_platform_admins pa ON pa.principal_id = m.principal_id
+         ${delegates ? 'LEFT JOIN auth_subscription_delegates sd ON sd.principal_id = m.principal_id AND sd.org_id = m.org_id' : ''}
          WHERE (? IS NULL OR m.org_id = ?)
          ORDER BY m.org_id ASC, m.created_at ASC, m.principal_id ASC`
       )
@@ -1451,6 +1586,7 @@ export class AuthStore {
         display_name: string;
         avatar_etag: string | null;
         platform_admin: number;
+        subscription_delegate: number;
       }>;
     const byOrg = new Map<string, OrganisationMember[]>();
     for (const member of members) {
@@ -1461,6 +1597,7 @@ export class AuthStore {
         role: member.role,
         joinedAt: member.created_at,
         platformAdmin: member.platform_admin === 1,
+        subscriptionDelegate: member.subscription_delegate === 1,
         avatarEtag: member.avatar_etag,
       });
       byOrg.set(member.org_id, list);

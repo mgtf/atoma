@@ -178,6 +178,14 @@ export const api = {
   sendAnnouncement: (body: { segment: string; texts: VizAnnouncementTexts }) =>
     mutateJson<{ segment: string; orgCount: number | null }>('/api/admin/announce', body),
   organisation: () => fetchJson<VizOrganisation>('/api/org'),
+  // Hand the host subscription to one member of the declared organisation,
+  // or take it back. The fresh state comes from the following `organisation`
+  // read, like the other membership-shaped mutations.
+  setSubscriptionDelegate: (principalId: string, delegated: boolean) =>
+    mutateWithoutResult(
+      `/api/org/subscription-delegates/${encodeURIComponent(principalId)}`,
+      delegated ? 'PUT' : 'DELETE'
+    ),
   accountModels: (refresh = false) => fetchJson<VizAccountModels>(`/api/account/models${refresh ? '?refresh=1' : ''}`),
   accountSubscriptions: () =>
     fetchJson<VizAccountSubscriptions>('/api/account/subscriptions'),
@@ -255,7 +263,7 @@ async function mutateJson<T>(
 }
 
 /** Subscription mutations expose their fresh state through the following GET. */
-async function mutateWithoutResult(path: string, method: 'POST' | 'DELETE'): Promise<void> {
+async function mutateWithoutResult(path: string, method: 'POST' | 'PUT' | 'DELETE'): Promise<void> {
   return trackMutation(async () => {
     const response = await fetch(path, {
       method,

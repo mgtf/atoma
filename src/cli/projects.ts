@@ -404,14 +404,20 @@ async function main(): Promise<void> {
     fail(error instanceof Error ? error.message : String(error));
   }
   const target = resolveProject(projects, auth, principal.principalId, projectRef);
+  // The same two authorities the coordinator re-asks per run, asked once
+  // here so a CLI launch fails with a sentence instead of mid-run.
   const admin = auth.isPlatformAdmin(principal.principalId);
+  const subscriptionDelegate = auth.isSubscriptionDelegate(principal.principalId, target.orgId);
+  const maySpendHostLogin = admin || subscriptionDelegate;
   const hostSubscriptionPins = hostSubscriptionPinsOf(process.env);
-  if (hostSubscriptionPins.length > 0 && !admin) {
+  if (hostSubscriptionPins.length > 0 && !maySpendHostLogin) {
     fail(
       `${hostSubscriptionPins.join(', ')} spends this machine's own login session, and ` +
-        `${safeTerminal(principal.displayName)} is not a platform admin. Either pin the tier to ` +
-        'an api: selector with a per-run credential, or grant the flag: ' +
-        'npm run auth -- grant-admin --principal <id-or-email>'
+        `${safeTerminal(principal.displayName)} is neither a platform admin nor a delegate of ` +
+        'it in this organisation. Either pin the tier to an api: selector with a per-run ' +
+        'credential, or hand out one of the two authorities: ' +
+        'npm run auth -- grant-admin --principal <id-or-email>, or ' +
+        'npm run auth -- grant-subscription --principal <id-or-email>'
     );
   }
 
@@ -548,7 +554,9 @@ async function main(): Promise<void> {
 
   process.stdout.write(
     `project ${target.slug} (${target.name})\n` +
-      `as       ${safeTerminal(principal.displayName)}${admin ? ' [platform admin]' : ''}\n` +
+      `as       ${safeTerminal(principal.displayName)}${
+        admin ? ' [platform admin]' : subscriptionDelegate ? ' [host-subscription delegate]' : ''
+      }\n` +
       `store    ${dbPath}\n` +
       (command === 'publish'
         ? `run      ${safeTerminal(String(runRef))}\n\n`

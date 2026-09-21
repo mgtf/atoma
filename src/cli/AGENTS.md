@@ -146,8 +146,8 @@ can only report that it cannot be.
 - Like `auth`, it is an OPERATOR tool reading the store on disk: possession of
   the machine is the credential. The run is ATTRIBUTED to `--as`, and the
   subscription-transport door still asks the coordinator's authority — the CLI
-  refuses early with the `grant-admin` hint rather than letting the
-  coordinator reject it later.
+  refuses early, naming BOTH ways in (`grant-admin`, `grant-subscription`),
+  rather than letting the coordinator reject it later.
 - A project slug is unique per organisation, not per instance. An ambiguous
   reference is refused, never guessed.
 - It PUBLISHES too, wired exactly as the viz server wires it — same publisher,

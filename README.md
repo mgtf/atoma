@@ -135,7 +135,7 @@ The console also serves an HTTP MCP endpoint at `https://<your-instance>/mcp`.
 Compatible clients can submit tasks and inspect their results through the same
 organisation permissions as the web console.
 
-**Thirty-eight tools.** The visible subset depends on the caller's role.
+**Thirty-nine tools.** The visible subset depends on the caller's role.
 See the [MCP connection and authorization guide](docs/mcp-oauth.md) for setup.
 
 ## Install and evaluate it locally
@@ -204,7 +204,7 @@ that every generated application is ready for production.
 | Version | `0.4.0` |
 | Node | 24.20+ (`.nvmrc` 24.20.0, `engines` >=24) |
 | Subsystems under their own contract | 18 |
-| MCP tools | 38 |
+| MCP tools | 39 |
 | Curated agent names | 118 molecules · 40 cells · 20 tissues |
 | Controlled benchmark rounds | 12 (`benchmark/RESULT.md` + `ROUND<n>.md`) |
 | Interface locales | 13 catalogs — 1 source, 12 translated |
