@@ -14,6 +14,13 @@ import {
 } from './scene-camera.js';
 import { sidebarWidthForViewport } from './theme.js';
 
+/**
+ * How often the rail's still is retaken while the box turns. Fast enough that
+ * the crystal keeps turning, slow enough that a turn allocates a dozen screens
+ * of pixels rather than forty.
+ */
+const CUBE_RAIL_REFRESH_MS = 50;
+
 /** Mounts a still on a layer, replacing whatever it held. */
 function mountStill(layer: HTMLElement, still: HTMLCanvasElement): void {
   still.className = 'gpu-cube__still';
@@ -115,11 +122,10 @@ export function CubeTurnPlane({
     }
 
     const plan = cubeTurnPlan(route.rowDistance, route.sameGroup, route.descending);
-    const destination = navigationKey;
     const startedAt = performance.now();
     let frameRequest: number | null = null;
     let disposed = false;
-    let railPinned = false;
+    let railRefreshedAt = Number.NEGATIVE_INFINITY;
     mountStill(leaving, leavingStill.canvas);
     cube.dataset['cubeTurn'] = 'turning';
     cube.dataset['cubeTurnAxis'] = plan.axis;
@@ -142,15 +148,19 @@ export function CubeTurnPlane({
       arriving.style.zIndex = frame.outgoingOnTop ? '1' : '2';
       rail.style.clipPath = frame.railClip;
       cube.dataset['cubeTurnProgress'] = progress.toFixed(4);
-      // The destination's own rail, pinned as soon as the renderer has drawn
-      // it. Asking every frame until then costs ONE readback in total, not one
-      // a frame: the first still that depicts the destination is the last one
-      // this turn takes.
-      if (!railPinned) {
-        const arrival = captureScene();
-        if (arrival && arrival.view === destination) {
-          mountStill(rail, arrival.canvas);
-          railPinned = true;
+      // THE RAIL KEEPS LIVING. A still taken once froze it for the length of
+      // the turn — the crystal stopped turning and the pointer light stopped
+      // following — so it is retaken on a cadence instead. Measured on the
+      // compiled build: a capture costs 0.33ms and 60fps holds even at one a
+      // frame, but each one allocates a screen of pixels, and THAT is what the
+      // cadence bounds. The first one lands on the first frame, so the row
+      // just clicked is lit from the start.
+      const now = performance.now();
+      if (now - railRefreshedAt >= CUBE_RAIL_REFRESH_MS) {
+        const still = captureScene();
+        if (still) {
+          mountStill(rail, still.canvas);
+          railRefreshedAt = now;
         }
       }
     };

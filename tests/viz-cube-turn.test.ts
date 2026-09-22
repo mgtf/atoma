@@ -126,10 +126,17 @@ describe('the cube turn', () => {
         // would swing the column's own edge through the rail.
         expect(frame.transformOrigin)
           .toBe(`${(columnLeft + (width - columnLeft) / 2).toFixed(3)}px 50%`);
-        // And the two clips are complementary: everything the box may paint
-        // starts where the rail stops, and the rail's still stops there too.
+        // Everything the box may paint starts where the rail stops.
         expect(frame.columnClip).toBe(`inset(0 0 0 ${columnLeft.toFixed(3)}px)`);
-        expect(frame.railClip).toBe(`inset(0 ${(width - columnLeft).toFixed(3)}px 0 0)`);
+        // The rail's still runs a LITTLE past that line, on purpose: the
+        // focused crop leaves the destination tile's right edge flush with the
+        // rail's, so a clip laid exactly on the boundary shaves the tile's
+        // stroke and its selection glow. The bleed stays inside the column's
+        // gutter, where nothing is drawn.
+        const inset = Number(/inset\(0 ([\d.]+)px 0 0\)/.exec(frame.railClip)?.[1]);
+        const railRight = width - inset;
+        expect(railRight).toBeGreaterThan(columnLeft);
+        expect(railRight - columnLeft).toBeLessThanOrEqual(8);
       }
     }
   });

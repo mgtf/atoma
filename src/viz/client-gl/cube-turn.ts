@@ -67,7 +67,7 @@ export interface CubeTurnFrame {
   readonly transformOrigin: string;
   /** Keeps both faces inside the content column. */
   readonly columnClip: string;
-  /** Keeps the still of the rail inside the rail, and nowhere else. */
+  /** Keeps the still of the rail inside the rail, bar a deliberate bleed. */
   readonly railClip: string;
 }
 
@@ -81,6 +81,18 @@ const CUBE_DURATION_PER_ROW_MS = 40;
 const CUBE_DURATION_MAX_MS = 760;
 /** Beyond this the duration stops growing: a jump is a jump. */
 const CUBE_MAX_ROWS = 5;
+/**
+ * How far the rail's still runs PAST the column boundary.
+ *
+ * The focused crop puts the destination tile's right edge flush with the
+ * rail's own right edge, so a clip laid exactly on the boundary shaves the
+ * tile's stroke and its selection glow — the icons came out visibly squared
+ * off on the right for the length of the turn. The bleed stays well inside the
+ * column's gutter (`GPU_LAYOUT.gap` of source pixels before anything is
+ * drawn), so it covers nothing a face paints, and the rail sits above both
+ * faces anyway.
+ */
+const CUBE_RAIL_BLEED_PX = 6;
 
 /**
  * Resolves the turn a route deserves.
@@ -177,7 +189,7 @@ export function cubeTurnFrame(
     incomingTransform: face(angleDegrees + 90 * plan.direction),
     transformOrigin: `${(columnLeft + columnWidth / 2).toFixed(3)}px 50%`,
     columnClip: `inset(0 0 0 ${columnLeft.toFixed(3)}px)`,
-    railClip: `inset(0 ${(width - columnLeft).toFixed(3)}px 0 0)`,
+    railClip: `inset(0 ${Math.max(0, width - columnLeft - CUBE_RAIL_BLEED_PX).toFixed(3)}px 0 0)`,
   };
 }
 

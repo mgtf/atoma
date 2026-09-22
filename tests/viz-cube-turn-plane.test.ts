@@ -22,7 +22,7 @@ let clock = 0;
 let nextFrame = 1;
 const frames = new Map<number, FrameRequestCallback>();
 let captures = 0;
-/** What the renderer would currently draw; the driver waits for the arrival. */
+/** What the renderer would currently draw, as the still reports it. */
 let drawnView = 'runs';
 
 function cube(container: HTMLElement): HTMLElement {
@@ -126,19 +126,20 @@ describe('the cube turn plane', () => {
     // Never transformed, at any point of the turn: that is the whole promise.
     expect(rail.style.transform).toBe('none');
 
-    // And it shows the DESTINATION's rail: until the renderer has drawn it,
-    // the driver pins nothing rather than pinning the view being left.
-    expect(rail.childElementCount).toBe(0);
-    runFrames(2);
-    expect(rail.childElementCount).toBe(0);
-    drawnView = 'skills';
-    runFrames(2);
+    // THE RAIL KEEPS LIVING. It carries a still from the first frame, so it is
+    // never a hole, and that still is retaken on a cadence rather than frozen
+    // for the length of the turn.
     expect(rail.childElementCount).toBe(1);
-    const afterPinned = captures;
-    runFrames(4);
-    // One capture for the leaving face, one for the arrived rail. A turn that
-    // read the screen back every frame would be a readback per frame.
-    expect(captures).toBe(afterPinned);
+    const firstStill = rail.firstElementChild;
+    const afterFirst = captures;
+    runFrames(2);
+    // Not every frame, though: each capture allocates a screen of pixels.
+    expect(captures).toBe(afterFirst);
+    expect(rail.firstElementChild).toBe(firstStill);
+    runFrames(5);
+    expect(captures).toBeGreaterThan(afterFirst);
+    expect(rail.firstElementChild).not.toBe(firstStill);
+    expect(rail.childElementCount).toBe(1);
 
     expect(leaving.style.transform).toMatch(/rotateY\(-\d/);
     expect(arriving.style.transform).toMatch(/rotateY\(\d/);
