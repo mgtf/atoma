@@ -384,9 +384,13 @@ html.atoma-cursor-active * {
   --gpu-content: calc(100vw - var(--gpu-sidebar));
   --gpu-runs-right: min(500px, calc(var(--gpu-content) * .4));
   --gpu-runs-left: calc(var(--gpu-content) - var(--gpu-runs-right) - 30px);
-  --gpu-overlay-top: 66px;
+  /* Must match RUN_PICKER_CONTROL_TOP: the canvas draws the project title
+     above this control and the panel's own chrome below it, so a literal that
+     drifts from the constant puts the native select over the title. Held to it
+     by a test, the same way `--gpu-sidebar` is held to the rail's width. */
+  --gpu-overlay-top: 88px;
   --gpu-overlay-left: calc(var(--gpu-sidebar) + 24px);
-  top: 66px;
+  top: 88px;
   left: calc(var(--gpu-sidebar) + 24px);
   width: calc(var(--gpu-runs-left) - 156px);
   min-width: 0;

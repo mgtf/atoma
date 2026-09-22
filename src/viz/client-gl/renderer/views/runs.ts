@@ -199,9 +199,24 @@ const COLLAPSED_TITLE_CHARS = 110;
  * silently remove event/atom detail between 1050px and 1257px windows.
  */
 export const RUNS_TWO_PANE_MIN_WIDTH = 1050 - GPU_LAYOUT.sidebarWidth;
+/**
+ * The row that says WHICH PROJECT this run belongs to.
+ *
+ * It sits above the run selector, and above it on purpose: a project contains
+ * runs, so a reader who has scrolled into a timeline should find the container
+ * first and the run second (owner request, 2026-09-22). The row is always
+ * reserved, never conditional — the selector's geometry is shared with the
+ * native control the DOM bridge positions, and a height that depended on the
+ * data would be two definitions of one layout waiting to disagree. A run with
+ * no project says so instead of leaving the row blank.
+ */
+export const RUNS_PROJECT_TITLE_HEIGHT = 22;
+const RUNS_PROJECT_TITLE_TOP = 8;
+const RUNS_PROJECT_TITLE_SIZE = 13;
+
 /** Native run selector geometry inside the primary Runs panel. */
 export const RUN_PICKER_CONTROL_TOP =
-  GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap + 8;
+  GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap + 8 + RUNS_PROJECT_TITLE_HEIGHT;
 export const RUN_PICKER_CONTROL_HEIGHT = 32;
 export const RUN_PICKER_HORIZONTAL_INSET = 14;
 /** Space kept for the status chip at the right of the selector. */
@@ -308,6 +323,26 @@ export function drawRuns(
     2
   );
   primaryFrame.label = 'view-frame-primary';
+  // WHERE this run lives. The trace itself does not carry its project — the
+  // INDEX entry does — so it is read from the same list the selector is built
+  // from, by the id the selector selected.
+  const project = snapshot.data.runs.find((entry) => entry.id === run.id)?.projectName;
+  ctx.text(
+    ctx.root,
+    ctx.fitText(
+      project ?? snapshot.t('runs.project.operator'),
+      leftWidth - 28,
+      { size: RUNS_PROJECT_TITLE_SIZE, weight: '700' }
+    ),
+    leftX + 14,
+    top + RUNS_PROJECT_TITLE_TOP,
+    {
+      size: RUNS_PROJECT_TITLE_SIZE,
+      weight: '700',
+      color: project ? GPU_COLORS.text : GPU_COLORS.muted,
+      singleLine: true,
+    }
+  );
   const heading = runHeading(run);
   // The native selector now owns the title row inside this panel. Drawing the
   // same run title under it would duplicate the selected value; the subtitle
@@ -316,7 +351,7 @@ export function drawRuns(
   // `fmtTime` still formats it, in the reader's locale, inside the bubble.
   const startedAge = relativeTime(run.startedAt, snapshot.t, snapshot.state.locale);
   const subtitle = [heading.family, startedAge].filter(Boolean).join('  ·  ');
-  ctx.text(ctx.root, subtitle, leftX + 14, top + 46, {
+  ctx.text(ctx.root, subtitle, leftX + 14, top + 46 + RUNS_PROJECT_TITLE_HEIGHT, {
     size: 11,
     color: GPU_COLORS.muted,
     width: leftWidth - 28,
@@ -325,7 +360,7 @@ export function drawRuns(
   if (startedExact && startedAge) {
     ctx.tooltip(ctx.root, {
       x: leftX + 14,
-      y: top + 46,
+      y: top + 46 + RUNS_PROJECT_TITLE_HEIGHT,
       width: leftWidth - 28,
       height: 15,
       text: startedExact,
@@ -339,12 +374,18 @@ export function drawRuns(
   const statusLabel = snapshot.t(`runs.flag.${status}`);
   const statusWidth = Math.max(64, statusLabel.length * 6.4 + 16);
   const statusChip = new Graphics();
-  statusChip.roundRect(leftX + leftWidth - statusWidth - 14, top + 8, statusWidth, 20, 6);
+  statusChip.roundRect(
+    leftX + leftWidth - statusWidth - 14,
+    top + 8 + RUNS_PROJECT_TITLE_HEIGHT,
+    statusWidth,
+    20,
+    6
+  );
   statusChip.fill({ color: statusColor, alpha: 0.16 });
   statusChip.stroke({ color: statusColor, width: 1, alpha: 0.8 });
   statusChip.eventMode = 'none';
   ctx.root.addChild(statusChip);
-  ctx.text(ctx.root, statusLabel, leftX + leftWidth - statusWidth - 6, top + 12, {
+  ctx.text(ctx.root, statusLabel, leftX + leftWidth - statusWidth - 6, top + 12 + RUNS_PROJECT_TITLE_HEIGHT, {
     size: 10,
     color: statusColor,
     weight: '700',
@@ -355,10 +396,19 @@ export function drawRuns(
   // The four run metrics and the atoms-used lanes live in the RUN summary
   // card on the right pane; a single-pane viewport has no summary card, so
   // both keep a row here instead.
-  let filterTop = top + 72;
+  let filterTop = top + 72 + RUNS_PROJECT_TITLE_HEIGHT;
   if (!twoPane) {
     filterTop +=
-      drawRunStatGrid(ctx, snapshot, run, ctx.root, 'runs.stat', leftX + 14, top + 60, leftWidth - 28) +
+      drawRunStatGrid(
+        ctx,
+        snapshot,
+        run,
+        ctx.root,
+        'runs.stat',
+        leftX + 14,
+        top + 60 + RUNS_PROJECT_TITLE_HEIGHT,
+        leftWidth - 28
+      ) +
       FILTER_BLOCK_GAP;
     filterTop =
       drawAtomLanes(ctx, snapshot, atoms, ctx.root, leftX + 14, filterTop, leftWidth - 28) +

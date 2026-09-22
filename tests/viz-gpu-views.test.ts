@@ -121,6 +121,7 @@ import {
   runsPaneLayout,
   runsPickerControlLayout,
   RUNS_FACTS_SIZE,
+  RUNS_PROJECT_TITLE_HEIGHT,
 } from '../src/viz/client-gl/renderer/views/runs.js';
 import { drawSkills } from '../src/viz/client-gl/renderer/views/skills.js';
 import { timelineConnectorGeometry } from '../src/viz/client-gl/renderer/timeline-rails.js';
@@ -1490,6 +1491,14 @@ describe('the nav rail', () => {
     // viewport. Two numbers, one truth: drift here puts an input under the
     // rail with nothing failing.
     const css = readFileSync('src/viz/client-gl/styles.css', 'utf8');
+    // Same contract for the run selector's TOP. The canvas draws the project
+    // title above it and the panel's chrome below it, so a literal that drifts
+    // from `RUN_PICKER_CONTROL_TOP` puts the native control over the title —
+    // which is exactly what the first version of that title did.
+    expect(css).toMatch(new RegExp(
+      `\\.gpu-run-input\\s*\\{[\\s\\S]*?--gpu-overlay-top:\\s*${RUN_PICKER_CONTROL_TOP}px[\\s\\S]*?` +
+      `top:\\s*${RUN_PICKER_CONTROL_TOP}px`
+    ));
     expect(css).toMatch(new RegExp(
       `--gpu-sidebar:\\s*min\\(100vw, clamp\\(${GPU_LAYOUT.sidebarMinWidth}px,` +
       `[\\s\\S]*?100vw - ${GPU_LAYOUT.contentMinWidth}px[\\s\\S]*?${GPU_LAYOUT.sidebarWidth}px`
@@ -4797,21 +4806,60 @@ describe('drawRuns behavior', () => {
     ];
   }
 
+  it('says which project the run belongs to, above the run itself', () => {
+    // A project CONTAINS runs, so the reader finds the container first. The
+    // trace does not carry it — the index entry does — so this also proves the
+    // view looks it up by the id the selector selected.
+    const events: VizEvent[] = [makeLlmEvent('one', { role: 'execute' })];
+    const run = makeRun(events);
+    const ctx = createRecordingCtx();
+    drawRuns(
+      ctx,
+      makeSnapshot({}, {
+        run,
+        runs: [{ id: run.id, label: run.label, startedAt: run.startedAt, projectName: 'Stopwatch E2E two' }],
+      }),
+      WIDTH,
+      HEIGHT
+    );
+    const pane = runsPaneLayout(WIDTH);
+    const title = ctx.texts.find((text) => text.value === 'Stopwatch E2E two');
+    expect(title, 'the panel must name the project').toBeDefined();
+    expect(title!.x).toBe(pane.leftX + 14);
+    // Above the selector, and by the height the selector was pushed down by.
+    expect(title!.y).toBeLessThan(runsPickerControlLayout(WIDTH).y);
+    expect(runsPickerControlLayout(WIDTH).y - title!.y)
+      .toBeGreaterThanOrEqual(RUNS_PROJECT_TITLE_HEIGHT);
+  });
+
+  it('says so when a run belongs to no project at all', () => {
+    // The operator's own corpus, and the ungated developer path, have no
+    // project. The row is still reserved — its height is shared with the
+    // native selector's CSS — so it says where you are instead of going blank.
+    const run = makeRun([makeLlmEvent('one', { role: 'execute' })]);
+    const ctx = createRecordingCtx();
+    drawRuns(ctx, makeSnapshot({}, { run, runs: [] }), WIDTH, HEIGHT);
+    expect(ctx.texts.some((text) => text.value === 'Operator runs')).toBe(true);
+  });
+
   it('places the run selector inside the primary Runs panel in both layouts', () => {
     for (const width of [RUNS_TWO_PANE_MIN_WIDTH - 1, WIDTH]) {
       const pane = runsPaneLayout(width);
       const picker = runsPickerControlLayout(width);
       expect(picker).toEqual({
         x: pane.leftX + RUN_PICKER_HORIZONTAL_INSET,
-        y: pane.top + 8,
+        // Below the project title, which says which project the run is in.
+        y: pane.top + 8 + RUNS_PROJECT_TITLE_HEIGHT,
         width:
           pane.leftWidth - RUN_PICKER_HORIZONTAL_INSET * 2 - RUN_PICKER_STATUS_RESERVE,
         height: RUN_PICKER_CONTROL_HEIGHT,
       });
       expect(picker.x).toBeGreaterThan(pane.leftX);
       expect(picker.x + picker.width).toBeLessThan(pane.leftX + pane.leftWidth);
-      expect(picker.y).toBeGreaterThan(pane.top);
-      expect(picker.y + picker.height).toBeLessThan(pane.top + 48);
+      // Clear of the title row, and still inside the panel's own header band.
+      expect(picker.y).toBeGreaterThanOrEqual(pane.top + RUNS_PROJECT_TITLE_HEIGHT);
+      expect(picker.y + picker.height)
+        .toBeLessThan(pane.top + 48 + RUNS_PROJECT_TITLE_HEIGHT);
     }
   });
 
