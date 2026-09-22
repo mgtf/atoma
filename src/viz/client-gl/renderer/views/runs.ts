@@ -114,21 +114,19 @@ const EVENT_TITLE_CHAR_PX = 6.4;
  * the 11px title's: 11px is 14.85px of line box, 10px is 13.5, 9px is 12.15.
  */
 const EVENT_TITLE_TOP = 7;
-const EVENT_DECISION_TOP = 8;
-const EVENT_ACTOR_TOP = 8;
-const EVENT_DETAIL_TOP = 8;
+const EVENT_DECISION_TOP = 7;
+const EVENT_ACTOR_TOP = 7;
+const EVENT_DETAIL_TOP = 7;
 /**
  * The row's type sizes.
  *
- * The facts line was 9px, and it is the densest and most-read text in the
- * client — the second report that it cannot be read (owner, 2026-09-22: "les
- * typos complètement illisibles"). The FIRST one was answered with contrast
- * alone, by lifting `GPU_COLORS.muted` to ~7.9:1 on 2026-09-21; that leaves
- * size as the thing still unanswered, so this is size. The tops above keep the
- * two sizes on ONE baseline: a Pixi label is placed by the top of its box, so
- * a facts line that grows has to start higher or the row reads as two lines
- * that failed to align. `EVENT_DECISION_TOP` was already sitting at the size
- * this moves to, which is why it does not move with them.
+ * The facts line is the densest and most-read text in the client, and it has
+ * been reported unreadable three times: 9px answered with contrast alone by
+ * lifting `GPU_COLORS.muted` to ~7.9:1 (2026-09-21), then 9px answered with
+ * 10px, then 10px reported again (2026-09-22). It is the title's own size now.
+ * The tops keep every label on ONE baseline: a Pixi label is placed by the top
+ * of its box, so labels of equal size share a top and the row reads as one
+ * line rather than as several that failed to align.
  */
 /**
  * Where the decision column STARTS, so that its right edge lands on the same
@@ -145,8 +143,18 @@ export function eventDecisionLeft(cardWidth: number, decisionWidth: number): num
 }
 
 const EVENT_TITLE_SIZE = 11;
-/** The view's facts size, not the row's: every line of facts here is one. */
-export const RUNS_FACTS_SIZE = 10;
+/**
+ * The view's facts size, not the row's: every line of facts here is one.
+ *
+ * It is the TITLE's size now, and that is the point. 9px was reported
+ * unreadable, 10px was reported unreadable again, and each step had kept the
+ * facts line smaller than the row's title — which is what made it the line you
+ * skip. The hierarchy it used to buy with size is bought with WEIGHT and
+ * COLOUR instead: the title is 700 and accented, the facts are regular and
+ * muted. Nothing else in the row changes, and `TIMELINE_ROW_HEIGHT` still
+ * holds one line comfortably.
+ */
+export const RUNS_FACTS_SIZE = 11;
 /** The rail's branch tag — `P1`, `B2.1` — beside the lane it belongs to. */
 const EVENT_BRANCH_TAG_SIZE = 9;
 

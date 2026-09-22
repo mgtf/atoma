@@ -5064,11 +5064,16 @@ describe('drawRuns behavior', () => {
     const title = inCards.find((text) => text.value.includes('reverify_recorded_probe'));
     expect(title, 'fixture must produce the long title').toBeDefined();
     const sameCard = inCards.filter((text) => text.parent === title!.parent);
-    // The card is one line, so the actor and the facts line share a y. Only
-    // the facts line is given a measured `width`, which is what tells them
-    // apart without pinning this test to a pixel.
+    // The card is one line, and every label on it now shares the title's SIZE
+    // — the hierarchy is weight and colour. So the actor is told from the
+    // title by its weight, and from the facts line by the measured `width`
+    // only that line is given. None of which pins this test to a pixel.
     const actor = sameCard.find(
-      (text) => opts(text).size === RUNS_FACTS_SIZE && opts(text).width === undefined
+      (text) =>
+        text !== title &&
+        opts(text).size === RUNS_FACTS_SIZE &&
+        opts(text).weight === undefined &&
+        opts(text).width === undefined
     );
     expect(actor, 'the card must draw an actor for this to mean anything').toBeDefined();
 
