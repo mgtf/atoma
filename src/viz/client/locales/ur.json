@@ -1146,5 +1146,6 @@
   "settings.subscriptionDelegateGrant": "میزبان کی سبسکرپشن تفویض کریں",
   "settings.subscriptionDelegateWithdraw": "میزبان کی سبسکرپشن واپس لیں",
   "settings.subscriptionDelegated": "میزبان کی سبسکرپشن تفویض کر دی گئی۔",
-  "settings.subscriptionDelegationWithdrawn": "میزبان کی سبسکرپشن کی تفویض واپس لے لی گئی۔"
+  "settings.subscriptionDelegationWithdrawn": "میزبان کی سبسکرپشن کی تفویض واپس لے لی گئی۔",
+  "runs.project.operator": "آپریٹر کے runs"
 }

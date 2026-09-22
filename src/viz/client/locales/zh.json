@@ -1146,5 +1146,6 @@
   "settings.subscriptionDelegateGrant": "委派主机订阅",
   "settings.subscriptionDelegateWithdraw": "撤回主机订阅委派",
   "settings.subscriptionDelegated": "已委派主机订阅。",
-  "settings.subscriptionDelegationWithdrawn": "已撤回主机订阅委派。"
+  "settings.subscriptionDelegationWithdrawn": "已撤回主机订阅委派。",
+  "runs.project.operator": "操作员 run"
 }

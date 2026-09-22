@@ -1146,5 +1146,6 @@
   "settings.subscriptionDelegateGrant": "Déléguer l’abonnement de l’hôte",
   "settings.subscriptionDelegateWithdraw": "Retirer la délégation de l’abonnement de l’hôte",
   "settings.subscriptionDelegated": "Abonnement de l’hôte délégué.",
-  "settings.subscriptionDelegationWithdrawn": "Délégation de l’abonnement de l’hôte retirée."
+  "settings.subscriptionDelegationWithdrawn": "Délégation de l’abonnement de l’hôte retirée.",
+  "runs.project.operator": "Runs de l’opérateur"
 }

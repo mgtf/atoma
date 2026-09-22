@@ -1146,5 +1146,6 @@
   "settings.subscriptionDelegateGrant": "Delegasikan langganan mesin host",
   "settings.subscriptionDelegateWithdraw": "Tarik delegasi langganan mesin host",
   "settings.subscriptionDelegated": "Langganan mesin host telah didelegasikan.",
-  "settings.subscriptionDelegationWithdrawn": "Delegasi langganan mesin host telah ditarik."
+  "settings.subscriptionDelegationWithdrawn": "Delegasi langganan mesin host telah ditarik.",
+  "runs.project.operator": "run operator"
 }

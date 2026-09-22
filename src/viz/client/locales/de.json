@@ -1146,5 +1146,6 @@
   "settings.subscriptionDelegateGrant": "Host-Abonnement delegieren",
   "settings.subscriptionDelegateWithdraw": "Delegierung des Host-Abonnements widerrufen",
   "settings.subscriptionDelegated": "Host-Abonnement delegiert.",
-  "settings.subscriptionDelegationWithdrawn": "Delegierung des Host-Abonnements widerrufen."
+  "settings.subscriptionDelegationWithdrawn": "Delegierung des Host-Abonnements widerrufen.",
+  "runs.project.operator": "Operator-runs"
 }

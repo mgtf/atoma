@@ -1146,5 +1146,6 @@
   "settings.subscriptionDelegateGrant": "Delegar subscrição do anfitrião",
   "settings.subscriptionDelegateWithdraw": "Retirar delegação da subscrição do anfitrião",
   "settings.subscriptionDelegated": "Subscrição do anfitrião delegada.",
-  "settings.subscriptionDelegationWithdrawn": "Delegação da subscrição do anfitrião retirada."
+  "settings.subscriptionDelegationWithdrawn": "Delegação da subscrição do anfitrião retirada.",
+  "runs.project.operator": "Runs do operador"
 }

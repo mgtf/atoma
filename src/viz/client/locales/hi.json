@@ -1146,5 +1146,6 @@
   "settings.subscriptionDelegateGrant": "होस्ट सदस्यता प्रत्यायोजित करें",
   "settings.subscriptionDelegateWithdraw": "होस्ट सदस्यता का प्रत्यायोजन वापस लें",
   "settings.subscriptionDelegated": "होस्ट सदस्यता प्रत्यायोजित की गई।",
-  "settings.subscriptionDelegationWithdrawn": "होस्ट सदस्यता का प्रत्यायोजन वापस लिया गया।"
+  "settings.subscriptionDelegationWithdrawn": "होस्ट सदस्यता का प्रत्यायोजन वापस लिया गया।",
+  "runs.project.operator": "ऑपरेटर run"
 }

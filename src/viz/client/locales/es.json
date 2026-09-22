@@ -1146,5 +1146,6 @@
   "settings.subscriptionDelegateGrant": "Delegar suscripción del host",
   "settings.subscriptionDelegateWithdraw": "Retirar suscripción del host",
   "settings.subscriptionDelegated": "Suscripción del host delegada.",
-  "settings.subscriptionDelegationWithdrawn": "Se retiró la delegación de la suscripción del host."
+  "settings.subscriptionDelegationWithdrawn": "Se retiró la delegación de la suscripción del host.",
+  "runs.project.operator": "Runs del operador"
 }
