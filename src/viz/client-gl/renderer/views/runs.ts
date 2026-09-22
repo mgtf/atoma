@@ -74,6 +74,10 @@ import { drawAtomDetail } from './atom-detail.js';
 export const RUN_STATUS_COLOR: Record<RunStatus, number> = {
   live: GPU_COLORS.success,
   delivered: GPU_COLORS.success,
+  // Warning, beside cancelled and abandoned: a landed run is not an error and
+  // is not a finished delivery, and the one thing the colour must not do is
+  // let it pass for the latter at a glance.
+  partial: GPU_COLORS.warning,
   cancelled: GPU_COLORS.warning,
   failed: GPU_COLORS.error,
   abandoned: GPU_COLORS.warning,

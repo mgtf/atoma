@@ -48,6 +48,42 @@ export const DEFAULT_LIMITS: Limits = {
 export const MIN_TOOL_ITERATION_MS = 26_000;
 
 /**
+ * Conservative floor for ONE dispatched phase: below this much remaining wall
+ * clock, `dispatchWithAggregation` stops opening the next sequential phase and
+ * lands on what is already accepted.
+ *
+ * SIZED AGAINST THE MEASURED DISTRIBUTION, and deliberately at its bottom.
+ * Across the 25 root-level sequential phases in the local trace corpus the
+ * durations run 43 / 52 / 52 / 54 / 65 … 246 / 252 / 605 s — minimum 43 s,
+ * median 83 s. A floor at the median would be the wrong instinct: once a
+ * landed run DELIVERS its completed phases (`partial`), the two errors stop
+ * being symmetric. Opening a phase that then gets truncated costs that one
+ * phase's tokens and nothing else, because the earlier phases still land;
+ * refusing a phase that would have fit costs a complete delivery. The cheaper
+ * error is to try, so this refuses only what is near-certainly doomed.
+ *
+ * It is NOT a margin reserved for the landing itself. That was measured too
+ * and is free: sequential aggregation is string assembly with no LLM call
+ * (`L3Atom.aggregate`), and on 11 of 12 local traces the interval between the
+ * last phase closing and the run's `endedAt` is 0-1 ms.
+ *
+ * Same family and same discipline as `MIN_TOOL_ITERATION_MS` above: a floor
+ * used to decide whether more work can still be paid for, never a reject gate
+ * on work already under way.
+ */
+export const MIN_PHASE_LANDING_MS = 60_000;
+
+/**
+ * True when `deadlineAt` leaves too little wall clock to open another phase.
+ * Absent or invalid `deadlineAt` (library and test contexts) never lands a
+ * dispatch — the deadline has to be known to be enforced.
+ */
+export function outOfPhaseBudget(deadlineAt?: number, now = Date.now()): boolean {
+  if (deadlineAt === undefined || !Number.isFinite(deadlineAt)) return false;
+  return deadlineAt - now < MIN_PHASE_LANDING_MS;
+}
+
+/**
  * Shrink a tool-loop iteration cap so it cannot out-plan the remaining
  * run wall clock. Absent or invalid `deadlineAt` leaves `requested`
  * unchanged. A deadline already in the past still returns 1 so the

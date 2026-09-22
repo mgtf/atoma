@@ -282,12 +282,66 @@ single run. Two changes landed, both regression-tested
   between-phases half, cut against the backlog family (eight of seventeen
   entries are recovery or validation discarding standing proof).
 
+## Acted on — the deadline, 2026-09-22
+
+The operator reopened the deadline item the next day, from the production
+vantage point the first pass did not take: *"en production je ne veux pas de
+`run abort after 1787s budget` — imagine le client qui lance un run et on le
+stop en cours de route. Ok pour une limite tout de même bien sûr mais là c'est
+un run et des tokens perdus."*
+
+The objection recorded below — that shipping unaccepted work would fake a
+delivery — stands, and the change is built around it rather than against it. A
+landed run is a THIRD outcome, not a delivery with a softer bar.
+
+- **A dispatch lands instead of being discarded.**
+  `dispatchWithAggregation` returns `{results, unfinished}`. Sequential refuses
+  to open a phase with less than `MIN_PHASE_LANDING_MS` of wall clock left and
+  keeps the earlier phases when a phase already opened is aborted; parallel
+  keeps the branches that settled when the deadline cut their siblings. A
+  dispatch that completed no phase still throws, and a rejection that is not
+  the deadline keeps its meaning. `llm-synthesize` on a landed parallel dispatch
+  rides `landingSignal()`, since `ctx.signal` is aborted by then.
+- **The floor is 60 s, and it is a floor, not a margin.** Measured on the local
+  trace corpus: the interval between the last phase closing and `endedAt` is
+  0-1 ms on 11 of 12 traces, because sequential aggregation is string assembly
+  with no LLM call — there is nothing to reserve time for. What the number
+  decides is whether to open one more phase, against a measured phase
+  distribution of min 43 s / median 83 s / p90 246 s. Because a landed run now
+  DELIVERS its completed phases, opening a phase that gets truncated costs that
+  one phase's tokens while refusing a phase that would have fit costs a complete
+  delivery — so the cheaper error is to try, and the floor sits at the bottom of
+  the distribution. Same discipline as `MIN_TOOL_ITERATION_MS`.
+- **`partial` is a terminal project-run status.** Same `completeProjectRun`
+  transaction, trace bar and workspace manifest as a delivery; it may carry an
+  error string naming the phases it never ran; it is offered as a preview and a
+  download; and it never publishes — the customer's repository is the one
+  surface where an incomplete artefact set would stop being distinguishable
+  from a finished one. Widening the SQLite status CHECK needed a table rebuild.
+- **The landed workspace seeds the next run** (`previousSeedRun`). This is the
+  half that recovers the spend: the customer's next run continues from the
+  phases that completed instead of rebuilding them. Without it the new status
+  would be a nicer label on the same loss.
+- **The budget default went 30 → 60 minutes, and the preparation came off it.**
+  The repository import and corpus build now have their own ceiling; they used
+  to be billed to the tenant, which is the arithmetic behind `1787s` on an
+  1800 s setting. The raise is explicitly the smaller half: a bigger budget only
+  moves the cliff.
+
+Regression cover crosses the same boundary the defect did
+(`tests/landed-run.test.ts`): the dispatch cases drive the real dispatcher, the
+coordinator cases drive the real coordinator over a child log, and one case
+pins the store rebuild. Two pre-existing tests changed, and one of them —
+`prepares search for an empty first corpus within the original deadline` — was
+pinning the preparation overcharge as correct.
+
+Two of the items below are unchanged by this and stay open: trust and skill
+credit on a run that delivered nothing is now narrower but not gone (the
+truncated phase was never credited either way), and sentinel `llm`-event
+blindness is untouched.
+
 ## Still open, deliberately
 
-- Deadline behaviour is UNCHANGED: delivering unaccepted work at the watchdog
-  would fake a delivery, which the analyst's own observation credits the
-  system for not doing. The lever landed is what the plan spends the deadline
-  on, not what gets shipped when it fires.
 - The analyst's `defect` bar and the mender's reachability: 17/17 backlog
   entries are `mechanism_candidate`, several at `high` confidence, so the
   mender has never had an eligible finding. Whether that bar is right is a

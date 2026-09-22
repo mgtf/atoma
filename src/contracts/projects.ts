@@ -174,6 +174,12 @@ export const projectRunStatusSchema = z.enum([
   'queued',
   'running',
   'delivered',
+  // Terminal, and NOT a failure: the run reached its budget with phases
+  // already accepted, and landed on them. Its manifest, preview and workspace
+  // are real and are the ones those phases produced; what it does not have is
+  // the complete deliverable, and it never claims one. Publication stays
+  // reserved for 'delivered'. See src/projects/AGENTS.md.
+  'partial',
   'failed',
   'cancelled',
 ]);

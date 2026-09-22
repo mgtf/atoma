@@ -167,6 +167,21 @@ export interface Result {
    * machine-checkable evidence", never "verified".
    */
   readonly evidence?: readonly import('../contracts/witness.js').Witness[];
+  /**
+   * Descriptions of the plan phases this result does NOT cover, because the
+   * run deadline landed the dispatch before they ran (`dispatchWithAggregation`).
+   * Present and non-empty means the result is honest but INCOMPLETE: the work
+   * it reports was accepted, and the named phases never happened.
+   *
+   * It exists so that "landed early" cannot be mistaken for "delivered". The
+   * 2026-09-21 production runs discarded three completed phases each rather
+   * than report them, and the post-mortem credited the system for recording
+   * `failed` instead of falsely delivering — correctly, because there was no
+   * way to say the third thing. This field is that third thing, and the
+   * runner turns it into the `partial` outcome. Absence means complete, never
+   * "unknown".
+   */
+  readonly unfinishedPhases?: readonly string[];
 }
 
 export type MutationScope = 'ephemeral' | 'branch' | 'patch';

@@ -96,6 +96,8 @@ export interface VizRun {
     summary?: string;
     output?: unknown;
     producedBy?: { tier?: number; name?: string; viaFallback?: boolean };
+    /** Non-empty on a run that landed on its budget. See VizRun in src/viz/trace.ts. */
+    unfinishedPhases?: readonly string[];
   };
   totals?: {
     calls?: number;
@@ -271,7 +273,7 @@ export interface VizProjectRun {
   projectRunId: string;
   projectId: string;
   goal: string;
-  status: 'queued' | 'running' | 'delivered' | 'failed' | 'cancelled';
+  status: 'queued' | 'running' | 'delivered' | 'partial' | 'failed' | 'cancelled';
   traceId: string | null;
   costUsd: number | null;
   durationS: number | null;

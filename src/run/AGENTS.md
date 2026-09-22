@@ -105,6 +105,13 @@ Neighbours:
 - Design and remaining measurement protocol:
   [depth experiment](../../docs/depth-routing-experiment-2026-09-13.md).
 
+- A run has THREE success-side outcomes, not two. `partial` is a run that
+  LANDED on its budget: its result names the phases that never ran
+  (`Result.unfinishedPhases`, [src/atoms](../atoms/AGENTS.md)), and that typed
+  list — never the summary text — is what separates it from a delivery. The
+  trace records it, `machineRunStats` reports it, and `runTask` treats it like a
+  delivery for process purposes: exit 0 and park, because there IS something to
+  look at. A landed run is not a failure and must not be scripted as one.
 - The runner's `ATOMA_RUN_STATS` JSON epilogue is the burn-in accounting
   contract. `parseRunLog` keeps text parsing only for interrupted legacy runs;
   never add global regexes over model-authored prose.

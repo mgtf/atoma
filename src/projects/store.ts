@@ -44,6 +44,53 @@ import {
 import { artifactManifestHash } from './artifacts.js';
 
 /**
+ * The `project_runs` table, parameterised by its NAME — the one table whose
+ * definition is needed twice.
+ *
+ * It is a function rather than a literal because the status CHECK gained
+ * `'partial'` on 2026-09-22 and SQLite cannot add or widen a CHECK by
+ * `ALTER TABLE`. A store created before that date would refuse every landed
+ * run, so `migrateProjectRunsForPartial` rebuilds it under a temporary name —
+ * the documented SQLite table-rebuild procedure — and that rebuild must use
+ * THIS definition, not a second copy of it that could drift from it.
+ */
+function projectRunsTable(name: string): string {
+  return `
+CREATE TABLE IF NOT EXISTS ${name} (
+  project_run_id                TEXT PRIMARY KEY,
+  project_id                    TEXT NOT NULL,
+  org_id                        TEXT NOT NULL REFERENCES auth_organisations(org_id),
+  requested_by_principal_id     TEXT NOT NULL REFERENCES auth_principals(principal_id),
+  request_key                   TEXT NOT NULL,
+  goal                          TEXT NOT NULL,
+  status                        TEXT NOT NULL CHECK (status IN ('queued','running','delivered','partial','failed','cancelled')),
+  workspace_path                TEXT NOT NULL,
+  runs_path                     TEXT NOT NULL,
+  log_path                      TEXT NOT NULL,
+  skills_path                   TEXT,
+  trace_id                      TEXT,
+  stats_json                    TEXT CHECK (stats_json IS NULL OR json_valid(stats_json)),
+  artifact_manifest_json        TEXT CHECK (artifact_manifest_json IS NULL OR json_valid(artifact_manifest_json)),
+  artifact_manifest_hash        TEXT,
+  error                         TEXT,
+  created_at                    TEXT NOT NULL,
+  started_at                    TEXT,
+  ended_at                      TEXT,
+  updated_at                    TEXT NOT NULL,
+  UNIQUE (project_run_id, org_id),
+  UNIQUE (project_id, request_key),
+  FOREIGN KEY (project_id, org_id) REFERENCES projects(project_id, org_id),
+  FOREIGN KEY (org_id, requested_by_principal_id)
+    REFERENCES auth_memberships(org_id, principal_id),
+  CHECK (
+    (artifact_manifest_json IS NULL AND artifact_manifest_hash IS NULL) OR
+    (artifact_manifest_json IS NOT NULL AND artifact_manifest_hash IS NOT NULL)
+  )
+);
+`;
+}
+
+/**
  * Projects share the primary product SQLite store with identity, registry and
  * ledger state. The browser never chooses a workspace, runs directory or log
  * path: those host-owned values enter only through `createProjectRun` after a
@@ -86,38 +133,7 @@ CREATE TABLE IF NOT EXISTS projects (
   )
 );
 
-CREATE TABLE IF NOT EXISTS project_runs (
-  project_run_id                TEXT PRIMARY KEY,
-  project_id                    TEXT NOT NULL,
-  org_id                        TEXT NOT NULL REFERENCES auth_organisations(org_id),
-  requested_by_principal_id     TEXT NOT NULL REFERENCES auth_principals(principal_id),
-  request_key                   TEXT NOT NULL,
-  goal                          TEXT NOT NULL,
-  status                        TEXT NOT NULL CHECK (status IN ('queued','running','delivered','failed','cancelled')),
-  workspace_path                TEXT NOT NULL,
-  runs_path                     TEXT NOT NULL,
-  log_path                      TEXT NOT NULL,
-  skills_path                   TEXT,
-  trace_id                      TEXT,
-  stats_json                    TEXT CHECK (stats_json IS NULL OR json_valid(stats_json)),
-  artifact_manifest_json        TEXT CHECK (artifact_manifest_json IS NULL OR json_valid(artifact_manifest_json)),
-  artifact_manifest_hash        TEXT,
-  error                         TEXT,
-  created_at                    TEXT NOT NULL,
-  started_at                    TEXT,
-  ended_at                      TEXT,
-  updated_at                    TEXT NOT NULL,
-  UNIQUE (project_run_id, org_id),
-  UNIQUE (project_id, request_key),
-  FOREIGN KEY (project_id, org_id) REFERENCES projects(project_id, org_id),
-  FOREIGN KEY (org_id, requested_by_principal_id)
-    REFERENCES auth_memberships(org_id, principal_id),
-  CHECK (
-    (artifact_manifest_json IS NULL AND artifact_manifest_hash IS NULL) OR
-    (artifact_manifest_json IS NOT NULL AND artifact_manifest_hash IS NOT NULL)
-  )
-);
-
+${projectRunsTable('project_runs')}
 CREATE TABLE IF NOT EXISTS project_publications (
   publication_id                TEXT PRIMARY KEY,
   project_run_id                TEXT NOT NULL UNIQUE,
@@ -231,10 +247,85 @@ BEGIN
 END;
 `;
 
+/**
+ * Widen the `project_runs.status` CHECK to admit `'partial'`, by rebuilding the
+ * table.
+ *
+ * WHY A REBUILD AND NOT AN `ALTER TABLE`. SQLite has no way to add or relax a
+ * CHECK in place — the note on `project_publications.base_sha` in the DDL above
+ * says so about the same limitation, and the case-folded projects index says it
+ * again. There the answer was to express the constraint as an INDEX instead,
+ * which a store can gain later. A column CHECK has no such equivalent, so a
+ * store created before 2026-09-22 would reject every landed run with
+ * `CHECK constraint failed` and the whole partial-delivery path would be dead
+ * on exactly the deployment it was written for.
+ *
+ * The steps are SQLite's own documented table-rebuild procedure
+ * (https://sqlite.org/lang_altertable.html): foreign keys off, one
+ * transaction, copy into a new table, drop, rename, rebuild the indexes and
+ * trigger the drop took with it. Two details are not boilerplate:
+ *
+ *   - the copy is driven by the OLD table's actual column list, and any column
+ *     it holds that the fresh definition lacks is re-added before the insert.
+ *     Every additive migration below (`repository_base_json`, `bytes_expired_at`
+ *     and friends) lives in the live table and not in the DDL constant, so a
+ *     copy driven by the constant would silently drop columns of real data.
+ *   - it is a no-op the moment the stored schema already names `'partial'`, so
+ *     it runs once per store and never on a fresh one.
+ */
+function migrateProjectRunsForPartial(db: Database.Database): void {
+  const stored = db
+    .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'project_runs'`)
+    .get() as { sql: string | null } | undefined;
+  if (!stored?.sql || stored.sql.includes(`'partial'`)) return;
+  const temporary = 'project_runs_partial_rebuild';
+  const columnsOf = (table: string): string[] =>
+    (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(
+      (column) => column.name
+    );
+  const oldColumns = columnsOf('project_runs');
+  const foreignKeysWereOn =
+    (db.prepare('PRAGMA foreign_keys').get() as { foreign_keys: number } | undefined)
+      ?.foreign_keys === 1;
+  // Outside the transaction: SQLite ignores this pragma inside one.
+  db.exec('PRAGMA foreign_keys=OFF');
+  try {
+    db.exec('BEGIN');
+    try {
+      db.exec(`DROP TABLE IF EXISTS ${temporary}`);
+      db.exec(projectRunsTable(temporary));
+      const fresh = columnsOf(temporary);
+      for (const column of oldColumns) {
+        if (!fresh.includes(column)) db.exec(`ALTER TABLE ${temporary} ADD COLUMN ${column} TEXT`);
+      }
+      const list = oldColumns.join(', ');
+      db.exec(`INSERT INTO ${temporary} (${list}) SELECT ${list} FROM project_runs`);
+      db.exec('DROP TABLE project_runs');
+      db.exec(`ALTER TABLE ${temporary} RENAME TO project_runs`);
+      // The drop took the table's indexes and its identity trigger with it.
+      // Re-running the whole DDL is the honest way to restore them: every
+      // statement in it is `IF NOT EXISTS`, so it recreates exactly what is
+      // missing and cannot drift from a second hand-written copy.
+      db.exec(PROJECT_TABLES_DDL);
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+  } finally {
+    if (foreignKeysWereOn) db.exec('PRAGMA foreign_keys=ON');
+  }
+}
+
 const RUN_TRANSITIONS: Readonly<Record<ProjectRunStatus, readonly ProjectRunStatus[]>> = {
   queued: ['running', 'failed', 'cancelled'],
-  running: ['delivered', 'failed', 'cancelled'],
+  // 'partial' is terminal like its siblings, and reachable only from
+  // 'running': a landed run is one that was in flight and stopped on its own
+  // budget. It is NOT a step on the way to 'delivered' — the next attempt is
+  // its own run, seeded from this one's workspace.
+  running: ['delivered', 'partial', 'failed', 'cancelled'],
   delivered: [],
+  partial: [],
   failed: [],
   cancelled: [],
 };
@@ -543,6 +634,10 @@ export class ProjectStore {
     this.db.pragma(`busy_timeout = ${STORE_BUSY_TIMEOUT_MS}`);
     if (options.initialize !== false) {
       this.db.exec(PROJECT_TABLES_DDL);
+      // BEFORE the additive migration below, and before anything writes: a
+      // store created prior to 2026-09-22 carries a status CHECK that refuses
+      // `'partial'`, and the rebuild copies the table as it finds it.
+      migrateProjectRunsForPartial(this.db);
       // ADDITIVE MIGRATION. `CREATE TABLE IF NOT EXISTS` does nothing to a
       // table that already exists, so a column added to the DDL above never
       // reaches a store created before it. Same guarded shape the auth store
@@ -900,7 +995,7 @@ export class ProjectStore {
     orgId: string;
     projectId: string;
     projectSlug: string;
-    status: 'delivered' | 'failed' | 'cancelled';
+    status: 'delivered' | 'partial' | 'failed' | 'cancelled';
     endedAt: string;
     file: string | null;
   }> {
@@ -910,7 +1005,7 @@ export class ProjectStore {
                 p.slug AS project_slug
          FROM project_runs r
          JOIN projects p ON p.project_id = r.project_id AND p.org_id = r.org_id
-         WHERE r.status IN ('delivered', 'failed', 'cancelled') AND r.ended_at IS NOT NULL
+         WHERE r.status IN ('delivered', 'partial', 'failed', 'cancelled') AND r.ended_at IS NOT NULL
          ORDER BY r.ended_at ASC, r.project_run_id ASC`
       )
       .all() as Array<{
@@ -919,7 +1014,7 @@ export class ProjectStore {
       runs_path: string;
       org_id: string;
       project_id: string;
-      status: 'delivered' | 'failed' | 'cancelled';
+      status: 'delivered' | 'partial' | 'failed' | 'cancelled';
       ended_at: string;
       project_slug: string;
     }>;
@@ -1284,9 +1379,19 @@ export class ProjectStore {
       }
       if (error) throw new Error('delivered cannot carry an error');
     }
+    // Same evidence bar as 'delivered', and deliberately so: a landed run is a
+    // real deliverable, just an incomplete one, so it owes the same trace and
+    // the same self-consistent stats. It differs on one point — it may carry an
+    // error string, because the phases it never ran are worth naming and there
+    // is no other field that says so.
+    if (to === 'partial') {
+      if (!nextTraceId || !stats || stats.outcome !== 'partial') {
+        throw new Error('partial requires traceId and partial run stats');
+      }
+    }
     if (to === 'failed') {
       if (!error) throw new Error('failed requires an error');
-      if (stats?.outcome === 'delivered' || stats?.outcome === 'cancelled') {
+      if (stats?.outcome === 'delivered' || stats?.outcome === 'partial' || stats?.outcome === 'cancelled') {
         throw new Error('failed status contradicts the supplied run stats');
       }
     }
@@ -1314,7 +1419,7 @@ export class ProjectStore {
       throw new ProjectStateConflict(`run transition ${from} -> ${to} is not allowed`);
     }
     const now = new Date().toISOString();
-    const terminal = to === 'delivered' || to === 'failed' || to === 'cancelled';
+    const terminal = to === 'delivered' || to === 'partial' || to === 'failed' || to === 'cancelled';
     const changed = this.db
       .prepare(
         `UPDATE project_runs
@@ -1416,18 +1521,28 @@ export class ProjectStore {
     return parsed.success ? parsed.data : null;
   }
 
-  /** Delivery and its immutable file inventory become visible together. */
+  /**
+   * Delivery and its immutable file inventory become visible together.
+   *
+   * `to` carries the two outcomes that HAVE an inventory. A landed run takes
+   * the same path as a delivered one — same transaction, same manifest, same
+   * atomicity — because its files are equally real; the difference is the
+   * status it lands in and the fact that publication will not touch it.
+   */
   completeProjectRun(input: {
     readonly orgId: string;
     readonly projectRunId: string;
     readonly traceId: string;
     readonly stats: RunStats;
     readonly manifest: ArtifactManifest;
+    readonly to?: 'delivered' | 'partial';
+    readonly error?: string;
   }): ProjectRun | null {
     return this.db.transaction(() => {
       const completed = this.transitionProjectRun({
         orgId: input.orgId, projectRunId: input.projectRunId,
-        from: 'running', to: 'delivered', traceId: input.traceId, stats: input.stats,
+        from: 'running', to: input.to ?? 'delivered', traceId: input.traceId, stats: input.stats,
+        ...(input.error !== undefined ? { error: input.error } : {}),
       });
       if (!completed) return null;
       const saved = this.saveArtifactManifest(input.orgId, input.projectRunId, input.manifest);
@@ -1447,8 +1562,8 @@ export class ProjectStore {
     const hash = artifactManifestHash(manifest);
     const current = this.getProjectRun(orgId, projectRunId);
     if (!current) return null;
-    if (current.status !== 'delivered') {
-      throw new ProjectStateConflict('artifacts can be attached only to a delivered run');
+    if (current.status !== 'delivered' && current.status !== 'partial') {
+      throw new ProjectStateConflict('artifacts can be attached only to a delivered or partial run');
     }
     if (current.artifactManifestHash !== null) {
       if (
@@ -1463,7 +1578,7 @@ export class ProjectStore {
       .prepare(
         `UPDATE project_runs
          SET artifact_manifest_json = ?, artifact_manifest_hash = ?, updated_at = ?
-         WHERE project_run_id = ? AND org_id = ? AND status = 'delivered'
+         WHERE project_run_id = ? AND org_id = ? AND status IN ('delivered', 'partial')
            AND artifact_manifest_json IS NULL AND artifact_manifest_hash IS NULL`
       )
       .run(JSON.stringify(manifest), hash, new Date().toISOString(), projectRunId, orgId).changes;
@@ -1484,6 +1599,11 @@ export class ProjectStore {
     const transact = this.db.transaction(() => {
       const run = this.getProjectRun(orgId, projectRunId);
       if (!run) return null;
+      // 'delivered' ONLY, and 'partial' is excluded on purpose rather than by
+      // omission: the customer's repository is the one surface where an
+      // incomplete artefact set would be indistinguishable from a finished
+      // one once it landed, so a landed run is offered for preview and
+      // download and seeds the next run, but never publishes.
       if (run.status !== 'delivered' || !run.artifactManifestHash) {
         throw new ProjectStateConflict('publication requires a delivered run with artifacts');
       }

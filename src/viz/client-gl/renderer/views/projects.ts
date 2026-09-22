@@ -178,6 +178,7 @@ const STATUS_COLORS: Record<string, number> = {
   queued: GPU_COLORS.muted,
   running: GPU_COLORS.warning,
   delivered: GPU_COLORS.success,
+  partial: GPU_COLORS.warning,
   cancelled: GPU_COLORS.muted,
   published: GPU_COLORS.success,
   publishing: GPU_COLORS.warning,

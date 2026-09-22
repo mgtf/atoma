@@ -421,7 +421,10 @@ describe('what happened to a run, asked of the index', () => {
     // Cancelled and failed share a mark and are told apart by COLOUR, exactly
     // as the status chip tells them apart.
     expect(RUN_STATUS_GLYPH.cancelled).toBe('✕');
+    // A landed run gets its own mark rather than sharing one: it delivered
+    // something and did not finish, and both ✓ and ✕ would say only half of it.
+    expect(RUN_STATUS_GLYPH.partial).toBe('◐');
     expect(new Set(Object.keys(RUN_STATUS_GLYPH)))
-      .toEqual(new Set(['live', 'delivered', 'cancelled', 'failed', 'abandoned']));
+      .toEqual(new Set(['live', 'delivered', 'partial', 'cancelled', 'failed', 'abandoned']));
   });
 });

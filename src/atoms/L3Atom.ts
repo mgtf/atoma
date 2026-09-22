@@ -18,7 +18,7 @@ import {
 } from '../registry/atomRegistry.js';
 import { modelForTier } from '../core/models.js';
 import { capToolIterations } from '../core/limits.js';
-import { dispatchWithAggregation } from './dispatch.js';
+import { dispatchWithAggregation, markLanded, type DispatchOutcome } from './dispatch.js';
 import { acceptL3RootPlan } from './l3RootPlan.js';
 import { L2Atom } from './L2Atom.js';
 import { buildResultGateEnv, runResultGates } from './resultGates.js';
@@ -45,6 +45,7 @@ import { randomUUID } from 'node:crypto';
 import { RegistryNotFoundError } from '../core/errors.js';
 import { mergeTools } from './toolMerge.js';
 import {
+  landingSignal,
   prefilterStrategy,
   shouldTrustType,
   trustedApproval,
@@ -705,8 +706,12 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     if (!strategy) return this.selfExecute(task, plan, ctx);
 
     const subtasks = plan.subtasks;
-    const subResults = await this.dispatchSubtasks(subtasks, plan, strategy, task, ctx);
-    return this.aggregate(subResults, plan.aggregation, task, ctx);
+    const dispatched = await this.dispatchSubtasks(subtasks, plan, strategy, task, ctx);
+    const landed = dispatched.unfinished.length > 0;
+    return markLanded(
+      await this.aggregate(dispatched.results, plan.aggregation, task, ctx, landed),
+      dispatched.unfinished
+    );
   }
 
   /**
@@ -744,7 +749,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     strategy: L3Strategy,
     task: Task,
     ctx: RunContext
-  ): Promise<Result[]> {
+  ): Promise<DispatchOutcome> {
     this.planChildAliases.clear();
     return dispatchWithAggregation(subtasks, plan, ctx, (subtask, idx) => {
       const hooks = this.makeL2Hooks(ctx, subtask.description);
@@ -1014,13 +1019,26 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     subResults: Result[],
     aggregation: Plan['aggregation'],
     parentTask: Task,
-    ctx: RunContext
+    ctx: RunContext,
+    /**
+     * True when the run deadline landed the dispatch that produced
+     * `subResults`. It changes exactly one thing: the `llm-synthesize` call
+     * below cannot ride `ctx.signal`, which is already aborted by then. See
+     * `landingSignal`.
+     */
+    landed = false
   ): Promise<Result> {
     if (subResults.length === 1) {
       return subResults[0]!;
     }
     const evidence = subResults.flatMap((result) => result.evidence ?? []);
     const evidenceField = evidence.length > 0 ? { evidence } : {};
+    // Carried up like `evidence`, and for the same reason: a phase that itself
+    // landed short is a fact about this aggregate's completeness, and an
+    // aggregate that dropped it would report more coverage than it has.
+    const unfinishedBelow = subResults.flatMap((result) => result.unfinishedPhases ?? []);
+    const unfinishedField =
+      unfinishedBelow.length > 0 ? { unfinishedPhases: unfinishedBelow } : {};
     if (aggregation.mode === 'sequential') {
       // For phased pipelines, the FINAL phase's result is the deliverable.
       // The earlier phases produced intermediate state on disk that the
@@ -1036,6 +1054,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
         trace: [],
         producedBy: { tier: 3, name: this.name, viaFallback: false },
         ...evidenceField,
+        ...unfinishedField,
       };
     }
     if (aggregation.mode === 'concat') {
@@ -1049,6 +1068,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
         trace: [],
         producedBy: { tier: 3, name: this.name, viaFallback: false },
         ...evidenceField,
+        ...unfinishedField,
       };
     }
     const userContent = [
@@ -1074,7 +1094,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       this.toLlmRequest('execute', {
         userContent,
         params: this.params,
-        signal: ctx.signal,
+        signal: landed ? landingSignal() : ctx.signal,
       })
     );
     const { output, summary } = parsePayloadTolerant(resp.text);
@@ -1084,6 +1104,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       trace: [],
       producedBy: { tier: 3, name: this.name, viaFallback: false },
       ...evidenceField,
+      ...unfinishedField,
     };
   }
 

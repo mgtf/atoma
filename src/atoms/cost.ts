@@ -152,6 +152,31 @@ export function postApprovalSignal(): AbortSignal {
 }
 
 /**
+ * The same decoupling, for the one LLM call a LANDED dispatch still has to
+ * make: `llm-synthesize` aggregation over the branches that settled before the
+ * run deadline cut their siblings (`dispatchWithAggregation`).
+ *
+ * It needs its own signal for a mechanical reason, not a policy one: by the
+ * time a parallel dispatch lands, `ctx.signal` is ALREADY aborted — that is
+ * what landing means — so a synthesis riding it would throw before its first
+ * token and take the landing down with it, delivering nothing. The accepted
+ * branches would be discarded by the very mechanism added to preserve them.
+ *
+ * The ceiling is inherited from `POST_APPROVAL_LLM_TIMEOUT_MS` rather than
+ * measured separately: the call has the same shape — one tool-less text
+ * completion — and the same failure mode, a silent transport consuming the
+ * budget and returning nothing. Sequential aggregation needs none of this; it
+ * is string assembly and makes no call at all.
+ *
+ * Same explicit trade-off as its neighbour: a landed run may extend past its
+ * deadline by at most this much while it finishes saying what it delivered. A
+ * hard process kill still reaps everything.
+ */
+export function landingSignal(): AbortSignal {
+  return AbortSignal.timeout(POST_APPROVAL_LLM_TIMEOUT_MS);
+}
+
+/**
  * Cap on output tokens for supervisor-tier strategy/plan calls (L2.plan /
  * L3.plan on non-fallback path). The response is a JSON pair [strategy, plan]
  * + a list of subtasks with descriptions. Sized to fit a 3-5 phase PHASED

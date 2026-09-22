@@ -283,7 +283,7 @@ describe('depth transition through the production supervision loop', () => {
             current.signal.throwIfAborted();
             return result;
           });
-          return siblings[0]!;
+          return siblings.results[0]!;
         } };
       },
     })).rejects.toBeInstanceOf(RootAcceptanceError);

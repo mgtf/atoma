@@ -50,7 +50,7 @@ export function runElapsedMs(run: VizRun, now = Date.now()): number | undefined 
   return Number.isFinite(started) ? Math.max(0, now - started) : undefined;
 }
 
-export type RunStatus = 'live' | 'abandoned' | 'cancelled' | 'failed' | 'delivered';
+export type RunStatus = 'live' | 'abandoned' | 'cancelled' | 'failed' | 'partial' | 'delivered';
 
 /**
  * ONE definition of "what happened to this run", for every surface that
@@ -64,7 +64,12 @@ export type RunStatus = 'live' | 'abandoned' | 'cancelled' | 'failed' | 'deliver
 export function runStatus(run: VizRun, now = Date.now()): RunStatus {
   if (run.cancelled) return 'cancelled';
   if (!run.endedAt) return isAbandoned(run, now) ? 'abandoned' : 'live';
-  return run.error ? 'failed' : 'delivered';
+  if (run.error) return 'failed';
+  // A landed run has a result and no error, so it read as 'delivered' until
+  // the trace carried this field: it reached its budget with phases already
+  // accepted and reported those. The list of phases it never ran is what says
+  // so — never the summary text, which continues into model-authored prose.
+  return (run.result?.unfinishedPhases?.length ?? 0) > 0 ? 'partial' : 'delivered';
 }
 
 /**
@@ -92,6 +97,9 @@ export function runIndexStatus(entry: RunIndexEntry, now = Date.now()): RunStatu
 export const RUN_STATUS_GLYPH: Record<RunStatus, string> = {
   live: '●',
   delivered: '✓',
+  // A half-filled circle, not a tick and not a cross: a landed run delivered
+  // something and did not finish, and neither existing glyph can say both.
+  partial: '◐',
   cancelled: '✕',
   failed: '✕',
   abandoned: '⚠',

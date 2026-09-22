@@ -107,6 +107,24 @@ load-bearing.
   receives it fans the group out. One L3 phase per orthogonal artefact
   serialises work that shares no file — see
   [parallel fan-in 2026-08-16](../../docs/incidents/parallel-fanin-2026-08-16.md).
+- REACHING THE RUN DEADLINE LANDS A DISPATCH; it does not discard it.
+  `dispatchWithAggregation` returns `{results, unfinished}`: sequential refuses
+  to OPEN a phase under `MIN_PHASE_LANDING_MS` of remaining wall clock and keeps
+  the earlier phases when a phase that was opened is aborted, and parallel keeps
+  the branches that settled when the deadline cut their siblings. A dispatch
+  that completed NO phase still throws, and a rejection that is not the deadline
+  keeps its meaning whatever else settled — `ctx.signal` is the deadline and
+  nothing else, since cancellation reaches a run as process teardown. `markLanded`
+  stamps the aggregate (`Result.unfinishedPhases`, unioned with what a nested
+  landing reported) and the runner turns that into the `partial` outcome. Never
+  infer a landing from the summary text: `markLanded` prefixes it, but it then
+  continues into model-authored prose. Measured twice on 2026-09-21:
+  [progressive runs](../../docs/incidents/progressive-runs-2026-09-21.md).
+- `llm-synthesize` aggregation on a LANDED parallel dispatch rides
+  `landingSignal()`, not `ctx.signal` — which is already aborted by then, so the
+  synthesis would throw before its first token and discard the branches the
+  landing exists to preserve. Same decoupling and same ceiling as
+  `postApprovalSignal()`; sequential aggregation makes no call and needs none.
 
 ## Verification and ground truth
 

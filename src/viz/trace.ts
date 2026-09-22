@@ -438,6 +438,15 @@ export interface VizRun {
     summary: string;
     output: unknown;
     producedBy: { tier: Tier; name: string; viaFallback: boolean };
+    /**
+     * Plan phases the run never ran, because it landed on its budget
+     * (`Result.unfinishedPhases`). Present and non-empty is what makes a trace
+     * PARTIAL rather than delivered, and it is a typed field for the same
+     * reason the run stats carry an outcome instead of being grepped out of
+     * the log: `markLanded` also prefixes the summary, but that string then
+     * continues into model-authored prose and is not a contract.
+     */
+    unfinishedPhases?: readonly string[];
   };
   /**
    * Mirrors `VizRunIndexEntry.degraded`. Computed from

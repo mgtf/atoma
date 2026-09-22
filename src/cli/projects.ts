@@ -675,8 +675,21 @@ async function main(): Promise<void> {
       }
     }
   }
+  if (status === 'partial') {
+    // Not a failure and not a delivery: the run landed on its budget with
+    // phases already accepted, and the next run of this project seeds from
+    // this workspace (`previousSeedRun`). It publishes nothing, which is why
+    // the publication block above is skipped for it.
+    process.stdout.write(
+      '  landed on its budget: the completed phases are in the workspace and seed the next run\n' +
+        '  not published — publication is reserved for a complete delivery\n'
+    );
+  }
   process.stdout.write('watch it in the visualizer: npm run viz:dev\n');
-  if (status !== 'delivered') process.exitCode = 1;
+  // A landed run exits 0: it produced a real, inspectable deliverable, and an
+  // operator script that treated it as a failure would discard exactly the
+  // work this path exists to preserve.
+  if (status !== 'delivered' && status !== 'partial') process.exitCode = 1;
 }
 
 await main();

@@ -92,7 +92,7 @@ export interface ProjectRunFinishedEvent {
   /** The principal who requested the run — the one to notify. */
   readonly principalId: string;
   readonly goal: string;
-  readonly status: 'delivered' | 'failed' | 'cancelled';
+  readonly status: 'delivered' | 'partial' | 'failed' | 'cancelled';
 }
 
 export interface ProjectCoordinatorOptions {
@@ -675,7 +675,22 @@ export function projectRunEnvironment(input: {
   return { environment, payers };
 }
 
-export function previousDeliveredRun(
+/**
+ * The workspace the next run of this project starts from: the most recent run
+ * that produced one.
+ *
+ * It was `previousDeliveredRun` and took `delivered` only. A LANDED run counts
+ * now, and that is the half of partial delivery that actually recovers the
+ * spend: a run that completed three phases of four leaves those three on disk,
+ * and the customer's next run continues from them instead of rebuilding them.
+ * Without this the partial status would be a nicer label on the same loss.
+ *
+ * Order is "most recent first" from the store, and the first usable one wins —
+ * a landed run is not ranked below an older complete one, because it is the
+ * later state of the same evolving corpus (the project-continuity contract in
+ * docs/incidents/progressive-runs-2026-09-21.md).
+ */
+export function previousSeedRun(
   store: ProjectStore,
   orgId: string,
   projectId: string
@@ -683,8 +698,8 @@ export function previousDeliveredRun(
   const runs = store.listProjectRuns(orgId, projectId);
   if (!runs) return null;
   for (const run of runs) {
-    if (run.status !== 'delivered') continue;
-    if (run.bytesExpiredAt) throw new ProjectStateConflict('The previous delivered workspace has expired; restore it before continuing this project');
+    if (run.status !== 'delivered' && run.status !== 'partial') continue;
+    if (run.bytesExpiredAt) throw new ProjectStateConflict('The previous workspace has expired; restore it before continuing this project');
     try {
       if (lstatSync(run.hostPaths.workspacePath).isDirectory()) {
         return run;
@@ -803,6 +818,32 @@ export function runnerFailureDetail(log: string, outcome: string): string {
 }
 
 /**
+ * What a landed run says about itself, for the row the customer reads.
+ *
+ * The OUTCOME comes from the JSON epilogue and is not in question here; this
+ * only recovers the prose the runner printed alongside it — the phases that
+ * never ran. Same trade as `runnerFailureDetail` above and for the same
+ * reason: a tenant goal is echoed into this log and can therefore forge these
+ * lines, which changes a detail string and never a status.
+ */
+export function landedRunDetail(log: string): string {
+  const lines = log.split(/\r?\n/);
+  const phases: string[] = [];
+  let headline = '';
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (line.startsWith('◐ ')) headline = line.slice(2).trim();
+    const notRun = /^not run:\s+(\S.*)$/.exec(line);
+    if (notRun?.[1]) phases.push(notRun[1].trim());
+  }
+  const detail =
+    phases.length > 0
+      ? `run landed on its budget; phases never run: ${phases.join(' | ')}`
+      : headline || 'run landed on its budget before completing every planned phase';
+  return detail.slice(0, 2_000);
+}
+
+/**
  * THE OPERATOR'S BUDGET FOR ONE PROJECT RUN, and the one place it is decided.
  *
  * It used to be unreachable. The coordinator hard-coded 15 minutes, neither
@@ -812,17 +853,42 @@ export function runnerFailureDetail(log: string, outcome: string): string {
  * `949ecd5d` died at 900s after 68 tool calls and $0.96, and its own post-mortem
  * advised raising a variable that could not be raised.
  *
- * The default is 30 minutes, allowing project runs on small production hosts
- * enough wall-clock time. Explicit operator budgets still take precedence.
+ * The default is 60 minutes. It was 30, and two production runs of 2026-09-21
+ * (`cc894dad`, `d3098d25`, docs/incidents/progressive-runs-2026-09-21.md) both
+ * died at exactly that wall clock having spent $2.83 and $3.50. Raising it is
+ * the smaller half of the answer and not the interesting one: a bigger budget
+ * only moves the cliff. What stops the loss is that reaching the deadline now
+ * LANDS on the phases already accepted (`MIN_PHASE_LANDING_MS` in
+ * src/atoms/dispatch.ts) and records the run `partial` instead of discarding
+ * them. Explicit operator budgets still take precedence.
  *
  * Bounded on both ends because the child derives two later deadlines from it:
  * the runner's watchdog fires at budget + 60s and the harness hard-reaps at
  * budget + 180s, so an absurd value moves those too.
  */
-export const DEFAULT_PROJECT_RUN_TIMEOUT_MS = 30 * 60 * 1_000;
+export const DEFAULT_PROJECT_RUN_TIMEOUT_MS = 60 * 60 * 1_000;
 export const MIN_PROJECT_RUN_TIMEOUT_MS = 60 * 1_000;
 export const MAX_PROJECT_RUN_TIMEOUT_MS = 2 * 60 * 60 * 1_000;
 export const PROJECT_RUN_TIMEOUT_ENV = 'ATOMA_PROJECT_TIMEOUT_MS';
+
+/**
+ * The preparation's OWN bound, and the reason the run budget no longer pays
+ * for it.
+ *
+ * Importing a GitHub repository and building the run's retrieval corpus both
+ * happen before the child is spawned, and both used to be billed to the
+ * tenant's wall clock: `deadlineAt` was stamped above this work and the child
+ * received the REMAINDER. Measured on the 2026-09-21 production runs, whose
+ * post-mortem reads `run aborted after 1787s budget` against a 1800s setting —
+ * the missing 13s are this preparation. Small in that instance, arbitrary in
+ * general, and paid by the wrong party in every instance.
+ *
+ * It gets a ceiling rather than no bound at all: moving it off the run budget
+ * must not make it unbounded, or a wedged import becomes a run that never
+ * starts and never stops. Ten minutes is far above anything observed and well
+ * under the point where a caller would rather have been refused.
+ */
+export const PROJECT_RUN_PREPARATION_TIMEOUT_MS = 10 * 60 * 1_000;
 
 /**
  * Resolve the budget: an explicit argument wins over the host environment,
@@ -1241,12 +1307,16 @@ export class ProjectRunCoordinator {
 
     let driven: Promise<string>;
     try {
-      const seedRun = previousDeliveredRun(this.store, input.orgId, input.projectId);
+      const seedRun = previousSeedRun(this.store, input.orgId, input.projectId);
       let seedFrom = seedRun?.hostPaths.workspacePath;
-      const deadlineAt = Date.now() + this.timeoutMs;
+      // The tenant's wall clock starts when the CHILD does, not here: the
+      // repository import and corpus preparation below have their own bound
+      // (`PROJECT_RUN_PREPARATION_TIMEOUT_MS`) and are no longer billed to the
+      // run budget. See that constant for the measurement.
+      const preparationDeadlineAt = Date.now() + PROJECT_RUN_PREPARATION_TIMEOUT_MS;
       const launch = () => this.driver({
         goal: run.goal,
-        timeoutMs: Math.max(1, deadlineAt - Date.now()),
+        timeoutMs: this.timeoutMs,
         logPath: paths.logPath,
         cwd: this.cwd,
         npmScript: 'run:build',
@@ -1263,14 +1333,17 @@ export class ProjectRunCoordinator {
         onSpawn: (pid) => lease.attachChild(pid),
       });
       driven = (async () => {
-        const preparationSignal = AbortSignal.any([controller.signal, AbortSignal.timeout(this.timeoutMs)]);
+        const preparationSignal = AbortSignal.any([
+          controller.signal,
+          AbortSignal.timeout(PROJECT_RUN_PREPARATION_TIMEOUT_MS),
+        ]);
         if (project.repositoryTarget.source) {
           if (!this.publisher?.prepareRun) throw new ProjectRunConfigurationError('GitHub repository import is unavailable');
           seedFrom = await this.publisher.prepareRun(project, run, preparationSignal);
         }
         await ProjectRetrievalLaunchStore.open(this.dbPath).prepare(run.projectRunId,
-          seedRun?.projectRunId ?? null, { signal: preparationSignal, deadlineAt });
-        if (preparationSignal.aborted || Date.now() >= deadlineAt) throw new Error('project document preparation cancelled');
+          seedRun?.projectRunId ?? null, { signal: preparationSignal, deadlineAt: preparationDeadlineAt });
+        if (preparationSignal.aborted || Date.now() >= preparationDeadlineAt) throw new Error('project document preparation cancelled');
         environment[HAYSTACK_LAUNCH_ENV] = JSON.stringify(retrievalLaunch);
         return launch();
       })();
@@ -1303,7 +1376,18 @@ export class ProjectRunCoordinator {
         });
         return;
       }
-      if (stats.outcome !== 'delivered') {
+      // A LANDED run takes this whole path. Its trace, its declared manifest
+      // and the files in its workspace are as real as a delivery's — the run
+      // reached its budget with phases already accepted and reported those
+      // (`dispatchWithAggregation`) instead of discarding them, which is the
+      // 2026-09-21 defect this exists to close. Only two things differ, both
+      // below: the status it completes into, and that publication never sees
+      // it. The declared manifest is NOT cross-checked against the workspace
+      // here, so a plan that declared artefacts its unrun phases would have
+      // produced is not a contradiction; `buildWorkspaceArtifactManifest`
+      // reports what is actually on disk.
+      const landed = stats.outcome === 'partial';
+      if (stats.outcome !== 'delivered' && !landed) {
         throw new Error(runnerFailureDetail(log, stats.outcome));
       }
       const tracePath = path.join(reservedRun.hostPaths.runsPath, `${reservedRun.projectRunId}.json`);
@@ -1323,6 +1407,15 @@ export class ProjectRunCoordinator {
         traceId: reservedRun.projectRunId,
         stats,
         manifest: built.manifest,
+        ...(landed
+          ? {
+              to: 'partial' as const,
+              // The runner prints the phases it never ran; keep the first line
+              // of that as the row's own explanation, because 'partial' alone
+              // does not tell the customer WHAT is missing.
+              error: landedRunDetail(log),
+            }
+          : {}),
       });
       if (!completed) throw new Error('project run disappeared before completion');
       // BEFORE publication and AFTER the run is durably delivered, in its own
@@ -1344,7 +1437,12 @@ export class ProjectRunCoordinator {
           );
         }
       }
-      if (this.publisher) {
+      // Publication is 'delivered' only, by the operator's decision of
+      // 2026-09-22: a landed run is offered to its customer as a preview, a
+      // download and the seed of the next run, but an incomplete artefact set
+      // never reaches the project's repository, where nothing would mark it
+      // as incomplete afterwards.
+      if (this.publisher && !landed) {
         await this.publisher.publish({
           project,
           run: completed,
@@ -1370,7 +1468,7 @@ export class ProjectRunCoordinator {
             // Preserve the actual spend when host-side finalization refuses
             // a runner delivery. Only the outcome changes to match this row;
             // the original runner outcome remains in its immutable trace.
-            ...(stats ? { stats: { ...stats, outcome: signal.aborted ? 'cancelled' as const : stats.outcome === 'delivered' ? 'failed' as const : stats.outcome } } : {}),
+            ...(stats ? { stats: { ...stats, outcome: signal.aborted ? 'cancelled' as const : stats.outcome === 'delivered' || stats.outcome === 'partial' ? 'failed' as const : stats.outcome } } : {}),
             ...(signal.aborted
               ? {}
               : {
@@ -1396,6 +1494,7 @@ export class ProjectRunCoordinator {
           this.onRunFinished &&
           settled &&
           (settled.status === 'delivered' ||
+            settled.status === 'partial' ||
             settled.status === 'failed' ||
             settled.status === 'cancelled')
         ) {

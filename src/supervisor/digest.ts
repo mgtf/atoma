@@ -82,11 +82,22 @@ function digestEvent(event: VizEvent, index: number): Record<string, unknown> {
   return out;
 }
 
-/** Cancelled beats error: a cancelled run records an error message by design. */
-export function runStatusOf(run: Pick<VizRun, 'cancelled' | 'endedAt' | 'error'>): VerdictRunStatus {
+/**
+ * Cancelled beats error: a cancelled run records an error message by design.
+ *
+ * 'partial' is read from the result's own phase list, not from its summary:
+ * a landed run ends with a result and no error, so it is 'delivered' on every
+ * other signal. The analyst grades it on its own terms — landing on a budget
+ * with the completed phases reported is policy working, and `sound` is
+ * available for it exactly as it is for a delivery.
+ */
+export function runStatusOf(
+  run: Pick<VizRun, 'cancelled' | 'endedAt' | 'error' | 'result'>
+): VerdictRunStatus {
   if (run.cancelled) return 'cancelled';
-  if (run.endedAt) return run.error ? 'failed' : 'delivered';
-  return 'unknown';
+  if (!run.endedAt) return 'unknown';
+  if (run.error) return 'failed';
+  return (run.result?.unfinishedPhases?.length ?? 0) > 0 ? 'partial' : 'delivered';
 }
 
 export interface RunDigest {

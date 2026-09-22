@@ -24,7 +24,7 @@ import { jsonSchemaFromZod } from './jsonSchema.js';
  */
 export const SUPERVISOR_VERDICT_SCHEMA_TAG = 'atoma.supervisor.verdict/v1';
 
-export const verdictRunStatusSchema = z.enum(['delivered', 'failed', 'cancelled', 'unknown']);
+export const verdictRunStatusSchema = z.enum(['delivered', 'partial', 'failed', 'cancelled', 'unknown']);
 export const verdictGradeSchema = z.enum(['sound', 'wasteful', 'deficient']);
 export const findingKindSchema = z.enum([
   /** A net bug in atoma with a mechanism in `src/`; the mender may take it. */

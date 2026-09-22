@@ -40,6 +40,7 @@ import { randomUUID } from 'node:crypto';
 import { RegistryNotFoundError } from '../core/errors.js';
 import { mergeTools } from './toolMerge.js';
 import {
+  landingSignal,
   prefilterStrategy,
   shouldTrustSkill,
   shouldTrustType,
@@ -68,7 +69,7 @@ export {
 export { extractRecordedProbes } from '../contracts/witness.js';
 import { SkillLifecycle, resultHasSuccessfulToolAction } from '../skills/lifecycle.js';
 import { llmVerdict, undeclaredToolMentions} from './verdict.js';
-import { dispatchWithAggregation } from './dispatch.js';
+import { dispatchWithAggregation, markLanded, type DispatchOutcome } from './dispatch.js';
 export { llmVerdict, VALIDATION_SYSTEM_PROMPT } from './verdict.js';
 import { skillContextBlock } from '../skills/lifecycle.js';
 export {
@@ -637,8 +638,12 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     }
 
     const subtasks = plan.subtasks;
-    const subResults = await this.dispatchSubtasks(subtasks, plan, strategy, task, ctx);
-    return this.aggregate(subResults, plan.aggregation, task, ctx);
+    const dispatched = await this.dispatchSubtasks(subtasks, plan, strategy, task, ctx);
+    const landed = dispatched.unfinished.length > 0;
+    return markLanded(
+      await this.aggregate(dispatched.results, plan.aggregation, task, ctx, landed),
+      dispatched.unfinished
+    );
   }
 
   /**
@@ -668,7 +673,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     strategy: L2Strategy,
     task: Task,
     ctx: RunContext
-  ): Promise<Result[]> {
+  ): Promise<DispatchOutcome> {
     this.planChildAliases.clear();
     return dispatchWithAggregation(subtasks, plan, ctx, (subtask, idx) =>
       this.runSubtask({
@@ -1776,7 +1781,9 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     subResults: Result[],
     aggregation: Plan['aggregation'],
     parentTask: Task,
-    ctx: RunContext
+    ctx: RunContext,
+    /** See L3Atom.aggregate: only the `llm-synthesize` signal depends on it. */
+    landed = false
   ): Promise<Result> {
     if (subResults.length === 1) {
       // Degenerate fan-out (N=1): preserve the exact pre-fan-out shape so
@@ -1785,6 +1792,10 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     }
     const evidence = subResults.flatMap((result) => result.evidence ?? []);
     const evidenceField = evidence.length > 0 ? { evidence } : {};
+    // Carried up like `evidence`; see L3Atom.aggregate for why.
+    const unfinishedBelow = subResults.flatMap((result) => result.unfinishedPhases ?? []);
+    const unfinishedField =
+      unfinishedBelow.length > 0 ? { unfinishedPhases: unfinishedBelow } : {};
     if (aggregation.mode === 'sequential') {
       // Phased pipeline: the FINAL phase carries the deliverable. See
       // L3Atom.aggregate sequential branch for full rationale.
@@ -1798,6 +1809,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         trace: [],
         producedBy: { tier: 2, name: this.name, viaFallback: false },
         ...evidenceField,
+        ...unfinishedField,
       };
     }
     if (aggregation.mode === 'concat') {
@@ -1811,6 +1823,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         trace: [],
         producedBy: { tier: 2, name: this.name, viaFallback: false },
         ...evidenceField,
+        ...unfinishedField,
       };
     }
     // llm-synthesize
@@ -1837,7 +1850,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       this.toLlmRequest('execute', {
         userContent,
         params: this.params,
-        signal: ctx.signal,
+        signal: landed ? landingSignal() : ctx.signal,
       })
     );
     const { output, summary } = parsePayloadTolerant(resp.text);
@@ -1847,6 +1860,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       trace: [],
       producedBy: { tier: 2, name: this.name, viaFallback: false },
       ...evidenceField,
+      ...unfinishedField,
     };
   }
 

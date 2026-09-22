@@ -19,7 +19,14 @@ export const runStatsSchema = z.object({
   // printed nothing, so parseRunLog read 'error' with null economics while
   // the trace held the actual spend — the CSV and the trace disagreed about
   // the same run's cost (both overnight 2026-08-14 'error' rows were this).
-  outcome: z.enum(['delivered', 'failed', 'error', 'cancelled']),
+  // 'partial' is first-class for the same reason 'cancelled' is, and was added
+  // 2026-09-22: a run that reaches its deadline with phases already accepted
+  // now LANDS on them (`dispatchWithAggregation`) instead of discarding them,
+  // and neither neighbour could describe that. 'delivered' would claim a
+  // complete deliverable — the false delivery the 2026-09-21 post-mortem
+  // credited the system for refusing — and 'failed' is what threw the work
+  // away in the first place. The epilogue carries the real totals either way.
+  outcome: z.enum(['delivered', 'partial', 'failed', 'error', 'cancelled']),
   costUsd: z.number().finite().nonnegative().nullable(),
   /**
    * The share of `costUsd` that the HOST SUBSCRIPTION paid for, at API list

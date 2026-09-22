@@ -332,7 +332,14 @@ export interface RunHandle {
 }
 
 export interface RunOutcome {
-  readonly outcome: 'delivered' | 'failed';
+  /**
+   * 'partial' is a landed run: it reached its budget with phases already
+   * accepted and reported those instead of discarding them. Its deliverable
+   * is real and incomplete, and `runTask` treats it like a delivery for
+   * process purposes (exit 0, park so any server it started stays reachable)
+   * because there IS something to look at.
+   */
+  readonly outcome: 'delivered' | 'partial' | 'failed';
 }
 
 /**
@@ -1006,11 +1013,18 @@ export async function startTask(
       retrievalPrepared = true;
       const result = await handle(task, ctx);
       clearTimeout(watchdog);
+      // A landed run names the phases it never ran (`Result.unfinishedPhases`,
+      // stamped by `markLanded`). That list is the ONLY thing separating a
+      // partial from a delivery here, which is why it is a typed field and not
+      // a substring of the summary.
+      const unfinishedPhases = result.unfinishedPhases ?? [];
+      const landed = unfinishedPhases.length > 0;
       const persistedRun = recorder.endRun({
         result: {
           summary: result.summary,
           output: result.output,
           producedBy: result.producedBy,
+          ...(landed ? { unfinishedPhases } : {}),
         },
       });
 
@@ -1046,12 +1060,20 @@ export async function startTask(
       console.log(
         `\nrun recorded in ${recorder.runsDir} — start the visualizer: npm run viz`
       );
-      console.log(formatRunStatsEpilogue(machineRunStats('delivered', metrics, runSignals)));
-      console.log(
-        '\n✓ build finished. Any server the run started is still reachable inside the sandbox.'
-      );
+      console.log(formatRunStatsEpilogue(machineRunStats(landed ? 'partial' : 'delivered', metrics, runSignals)));
+      if (landed) {
+        console.log(
+          `\n◐ build LANDED on its budget: ${unfinishedPhases.length} phase(s) were never run, and what the earlier phases produced is in the workspace.`
+        );
+        for (const phase of unfinishedPhases) console.log(`  not run: ${phase}`);
+        console.log('  Any server the run started is still reachable inside the sandbox.');
+      } else {
+        console.log(
+          '\n✓ build finished. Any server the run started is still reachable inside the sandbox.'
+        );
+      }
       console.log('  Press Ctrl+C when you are done testing.');
-      return { outcome: 'delivered' };
+      return { outcome: landed ? 'partial' : 'delivered' };
     } catch (err) {
       // The run failed on its own terms (abort, transport error, crash):
       // the watchdog's job is done, and leaving its timer armed would hold

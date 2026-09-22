@@ -259,7 +259,16 @@ export interface ProjectRunTaskDeps {
   readonly pollMs?: number;
 }
 
-const PROJECT_TERMINAL = new Set(['delivered', 'failed', 'cancelled']);
+const PROJECT_TERMINAL = new Set(['delivered', 'partial', 'failed', 'cancelled']);
+
+/**
+ * Which terminal statuses are a task COMPLETION rather than a failure.
+ * `'partial'` is a completion: the run ran to its budget and produced a real
+ * deliverable, just not a complete one, and the status travels in the payload
+ * where the caller reads it. Reporting it as `failed` would tell an MCP client
+ * to discard exactly the work the landing preserved.
+ */
+const PROJECT_COMPLETED = new Set(['delivered', 'partial']);
 
 /**
  * `atoma_run_start`: the watcher reads the tenant store once every
@@ -313,7 +322,7 @@ export function projectRunTaskHandler(host: RunTaskHost, deps: ProjectRunTaskDep
       }
       if (PROJECT_TERMINAL.has(snapshot.status)) {
         stop();
-        quietly(() => extra.taskStore.storeTaskResult(task.taskId, snapshot.status === 'delivered' ? 'completed' : 'failed', jsonResult(snapshot)));
+        quietly(() => extra.taskStore.storeTaskResult(task.taskId, PROJECT_COMPLETED.has(String(snapshot.status)) ? 'completed' : 'failed', jsonResult(snapshot)));
         return;
       }
       timer = setTimeout(tick, pollMs);

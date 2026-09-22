@@ -301,16 +301,47 @@ list. These values come from the host snapshot, never a tenant prompt.
 
 - ONE place decides how long a project run may take: `projectRunTimeoutMs`,
   which reads an explicit argument, then `ATOMA_PROJECT_TIMEOUT_MS`, then the
-  30-minute default, and REFUSES anything malformed or outside 60s..7200s
-  rather than falling back — a run that quietly gets 30 minutes when the
-  operator asked for 40 is the same defect wearing a different hat.
+  60-minute default, and REFUSES anything malformed or outside 60s..7200s
+  rather than falling back — a run that quietly gets the default when the
+  operator asked for 40 minutes is the same defect wearing a different hat.
 - `ATOMA_BUILD_TIMEOUT_MS` is the CHILD's variable and is inert on the host:
   `spawnRun` writes it from this value AFTER spreading the caller's
   environment, so an exported one is overwritten. That is why "raise the
   timeout", which run `949ecd5d`'s post-mortem advised after dying at 900s on
   68 tool calls and $0.96, was unreachable advice until the lever existed.
-- The DEFAULT is 30 minutes, allowing project runs on small production hosts
-  more wall-clock time. Explicit operator budgets still take precedence.
+- The DEFAULT is 60 minutes, raised from 30 on 2026-09-22 after two production
+  runs died at exactly that wall clock having spent $2.83 and $3.50. It is the
+  smaller half of that answer: a bigger budget only moves the cliff, and what
+  stops the loss is that reaching the deadline now LANDS
+  ([src/atoms](../atoms/AGENTS.md)) and records `partial`.
+- THE PREPARATION IS NOT BILLED TO THE RUN. The repository import and the
+  corpus build happen before the child is spawned and have their own ceiling,
+  `PROJECT_RUN_PREPARATION_TIMEOUT_MS`; the tenant's clock starts when the child
+  does. `deadlineAt` used to be stamped above that work and the child got the
+  remainder, which is the arithmetic behind `run aborted after 1787s budget` on
+  a 1800s setting. Moving it off the budget must not make it unbounded.
+
+## A landed run: `partial`
+
+- `partial` is TERMINAL and is not a failure: the run reached its budget with
+  phases already accepted and reported those. It reaches the store through the
+  same `completeProjectRun` transaction as a delivery — same trace bar, same
+  workspace manifest, same atomicity — and differs on exactly three points.
+  It may carry an error string, because the phases it never ran are worth
+  naming and no other field says so; it is offered to its customer as a preview
+  and a download; and it NEVER publishes.
+- Publication stays `delivered`-only, by the operator's decision of 2026-09-22.
+  The customer's repository is the one surface where an incomplete artefact set
+  would be indistinguishable from a finished one once it landed.
+- `previousSeedRun` (was `previousDeliveredRun`) takes a landed run too, and
+  that is the half that actually recovers the spend: the next run continues
+  from the phases that did complete instead of rebuilding them. Retention and
+  the retrieval source follow it, so a landed seed is held like any other.
+- The status CHECK on `project_runs` was widened by a TABLE REBUILD
+  (`migrateProjectRunsForPartial`), because SQLite cannot relax a CHECK by
+  `ALTER TABLE` and a store created before that date would refuse every landed
+  run. The copy is driven by the OLD table's column list so the additive
+  migrations below it are not silently dropped.
 
 ## What a published commit says
 

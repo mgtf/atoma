@@ -163,8 +163,11 @@ function announcementText(event: PlatformEvent, locale: PushLocale, field: 'titl
 }
 
 const RUN_STATUS_WORDS: Partial<Record<PushLocale, Record<string, string>>> = {
-  en: { delivered: 'delivered', failed: 'failed', cancelled: 'cancelled' },
-  fr: { delivered: 'livré', failed: 'échoué', cancelled: 'annulé' },
+  // 'partial' says what it is in the title, because the requester's next
+  // action depends on it: a landed run has files to look at AND work left, and
+  // the next run of the project continues from it.
+  en: { delivered: 'delivered', partial: 'partial — resumable', failed: 'failed', cancelled: 'cancelled' },
+  fr: { delivered: 'livré', partial: 'partiel — reprenable', failed: 'échoué', cancelled: 'annulé' },
 };
 
 const INSTALLATION_STATUS_WORDS: Partial<Record<PushLocale, Record<string, string>>> = {

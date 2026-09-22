@@ -1,4 +1,4 @@
-import { previousDeliveredRun } from './coordinator.js';
+import { previousSeedRun } from './coordinator.js';
 import { ProjectStore } from './store.js';
 import { organisationIdSchema, projectIdSchema, projectRunIdSchema } from '../contracts/projects.js';
 import type Database from 'better-sqlite3';
@@ -41,7 +41,7 @@ export function retentionPlan(db: Database.Database, projectsRoot: string, works
   const deletedFilter = columns.some(column => column.name === 'bytes_deleted_at') ? 'AND r.bytes_deleted_at IS NULL' : '';
   const rows = db.prepare(`SELECT r.*, p.status AS project_status FROM project_runs r
     JOIN projects p ON p.project_id = r.project_id AND p.org_id = r.org_id
-    WHERE r.status IN ('delivered','failed','cancelled') AND r.ended_at <= ?
+    WHERE r.status IN ('delivered','partial','failed','cancelled') AND r.ended_at <= ?
     ${deletedFilter} ORDER BY r.ended_at, r.project_run_id`).all(cutoff) as Array<{
       project_run_id: string; org_id: string; project_id: string; workspace_path: string;
       runs_path: string; log_path: string; status: string; project_status: string;
@@ -66,7 +66,7 @@ export function retentionPlan(db: Database.Database, projectsRoot: string, works
     }
     let held: string | null = null;
     if (row.project_status === 'active') {
-      const seed = previousDeliveredRun(new ProjectStore(db, { initialize: false }), row.org_id, row.project_id);
+      const seed = previousSeedRun(new ProjectStore(db, { initialize: false }), row.org_id, row.project_id);
       if (seed?.projectRunId === row.project_run_id) held = 'current project seed';
     }
     const publication = db.prepare("SELECT 1 FROM project_publications WHERE project_run_id = ? AND status <> 'published'").get(row.project_run_id);

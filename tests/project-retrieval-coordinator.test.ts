@@ -69,7 +69,7 @@ describe('coordinator retrieval admission before spawn', () => {
     expect(release).toHaveBeenCalledOnce();
   });
 
-  it('prepares search for an empty first corpus within the original deadline', async () => {
+  it('prepares search for an empty first corpus WITHOUT spending the run budget on it', async () => {
     const root = mkdtempSync(join(tmpdir(), 'atoma-retrieval-empty-')); roots.push(root);
     const f = projectRetrievalFixture(root);
     const now = Date.now();
@@ -101,7 +101,13 @@ describe('coordinator retrieval admission before spawn', () => {
     const run = await coordinator.start(input);
     await coordinator.waitForIdle();
     expect(result).toMatchObject({ ok: true, passages: [] });
-    expect(driver.mock.calls[0]?.[0].timeoutMs).toBe(59_750);
+    // 60_000 and not 59_750: the mocked clock above advances 250 ms inside the
+    // corpus preparation, and that time used to come out of the tenant's run
+    // budget — `deadlineAt` was stamped before the preparation and the child
+    // got the remainder. That is the arithmetic behind `run aborted after
+    // 1787s budget` on a 1800 s setting (2026-09-21 production runs). The
+    // preparation now has its own ceiling, `PROJECT_RUN_PREPARATION_TIMEOUT_MS`.
+    expect(driver.mock.calls[0]?.[0].timeoutMs).toBe(60_000);
     // Retrying an existing request is a read, even from a host without a runtime.
     const reader = new ProjectRunCoordinator({ store: f.projects, dbPath: f.dbPath, hostEnv: {} });
     expect((await reader.start(input)).projectRunId).toBe(run.projectRunId);
