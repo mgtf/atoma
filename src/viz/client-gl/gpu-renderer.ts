@@ -400,7 +400,6 @@ export {
 } from './renderer/metrics.js';
 export { TUNING_ROW_HEIGHT as TUNING_PANEL_ROW_HEIGHT } from './renderer/tuning-layout.js';
 import { type FilterBlockLayout } from './renderer/chip-layout.js';
-import { truncate } from './renderer/copy.js';
 import {
   POINTER_LIGHT_GLSL,
   POINTER_LIGHT_GLSL_VERTEX,
@@ -3747,7 +3746,10 @@ export class GpuRenderer {
 
     this.text(
       container,
-      truncate(label, Math.max(1, Math.floor((width - 44) / 6.2))),
+      // The last `width / 6.2` in this file, which is the estimate `fitText`
+      // exists to replace and which its own docs already call wrong in both
+      // directions on a proportional face.
+      this.fitText(label, Math.max(0, width - 44), { size: 10 }),
       34,
       Math.max(5, (height - 16) / 2),
       {
@@ -5051,10 +5053,16 @@ export class GpuRenderer {
         listLayer,
         `run.select.${run.id}`,
         'option',
-        `${status ? `${status} ` : ''}${truncate(
-          `${run.projectSlug ? `${run.projectSlug} · ` : ''}${run.label.replace(/^(?:build-app|baseline):\s*/i, '')}`,
-          82
-        )}`,
+        // NOT truncated here. `button` fits its own label to the width it is
+        // given, by measurement, and a character cap ahead of it can only take
+        // away what that measurement would have kept: 82 characters is about
+        // 525px of this face, and these rows are as wide as the panel — so a
+        // third of every row sat empty while its label ended in an ellipsis
+        // (owner report, 2026-09-22). The full label also makes a better
+        // accessible name than a pre-cut one.
+        `${status ? `${status} ` : ''}${run.projectSlug ? `${run.projectSlug} · ` : ''}${
+          run.label.replace(/^(?:build-app|baseline):\s*/i, '')
+        }`,
         x + 5,
         rowY + 2,
         popupWidth - 18,
