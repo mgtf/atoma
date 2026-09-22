@@ -348,6 +348,10 @@ function gatedStubs() {
         durationMs: 1_293_740,
         costUsd: 1.69,
         calls: 26,
+        // The GOAL beside the compact label: the picker prefers it, so the
+        // review fixture exercises that preference rather than the fallback.
+        goal:
+          'server.js already exists and serves GET /api/expenses and POST /api/expenses — do not rewrite it. Add the frontend with a form, a list and a running total.',
         projectId,
         projectName: 'Stopwatch E2E two',
         projectSlug: 'stopwatch-e2e-two',

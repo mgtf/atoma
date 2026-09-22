@@ -5,6 +5,8 @@ import type { AcceptanceInfo, TopologyInfo } from '../../contracts/depthRouting.
 export interface RunIndexEntry {
   id: string;
   label: string;
+  /** The run's goal in full, where the label is the compact form. */
+  goal?: string;
   startedAt: string;
   endedAt?: string;
   durationMs?: number;

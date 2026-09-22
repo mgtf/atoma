@@ -317,9 +317,23 @@ export type VizEvent = (
   | ({ id: string; ts: number; kind: 'acceptance' } & AcceptanceInfo)
 ) & { attempt?: number };
 
+/**
+ * How much of a run's goal the index carries.
+ *
+ * The stored LABEL is the compact form — the runner caps it at 80 characters
+ * for the CLI and the trace header — and the run picker is a row as wide as
+ * its panel, so that cap, not the row, decided where every title stopped
+ * (owner report, 2026-09-22). The goal rides along instead of the picker
+ * guessing: 200 characters fills the widest row this client draws and still
+ * bounds what an index of thousands of runs costs to read.
+ */
+export const RUN_INDEX_GOAL_MAX = 200;
+
 export interface VizRunIndexEntry {
   id: string;
   label: string;
+  /** The run's goal, for surfaces with room for more than the label. */
+  goal?: string;
   startedAt: string;
   endedAt?: string;
   durationMs?: number;
@@ -692,6 +706,8 @@ export class TraceRecorder {
       startedAt: this.run.startedAt,
       hasError: !!this.run.error,
     };
+    const goal = this.run.task?.description?.trim();
+    if (goal) entry.goal = runLabelFromGoal(goal, RUN_INDEX_GOAL_MAX);
     if (this.run.endedAt !== undefined) entry.endedAt = this.run.endedAt;
     if (this.run.durationMs !== undefined) entry.durationMs = this.run.durationMs;
     if (this.run.degraded) entry.degraded = true;

@@ -1,6 +1,6 @@
 import { lstatSync, readFileSync } from 'node:fs';
 import { MAX_TRACE_BYTES } from '../contracts/traceFields.js';
-import type { VizRun, VizRunIndexEntry } from './trace.js';
+import { RUN_INDEX_GOAL_MAX, runLabelFromGoal, type VizRun, type VizRunIndexEntry } from './trace.js';
 
 /**
  * The members this row is built from, PINNED AGAINST `VizRun` so renaming one
@@ -11,6 +11,7 @@ import type { VizRun, VizRunIndexEntry } from './trace.js';
 export const TRACE_HEADER_KEYS = [
   'id',
   'label',
+  'task',
   'startedAt',
   'endedAt',
   'durationMs',
@@ -24,6 +25,8 @@ export const TRACE_HEADER_KEYS = [
 type TraceFileHeader = {
   readonly [K in (typeof TRACE_HEADER_KEYS)[number]]?: K extends 'totals'
     ? { calls?: unknown; costUsd?: unknown }
+    : K extends 'task'
+    ? { description?: unknown }
     : unknown;
 };
 
@@ -110,6 +113,11 @@ export function summarizeTraceFile(file: string): VizRunIndexEntry | null {
       startedAt: run.startedAt,
       hasError: Boolean(run.error),
     };
+    // The goal the LABEL was cut from. Runs recorded before the index carried
+    // it still have it here, because it is read from the trace and not from
+    // the entry the recorder wrote at the time.
+    const goal = typeof run.task?.description === 'string' ? run.task.description.trim() : '';
+    if (goal) entry.goal = runLabelFromGoal(goal, RUN_INDEX_GOAL_MAX);
     if (typeof run.endedAt === 'string') entry.endedAt = run.endedAt;
     if (typeof run.durationMs === 'number') entry.durationMs = run.durationMs;
     if (run.degraded === true) entry.degraded = true;

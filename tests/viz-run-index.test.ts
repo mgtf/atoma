@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MAX_TRACE_BYTES } from '../src/contracts/traceFields.js';
+import { RUN_INDEX_GOAL_MAX } from '../src/viz/trace.js';
 import {
   readBoundedRunFile,
   sortRunIndex,
@@ -150,6 +151,55 @@ describe('viz run index is bounded', () => {
   });
 });
 
+describe('the row carries the goal its label was cut from', () => {
+  it('projects it from the trace, for runs recorded before the index had it', () => {
+    // The label is the COMPACT form — capped at 80 characters when the run was
+    // recorded — and the run picker's row is as wide as its panel. Reading the
+    // goal from the TRACE rather than from the entry is what lets a run
+    // recorded long ago fill that row today.
+    const goal = 'Improve the existing MDN scripted beginner site with one focused change: replace the greeting with an accessible banner that states the page purpose.';
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-run-index-goal-'));
+    try {
+      const file = join(dir, 'run-goal.json');
+      writeFileSync(file, JSON.stringify({
+        id: 'run-goal',
+        label: `build-app: ${goal.slice(0, 80)}…`,
+        task: { description: goal },
+        startedAt: '2026-09-22T10:00:00.000Z',
+        endedAt: '2026-09-22T10:01:00.000Z',
+        events: [],
+      }));
+      const entry = summarizeTraceFile(file);
+      expect(entry?.goal).toBe(goal);
+      // Longer than the label it rides beside, which is the entire point.
+      expect(entry!.goal!.length).toBeGreaterThan(entry!.label.length);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('bounds what it carries, and says nothing when there is no goal', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-run-index-goal-'));
+    try {
+      const long = join(dir, 'long.json');
+      writeFileSync(long, JSON.stringify({
+        id: 'long', label: 'x', startedAt: '2026-09-22T10:00:00.000Z',
+        task: { description: 'g'.repeat(RUN_INDEX_GOAL_MAX + 50) }, events: [],
+      }));
+      // An index of thousands of runs is read whole; the goal is bounded.
+      expect(summarizeTraceFile(long)?.goal).toHaveLength(RUN_INDEX_GOAL_MAX + 1);
+
+      const bare = join(dir, 'bare.json');
+      writeFileSync(bare, JSON.stringify({
+        id: 'bare', label: 'x', startedAt: '2026-09-22T10:00:00.000Z', events: [],
+      }));
+      expect(summarizeTraceFile(bare)?.goal).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 /**
  * The row's key names are PINNED against `VizRun` in the source with
  * `satisfies`, so a rename there fails to compile rather than silently reading
@@ -168,6 +218,7 @@ describe('the row reads a stated set of trace members', () => {
       'id',
       'label',
       'startedAt',
+      'task',
       'totals',
     ]);
   });

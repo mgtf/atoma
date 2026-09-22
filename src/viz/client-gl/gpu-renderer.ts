@@ -5060,8 +5060,12 @@ export class GpuRenderer {
         // third of every row sat empty while its label ended in an ellipsis
         // (owner report, 2026-09-22). The full label also makes a better
         // accessible name than a pre-cut one.
+        // The GOAL where the index carries it, because the label is the
+        // COMPACT form — capped at 80 characters when the run was recorded —
+        // and this row is as wide as the panel. The label remains the fallback
+        // for an index that predates the goal, or a run that never had one.
         `${status ? `${status} ` : ''}${run.projectSlug ? `${run.projectSlug} · ` : ''}${
-          run.label.replace(/^(?:build-app|baseline):\s*/i, '')
+          run.goal ?? run.label.replace(/^(?:build-app|baseline):\s*/i, '')
         }`,
         x + 5,
         rowY + 2,
