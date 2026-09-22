@@ -14,13 +14,24 @@ import type { AuthUiSnapshot } from '../../AuthControls.js';
  */
 
 const EDGE = 12;
-const PANEL_WIDTH = 272;
-const IDENTITY_HEIGHT = 54;
-const ORG_HEIGHT = 36;
-const ROW_HEIGHT = 30;
-const ACTION_HEIGHT = 32;
-const DIVIDER_HEIGHT = 9;
-const FAILURE_HEIGHT = 20;
+const PANEL_WIDTH = 288;
+/** Inset of every row from the panel's own edge — the surrounding air. */
+const PANEL_INSET = 16;
+/** Air above the first row and below the last one. */
+const PANEL_TOP_PAD = 6;
+const PANEL_BOTTOM_PAD = 10;
+const IDENTITY_HEIGHT = 56;
+const ORG_HEIGHT = 40;
+const ROW_HEIGHT = 34;
+/**
+ * An action slot is its button plus the air under it: the buttons are three
+ * distinct decisions, and reading them as a stacked block made the panel feel
+ * like a list of rows rather than a set of choices.
+ */
+const ACTION_GAP = 8;
+const ACTION_HEIGHT = 34 + ACTION_GAP;
+const DIVIDER_HEIGHT = 14;
+const FAILURE_HEIGHT = 22;
 
 export type AccountMenuItemKind =
   | 'identity'
@@ -70,7 +81,7 @@ export function accountMenuLayout(
 ): AccountMenuLayout {
   const width = Math.min(PANEL_WIDTH, Math.max(200, viewportWidth - EDGE * 2));
   const items: AccountMenuItem[] = [];
-  let cursor = 0;
+  let cursor = PANEL_TOP_PAD;
   const push = (item: Omit<AccountMenuItem, 'y'>): void => {
     items.push({ ...item, y: cursor });
     cursor += item.height;
@@ -93,7 +104,7 @@ export function accountMenuLayout(
   push({ kind: 'signOut', id: 'auth.signOut', height: ACTION_HEIGHT });
   if (auth.failure) push({ kind: 'failure', height: FAILURE_HEIGHT });
 
-  const height = cursor + 10;
+  const height = cursor + PANEL_BOTTOM_PAD;
   return {
     x: anchor
       ? Math.min(
@@ -153,8 +164,8 @@ export function drawAccountMenu(
     2
   );
 
-  const innerX = layout.x + 14;
-  const innerWidth = layout.width - 28;
+  const innerX = layout.x + PANEL_INSET;
+  const innerWidth = layout.width - PANEL_INSET * 2;
   for (const item of layout.items) {
     const y = layout.y + item.y;
     if (item.kind === 'identity') {
@@ -206,7 +217,7 @@ export function drawAccountMenu(
         innerX,
         y,
         innerWidth,
-        ROW_HEIGHT - 4,
+        ROW_HEIGHT - ACTION_GAP,
         false,
         snapshot.onActivate,
         GPU_COLORS.primary,
@@ -217,8 +228,8 @@ export function drawAccountMenu(
     }
     if (item.kind === 'divider') {
       const rule = new Graphics();
-      rule.moveTo(innerX, y + 4);
-      rule.lineTo(innerX + innerWidth, y + 4);
+      rule.moveTo(innerX, y + DIVIDER_HEIGHT / 2);
+      rule.lineTo(innerX + innerWidth, y + DIVIDER_HEIGHT / 2);
       rule.stroke({ color: GPU_COLORS.border, width: 1, alpha: 0.8 });
       rule.eventMode = 'none';
       ctx.root.addChild(rule);
@@ -233,7 +244,7 @@ export function drawAccountMenu(
         innerX,
         y,
         innerWidth,
-        ACTION_HEIGHT - 4,
+        ACTION_HEIGHT - ACTION_GAP,
         snapshot.state.view === 'settings',
         snapshot.onActivate,
         GPU_COLORS.primary
@@ -249,7 +260,7 @@ export function drawAccountMenu(
         innerX,
         y,
         innerWidth,
-        ACTION_HEIGHT - 4,
+        ACTION_HEIGHT - ACTION_GAP,
         false,
         snapshot.onActivate,
         item.kind === 'signOut' ? GPU_COLORS.warning : GPU_COLORS.primary,

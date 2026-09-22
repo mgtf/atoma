@@ -28,6 +28,8 @@
  *                        list + run form state).
  *   --notifications      Open the header bell's notification tray after
  *                        arrival (gated only: the tray exists with an account).
+ *   --account-menu       Open the account menu on the profile orb after
+ *                        arrival (gated only, like the orb itself).
  *   --scroll-end         Scroll the Settings body form to its end before
  *                        capture (org directory below the keys).
  *   --camera <mode>      Camera pose after navigation: focus (default) or
@@ -67,6 +69,7 @@ const tuning = has('--tuning');
 const selectFirst = has('--select-first');
 const repositoryMode = arg('--repository-mode', '');
 const notifications = has('--notifications');
+const accountMenu = has('--account-menu');
 const scrollEnd = has('--scroll-end');
 const handheld = has('--handheld');
 const cameraMode = arg('--camera', 'focus');
@@ -751,6 +754,22 @@ try {
       await page.evaluate(() => new Promise((resolveWait) => setTimeout(resolveWait, 800)));
     }
 
+    if (accountMenu) {
+      if (!authed) throw new Error('--account-menu needs --auth: the orb exists with an account');
+      const orb = await page.evaluate(() => {
+        const handle = globalThis.__ATOMA_GPU__;
+        const target = handle?.hitTargets().find((entry) => entry.id === 'account.menu.toggle');
+        if (!target || !handle.projectRendererPoint) return null;
+        return handle.projectRendererPoint(
+          target.x + target.width / 2,
+          target.y + target.height / 2
+        );
+      });
+      if (!orb) throw new Error('--account-menu: no profile orb on screen');
+      await page.mouse.click(orb.x, orb.y);
+      await page.evaluate(() => new Promise((resolveWait) => setTimeout(resolveWait, 500)));
+    }
+
     if (notifications) {
       if (!authed) throw new Error('--notifications needs --auth: the bell exists with an account');
       const bell = await page.evaluate(() => {
@@ -782,7 +801,7 @@ try {
     }
     await page.screenshot({ path: outPath });
     const capturedViewport = page.viewport();
-    console.log(`viz screenshot: ${outPath} (${view}, ${authed ? 'gated' : 'ungated'}, camera ${cameraMode}${selectFirst ? ', first row selected' : ''}${notifications ? ', notification tray open' : ''}, ${capturedViewport.width}x${capturedViewport.height})`);
+    console.log(`viz screenshot: ${outPath} (${view}, ${authed ? 'gated' : 'ungated'}, camera ${cameraMode}${selectFirst ? ', first row selected' : ''}${notifications ? ', notification tray open' : ''}${accountMenu ? ', account menu open' : ''}, ${capturedViewport.width}x${capturedViewport.height})`);
   } finally {
     await browser.close();
   }

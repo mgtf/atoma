@@ -36,9 +36,16 @@ const GROUP_LABEL_SIZE = 9;
 const GROUP_RULE_GAP = 8;
 /** The compact rail gives each destination one centred icon tile. */
 export const FOCUS_SIDEBAR_BUTTON_WIDTH = GPU_LAYOUT.sidebarFocusButtonWidth;
-const FOCUS_RAIL_BOTTOM_PAD = 6;
-const FOCUS_RAIL_DOCK_GAP = 6;
-const FOCUS_RAIL_FPS_GAP = 4;
+const FOCUS_RAIL_BOTTOM_PAD = 8;
+/** Space the dock keeps clear of the navigation rows above it. */
+const FOCUS_RAIL_DOCK_GAP = 14;
+const FOCUS_RAIL_FPS_GAP = 6;
+/**
+ * Air between the dock's own controls. The locale pill, the bell and the orb
+ * are three separate destinations, not one segmented control, so each gets
+ * room around it rather than sharing a hairline.
+ */
+const FOCUS_RAIL_UTILITY_GAP = 14;
 const FOCUS_RAIL_FPS_HEIGHT = 8;
 const FOCUS_RAIL_LOCALE_HEIGHT = 26;
 const FOCUS_RAIL_BELL_HEIGHT = 26;
@@ -163,7 +170,7 @@ export function focusRailChromeLayout(
   const bell = authenticated
     ? {
         x: buttonX,
-        y: locale.y - FOCUS_RAIL_FPS_GAP - FOCUS_RAIL_BELL_HEIGHT,
+        y: locale.y - FOCUS_RAIL_UTILITY_GAP - FOCUS_RAIL_BELL_HEIGHT,
         width: Math.min(sidebarWidth, FOCUS_SIDEBAR_BUTTON_WIDTH),
         height: FOCUS_RAIL_BELL_HEIGHT,
       }
@@ -171,7 +178,7 @@ export function focusRailChromeLayout(
   const profile = authenticated
     ? {
         x: buttonX + (FOCUS_SIDEBAR_BUTTON_WIDTH - FOCUS_RAIL_PROFILE_SIZE) / 2,
-        y: (bell?.y ?? locale.y) - FOCUS_RAIL_DOCK_GAP - FOCUS_RAIL_PROFILE_SIZE,
+        y: (bell?.y ?? locale.y) - FOCUS_RAIL_UTILITY_GAP - FOCUS_RAIL_PROFILE_SIZE,
         width: FOCUS_RAIL_PROFILE_SIZE,
         height: FOCUS_RAIL_PROFILE_SIZE,
       }
