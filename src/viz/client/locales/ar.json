@@ -1147,5 +1147,6 @@
   "settings.subscriptionDelegateWithdraw": "سحب تفويض اشتراك المضيف",
   "settings.subscriptionDelegated": "تم تفويض اشتراك المضيف.",
   "settings.subscriptionDelegationWithdrawn": "تم سحب تفويض اشتراك المضيف.",
-  "runs.project.operator": "عمليات run الخاصة بالمشغّل"
+  "runs.project.operator": "عمليات run الخاصة بالمشغّل",
+  "runs.picker.tokens": "الرموز"
 }
