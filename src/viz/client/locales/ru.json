@@ -1147,5 +1147,6 @@
   "settings.subscriptionDelegateWithdraw": "Отозвать делегирование подписки хоста",
   "settings.subscriptionDelegated": "Подписка хоста делегирована.",
   "settings.subscriptionDelegationWithdrawn": "Делегирование подписки хоста отозвано.",
-  "runs.project.operator": "run оператора"
+  "runs.project.operator": "run оператора",
+  "runs.picker.tokens": "токены"
 }

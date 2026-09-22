@@ -1147,5 +1147,6 @@
   "settings.subscriptionDelegateWithdraw": "ホストのサブスクリプションの委任を取り消す",
   "settings.subscriptionDelegated": "ホストのサブスクリプションを委任しました。",
   "settings.subscriptionDelegationWithdrawn": "ホストのサブスクリプションの委任を取り消しました。",
-  "runs.project.operator": "オペレーターのrun"
+  "runs.project.operator": "オペレーターのrun",
+  "runs.picker.tokens": "トークン"
 }

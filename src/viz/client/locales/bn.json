@@ -1147,5 +1147,6 @@
   "settings.subscriptionDelegateWithdraw": "হোস্ট সাবস্ক্রিপশন প্রত্যাহার করুন",
   "settings.subscriptionDelegated": "হোস্ট সাবস্ক্রিপশন অর্পণ করা হয়েছে।",
   "settings.subscriptionDelegationWithdrawn": "হোস্ট সাবস্ক্রিপশনের অর্পণ প্রত্যাহার করা হয়েছে।",
-  "runs.project.operator": "অপারেটরের run"
+  "runs.project.operator": "অপারেটরের run",
+  "runs.picker.tokens": "টোকেন"
 }

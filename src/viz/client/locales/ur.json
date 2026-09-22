@@ -1147,5 +1147,6 @@
   "settings.subscriptionDelegateWithdraw": "میزبان کی سبسکرپشن واپس لیں",
   "settings.subscriptionDelegated": "میزبان کی سبسکرپشن تفویض کر دی گئی۔",
   "settings.subscriptionDelegationWithdrawn": "میزبان کی سبسکرپشن کی تفویض واپس لے لی گئی۔",
-  "runs.project.operator": "آپریٹر کے runs"
+  "runs.project.operator": "آپریٹر کے runs",
+  "runs.picker.tokens": "ٹوکنز"
 }

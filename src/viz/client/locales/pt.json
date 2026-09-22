@@ -1147,5 +1147,6 @@
   "settings.subscriptionDelegateWithdraw": "Retirar delegação da subscrição do anfitrião",
   "settings.subscriptionDelegated": "Subscrição do anfitrião delegada.",
   "settings.subscriptionDelegationWithdrawn": "Delegação da subscrição do anfitrião retirada.",
-  "runs.project.operator": "Runs do operador"
+  "runs.project.operator": "Runs do operador",
+  "runs.picker.tokens": "tokens"
 }
