@@ -2,9 +2,9 @@ import { createHash, randomBytes } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import assert from 'node:assert/strict';
-import { CookieJar, request as browserRequest, providerLoginUrl } from './auth-smoke-fixture.mjs';
+import { CookieJar, request as browserRequest } from './auth-smoke-fixture.mjs';
 
-/** Follow the compiled login selector and callback after an explicit account switch. */
+/** Follow the compiled login and callback after an explicit account switch. */
 export async function smokeMcpAccountSwitch(base, cookie) {
   const redirectUri = 'http://127.0.0.1:54545/callback';
   const verifier = randomBytes(32).toString('base64url');
@@ -26,11 +26,17 @@ export async function smokeMcpAccountSwitch(base, cookie) {
   assert.equal(switched.status, 302);
   const jar = new CookieJar();
   jar.absorb(switched, `${base}/oauth/authorize`);
-  const selectorUrl = new URL(switched.headers.get('location'), base);
-  const selector = await browserRequest(jar, selectorUrl.href);
-  const login = providerLoginUrl(await selector.text(), base, null);
-  assert.equal(login.searchParams.get('select_account'), '1');
-  const started = await browserRequest(jar, login.href);
+  // The switch lands on /auth/login?select_account=1. With a SINGLE provider
+  // configured — the case this smoke runs — that page no longer renders the
+  // selector: it sends the browser straight through to the provider, still
+  // asking it to offer its accounts (427035c). The plain arrival keeps the
+  // page as the no-JS fallback, and the invitation path of the release smoke
+  // still reads a provider href out of it; this path must not.
+  const loginUrl = new URL(switched.headers.get('location'), base);
+  assert.equal(loginUrl.pathname, '/auth/login');
+  assert.equal(loginUrl.searchParams.get('select_account'), '1');
+  const started = await browserRequest(jar, loginUrl.href);
+  assert.equal(started.status, 302, 'an account switch with a sole provider enters it directly');
   const upstream = new URL(started.headers.get('location'));
   assert.equal(upstream.searchParams.get('prompt'), 'select_account');
   const authorized = await browserRequest(jar, upstream.href);
