@@ -1934,6 +1934,31 @@ describe('viz auth gate (process level)', () => {
     expect(replay.headers.get('location')).toBe('/?authNotice=expiredState');
   });
 
+  it('sends an account switch straight to the sole provider and keeps the plain selector', async () => {
+    const instance = tempInstance();
+    const provider = await startFakeProvider({ port: await freePort(), subject: 61 });
+    const port = await freePort();
+    const base = `http://127.0.0.1:${port}`;
+    const running = startViz(
+      [...instance.args, '--port', String(port)],
+      providerEnv(provider, base)
+    );
+    await waitReady(running, `${base}/auth/whoami`);
+
+    // The switch has nothing to ask with one provider configured: no page,
+    // and the provider is told to offer its accounts.
+    const switched = await fetch(`${base}/auth/login?select_account=1`, { redirect: 'manual' });
+    expect(switched.status).toBe(302);
+    const target = new URL(switched.headers.get('location')!);
+    expect(target.origin).toBe(new URL(provider.baseUrl).origin);
+    expect(target.searchParams.get('prompt')).toBe('select_account');
+
+    // A plain arrival still gets the no-JS selector.
+    const plain = await fetch(`${base}/auth/login`, { redirect: 'manual' });
+    expect(plain.status).toBe(200);
+    expect(await plain.text()).toContain(`<title>${AUTH_COPY.pageTitle}</title>`);
+  });
+
   it('derives Secure and redirect_uri only from the configured HTTPS public origin', async () => {
     const instance = tempInstance();
     const provider = await startFakeProvider({ port: await freePort(), subject: 8 });

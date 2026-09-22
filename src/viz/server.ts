@@ -2236,7 +2236,16 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
 
     if (pathname === '/auth/login') {
       if (!methodAllowed(req, res, 'GET')) return;
-      const providerId = url.searchParams.get('provider') ?? '';
+      const selectAccount = url.searchParams.get('select_account') === '1';
+      // An account switch already knows what it wants: it has just dropped a
+      // session and asks the provider to offer its accounts. With a single
+      // provider configured the selector below would be one button and one
+      // pointless click, so the switch goes straight through. The plain
+      // arrival keeps the page: the GL shell is the login for a browser with
+      // JavaScript, and this is the no-JS fallback that must stay readable.
+      const soleProvider =
+        selectAccount && AUTH_RUNTIME.providers.length === 1 ? AUTH_RUNTIME.providers[0]!.id : '';
+      const providerId = url.searchParams.get('provider') ?? soleProvider;
       const rawInvitation = url.searchParams.get('invite');
       const invitationToken = invitationTokenFrom(rawInvitation);
       if (rawInvitation && !invitationToken) {
@@ -2244,7 +2253,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         return;
       }
       if (!providerId) {
-        sendAuthHtml(res, 200, loginPage(undefined, invitationToken ?? undefined, url.searchParams.get('select_account') === '1'));
+        sendAuthHtml(res, 200, loginPage(undefined, invitationToken ?? undefined, selectAccount));
         return;
       }
       const provider = authProvider(providerId);
@@ -2302,7 +2311,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         redirectUri: AUTH_RUNTIME.redirectUri,
         state,
         codeChallenge: pkce.challenge,
-        selectAccount: url.searchParams.get('select_account') === '1',
+        selectAccount,
       });
       writeAuthRedirect(
         res,
