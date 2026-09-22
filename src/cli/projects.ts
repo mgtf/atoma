@@ -512,7 +512,11 @@ async function main(): Promise<void> {
     describeDeliveredPreview: (subject) => {
       recordDeliveredPreview(previewStore, subject);
     },
+    // BOTH authorities, or the guard above is a lie: it lets a delegate
+    // through and the coordinator then refuses them, because an absent
+    // resolver means no (fail-closed, by design).
     platformAdmins: (id) => auth.isPlatformAdmin(id),
+    subscriptionDelegates: (id, orgId) => auth.isSubscriptionDelegate(id, orgId),
     tierModelsFor: (id) => auth.modelPins(id),
     // The org levels of the precedence chain, resolved against the SAME
     // store the browser path uses. The operator CLI passes `--as`, so the

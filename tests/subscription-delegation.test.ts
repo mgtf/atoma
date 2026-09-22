@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
@@ -215,6 +215,29 @@ describe('host-subscription delegation — the shared body', () => {
     } finally {
       db.close();
     }
+  });
+});
+
+describe('host-subscription delegation — every run launcher asks BOTH authorities', () => {
+  /**
+   * Source presence, deliberately, and the ONE case AGENTS.md admits it for.
+   * Two processes construct a `ProjectRunCoordinator` — the viz server and
+   * the projects CLI — and each passes the authorities as QUESTIONS. An
+   * absent resolver means "no", so a launcher that wires only
+   * `platformAdmins` refuses every delegate AFTER its own early guard let
+   * them through. Observing that behaviourally through the CLI means
+   * reaching `coordinator.start`, which spawns a real runner and spends
+   * quota; the coordinator's own two answers are already proven in
+   * `project-coordinator.test.ts`. What is left, and what this asserts, is
+   * that neither construction site forgets the second question.
+   */
+  it.each([
+    ['src/viz/server.ts', 'the browser and MCP path'],
+    ['src/cli/projects.ts', 'npm run projects -- run --as'],
+  ])('%s wires both authorities (%s)', (file) => {
+    const source = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+    expect(source).toMatch(/platformAdmins:/);
+    expect(source).toMatch(/subscriptionDelegates:/);
   });
 });
 
