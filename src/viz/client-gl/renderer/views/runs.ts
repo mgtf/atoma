@@ -129,6 +129,35 @@ const EVENT_DETAIL_TOP = 7;
  * line rather than as several that failed to align.
  */
 /**
+ * The row's facts line, joined and GUARANTEED to fit its column.
+ *
+ * The two halves are budgeted so that the prose yields and the facts survive,
+ * but that budget can be impossible: a narrow column — a row that also carries
+ * a verdict is the case — leaves less room than the facts alone need. The
+ * prose then vanishes and the facts were drawn anyway, over their allotment,
+ * and `GpuRenderer.text` did the only thing left to it and SQUEEZED the label
+ * on its x axis. The row did not overflow; it just became unreadable, narrower
+ * than every other row on screen, which is exactly how it was reported (owner,
+ * 2026-09-22).
+ *
+ * Squeezing is a last resort for labels bounded by a character count, not a
+ * layout tool. A facts line is measured, so it truncates: an ellipsis says
+ * something was dropped, where a squeeze silently lies about the type size.
+ */
+function factsLine(
+  ctx: RendererCtx,
+  prose: string,
+  facts: string,
+  width: number
+): string {
+  return ctx.fitText(
+    [prose, facts].filter(Boolean).join(' · '),
+    width,
+    { size: RUNS_FACTS_SIZE }
+  );
+}
+
+/**
  * Where the decision column STARTS, so that its right edge lands on the same
  * margin the title keeps on the left.
  *
@@ -866,12 +895,12 @@ export function drawRuns(
       cardBaseX + cardBaseWidth - EVENT_TITLE_X - detailX
     );
     const factsAdvance = ctx.measureText(facts ? ` · ${facts}` : '', { size: RUNS_FACTS_SIZE });
-    const detail = [
+    const detail = factsLine(
+      ctx,
       ctx.fitText(prose, Math.max(0, detailWidth - factsAdvance), { size: RUNS_FACTS_SIZE }),
       facts,
-    ]
-      .filter(Boolean)
-      .join(' · ');
+      detailWidth
+    );
     if (detail) {
       ctx.text(listLayer, detail, detailX, y + EVENT_DETAIL_TOP, {
         size: RUNS_FACTS_SIZE,
@@ -1014,9 +1043,12 @@ export function drawRuns(
     }
     const detailWidth = Math.max(0, detailRight - detailX);
     const bodyBudget = Math.max(0, detailWidth - footerAdvance);
-    const detail = [ctx.fitText(body, bodyBudget, { size: RUNS_FACTS_SIZE }), footer]
-      .filter(Boolean)
-      .join(' · ');
+    const detail = factsLine(
+      ctx,
+      ctx.fitText(body, bodyBudget, { size: RUNS_FACTS_SIZE }),
+      footer,
+      detailWidth
+    );
     ctx.text(cardContent, detail, detailX, EVENT_DETAIL_TOP, {
       size: RUNS_FACTS_SIZE,
       color: event.error ? GPU_COLORS.error : GPU_COLORS.muted,

@@ -5083,10 +5083,55 @@ describe('drawRuns behavior', () => {
     expect(actor!.x).toBeGreaterThanOrEqual(titleEnd);
   });
 
-  it('truncates a long body rather than the facts after it', () => {
+  it('truncates the facts line rather than letting it be squeezed', () => {
+    // A row that also carries a VERDICT gives its facts line a narrower
+    // column, and this event's facts alone are wider than what is left. The
+    // prose budget then goes to zero, the facts used to be drawn over their
+    // allotment anyway, and `GpuRenderer.text` squeezed the label on its x
+    // axis — the row stayed inside its column and became unreadable, visibly
+    // narrower than every other row on screen.
+    const events: VizEvent[] = [
+      makeLlmEvent('verdict', {
+        role: 'validate-plan',
+        response: '{"approved":true}',
+        model: 'claude-haiku-4-5-20251001',
+        servedModel: 'anthropic:haiku',
+        costUsd: 0.0047,
+        usage: { inputTokens: 3, outputTokens: 121, cacheReadInputTokens: 8_400 },
+      }),
+    ];
+    const ctx = createRecordingCtx();
+    drawRuns(ctx, makeSnapshot({}, { run: makeRun(events) }), WIDTH, HEIGHT);
+
+    const detail = ctx.texts.find((text) =>
+      ctx.eventCards.some((card) => card.content === text.parent) &&
+      typeof (text.options as { width?: number } | undefined)?.width === 'number');
+    expect(detail, 'the card must draw a detail line').toBeDefined();
+    const width = (detail!.options as { width: number }).width;
+    // The stub measures a label at size * 0.58 per character, which is what
+    // `fitText` is measuring against too.
+    expect(detail!.value.length * RUNS_FACTS_SIZE * 0.58).toBeLessThanOrEqual(width + 0.001);
+    // And an ellipsis SAYS something was dropped, where a squeeze silently
+    // lies about the type size.
+    expect(detail!.value.endsWith('…')).toBe(true);
+    // The verdict it makes room for is still there, and still flush right.
+    const verdict = ctx.texts.find((text) => text.value.includes('approved'));
+    expect(verdict, 'the row must draw its verdict').toBeDefined();
+  });
+
+  it('drops the body before the facts, and truncates rather than squeezes', () => {
     // The card's second line is body + footer. Truncating the pair as one
     // string dropped the served model, tokens, cache read and cost first —
-    // exactly when an event had enough reasoning to be worth reading.
+    // exactly when an event had enough reasoning to be worth reading. That
+    // priority is what is asserted here.
+    //
+    // What is NOT asserted any more is that the whole footer survives. At a
+    // legible type size a narrow column cannot hold every fact — this one is
+    // 391px wide and the facts alone want 453 — and the honest answer is an
+    // ellipsis, which says something was dropped. The alternative was what
+    // shipped: `GpuRenderer.text` squeezing the label on its x axis, which
+    // keeps every character and silently lies about the type size. The whole
+    // step is read in the detail pane, which is what it is for.
     const events: VizEvent[] = [
       makeLlmEvent('verbose', {
         role: 'execute',
@@ -5104,9 +5149,13 @@ describe('drawRuns behavior', () => {
       ctx.eventCards.some((card) => card.content === text.parent) &&
       typeof (text.options as { width?: number } | undefined)?.width === 'number');
     expect(detail, 'the card must draw a detail line').toBeDefined();
+    // The body yielded first: not one character of the reasoning is here.
+    expect(detail!.value).not.toContain('xx');
+    // And the facts lead, in their own order, for as far as the column goes.
+    expect(detail!.value.startsWith('claude-haiku-4-5 ⇢ haiku')).toBe(true);
     expect(detail!.value).toContain('cache 177k');
-    expect(detail!.value).toContain('$');
-    expect(detail!.value).toContain('⇢ haiku');
+    const width = (detail!.options as { width: number }).width;
+    expect(detail!.value.length * RUNS_FACTS_SIZE * 0.58).toBeLessThanOrEqual(width + 0.001);
   });
 
   it('keeps multiline tool previews within one card line without changing the trace', () => {
