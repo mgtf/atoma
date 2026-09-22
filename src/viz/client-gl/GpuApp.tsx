@@ -34,6 +34,7 @@ import { useEntryFade } from './entry-fade.js';
 import { handheldMediaQuery, isHandheldDevice } from './handheld.js';
 import { GpuSurface } from './GpuSurface.js';
 import { SceneCameraPlane } from './SceneCameraPlane.js';
+import { CubeTurnPlane } from './CubeTurnPlane.js';
 import { SceneTuningPanel } from './SceneTuningPanel.js';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, pendingApiMutations } from '../client/data-api.js';
@@ -68,6 +69,7 @@ import {
   projectSelectionAfterProjects,
   useGpuStore,
   visibleViews,
+  navRowGroup,
   type DocsThemeKey,
 } from './store.js';
 import type { VizAdminInvitation } from '../client/types.js';
@@ -151,14 +153,19 @@ function GpuAppContent({
     []
   );
   /**
-   * What the camera is asked to move for: the destination, and the rail row it
-   * occupies. `SceneCameraPlane` keeps the previous one, so the amplitude of
-   * its navigation shot follows the distance actually travelled down the rail.
-   * A destination with no row of its own (Settings, from the account menu)
-   * reports -1 and gets the short beat.
+   * What the scene is asked to move for: the destination, the rail row it
+   * occupies and the group that row belongs to. The camera and the cube read
+   * the route from it through one shared tracker, so the travelling shot and
+   * the turn are one beat: distance sets the amplitude, the group boundary
+   * sets the axis the box turns about. A destination with no row of its own
+   * (Settings, from the account menu) reports -1 and gets the short beat.
    */
   const sceneNavigation = useMemo(
-    () => ({ key: state.view, rank: visibleViews(authSnapshot).indexOf(state.view) }),
+    () => ({
+      key: state.view,
+      rank: visibleViews(authSnapshot).indexOf(state.view),
+      group: navRowGroup(state.view),
+    }),
     [authSnapshot, state.view]
   );
   const metrics = useRef<GpuRenderMetrics>(emptyRenderMetrics());
@@ -1049,6 +1056,7 @@ function GpuAppContent({
           reader is not read two surfaces at once. `aria-hidden` alone would
           have done only the last of the three. */}
       <div className="gpu-scene-host" inert={previewOpen}>
+      <CubeTurnPlane mode={state.sceneCameraMode} navigation={sceneNavigation}>
       <SceneCameraPlane
         mode={state.sceneCameraMode}
         navigation={sceneNavigation}
@@ -1131,6 +1139,7 @@ function GpuAppContent({
         />
         <SceneTuningPanel />
       </SceneCameraPlane>
+      </CubeTurnPlane>
       </div>
       <PreviewPlane
         open={previewOpen}

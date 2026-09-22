@@ -514,10 +514,13 @@ describe('the navigation shot', () => {
       expect(punch, `${width}x${height} punch`).toBeLessThan(settled);
       // And the retreat is a move a reader can see, measured as the share of
       // the rail the full dezoom would have given back — the one reading that
-      // means the same thing on a phone and on a 27-inch display.
+      // means the same thing on a phone and on a 27-inch display. The band is
+      // HALF what it was before the cube turn: the box now carries the gross
+      // movement of a route and recoils while it turns, so a full-amplitude
+      // shot inside the face compounded with it into a lurch.
       const reveal = (widest - settled) / (railWidth - settled);
-      expect(reveal, `${width}x${height} reveal`).toBeGreaterThan(0.2);
-      expect(reveal, `${width}x${height} reveal`).toBeLessThan(0.45);
+      expect(reveal, `${width}x${height} reveal`).toBeGreaterThan(0.08);
+      expect(reveal, `${width}x${height} reveal`).toBeLessThan(0.25);
     }
   });
 });

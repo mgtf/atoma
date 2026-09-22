@@ -10,6 +10,7 @@ import {
   Matrix,
   Rectangle,
   RendererType,
+  RenderTexture,
   Sprite,
   Text,
   TextStyle,
@@ -115,8 +116,9 @@ import {
   hidePointerLight,
 } from './pointer-light.js';
 import { TooltipLayer } from './renderer/tooltip.js';
+import { publishSceneCapture } from './scene-capture.js';
 import { viewFrameGutterRects } from './renderer/view-frame.js';
-import type { GpuUiState, ViewName } from './store.js';
+import { navRowDistance, type GpuUiState, type ViewName } from './store.js';
 import { GPU_COLORS, GPU_LAYOUT, gpuTextRasterOptions, sidebarWidthForViewport } from './theme.js';
 import { VIZ_VISUAL_DEPTH } from './visual-depth.js';
 import type { AuthUiSnapshot } from './AuthControls.js';
@@ -442,7 +444,6 @@ import {
   drawSidebar,
   FOCUS_RAIL_FPS_SCALE,
   focusRailChromeLayout,
-  navRowDistance,
   overviewRailChromeLayout,
   utilityDockOpacity,
   type FocusRailChromeLayout,
@@ -1274,6 +1275,7 @@ export class GpuRenderer {
     this.app.canvas.className = 'gpu-ui-canvas';
     this.app.canvas.setAttribute('aria-hidden', 'true');
     host.appendChild(this.app.canvas);
+    publishSceneCapture(() => this.captureSceneBitmap());
     this.cameraFrameUnsubscribe = subscribeSceneCameraFrames(
       this.app.canvas,
       this.updateCameraFrameGeometry
@@ -1393,6 +1395,7 @@ export class GpuRenderer {
     window.removeEventListener('blur', this.syncRenderActivity);
     document.removeEventListener('visibilitychange', this.syncRenderActivity);
     this.runsScroll = null;
+    publishSceneCapture(null);
     this.cameraFrameUnsubscribe?.();
     this.cameraFrameUnsubscribe = null;
     this.cameraFramePanels = [];
@@ -4443,6 +4446,40 @@ export class GpuRenderer {
    */
   get pixiRenderer() {
     return this.app.renderer;
+  }
+
+  /**
+   * A still of exactly what is on screen, for the face a cube turn leaves.
+   *
+   * It re-renders the LIVE scene through the camera transform being painted,
+   * rather than extracting the canvas: the canvas is transparent where nothing
+   * is drawn, and a WebGPU drawing buffer is not readable after it is
+   * presented. Resolution 1 halves the readback on a retina display, and the
+   * face it feeds is rotating away while it is looked at.
+   */
+  captureSceneBitmap(): HTMLCanvasElement | null {
+    const width = this.app.screen.width;
+    const height = this.app.screen.height;
+    if (this.suspended || width <= 0 || height <= 0) return null;
+    let target: RenderTexture | null = null;
+    try {
+      target = RenderTexture.create({ width, height, resolution: 1 });
+      this.app.renderer.render({
+        container: this.app.stage,
+        target,
+        transform: this.cameraRenderTransform,
+        clear: true,
+      });
+      const still = this.app.renderer.extract.canvas({ target });
+      // `ICanvas` is the platform-agnostic surface; only a real one can be
+      // mounted on a face, and a worker canvas here would be a silent blank.
+      return still instanceof HTMLCanvasElement ? still : null;
+    } catch (error) {
+      console.warn('[viz:gpu] scene capture failed', error);
+      return null;
+    } finally {
+      target?.destroy(true);
+    }
   }
 
   private drawAtomaMark(x: number, y: number, visualScale?: number) {

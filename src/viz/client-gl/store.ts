@@ -83,6 +83,43 @@ export function visibleViews(auth: { viewer: { platformAdmin: boolean } } | null
  * Settings exists only where an account does: the ungated developer path has
  * no principal to configure.
  */
+/**
+ * How the rail STACKS the views it shows, and therefore which boundary in it
+ * means something.
+ *
+ * It lives beside `visibleViews` rather than in the rail's own module because
+ * the order and the grouping are the same fact, and because everything that
+ * moves for a route has to read them: the rail draws from here, and so do the
+ * camera shot and the cube turn. Importing them from the rail module pulled
+ * the whole renderer into the entry chunk, which the build refuses.
+ */
+export const SIDEBAR_GROUPS: readonly { key: string; views: readonly ViewName[] }[] = [
+  { key: 'workspace', views: ['projects', 'runs', 'registry', 'skills', 'docs'] },
+  { key: 'operate', views: ['burnin'] },
+  { key: 'admin', views: ADMIN_VIEWS },
+];
+
+/**
+ * How many rail rows separate two destinations, for the motion a route
+ * deserves. A destination with no row (Settings, reached from the account
+ * menu) is one row away, the shortest move there is.
+ */
+export function navRowDistance(
+  auth: { viewer: { platformAdmin: boolean } } | null,
+  from: ViewName,
+  to: ViewName
+): number {
+  const rows = visibleViews(auth);
+  const start = rows.indexOf(from);
+  const end = rows.indexOf(to);
+  return start < 0 || end < 0 ? 1 : Math.abs(end - start);
+}
+
+/** The rail group a destination belongs to; ungrouped falls in with workspace. */
+export function navRowGroup(view: ViewName): string {
+  return SIDEBAR_GROUPS.find((group) => group.views.includes(view))?.key ?? 'workspace';
+}
+
 export function isRoutableView(
   view: ViewName,
   auth: { viewer: { platformAdmin: boolean } } | null

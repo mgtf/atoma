@@ -611,14 +611,21 @@ export interface SceneCameraNavigationShot {
 
 /** Fraction of the shot spent leaving; the rest is the approach and landing. */
 const NAV_RETREAT_FRACTION = 0.32;
-const NAV_PULL_BACK_BASE = 0.14;
-const NAV_PULL_BACK_PER_ROW = 0.04;
+/**
+ * HALF the amplitude this shot was born with. The cube turn now carries the
+ * gross movement of a route and draws the whole box back while it turns; the
+ * shot kept its full pull-back on top of that, the two recoils compounded, and
+ * the scene visibly lurched. What remains is the shot's job inside the face:
+ * a breath that makes the arriving content settle rather than appear.
+ */
+const NAV_PULL_BACK_BASE = 0.07;
+const NAV_PULL_BACK_PER_ROW = 0.02;
 /**
  * The ceiling is composition, not safety: the focused crop holds the rail's
  * icon column at the viewport edge, and pulling further back slides the rail's
- * empty lead into shot. 0.3 keeps that reveal to a few tens of pixels.
+ * empty lead into shot.
  */
-const NAV_PULL_BACK_MAX = 0.3;
+const NAV_PULL_BACK_MAX = 0.15;
 const NAV_OVERSHOOT_BASE = 0.05;
 const NAV_OVERSHOOT_PER_ROW = 0.012;
 const NAV_OVERSHOOT_MAX = 0.09;

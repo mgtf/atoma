@@ -60,7 +60,6 @@ import {
   focusRailChromeLayout,
   overviewRailChromeLayout,
   sidebarLayout,
-  SIDEBAR_GROUPS,
   utilityDockOpacity,
 } from '../src/viz/client-gl/renderer/views/sidebar.js';
 import { clampSceneTuningPosition } from '../src/viz/client-gl/tuning.js';
@@ -129,6 +128,7 @@ import {
   isRoutableView,
   visibleViews,
   type GpuUiState,
+  SIDEBAR_GROUPS,
 } from '../src/viz/client-gl/store.js';
 import {
   docsViewLayout,

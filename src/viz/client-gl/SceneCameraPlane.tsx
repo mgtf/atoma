@@ -4,6 +4,7 @@ import {
   type ReactNode,
 } from 'react';
 import { prefersReducedMotion } from './renderer/motion.js';
+import { useNavigationTracker, type NavigationIntent } from './navigation-intent.js';
 import {
   applySceneCamera,
   interpolateSceneCamera,
@@ -32,20 +33,6 @@ function sameCamera(left: SceneCamera, right: SceneCamera): boolean {
 }
 
 /**
- * The destination the rail last routed to, and its row in the rail.
- *
- * The KEY is what makes a shot a shot: re-rendering for data, a selection or a
- * resize must never re-fire one. The RANK is the row the destination occupies
- * in the visible nav order, or -1 for a surface with no row of its own; the
- * plane keeps the previous rank itself, so how far a click travelled is
- * derived where the previous pose already lives instead of during a render.
- */
-export interface SceneCameraNavigation {
-  readonly key: string;
-  readonly rank: number;
-}
-
-/**
  * Imperative camera driver: React publishes only the navigation intent, while
  * rAF owns the intermediate poses. Every frame is written once to the DOM and
  * to the shared camera registry, so rendering and inverse hit-testing cannot
@@ -64,23 +51,18 @@ export function SceneCameraPlane({
   children,
 }: {
   mode: SceneCameraMode;
-  navigation?: SceneCameraNavigation;
+  navigation?: NavigationIntent;
   onSettled?: () => void;
   children: ReactNode;
 }) {
   const planeRef = useRef<HTMLDivElement>(null);
-  /**
-   * What the last run of this effect was asked for. The comparison cannot be
-   * made against the painted pose: a navigation shot begins and ends on the
-   * same pose, so only the intent records that one was requested.
-   */
-  const requested = useRef<{
-    mode: SceneCameraMode;
-    navigationKey: string | null;
-    navigationRank: number;
-  } | null>(null);
+  // The route is read from the shared tracker, never from the painted pose: a
+  // navigation shot begins and ends on the same pose, so only the intent
+  // records that one was asked for.
+  const readRoute = useNavigationTracker();
   const navigationKey = navigation?.key ?? null;
   const navigationRank = navigation?.rank ?? -1;
+  const navigationGroup = navigation?.group ?? '';
 
   useLayoutEffect(() => {
     const plane = planeRef.current;
@@ -88,12 +70,7 @@ export function SceneCameraPlane({
     let frameRequest: number | null = null;
     let disposed = false;
 
-    const previous = requested.current;
-    requested.current = { mode, navigationKey, navigationRank };
-    const navigated = previous !== null &&
-      previous.mode === mode &&
-      navigationKey !== null &&
-      previous.navigationKey !== navigationKey;
+    const { navigated, route } = readRoute(mode, navigation);
 
     const targetCamera = () => sceneCameraForMode(
       mode,
@@ -138,10 +115,7 @@ export function SceneCameraPlane({
       // where the camera actually stands rather than from the nominal focus
       // pose, so a second click during the first shot continues the move
       // instead of cutting back to focus for it.
-      const rowDistance = previous.navigationRank < 0 || navigationRank < 0
-        ? 1
-        : Math.abs(navigationRank - previous.navigationRank);
-      const shot = sceneCameraNavigationShot(rowDistance);
+      const shot = sceneCameraNavigationShot(route.rowDistance);
       const fromAxis = sceneCameraAxis(current, plane.clientWidth, plane.clientHeight);
       travel(shot.durationMs, (progress) => sceneCameraNavigationPose(
         progress,
@@ -178,7 +152,9 @@ export function SceneCameraPlane({
       observer?.disconnect();
       if (frameRequest !== null) cancelAnimationFrame(frameRequest);
     };
-  }, [mode, navigationKey, navigationRank, onSettled]);
+    // `navigation` is read through its parts: a new object for the same
+    // destination is a re-render, never a route.
+  }, [mode, navigationKey, navigationRank, navigationGroup, onSettled, readRoute]);
 
   return (
     <div

@@ -49,6 +49,55 @@ button, input, textarea, select { font: inherit; }
   will-change: transform;
 }
 
+/* THE BOX (cube-turn.ts). Two faces of one solid: the frozen bitmap of the
+   screen being left, and the live scene plane being reached. At rest neither
+   face carries a transform, so the scene plane keeps its own viewport-fixed
+   containing block and the idle app is byte-identical to a build without a
+   box. While it turns, the transformed face becomes that containing block —
+   the same rect — which is also what lets the box be clipped at the viewport
+   edge instead of painting over the page.
+
+   Canvas pointer input is suspended for the turn: the inverse hit test knows
+   the camera, not the box. DOM overlays stay live, because the browser
+   hit-tests transformed HTML correctly and the keyboard mirror must not go
+   away for half a second on every route. */
+.gpu-cube {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+}
+.gpu-cube__face {
+  position: absolute;
+  inset: 0;
+  transform-origin: 50% 50%;
+}
+.gpu-cube__face--leaving {
+  display: none;
+}
+.gpu-cube[data-cube-turn="turning"] .gpu-cube__face--leaving {
+  display: block;
+}
+.gpu-cube[data-cube-turn="turning"] .gpu-cube__face {
+  will-change: transform;
+  /* A face is a WHOLE SCREEN, so it has to be opaque. The canvas is drawn on
+     `backgroundAlpha: 0` and the product's ground is a CSS background behind
+     it, so without this the wall that has not come round yet reads straight
+     through the one facing you. Turning also darkens the space around the box,
+     so a solid reads as a solid against the room rather than against itself. */
+  background: #0d1726;
+}
+.gpu-cube[data-cube-turn="turning"] {
+  background: #070b13;
+}
+.gpu-cube[data-cube-turn="turning"] .gpu-ui-host {
+  pointer-events: none;
+}
+.gpu-cube__still {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 .gpu-ui-host {
   z-index: 1;
   transform-origin: 0 0;

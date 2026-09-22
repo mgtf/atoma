@@ -89,7 +89,7 @@ afterEach(() => {
 describe('the scene camera plane', () => {
   const focused = (key: string, rank: number, onSettled?: () => void) => ({
     mode: 'focus' as const,
-    navigation: { key, rank },
+    navigation: { key, rank, group: 'workspace' },
     onSettled,
     children: null,
   });
@@ -189,7 +189,7 @@ describe('the scene camera plane', () => {
   it('keeps the long mode move for arrival and departure', () => {
     const view = render(createElement(
       SceneCameraPlane,
-      { mode: 'overview' as const, navigation: { key: 'runs', rank: 1 }, children: null },
+      { mode: 'overview' as const, navigation: { key: 'runs', rank: 1, group: 'workspace' }, children: null },
     ));
     const element = plane(view.container);
     settle();
@@ -199,7 +199,7 @@ describe('the scene camera plane', () => {
     // destination; that click is the long approach, never a shot on top of it.
     view.rerender(createElement(
       SceneCameraPlane,
-      { mode: 'focus' as const, navigation: { key: 'skills', rank: 3 }, children: null },
+      { mode: 'focus' as const, navigation: { key: 'skills', rank: 3, group: 'workspace' }, children: null },
     ));
     let widest = Number.POSITIVE_INFINITY;
     while (frames.size > 0) {

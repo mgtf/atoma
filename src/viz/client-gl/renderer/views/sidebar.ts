@@ -1,7 +1,7 @@
 import { Graphics } from 'pixi.js';
 import type { GpuRenderSnapshot, RendererCtx } from '../../gpu-renderer.js';
 import { GPU_COLORS, GPU_LAYOUT } from '../../theme.js';
-import { ADMIN_VIEWS, visibleViews, type ViewName } from '../../store.js';
+import { SIDEBAR_GROUPS, visibleViews, type ViewName } from '../../store.js';
 import { NAV_ICON_OUTSIDE_GAP, NAV_ICON_RENDER_SIZE } from '../nav-icons.js';
 import {
   ATOMA_MARK_LOCAL_CENTER,
@@ -82,25 +82,6 @@ export interface OverviewRailChromeLayout {
   readonly crystalScale: number;
   /** Source-space bottom of chrome reserved above the first navigation row. */
   readonly navigationTop: number;
-}
-
-/**
- * How many rail rows separate two destinations.
- *
- * The rail owns this because it owns the ORDER. The renderer asks for it to
- * time the motion a route deserves, and must not keep a second nav layout of
- * its own to answer it; a destination with no row (Settings, reached from the
- * account menu) is one row away, the shortest move there is.
- */
-export function navRowDistance(
-  auth: { viewer: { platformAdmin: boolean } } | null,
-  from: ViewName,
-  to: ViewName
-): number {
-  const rows = visibleViews(auth);
-  const start = rows.indexOf(from);
-  const end = rows.indexOf(to);
-  return start < 0 || end < 0 ? 1 : Math.abs(end - start);
 }
 
 /** Shared cross-fade curve for utilities moving between the two rail modes. */
@@ -199,12 +180,6 @@ export function focusRailChromeLayout(
     navigationBottom: Math.max(0, dockTop - FOCUS_RAIL_DOCK_GAP),
   };
 }
-
-export const SIDEBAR_GROUPS: readonly { key: string; views: readonly ViewName[] }[] = [
-  { key: 'workspace', views: ['projects', 'runs', 'registry', 'skills', 'docs'] },
-  { key: 'operate', views: ['burnin'] },
-  { key: 'admin', views: ADMIN_VIEWS },
-];
 
 export type SidebarRow =
   | { readonly kind: 'group'; readonly group: string; readonly y: number; readonly height: number }
