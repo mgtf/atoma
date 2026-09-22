@@ -87,9 +87,16 @@ const TIMELINE_ROW_OFFSET = 1;
  * x, and a decision column inset from the right — and nothing related them, so
  * a long title simply drew over the actor. Named and related here so the three
  * columns are laid out from one set of facts.
+ *
+ * The decision no longer has an inset of its own. It was drawn LEFT-aligned at
+ * a fixed 118px from the card's right edge, so `✕ rejected` and `✓ approved`
+ * began together and ended wherever their own widths put them — a ragged right
+ * edge down a column of verdicts (owner report, 2026-09-22). It is measured
+ * and set flush to the same margin the title keeps on the left, and the detail
+ * column now yields to what the verdict actually occupies rather than to a
+ * reservation that fitted neither.
  */
 const EVENT_TITLE_X = 11;
-const EVENT_DECISION_INSET = 118;
 const EVENT_COLUMN_GAP = 10;
 const EVENT_ACTOR_MIN_WIDTH = 64;
 /** Enough for `L1 CarbonDioxide`, the longest molecule name plus its tier. */
@@ -108,8 +115,40 @@ const EVENT_TITLE_CHAR_PX = 6.4;
  */
 const EVENT_TITLE_TOP = 7;
 const EVENT_DECISION_TOP = 8;
-const EVENT_ACTOR_TOP = 9;
-const EVENT_DETAIL_TOP = 9;
+const EVENT_ACTOR_TOP = 8;
+const EVENT_DETAIL_TOP = 8;
+/**
+ * The row's type sizes.
+ *
+ * The facts line was 9px, and it is the densest and most-read text in the
+ * client — the second report that it cannot be read (owner, 2026-09-22: "les
+ * typos complètement illisibles"). The FIRST one was answered with contrast
+ * alone, by lifting `GPU_COLORS.muted` to ~7.9:1 on 2026-09-21; that leaves
+ * size as the thing still unanswered, so this is size. The tops above keep the
+ * two sizes on ONE baseline: a Pixi label is placed by the top of its box, so
+ * a facts line that grows has to start higher or the row reads as two lines
+ * that failed to align. `EVENT_DECISION_TOP` was already sitting at the size
+ * this moves to, which is why it does not move with them.
+ */
+/**
+ * Where the decision column STARTS, so that its right edge lands on the same
+ * margin the title keeps on the left.
+ *
+ * It used to start at a fixed inset instead, which meant `✕ rejected` and
+ * `✓ approved` began together and ended wherever their own widths put them —
+ * a ragged right edge down a column of verdicts, which is how it was reported
+ * (owner, 2026-09-22). Alignment is the whole point of the column, so it is a
+ * function of what the verdict MEASURES and not of what a constant guessed.
+ */
+export function eventDecisionLeft(cardWidth: number, decisionWidth: number): number {
+  return cardWidth - EVENT_TITLE_X - decisionWidth;
+}
+
+const EVENT_TITLE_SIZE = 11;
+/** The view's facts size, not the row's: every line of facts here is one. */
+export const RUNS_FACTS_SIZE = 10;
+/** The rail's branch tag — `P1`, `B2.1` — beside the lane it belongs to. */
+const EVENT_BRANCH_TAG_SIZE = 9;
 
 /**
  * Roughly two lines of the 13px summary title at the right pane's width.
@@ -494,7 +533,7 @@ export function drawRuns(
       truncate(nowDescription(snapshot.t, current), 130),
       leftX + 24,
       liveY + 29,
-      { size: 9, color: GPU_COLORS.muted, width: leftWidth - 48 }
+      { size: RUNS_FACTS_SIZE, color: GPU_COLORS.muted, width: leftWidth - 48 }
     );
     controlsBottom = liveY + 57;
   }
@@ -810,7 +849,7 @@ export function drawRuns(
       title,
       cardBaseX + EVENT_TITLE_X,
       y + EVENT_TITLE_TOP,
-      { size: 11, weight: '700', color: accent, singleLine: true }
+      { size: EVENT_TITLE_SIZE, weight: '700', color: accent, singleLine: true }
     );
     const detailX =
       cardBaseX + EVENT_TITLE_X + titleLabel.width + EVENT_COLUMN_GAP;
@@ -818,16 +857,16 @@ export function drawRuns(
       0,
       cardBaseX + cardBaseWidth - EVENT_TITLE_X - detailX
     );
-    const factsAdvance = ctx.measureText(facts ? ` · ${facts}` : '', { size: 9 });
+    const factsAdvance = ctx.measureText(facts ? ` · ${facts}` : '', { size: RUNS_FACTS_SIZE });
     const detail = [
-      ctx.fitText(prose, Math.max(0, detailWidth - factsAdvance), { size: 9 }),
+      ctx.fitText(prose, Math.max(0, detailWidth - factsAdvance), { size: RUNS_FACTS_SIZE }),
       facts,
     ]
       .filter(Boolean)
       .join(' · ');
     if (detail) {
       ctx.text(listLayer, detail, detailX, y + EVENT_DETAIL_TOP, {
-        size: 9,
+        size: RUNS_FACTS_SIZE,
         color: GPU_COLORS.muted,
         width: detailWidth,
         singleLine: true,
@@ -901,18 +940,21 @@ export function drawRuns(
     // through the molecule name. Both ends are now driven by the geometry:
     // the title gets the space that is actually free before the actor column,
     // and the actor column starts after whatever the title really measured.
-    const decisionX = cardWidth - EVENT_DECISION_INSET;
+    const decisionWidth = copy.decision
+      ? ctx.measureText(copy.decision, { size: RUNS_FACTS_SIZE, weight: '700' })
+      : 0;
+    const decisionX = eventDecisionLeft(cardWidth, decisionWidth);
     const titleBudget = Math.max(70, decisionX - EVENT_TITLE_X - EVENT_ACTOR_MIN_WIDTH - EVENT_COLUMN_GAP);
     const titleLabel = ctx.text(
       cardContent,
       truncate(copy.title, Math.max(8, Math.min(28, Math.floor(titleBudget / EVENT_TITLE_CHAR_PX)))),
       EVENT_TITLE_X,
       EVENT_TITLE_TOP,
-      { size: 11, weight: '700', color: eventAccent(event), singleLine: true }
+      { size: EVENT_TITLE_SIZE, weight: '700', color: eventAccent(event), singleLine: true }
     );
     if (copy.decision) {
       ctx.text(cardContent, copy.decision, decisionX, EVENT_DECISION_TOP, {
-        size: 10,
+        size: RUNS_FACTS_SIZE,
         color: copy.decision.startsWith('✕') || copy.decision.startsWith('↑')
           ? GPU_COLORS.warning
           : GPU_COLORS.success,
@@ -939,7 +981,7 @@ export function drawRuns(
     // the next fixed-height card. Reserve measured space for the footer.
     const footer = copy.footer.replace(/\s+/g, ' ').trim();
     const body = copy.body.replace(/\s+/g, ' ').trim();
-    const footerAdvance = ctx.measureText(footer ? ` · ${footer}` : '', { size: 9 });
+    const footerAdvance = ctx.measureText(footer ? ` · ${footer}` : '', { size: RUNS_FACTS_SIZE });
     // Priority on the single line: the title, then the footer's facts, then
     // the actor, then the body. The molecule is named again in the atom lanes
     // and in the detail pane, so the actor yields to the numbers — but it
@@ -951,12 +993,12 @@ export function drawRuns(
     );
     const actorText =
       actor && actorRoom >= EVENT_ACTOR_MIN_WIDTH
-        ? ctx.fitText(actor, actorRoom, { size: 9 })
+        ? ctx.fitText(actor, actorRoom, { size: RUNS_FACTS_SIZE })
         : '';
     let detailX = actorX;
     if (actorText) {
       const actorLabel = ctx.text(cardContent, actorText, actorX, EVENT_ACTOR_TOP, {
-        size: 9,
+        size: RUNS_FACTS_SIZE,
         color: GPU_COLORS.muted,
         singleLine: true,
       });
@@ -964,11 +1006,11 @@ export function drawRuns(
     }
     const detailWidth = Math.max(0, detailRight - detailX);
     const bodyBudget = Math.max(0, detailWidth - footerAdvance);
-    const detail = [ctx.fitText(body, bodyBudget, { size: 9 }), footer]
+    const detail = [ctx.fitText(body, bodyBudget, { size: RUNS_FACTS_SIZE }), footer]
       .filter(Boolean)
       .join(' · ');
     ctx.text(cardContent, detail, detailX, EVENT_DETAIL_TOP, {
-      size: 9,
+      size: RUNS_FACTS_SIZE,
       color: event.error ? GPU_COLORS.error : GPU_COLORS.muted,
       width: detailWidth,
       singleLine: true,
@@ -982,7 +1024,7 @@ export function drawRuns(
         railX(branch.lane) + 6,
         y + 4,
         {
-          size: 8,
+          size: EVENT_BRANCH_TAG_SIZE,
           color: timelineBranchColor(branch),
           weight: '700',
         }
@@ -1254,7 +1296,7 @@ function drawRunSummaryCard(
   if (expanded) {
     if (run.error) {
       const reason = ctx.text(block, run.error, padX, cursor, {
-        size: 9,
+        size: RUNS_FACTS_SIZE,
         color: summaryStatusColor,
         width: innerWidth,
       });

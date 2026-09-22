@@ -406,7 +406,10 @@ function fixtureTrace() {
     }),
     ev(240, { kind: 'tool', name: 'write_file', branchId: 'c1', actor: { tier: 1, name: 'Methane' }, args: { path: 'index.html' } }),
     ev(250, { kind: 'tool', name: 'write_file', branchId: 'c1', actor: { tier: 1, name: 'Methane' }, args: { path: 'app.js' } }),
-    ev(260, { kind: 'llm', role: 'validate-result', branchId: 'p1', actor: { tier: 2, name: 'Tracheid' }, durationMs: 12_000, costUsd: 0.08 }),
+    // A verdict on each validator, and DELIBERATELY one of each: the decision
+    // column is right-aligned, and a fixture that never showed one is why a
+    // ragged right edge down a column of verdicts reached production.
+    ev(260, { kind: 'llm', role: 'validate-result', branchId: 'p1', actor: { tier: 2, name: 'Tracheid' }, durationMs: 12_000, costUsd: 0.08, response: '{"approved":true}' }),
     ev(300, { kind: 'branch', op: 'end', branchId: 'c1' }),
     ev(300, { kind: 'branch', op: 'end', branchId: 'p1' }),
     ev(300, {
@@ -425,7 +428,7 @@ function fixtureTrace() {
       model: 'claude-haiku-4-5-20251001', durationMs: 540_000, costUsd: 0.87,
       usage: { input_tokens: 6200, output_tokens: 52_000 },
     }),
-    ev(900, { kind: 'llm', role: 'validate-result', branchId: 'p2', actor: { tier: 2, name: 'Sclereid' }, durationMs: 14_000, costUsd: 0.11 }),
+    ev(900, { kind: 'llm', role: 'validate-result', branchId: 'p2', actor: { tier: 2, name: 'Sclereid' }, durationMs: 14_000, costUsd: 0.11, response: '{"approved":false}' }),
     ev(1200, { kind: 'branch', op: 'end', branchId: 'c2' }),
     ev(1200, { kind: 'branch', op: 'end', branchId: 'p2' }),
     ev(1290, { kind: 'llm', role: 'aggregate', actor: { tier: 3, name: 'Meristem' }, durationMs: 4000, costUsd: 0.05 }),

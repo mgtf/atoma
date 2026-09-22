@@ -1924,9 +1924,9 @@ export class GpuRenderer {
     );
     this.drawRemovedFilterEffects();
     if (this.previousView && this.previousView !== snapshot.state.view) {
-      // The light sweep rides the camera's navigation shot rather than
-      // running beside it on a fixed clock: same rail rows, same duration,
-      // so a long jump reads as one longer move instead of two beats.
+      // The light sweep rides the CUBE's clock rather than running beside it
+      // on a fixed 560ms: same rail rows, same duration, so a long jump reads
+      // as one longer move instead of two beats.
       this.activeViewTransition = {
         from: this.previousView,
         to: snapshot.state.view,

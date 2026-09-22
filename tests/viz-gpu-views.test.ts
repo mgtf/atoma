@@ -112,6 +112,7 @@ import { MARK_SURGE, setMarkCoreSurge } from '../src/viz/client-gl/renderer/mark
 import { drawRegistry } from '../src/viz/client-gl/renderer/views/registry.js';
 import {
   drawRuns,
+  eventDecisionLeft,
   RUN_PICKER_CONTROL_HEIGHT,
   RUN_PICKER_CONTROL_TOP,
   RUN_PICKER_HORIZONTAL_INSET,
@@ -119,6 +120,7 @@ import {
   RUNS_TWO_PANE_MIN_WIDTH,
   runsPaneLayout,
   runsPickerControlLayout,
+  RUNS_FACTS_SIZE,
 } from '../src/viz/client-gl/renderer/views/runs.js';
 import { drawSkills } from '../src/viz/client-gl/renderer/views/skills.js';
 import { timelineConnectorGeometry } from '../src/viz/client-gl/renderer/timeline-rails.js';
@@ -5066,7 +5068,7 @@ describe('drawRuns behavior', () => {
     // the facts line is given a measured `width`, which is what tells them
     // apart without pinning this test to a pixel.
     const actor = sameCard.find(
-      (text) => opts(text).size === 9 && opts(text).width === undefined
+      (text) => opts(text).size === RUNS_FACTS_SIZE && opts(text).width === undefined
     );
     expect(actor, 'the card must draw an actor for this to mean anything').toBeDefined();
 
@@ -6093,5 +6095,22 @@ describe('drawRuns — paired detail fields', () => {
     expect(scrollbarThumbs(ctx.root).length).toBe(1);
     // ONE rectangle over the whole pane viewport, never one per column.
     expect(ctx.detailBounds!.width).toBeGreaterThan(detailColumnWidth(ctx.detailBounds!.width) * 2 - 1);
+  });
+});
+
+describe('the run timeline decision column', () => {
+  it('ends every verdict on one margin, whatever the verdict says', () => {
+    // Widths a real pair produces: `✕ rejected` is the wider of the two, and
+    // that difference is exactly what a left-aligned column turned into a
+    // ragged right edge.
+    const cardWidth = 520;
+    const rejected = eventDecisionLeft(cardWidth, 62);
+    const approved = eventDecisionLeft(cardWidth, 54);
+    expect(rejected + 62).toBe(approved + 54);
+    // And the margin it ends on is the one the title keeps on the left, so
+    // the row is symmetrical rather than merely consistent with itself.
+    expect(cardWidth - (rejected + 62)).toBe(11);
+    // A narrower card moves the column with it; nothing here is absolute.
+    expect(eventDecisionLeft(320, 62)).toBe(rejected - 200);
   });
 });
