@@ -8,6 +8,10 @@ import {
   ATOMA_MARK_ACTIVE_MATERIALS,
   ATOMA_MARK_ACTIVE_MAX_TRANSMIT,
   ATOMA_MARK_CAMERA_Z,
+  ATOMA_MARK_CONTACT_ONSET,
+  ATOMA_MARK_CORE_EDGE_CLEARANCE,
+  ATOMA_MARK_CORE_SQUASH,
+  ATOMA_MARK_CORE_STRETCH,
   ATOMA_MARK_DIAMOND_MATERIAL,
   ATOMA_MARK_LAMP_Z,
   ATOMA_MARK_LOCAL_SIZE,
@@ -27,6 +31,8 @@ import {
   mergeFieldSpills,
   pointerLampForLocal,
   markColorForOctant,
+  markContactFlash,
+  markContactShare,
   markElapsedMsFromTurnDegrees,
   markF0,
   markPerspectiveAt,
@@ -415,6 +421,221 @@ describe('Atoma GPU brand mark', () => {
     expect(worst).toBeLessThan(0.02);
   });
 
+  it('flashes the wedge the bead lands on, and only while it is against it', () => {
+    // The bead bounces in a CLOSED cavity, so every so often it arrives at a
+    // wall. Before this, nothing happened there: the light drifted across the
+    // interior and the eight faces answered only with distance falloff, so the
+    // solid never registered being hit. The flash is that event, and it has to
+    // be the event — the face the bead actually reached, for as long as it is
+    // there, and nothing while it is crossing the middle.
+    const clearance = ATOMA_MARK_CORE_EDGE_CLEARANCE / ATOMA_MARK_PROJECTION_SCALE;
+    // Distance from the bead to a cavity wall's plane, in the frame's own
+    // rotated space. Nothing here needs to know the pose: the frame publishes
+    // both, and the bead at rest against a wall sits exactly its own clearance
+    // from it.
+    const wallDistance = (frame: ReturnType<typeof buildAtomaMarkFrame>, index: number) => {
+      const facet = frame.facets[index]!;
+      return Math.abs(
+        facet.normal[0] * (frame.core3[0] - facet.centroid[0]) +
+        facet.normal[1] * (frame.core3[1] - facet.centroid[1]) +
+        facet.normal[2] * (frame.core3[2] - facet.centroid[2])
+      );
+    };
+    const cavity = ATOMA_MARK_MESH.facets
+      .map((facet, index) => ({ facet, index }))
+      .filter(({ facet }) => facet.part === 'inner');
+    // Where the flash is allowed to have started: the onset expressed as a
+    // distance from the wall rather than as a fraction of the bead's room.
+    const onsetDistance = (1 - ATOMA_MARK_CONTACT_ONSET) * ATOMA_MARK_CAVITY_INRADIUS +
+      ATOMA_MARK_CONTACT_ONSET * clearance;
+
+    let peak = { ms: 0, contact: 0 };
+    let flashes = 0;
+    let flashing = false;
+    let loud = 0;
+    let samples = 0;
+    let worstStep = 0;
+    let previous = buildAtomaMarkFrame(0);
+    for (let ms = 0; ms <= ATOMA_MARK_TURN_MS; ms += 16) {
+      const frame = buildAtomaMarkFrame(ms);
+      const contacts = frame.facets.map((facet) => facet.contact);
+      const strongest = Math.max(...contacts);
+      const nearest = Math.min(...cavity.map(({ index }) => wallDistance(frame, index)));
+
+      // One arrival, shared. The eight octants partition it, so a bead landing
+      // on an EDGE splits its flash between the two faces that meet there
+      // instead of lighting both whole — and the two facets of one wedge, the
+      // cavity wall and the table in front of it, always agree.
+      const [outerTotal, innerTotal] = (['outer', 'inner'] as const).map((part) =>
+        ATOMA_MARK_MESH.facets.reduce(
+          (sum, facet, index) => facet.part === part ? sum + contacts[index]! : sum,
+          0
+        ));
+      expect(outerTotal!).toBeLessThanOrEqual(1 + 1e-9);
+      expect(outerTotal!).toBeCloseTo(innerTotal!, 12);
+
+      // A flash is a CONTACT, not a mood: nothing lights up while the bead is
+      // still crossing the cavity, and a bead against a wall spends the whole
+      // flash — on one face, or between the faces of the edge it is sliding
+      // across while the wall holds it (the dwell moves it along the wall).
+      if (strongest > 0) expect(nearest).toBeLessThanOrEqual(onsetDistance + 1e-9);
+      if (nearest <= clearance + 1e-9) expect(outerTotal!).toBeGreaterThan(0.99);
+      for (const [index, facet] of ATOMA_MARK_MESH.facets.entries()) {
+        const twin = ATOMA_MARK_MESH.facets.findIndex((other) =>
+          other.part !== facet.part &&
+          other.octant.every((sign, axis) => sign === facet.octant[axis])
+        );
+        expect(contacts[index]!).toBeCloseTo(contacts[twin]!, 12);
+      }
+
+      for (const [index, contact] of contacts.entries()) {
+        worstStep = Math.max(worstStep, Math.abs(contact - previous.facets[index]!.contact));
+      }
+      if (strongest > peak.contact) peak = { ms, contact: strongest };
+      if (strongest > 0.5) loud += 1;
+      if (strongest > 0.02) {
+        if (!flashing) flashes += 1;
+        flashing = true;
+      } else flashing = false;
+      samples += 1;
+      previous = frame;
+    }
+
+    // The strongest moment of the turn is the bead touching down, and the face
+    // that answers is the one it touched — not its neighbour, not the whole
+    // crystal.
+    const struck = buildAtomaMarkFrame(peak.ms);
+    const ranked = cavity
+      .map(({ index }) => ({ index, distance: wallDistance(struck, index) }))
+      .sort((left, right) => left.distance - right.distance);
+    expect(peak.contact).toBeGreaterThan(0.99);
+    expect(ranked[0]!.distance).toBeCloseTo(clearance, 3);
+    expect(struck.facets[ranked[0]!.index]!.contact).toBeGreaterThan(0.99);
+    expect(struck.facets[ranked[1]!.index]!.contact).toBeLessThan(0.05);
+
+    // An ACCENT. Roughly one bounce a second — the three travel rates are
+    // incommensurate on purpose — and the crystal spends most of its time with
+    // nothing lit, which is what keeps the flash an event instead of the
+    // breathing pulse this shell has already been debugged out of once.
+    const perSecond = flashes / (ATOMA_MARK_TURN_MS / 1000);
+    expect(perSecond).toBeGreaterThan(0.4);
+    expect(perSecond).toBeLessThan(1.6);
+    // The dwell holds the bead against each wall for 80–150 ms at full flash,
+    // which is most of what this fraction is; a third of the time is the line
+    // between an accent and a pulse.
+    expect(loud / samples).toBeLessThan(0.3);
+    // Continuous at 60fps: it rises and falls on the same curve, so no frame
+    // snaps a face on. It is faster than the density ramp above by design —
+    // that one may not move on the bead at all, this one is the bead.
+    expect(worstStep).toBeLessThan(0.2);
+
+    // The two halves of the contact, held on their own: the curve is flat until
+    // the onset and whole at the wall, and the eight shares of any position sum
+    // to exactly one wherever the bead is.
+    expect(markContactFlash(ATOMA_MARK_CONTACT_ONSET)).toBe(0);
+    expect(markContactFlash(0.5 + ATOMA_MARK_CONTACT_ONSET / 2)).toBeCloseTo(0.5, 12);
+    expect(markContactFlash(1)).toBe(1);
+    const octants = ATOMA_MARK_MESH.facets
+      .filter((facet) => facet.part === 'outer')
+      .map((facet) => facet.octant);
+    for (const position of [[0.31, -0.12, 0.08], [0.2, 0.2, 0], [0, 0, 0.4]] as const) {
+      const shares = octants.map((octant) => markContactShare([...position], octant));
+      expect(shares.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1, 12);
+    }
+  });
+
+  it('squashes the bead against the wall it lands on and stretches it off, round in flight', () => {
+    // A rigid bead reverses in zero time at constant speed, and that is the
+    // machine the eye picks up. This one is rubber: the wall holds it for a
+    // beat while it flattens along the wall's normal, it leaves drawn out
+    // along its exit, and between walls it is a sphere again. All of it is a
+    // pure function of the frame's time — the turn film pins any instant.
+    const clearance = ATOMA_MARK_CORE_EDGE_CLEARANCE / ATOMA_MARK_PROJECTION_SCALE;
+    const cavity = ATOMA_MARK_MESH.facets
+      .map((facet, index) => ({ facet, index }))
+      .filter(({ facet }) => facet.part === 'inner');
+    const wallDistance = (frame: ReturnType<typeof buildAtomaMarkFrame>, index: number) => {
+      const facet = frame.facets[index]!;
+      return Math.abs(
+        facet.normal[0] * (frame.core3[0] - facet.centroid[0]) +
+        facet.normal[1] * (frame.core3[1] - facet.centroid[1]) +
+        facet.normal[2] * (frame.core3[2] - facet.centroid[2])
+      );
+    };
+    const bulge = 1 / Math.sqrt(1 - ATOMA_MARK_CORE_SQUASH);
+
+    let held = 0;
+    let longestHold = 0;
+    let squashedFrames = 0;
+    let stretchedFrames = 0;
+    let axisChecks = 0;
+    let worstStep = 0;
+    let previous = buildAtomaMarkFrame(0);
+    for (let ms = 16; ms <= ATOMA_MARK_TURN_MS * 2; ms += 16) {
+      const frame = buildAtomaMarkFrame(ms);
+      const shape = frame.coreShape;
+      const nearest = cavity
+        .map(({ index }) => ({ index, distance: wallDistance(frame, index) }))
+        .sort((left, right) => left.distance - right.distance)[0]!;
+      const touching = nearest.distance <= clearance + 1e-9;
+      const strongest = Math.max(...frame.facets.map((facet) => facet.contact));
+
+      // Round in flight: no contact, no shape.
+      if (strongest === 0) {
+        expect(shape).toEqual({ angle: 0, along: 1, across: 1, squash: 0, stretch: 0 });
+      }
+      // Never both held and gone.
+      expect(shape.squash > 0 && shape.stretch > 0).toBe(false);
+      // A squash is a bead AGAINST a wall, flattened along it and bulging
+      // across, with its volume kept; a stretch is a bead OFF every wall,
+      // drawn out along its way. Bounded by the authored peaks.
+      if (shape.squash > 0) {
+        squashedFrames += 1;
+        expect(touching).toBe(true);
+        expect(shape.along).toBeLessThanOrEqual(shape.across + 1e-12);
+        expect(shape.along).toBeGreaterThanOrEqual(1 - ATOMA_MARK_CORE_SQUASH - 1e-9);
+        expect(shape.across).toBeLessThanOrEqual(bulge + 1e-9);
+      }
+      if (shape.stretch > 0) {
+        stretchedFrames += 1;
+        expect(touching).toBe(false);
+        expect(shape.along).toBeGreaterThanOrEqual(shape.across - 1e-12);
+        expect(shape.along).toBeLessThanOrEqual(1 + ATOMA_MARK_CORE_STRETCH + 1e-9);
+      }
+      // The squash axis is the struck wall's normal, on a clean face hit
+      // presented to the camera; the ellipse axis is a line, so ±normal agree.
+      const wall = frame.facets[nearest.index]!.normal;
+      const wallInPlane = Math.hypot(wall[0], wall[1]);
+      if (shape.squash > 0.5 && strongest > 0.9 && wallInPlane > 0.5) {
+        axisChecks += 1;
+        const wallAngle = Math.atan2(-wall[1], wall[0]);
+        expect(Math.cos(2 * (shape.angle - wallAngle))).toBeGreaterThan(0.9);
+      }
+      // The dwell: the wall holds the bead for a run of frames, not one.
+      if (touching) {
+        held += 1;
+        longestHold = Math.max(longestHold, held);
+      } else held = 0;
+      worstStep = Math.max(
+        worstStep,
+        Math.abs(shape.along - previous.coreShape.along),
+        Math.abs(shape.across - previous.coreShape.across)
+      );
+      previous = frame;
+    }
+    expect(squashedFrames).toBeGreaterThan(0);
+    expect(stretchedFrames).toBeGreaterThan(0);
+    expect(axisChecks).toBeGreaterThan(0);
+    // 82 ms on the fastest axis, 149 ms on the slowest: 5 to 9 frames held
+    // per wall, and a corner — one axis clipping while another is still held —
+    // can chain two. A beat, or two; never a parking.
+    expect(longestHold).toBeGreaterThanOrEqual(5);
+    expect(longestHold).toBeLessThanOrEqual(20);
+    // Fast — an impact is — but continuous: the shape is one curve through
+    // squash, release and flight, never a state switched on.
+    expect(worstStep).toBeLessThan(0.1);
+  });
+
   it('gives every crystal face the one active diamond material', () => {
     // Material is uniformly diamond while rank colour remains taxonomy. The
     // selector is shared by the GPU shell and CPU light spills, and the active
@@ -511,9 +732,11 @@ describe('Atoma GPU brand mark', () => {
     let largestScale = 0;
     for (let elapsedMs = 0; elapsedMs <= ATOMA_MARK_TURN_MS; elapsedMs += 20) {
       const frame = buildAtomaMarkFrame(elapsedMs);
+      // The bulge across a squash is the largest the bead ever draws.
       largestScale = Math.max(
         largestScale,
-        frame.scale * frame.coreScale * (1 + frame.pulse * 0.035)
+        frame.scale * frame.coreScale * (1 + frame.pulse * 0.035) *
+          Math.max(frame.coreShape.along, frame.coreShape.across)
       );
     }
     const physicalRadius = ATOMA_MARK_CORE_RADIUS * hero.scale * 2 * largestScale;

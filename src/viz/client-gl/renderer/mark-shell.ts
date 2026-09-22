@@ -96,7 +96,7 @@ export const MARK_SHELL_ATTRIBUTES = [
   { name: 'aWorld', format: 'float32x3' },
   { name: 'aNormal', format: 'float32x3' },
   { name: 'aTint', format: 'float32x3' },
-  { name: 'aSurface', format: 'float32x2' },
+  { name: 'aSurface', format: 'float32x3' },
   { name: 'aMaterial', format: 'float32x4' },
   { name: 'aFinish', format: 'float32x3' },
   { name: 'aBary', format: 'float32x3' },
@@ -334,7 +334,7 @@ export function createMarkShell(): MarkShell | null {
   const world = new Float32Array(VERTEX_COUNT * 3);
   const normals = new Float32Array(VERTEX_COUNT * 3);
   const tints = new Float32Array(VERTEX_COUNT * 3);
-  const surfaces = new Float32Array(VERTEX_COUNT * 2);
+  const surfaces = new Float32Array(VERTEX_COUNT * 3);
   // Material coefficients. Written ONCE: every facet currently receives the
   // active diamond profile, so these buffers are never touched again.
   const materials = new Float32Array(VERTEX_COUNT * 4);
@@ -355,7 +355,7 @@ export function createMarkShell(): MarkShell | null {
     const material = markMaterialForOctant(facet.octant);
     for (let corner = 0; corner < 3; corner += 1) {
       const vertex = facet.triangle * 3 + corner;
-      surfaces[vertex * 2 + 1] = facet.part === 'outer' ? 1 : 0;
+      surfaces[vertex * 3 + 1] = facet.part === 'outer' ? 1 : 0;
       // The shader receives DERIVED quantities, never the authored ones: the
       // exponent from roughness, the normal-incidence reflectance from the IOR,
       // and the bend strength from the IOR too. The derivation happens ONCE, on
@@ -556,6 +556,11 @@ export function createMarkShell(): MarkShell | null {
         // Outer facets ignore this: their coverage is derived in the shader.
         const alpha = facet.part === 'outer' ? 0 : ALPHA_INNER;
         const shade = SHADE_FAR + (SHADE_NEAR - SHADE_FAR) * near;
+        // CONTACT FLASH, handed over raw: the frame decides which wedge the
+        // bead landed on and how hard, `MARK_CONTACT_GLOW` in the shader decides
+        // what that looks like. No bead, no flash — the inspect checkbox is a
+        // kill switch for the whole filament, not a hide-the-sprite.
+        const contact = beadVisible ? shaded.contact : 0;
         const rank = rankTints[index]!;
         for (const [corner, point] of facet.points.entries()) {
           const vertex = facet.triangle * 3 + corner;
@@ -565,7 +570,8 @@ export function createMarkShell(): MarkShell | null {
           const rotated = frame.points[point]!;
           world.set(rotated, vertex * 3);
           normals.set(shaded.normal, vertex * 3);
-          surfaces[vertex * 2] = alpha;
+          surfaces[vertex * 3] = alpha;
+          surfaces[vertex * 3 + 2] = contact;
           tints[vertex * 3] = rank[0] * shade;
           tints[vertex * 3 + 1] = rank[1] * shade;
           tints[vertex * 3 + 2] = rank[2] * shade;

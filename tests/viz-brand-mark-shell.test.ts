@@ -5,6 +5,9 @@ import {
   refractionForBackdrop,
 } from '../src/viz/client-gl/renderer/mark-shell.js';
 import {
+  MARK_CONTACT_ARETE,
+  MARK_CONTACT_COVERAGE,
+  MARK_CONTACT_GLOW,
   MARK_POINTER_SOURCE_RADIUS_MODEL,
   MARK_SHELL_GLSL,
   MARK_SHELL_GLSL_VERTEX,
@@ -36,6 +39,36 @@ describe('mark shell shader contract', () => {
       MARK_SHELL_GLSL,
     })) {
       expect(source, `${name} must not contain a backtick`).not.toContain('`');
+    }
+  });
+
+  it('adds the contact flash outside the terms that muted the first one', () => {
+    // WHY THIS IS HELD IN SOURCE: the flash is one facet, for a few frames, in
+    // a shader no headless test can compile. What it must not become is the
+    // first cut, which was correct on the CPU and invisible on screen — it
+    // lifted the facet's TINT, and the tint is multiplied by `cover`, which
+    // collapses under a bright transmitted filament, and killed outright on
+    // the cavity wall by `nearInner`. The bead lands where both apply. So the
+    // emission is ADDED to lit, and it may not pick either of them up again.
+    const surface = MARK_SHELL_ATTRIBUTES.find(({ name }) => name === 'aSurface');
+    expect(surface?.format, 'the contact rides aSurface.z').toBe('float32x3');
+    for (const [name, source] of Object.entries({ MARK_SHELL_WGSL, MARK_SHELL_GLSL })) {
+      expect(source, `${name} must read the contact lane`).toContain('vSurface.z');
+      expect(source, `${name} must add the flash to lit`)
+        .toContain('lit = surface + interior + contactGlow');
+      // The struck CAVITY wall is image-only, and alpha multiplies the lit
+      // colour: without this its emission would be multiplied by zero and the
+      // wedge would light on one face instead of through its thickness.
+      expect(source, `${name} must give the struck cavity wall coverage`)
+        .toContain(`contact * nearInner * ${MARK_CONTACT_COVERAGE.toFixed(2)}`);
+      for (const value of [MARK_CONTACT_GLOW, MARK_CONTACT_ARETE]) {
+        expect(source, `${name} must carry ${value}`).toContain(value.toFixed(2));
+      }
+      const glow = source.split('contactGlow =')[1]?.split(';')[0] ?? '';
+      expect(glow.length).toBeGreaterThan(0);
+      expect(glow, `${name} flash must not ride cover`).not.toContain('cover');
+      expect(glow, `${name} flash must not ride nearInner`).not.toContain('nearInner');
+      expect(glow, `${name} flash must not ride bounce`).not.toContain('bounce');
     }
   });
 

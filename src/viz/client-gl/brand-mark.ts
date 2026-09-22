@@ -58,6 +58,35 @@ export const ATOMA_MARK_CORE_SPEED_V = 0.6;
 export const ATOMA_MARK_CORE_SPEED_W = 0.47;
 
 /**
+ * RUBBER. How far past the wall the bead's authored path would carry it, as a
+ * fraction of its travel room, before the wall stops it. The wall does stop
+ * it — the position is clipped — and the distance the centre wanted to keep
+ * going is exactly the bead's COMPRESSION: a rubber ball flattens by what its
+ * centre could not travel. So this one number is both the DWELL (how long the
+ * bead is held against the wall: 82 ms on the fastest axis, 149 ms on the
+ * slowest) and the profile of the squash, which rises and falls over it.
+ *
+ * It is what takes the machine out of the bounce. A rigid bead reverses in
+ * zero time at constant speed; this one arrives, is held for a beat while it
+ * flattens, and leaves. Speed BETWEEN walls stays constant, which is what a
+ * weightless ball does — gravity was considered and declined: a light does not
+ * fall, the upper facets would never be struck again, and a ballistic path
+ * needs an integrated state that `buildAtomaMarkFrame(elapsedMs)` must not
+ * carry (the turn film and the slider pin any instant).
+ */
+export const ATOMA_MARK_CORE_DWELL = 0.035;
+/** Peak flattening along the struck wall's normal, at full compression. */
+export const ATOMA_MARK_CORE_SQUASH = 0.14;
+/** Peak elongation along the exit direction, just after the bead lets go. */
+export const ATOMA_MARK_CORE_STRETCH = 0.06;
+/**
+ * Over how much of the travel back from the wall the stretch relaxes, in reach
+ * units (1 is against the wall). In time: 118–213 ms after release, on the
+ * fastest and the slowest axis.
+ */
+export const ATOMA_MARK_CORE_STRETCH_SPAN = 0.1;
+
+/**
  * The bead is a LIGHT, not just a dot: this is how far its illumination reaches
  * across the crystal, in projected units (the hull spans about 12.5 units from
  * centre to vertex), and how it falls off.
@@ -498,6 +527,85 @@ export const ATOMA_MARK_CAVITY_INRADIUS =
 
 const CORE_MODEL_CLEARANCE = ATOMA_MARK_CORE_EDGE_CLEARANCE / PROJECTION_SCALE;
 
+/**
+ * CONTACT FLASH — how far in from the wall the touched wedge starts to answer.
+ *
+ * The bead is a light bouncing in a CLOSED cavity, and `bouncingCore` clamps it
+ * against those eight planes: a travel fraction of 1 is the bead against a wall,
+ * 0 the centre of the crystal. The analytic falloff already brightens whatever
+ * the bead approaches; this is the accent on top of it, so a bounce reads as an
+ * EVENT — the face it landed on — rather than as a glow drifting across the
+ * interior with nothing ever happening to the solid.
+ *
+ * It stays a pure function of the frame's own time, like the rest of the pose:
+ * the rise and the fall are the same curve travelled in both directions, so no
+ * frame has to remember the one before it and the turn film stays reproducible
+ * at any degree. An afterglow would need that memory and is deliberately not
+ * here. The three bounce rates peak about once a second between them, and the
+ * slowest crosses this onset roughly a quarter second either side of its touch:
+ * long enough to read, short enough to stay an accent.
+ */
+export const ATOMA_MARK_CONTACT_ONSET = 0.86;
+
+/**
+ * How LOUD a contact is does not live here. This file publishes 0..1 per facet —
+ * when the bead arrived and which wedge it arrived on — and the shell shader's
+ * `MARK_CONTACT_GLOW` says what that looks like, beside the other look
+ * constants it is added to. One concept, one home.
+ */
+
+/**
+ * Softness of the octant boundary, as a fraction of the bead's distance from
+ * the centre. A bead arriving at the middle of a face flashes that face alone;
+ * one arriving on an EDGE has two faces to light, and this is what splits the
+ * flash between them instead of snapping it from one to the other as a
+ * coordinate crosses zero.
+ */
+const CONTACT_EDGE_SOFTNESS = 0.22;
+
+/**
+ * How far the bead has travelled toward the cavity wall: 0 at the centre, 1
+ * where `bouncingCore` stops it. Measured in MODEL space, because the cavity
+ * is an octahedron of the solid (|x| + |y| + |z| <= inradius * sqrt(3)) while
+ * the path is authored in view space.
+ */
+export function markCoreReach(modelPosition: MarkVec3): number {
+  const room = ATOMA_MARK_CAVITY_INRADIUS - CORE_MODEL_CLEARANCE;
+  if (!(room > 0)) return 0;
+  const l1 = Math.abs(modelPosition[0]) +
+    Math.abs(modelPosition[1]) +
+    Math.abs(modelPosition[2]);
+  return clamp(l1 / (room * Math.sqrt(3)));
+}
+
+/** 0 while the bead is away from the walls, 1 with it against one. */
+export function markContactFlash(reach: number): number {
+  if (!Number.isFinite(reach)) return 0;
+  const t = clamp(
+    (reach - ATOMA_MARK_CONTACT_ONSET) / (1 - ATOMA_MARK_CONTACT_ONSET)
+  );
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * The share of one contact that a given octant's wedge receives, from the
+ * bead's MODEL-space position.
+ *
+ * Opposite octants are complementary on every axis, so the eight shares of any
+ * position sum to exactly 1: an edge REDISTRIBUTES a flash between neighbours
+ * and never invents one.
+ */
+export function markContactShare(position: MarkVec3, octant: MarkOctant): number {
+  const distance = Math.hypot(...position);
+  if (distance < 1e-6) return 1 / 8;
+  let share = 1;
+  for (let axis = 0; axis < 3; axis += 1) {
+    const aligned = position[axis]! * octant[axis]! / distance;
+    share *= clamp(0.5 + aligned / (2 * CONTACT_EDGE_SOFTNESS));
+  }
+  return share;
+}
+
 export interface AtomaMarkRearSpill {
   /** Outer facet index this light escaped through. */
   facet: number;
@@ -516,6 +624,26 @@ export interface AtomaMarkFacetFrame {
   normal: MarkVec3;
   /** Rotated centroid; the depth sort and the cavity/bead groups read its z. */
   centroid: MarkVec3;
+  /**
+   * 0..1 flash: how much of the bead's arrival against a cavity wall belongs to
+   * THIS facet. Both facets of a wedge — the cavity wall the bead lands on and
+   * the outer table in front of it — carry the same value, because a light
+   * inside a slab lights the whole slab and not one of its two faces.
+   */
+  contact: number;
+}
+
+export interface AtomaMarkCoreShape {
+  /** Screen angle of the deformation axis, radians, Pixi rotation. */
+  angle: number;
+  /** Radius multiplier along that axis. 1 when round. */
+  along: number;
+  /** Radius multiplier across it. 1 when round. */
+  across: number;
+  /** 0..1 flattening against the struck wall, along its normal. */
+  squash: number;
+  /** 0..1 elongation along the exit direction, just after release. */
+  stretch: number;
 }
 
 export interface AtomaMarkFrame {
@@ -559,6 +687,14 @@ export interface AtomaMarkFrame {
    * hull vertex at this Z. Not a second depth curve.
    */
   coreScale: number;
+  /**
+   * The bead's SHAPE this frame, as the screen ellipse the renderer draws it
+   * with: `along` and `across` multiply the round bead's radius on the axis at
+   * `angle` (Pixi rotation, y down) and perpendicular to it; both are exactly
+   * 1 whenever the bead is in flight. `squash` and `stretch` are the 3D
+   * deformations those were projected from, for tests and for the record.
+   */
+  coreShape: AtomaMarkCoreShape;
   /** Convex outline of the projected hull: the mask that keeps light inside. */
   silhouette: AtomaMarkPoint[];
   pulse: number;
@@ -661,6 +797,68 @@ function project(vertex: MarkVec3): AtomaMarkPoint {
   };
 }
 
+function triangleWaveSlope(value: number) {
+  const phase = (value % 4 + 4) % 4;
+  return phase < 2 ? 1 : -1;
+}
+
+/** Fast rise, slow relax: 0 at both ends, 1 at a third of the way. */
+function releaseBump(t: number) {
+  if (!(t > 0) || t >= 1) return 0;
+  return 6.75 * t * (1 - t) * (1 - t);
+}
+
+/**
+ * One axis of the bead's travel, read off its triangle wave at `phase`.
+ * `magnitude` is the wave's reach scaled by the dwell gain and may exceed 1:
+ * the part past 1 is where the wall stops the centre, and it is read three
+ * ways — the clipped `value` the position uses, the `compression` the wall
+ * is doing to the bead, and the `release` it is relaxing from on the way back.
+ */
+interface CoreAxis {
+  value: number;
+  compression: number;
+  release: number;
+  /** 0..1 as this axis closes on its wall over the last stretch span. */
+  approach: number;
+}
+
+function coreAxis(phase: number): CoreAxis {
+  const raw = triangleWave(phase) * (1 + ATOMA_MARK_CORE_DWELL);
+  const magnitude = Math.abs(raw);
+  const value = clamp(raw, -1, 1);
+  // 0 at first touch, 1 at the deepest, back to 0 at release: the excess the
+  // wall refuses is a triangle over the dwell already; smoothed so the
+  // flattening has no corner at its deepest point.
+  const excess = clamp((magnitude - 1) / ATOMA_MARK_CORE_DWELL);
+  const compression = excess * excess * (3 - 2 * excess);
+  // Departing: this axis is inside the wall's reach and its magnitude is
+  // FALLING. Read off the wave's own phase, so a neighbouring axis overtaking
+  // it mid-flight cannot cut the relaxation short.
+  const departing = magnitude < 1 &&
+    Math.sign(raw) * triangleWaveSlope(phase) < 0;
+  const release = departing
+    ? releaseBump((1 - magnitude) / ATOMA_MARK_CORE_STRETCH_SPAN)
+    : 0;
+  // Closing on the next wall. The stretch from the LAST wall must be gone
+  // before this one is touched, or two contacts in quick succession — a
+  // corner — snap the bead from elongated to flat in one frame.
+  const approach = magnitude >= 1
+    ? 1
+    : (departing ? 0 : clamp((magnitude - 1 + ATOMA_MARK_CORE_STRETCH_SPAN) /
+        ATOMA_MARK_CORE_STRETCH_SPAN));
+  return { value, compression, release, approach };
+}
+
+/** The bead's three travel axes at `seconds`. */
+function coreAxes(seconds: number): [CoreAxis, CoreAxis, CoreAxis] {
+  return [
+    coreAxis(seconds * ATOMA_MARK_CORE_SPEED_U + 1),
+    coreAxis(seconds * ATOMA_MARK_CORE_SPEED_V + 1),
+    coreAxis(seconds * ATOMA_MARK_CORE_SPEED_W + 1),
+  ];
+}
+
 /**
  * Three triangle waves produce a continuous reflected path through the CAVITY.
  * Two of them keep the screen-space wander the mark always had; the third moves
@@ -668,10 +866,11 @@ function project(vertex: MarkVec3): AtomaMarkPoint {
  * cavity planes, inset by the bead's own radius — so a bead at its limit is
  * touching a wall the viewer can see, and never floats past the outline.
  */
-function bouncingCore(seconds: number, rows: readonly [MarkVec3, MarkVec3, MarkVec3]): MarkVec3 {
-  const u = triangleWave(seconds * ATOMA_MARK_CORE_SPEED_U + 1);
-  const v = triangleWave(seconds * ATOMA_MARK_CORE_SPEED_V + 1);
-  const w = triangleWave(seconds * ATOMA_MARK_CORE_SPEED_W + 1);
+function bouncingCore(
+  axes: readonly [CoreAxis, CoreAxis, CoreAxis],
+  rows: readonly [MarkVec3, MarkVec3, MarkVec3]
+): MarkVec3 {
+  const [u, v, w] = [axes[0].value, axes[1].value, axes[2].value];
   const raw: MarkVec3 = [(u + v) / 2, (u - v) / 2, w * 0.85];
   const distance = Math.hypot(...raw);
   if (distance < 1e-6) return [0, 0, 0];
@@ -691,6 +890,73 @@ function bouncingCore(seconds: number, rows: readonly [MarkVec3, MarkVec3, MarkV
   const l1 = Math.abs(model[0]) + Math.abs(model[1]) + Math.abs(model[2]);
   const travel = room * Math.sqrt(3) / Math.max(1e-6, l1) * travelFraction;
   return [direction[0] * travel, direction[1] * travel, direction[2] * travel];
+}
+
+/** Half-width of the window the stretch axis is read over, in seconds. */
+const CORE_VELOCITY_WINDOW_S = 0.04;
+
+const ROUND_CORE: AtomaMarkCoreShape = {
+  angle: 0,
+  along: 1,
+  across: 1,
+  squash: 0,
+  stretch: 0,
+};
+
+/**
+ * The screen ellipse of a sphere deformed by `factor` along the unit view-space
+ * `axis`, bulging across it so its volume is kept: its silhouette's semi-axis
+ * along the projected axis is the support of that ellipsoid in that direction,
+ * and across it the bulge alone. An axis pointing at the camera therefore
+ * draws a slightly larger — never a flattened — disc, which is what a sphere
+ * squashed along the line of sight looks like.
+ */
+function projectCoreShape(
+  axis: MarkVec3,
+  factor: number,
+  squash: number,
+  stretch: number
+): AtomaMarkCoreShape {
+  const length = Math.hypot(...axis);
+  if (length < 1e-6 || !(factor > 0)) return ROUND_CORE;
+  const unit: MarkVec3 = [axis[0] / length, axis[1] / length, axis[2] / length];
+  const inPlane = Math.hypot(unit[0], unit[1]);
+  const bulge = 1 / Math.sqrt(factor);
+  return {
+    // Screen y is down; the axis is drawn as a Pixi rotation of the x axis.
+    angle: inPlane < 1e-6 ? 0 : Math.atan2(-unit[1], unit[0]),
+    along: Math.sqrt(factor * factor * inPlane * inPlane + bulge * bulge * unit[2] * unit[2]),
+    across: bulge,
+    squash,
+    stretch,
+  };
+}
+
+/**
+ * Squash against the wall, stretch on the way off it — and nothing at all
+ * anywhere else. The compression flattens the bead along the normal of the
+ * wall it is held against (the shares of the eight octants, blended, so a
+ * corner hit flattens against the corner); the stretch elongates it along
+ * the direction it is actually moving. Against a wall the squash wins:
+ * a bead cannot be both held and gone.
+ */
+function coreShapeFor(
+  axes: readonly [CoreAxis, CoreAxis, CoreAxis],
+  wallNormal: MarkVec3,
+  velocity: MarkVec3
+): AtomaMarkCoreShape {
+  const compression = Math.max(axes[0].compression, axes[1].compression, axes[2].compression);
+  if (compression > 0) {
+    const squash = ATOMA_MARK_CORE_SQUASH * compression;
+    return projectCoreShape(wallNormal, 1 - squash, compression, 0);
+  }
+  const release = Math.max(axes[0].release, axes[1].release, axes[2].release) *
+    (1 - Math.max(axes[0].approach, axes[1].approach, axes[2].approach));
+  if (release > 0) {
+    const stretch = ATOMA_MARK_CORE_STRETCH * release;
+    return projectCoreShape(velocity, 1 + stretch, 0, release);
+  }
+  return ROUND_CORE;
 }
 
 function collectRearSpills(
@@ -1555,13 +1821,43 @@ export function buildAtomaMarkFrame(elapsedMs: number): AtomaMarkFrame {
 
   const points = ATOMA_MARK_MESH.hullPoints.map((point) => apply(rows, point));
   const projected = points.map(project);
-  const facets = ATOMA_MARK_MESH.facets.map((facet): AtomaMarkFacetFrame => ({
-    facet: facet.triangle,
-    normal: apply(rows, facet.normal),
-    centroid: apply(rows, facet.centroid),
-  }));
 
-  const core3 = bouncingCore(seconds, rows);
+  const axes = coreAxes(seconds);
+  const core3 = bouncingCore(axes, rows);
+  // The bead's path is authored in view space; the cavity it bounces in turns
+  // with the crystal, so which wall it just reached is a MODEL-space question.
+  const coreModel = applyTransposed(rows, core3);
+  const contactFlash = markContactFlash(markCoreReach(coreModel));
+  // The wall the bead is against, as the share-weighted sum of the outer
+  // normals — one normal for a face hit, a blend for an edge or a corner.
+  const wallNormal: [number, number, number] = [0, 0, 0];
+  const facets = ATOMA_MARK_MESH.facets.map((facet): AtomaMarkFacetFrame => {
+    const normal = apply(rows, facet.normal);
+    const share = contactFlash > 0 ? markContactShare(coreModel, facet.octant) : 0;
+    if (facet.part === 'outer' && share > 0) {
+      wallNormal[0] += normal[0] * share;
+      wallNormal[1] += normal[1] * share;
+      wallNormal[2] += normal[2] * share;
+    }
+    return {
+      facet: facet.triangle,
+      normal,
+      centroid: apply(rows, facet.centroid),
+      contact: contactFlash * share,
+    };
+  });
+  // Where the bead is going, for the stretch: its path over the frames around
+  // this one, in the same pose (the pose turns a degree in that window, which
+  // is nothing for an axis). Wider than one frame ON PURPOSE: the path bends
+  // the instant another axis clips against its wall or lets go, and a
+  // one-frame difference would swing the stretch axis with it.
+  const behind = bouncingCore(coreAxes(seconds - CORE_VELOCITY_WINDOW_S), rows);
+  const ahead = bouncingCore(coreAxes(seconds + CORE_VELOCITY_WINDOW_S), rows);
+  const coreShape = coreShapeFor(axes, wallNormal, [
+    ahead[0] - behind[0],
+    ahead[1] - behind[1],
+    ahead[2] - behind[2],
+  ]);
   const order = facets
     .map((_facet, index) => index)
     .sort((left, right) => facets[left]!.centroid[2] - facets[right]!.centroid[2]);
@@ -1608,6 +1904,7 @@ export function buildAtomaMarkFrame(elapsedMs: number): AtomaMarkFrame {
     corePosition: project(core3),
     coreDepth,
     coreScale: markPerspectiveAt(core3[2]),
+    coreShape,
     silhouette: convexHull(outerHull),
     pulse,
     scale: 1,

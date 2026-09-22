@@ -985,7 +985,15 @@ export function attachAtomaMark(
     const coreGain = markSurgeGain(surge, MARK_SURGE.coreScale);
     const glowGain = markSurgeGain(surge, MARK_SURGE.glassGlow);
     core.position.set(coreX, coreY);
-    core.scale.set(frame.coreScale * (1 + frame.pulse * 0.035) * coreGain);
+    // RUBBER. The frame hands the bead's shape as a screen ellipse: flattened
+    // against the wall it is held on, drawn out along its exit, round in
+    // flight. The bloom is a child and deforms with it — a compressed light's
+    // halo compresses — and the same shape goes into the backdrop copy, or the
+    // front glass would transmit a round bead over a flattened one.
+    const shape = frame.coreShape;
+    const coreBase = frame.coreScale * (1 + frame.pulse * 0.035) * coreGain;
+    core.rotation = shape.angle;
+    core.scale.set(coreBase * shape.along, coreBase * shape.across);
     core.visible = beadVisible;
     bloom.alpha = Math.min(
       1,
@@ -996,7 +1004,11 @@ export function attachAtomaMark(
     transmittedPool.alpha = Math.min(1, forward * (0.85 + frame.pulse * 0.15) * glowGain);
     transmittedPool.visible = beadVisible;
     transmittedCore.position.set(coreX, coreY);
-    transmittedCore.scale.set(frame.coreScale * coreGain);
+    transmittedCore.rotation = shape.angle;
+    transmittedCore.scale.set(
+      frame.coreScale * coreGain * shape.along,
+      frame.coreScale * coreGain * shape.across
+    );
     transmittedCore.alpha = Math.min(1, forward * (0.88 + frame.pulse * 0.12) * glowGain);
     transmittedCore.visible = beadVisible;
     if (surge > 0 && projection) {

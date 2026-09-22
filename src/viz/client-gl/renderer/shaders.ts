@@ -213,6 +213,45 @@ export const POINTER_LIGHT_WGSL = /* wgsl */ `
  * still comes from the material; this is only the source's angular size, so a
  * polished diamond reflects a compact light instead of an infinite point.
  */
+/**
+ * CONTACT FLASH — how loudly a wedge answers the bead landing on its wall.
+ *
+ * The CPU decides WHEN and WHERE: `buildAtomaMarkFrame` publishes a 0..1
+ * contact per facet, both facets of a wedge carrying the same value, and the
+ * shell hands it over as `aSurface.z`. These three numbers are the only thing
+ * that says what a contact LOOKS like, and they live here beside the other
+ * look constants of this shader rather than being spelled a second time on the
+ * CPU.
+ *
+ * It is EMISSIVE, and that is the whole point of the lane. The first cut of
+ * this lifted the facet's TINT instead, and the tint cannot carry it: `cover`
+ * collapses the lit body exactly where the transmitted filament is brightest —
+ * which is exactly where a bead against the glass is — and `nearInner` drops
+ * the cavity wall standing between the bead and the camera altogether. So the
+ * one wedge with something to say was the one wedge muted. Emission is added
+ * after both.
+ *
+ * `GLOW` is the face, `ARETE` its own three edges. The edges are what make the
+ * WALL read: the outer table and the cavity wall behind it are one wedge a
+ * thickness apart, so two outlines light up slightly offset instead of one
+ * painted triangle.
+ */
+export const MARK_CONTACT_GLOW = 0.3;
+export const MARK_CONTACT_ARETE = 0.55;
+/**
+ * COVERAGE the struck cavity wall gains. The near wall is image-only — its
+ * alpha is the bead's ghost and nothing else — and alpha MULTIPLIES the lit
+ * colour, so without this the emission on the triangle the bead is actually
+ * touching would be multiplied by zero.
+ *
+ * This is the one place the bead is allowed to move density, and it is not the
+ * defect that rule was written against: that one keyed every facet's alpha on
+ * its ROLE relative to the bead, so all eight flipped as the bead crossed the
+ * cavity several times a second. This is one wall, the one the bead reached,
+ * for as long as it is there, on a curve that returns to zero.
+ */
+export const MARK_CONTACT_COVERAGE = 0.4;
+
 export const MARK_POINTER_SOURCE_RADIUS_MODEL = 0.055;
 const MARK_POINTER_SOURCE_RADIUS_SQ = MARK_POINTER_SOURCE_RADIUS_MODEL ** 2;
 const MARK_POINTER_LOBE_SUPPORT_INNER = 6.25;
@@ -280,7 +319,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     @location(1) aWorld: vec3<f32>,
     @location(2) aNormal: vec3<f32>,
     @location(3) aTint: vec3<f32>,
-    @location(4) aSurface: vec2<f32>,
+    @location(4) aSurface: vec3<f32>,
     @location(5) aMaterial: vec4<f32>,
     @location(6) aFinish: vec3<f32>,
     @location(7) aBary: vec3<f32>,
@@ -291,7 +330,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     @location(0) vWorld: vec3<f32>,
     @location(1) vNormal: vec3<f32>,
     @location(2) vTint: vec3<f32>,
-    @location(3) vSurface: vec2<f32>,
+    @location(3) vSurface: vec3<f32>,
     @location(4) vColor: vec4<f32>,
     @location(5) vMaterial: vec4<f32>,
     @location(6) vFinish: vec3<f32>,
@@ -336,7 +375,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     @location(0) vWorld: vec3<f32>,
     @location(1) vNormal: vec3<f32>,
     @location(2) vTint: vec3<f32>,
-    @location(3) vSurface: vec2<f32>,
+    @location(3) vSurface: vec3<f32>,
     @location(4) vColor: vec4<f32>,
     @location(5) vMaterial: vec4<f32>,
     @location(6) vFinish: vec3<f32>,
@@ -819,7 +858,19 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
       transmitted * markUniforms.uRefract,
       outer
     );
-    let lit = surface + interior;
+    // CONTACT. The wedge the bead has just landed on. Both of its triangles —
+    // the cavity wall the bead is against and the table in front of it — carry
+    // the same value, so what lights up is the WALL, two outlines a thickness
+    // apart, rather than one painted face. Emissive on purpose: see
+    // MARK_CONTACT_GLOW for why neither the tint nor the body could carry it.
+    let contact = vSurface.z;
+    let contactBary = min(vBary.x, min(vBary.y, vBary.z));
+    let contactEdge = 1.0 - smoothstep(0.0, 0.14, contactBary);
+    // A wall lit by the bead takes some of the bead's own colour, not only its
+    // rank hue — a filament against glass is white before it is teal.
+    let contactGlow = mix(vTint, markUniforms.uCoreTint, 0.3) * contact *
+      (${MARK_CONTACT_GLOW.toFixed(2)} + ${MARK_CONTACT_ARETE.toFixed(2)} * contactEdge);
+    let lit = surface + interior + contactGlow;
     // The bead only NUDGES alpha. It crosses the cavity several times a second,
     // so whatever it adds here reads as flicker rather than as light; its
     // brightness belongs in LIT, where it lands on colour instead of density.
@@ -843,7 +894,8 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
         mix(coreImage, vSurface.x * opacity, 1.0 - nearInner),
         1.0,
         outer
-      ) + core * 0.1 * (1.0 - nearInner),
+      ) + core * 0.1 * (1.0 - nearInner) +
+        contact * nearInner * ${MARK_CONTACT_COVERAGE.toFixed(2)},
       0.0,
       1.0
     );
@@ -864,7 +916,7 @@ export const MARK_SHELL_GLSL_VERTEX = /* glsl */ `#version 300 es
   in vec3 aWorld;
   in vec3 aNormal;
   in vec3 aTint;
-  in vec2 aSurface;
+  in vec3 aSurface;
   in vec4 aMaterial;
   in vec3 aFinish;
   in vec3 aBary;
@@ -879,7 +931,7 @@ export const MARK_SHELL_GLSL_VERTEX = /* glsl */ `#version 300 es
   out vec3 vWorld;
   out vec3 vNormal;
   out vec3 vTint;
-  out vec2 vSurface;
+  out vec3 vSurface;
   out vec4 vColor;
   out vec4 vMaterial;
   out vec3 vFinish;
@@ -910,7 +962,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `#version 300 es
   in vec3 vWorld;
   in vec3 vNormal;
   in vec3 vTint;
-  in vec2 vSurface;
+  in vec3 vSurface;
   in vec4 vColor;
   in vec4 vMaterial;
   in vec3 vFinish;
@@ -1165,14 +1217,21 @@ export const MARK_SHELL_GLSL = /* glsl */ `#version 300 es
       split * 0.9 * bounce +
       vec3(0.75, 0.88, 1.0) * (pow(1.0 - nDotV, 5.0) * uRim) * (1.0 - nearInner);
     vec3 interior = mix(uCoreTint * core * (1.0 - nearInner), transmitted * uRefract, outer);
-    vec3 lit = surface + interior;
+    // Same contact flash as the WGSL path; keep the two in step.
+    float contact = vSurface.z;
+    float contactBary = min(vBary.x, min(vBary.y, vBary.z));
+    float contactEdge = 1.0 - smoothstep(0.0, 0.14, contactBary);
+    vec3 contactGlow = mix(vTint, uCoreTint, 0.3) * contact *
+      (${MARK_CONTACT_GLOW.toFixed(2)} + ${MARK_CONTACT_ARETE.toFixed(2)} * contactEdge);
+    vec3 lit = surface + interior + contactGlow;
     // Same coverage model as the WGSL path; keep the two in step.
     float alpha = clamp(
       mix(
         mix(coreImage, vSurface.x * opacity, 1.0 - nearInner),
         1.0,
         outer
-      ) + core * 0.1 * (1.0 - nearInner),
+      ) + core * 0.1 * (1.0 - nearInner) +
+        contact * nearInner * ${MARK_CONTACT_COVERAGE.toFixed(2)},
       0.0,
       1.0
     );
