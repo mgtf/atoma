@@ -69,6 +69,7 @@ import {
   viewFrameGutterRects,
   VIEW_FRAME_CONTENT_TOP,
   VIEW_FRAME_PAD,
+  VIEW_FRAME_TITLE_SIZE,
   VIEW_FRAME_TITLE_Y,
 } from '../src/viz/client-gl/renderer/view-frame.js';
 import { overlayMenuClip } from '../src/viz/client-gl/renderer/overlay-menu-clip.js';
@@ -4826,10 +4827,12 @@ describe('drawRuns behavior', () => {
     const title = ctx.texts.find((text) => text.value === 'Stopwatch E2E two');
     expect(title, 'the panel must name the project').toBeDefined();
     expect(title!.x).toBe(pane.leftX + 14);
-    // Above the selector, and by the height the selector was pushed down by.
-    expect(title!.y).toBeLessThan(runsPickerControlLayout(WIDTH).y);
-    expect(runsPickerControlLayout(WIDTH).y - title!.y)
-      .toBeGreaterThanOrEqual(RUNS_PROJECT_TITLE_HEIGHT);
+    // On the SAME title line, at the SAME size, with the first control on the
+    // same content line as every other view — their constants, not a second
+    // set that merely looks similar.
+    expect(title!.y).toBe(pane.top + VIEW_FRAME_TITLE_Y);
+    expect((title!.options as { size?: number }).size).toBe(VIEW_FRAME_TITLE_SIZE);
+    expect(runsPickerControlLayout(WIDTH).y).toBe(pane.top + VIEW_FRAME_CONTENT_TOP);
   });
 
   it('says so when a run belongs to no project at all', () => {

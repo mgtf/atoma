@@ -63,7 +63,12 @@ import {
 import { LLM_FAMILY_COLOR, eventKindColor, llmRoleColor } from '../event-palette.js';
 import { drawScrollbarThumb } from '../scroll-pane.js';
 import { timelineConnectorGeometry } from '../timeline-rails.js';
-import { viewFrame } from '../view-frame.js';
+import {
+  viewFrame,
+  VIEW_FRAME_CONTENT_TOP,
+  VIEW_FRAME_TITLE_SIZE,
+  VIEW_FRAME_TITLE_Y,
+} from '../view-frame.js';
 import { drawAtomDetail } from './atom-detail.js';
 
 const RUN_STATUS_COLOR: Record<RunStatus, number> = {
@@ -209,10 +214,18 @@ export const RUNS_TWO_PANE_MIN_WIDTH = 1050 - GPU_LAYOUT.sidebarWidth;
  * native control the DOM bridge positions, and a height that depended on the
  * data would be two definitions of one layout waiting to disagree. A run with
  * no project says so instead of leaving the row blank.
+ *
+ * It is titled on the SAME terms as every other view, and with their numbers
+ * rather than a second set that merely looks similar: `VIEW_FRAME_TITLE_SIZE`
+ * at `VIEW_FRAME_TITLE_Y`, with the first control at `VIEW_FRAME_CONTENT_TOP`.
+ * It was 13px at y=8 with the selector 22px under it, which read as a caption
+ * squeezed against the control rather than a heading with air (owner, the
+ * same day). The constant below is what that band pushed everything else down
+ * by: the panel used to open on the selector at `top + 8`.
  */
-export const RUNS_PROJECT_TITLE_HEIGHT = 22;
-const RUNS_PROJECT_TITLE_TOP = 8;
-const RUNS_PROJECT_TITLE_SIZE = 13;
+export const RUNS_PROJECT_TITLE_HEIGHT = VIEW_FRAME_CONTENT_TOP - 8;
+const RUNS_PROJECT_TITLE_TOP = VIEW_FRAME_TITLE_Y;
+const RUNS_PROJECT_TITLE_SIZE = VIEW_FRAME_TITLE_SIZE;
 
 /** Native run selector geometry inside the primary Runs panel. */
 export const RUN_PICKER_CONTROL_TOP =
