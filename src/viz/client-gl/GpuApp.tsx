@@ -153,12 +153,11 @@ function GpuAppContent({
     []
   );
   /**
-   * What the scene is asked to move for: the destination, the rail row it
-   * occupies and the group that row belongs to. The camera and the cube read
-   * the route from it through one shared tracker, so the travelling shot and
-   * the turn are one beat: distance sets the amplitude, the group boundary
-   * sets the axis the box turns about. A destination with no row of its own
-   * (Settings, from the account menu) reports -1 and gets the short beat.
+   * What the box is asked to turn for: the destination, the rail row it
+   * occupies and the group that row belongs to. Rail rows set how long the
+   * turn lasts, and the group boundary sets the axis it turns about. A
+   * destination with no row of its own (Settings, from the account menu)
+   * reports -1 and gets the shortest turn.
    */
   const sceneNavigation = useMemo(
     () => ({
@@ -1057,11 +1056,7 @@ function GpuAppContent({
           have done only the last of the three. */}
       <div className="gpu-scene-host" inert={previewOpen}>
       <CubeTurnPlane mode={state.sceneCameraMode} navigation={sceneNavigation}>
-      <SceneCameraPlane
-        mode={state.sceneCameraMode}
-        navigation={sceneNavigation}
-        onSettled={cameraSettled}
-      >
+      <SceneCameraPlane mode={state.sceneCameraMode} onSettled={cameraSettled}>
         <GpuSurface
           data={data}
           releaseVersion={RELEASE_VERSION}

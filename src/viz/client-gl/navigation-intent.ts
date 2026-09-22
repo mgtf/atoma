@@ -2,14 +2,14 @@ import { useCallback, useRef } from 'react';
 import type { SceneCameraMode } from './scene-camera.js';
 
 /**
- * WHAT A ROUTE WAS, told once and read by everything that moves for it.
+ * WHAT A ROUTE WAS: how far the click travelled down the rail, in which
+ * direction, and whether it left the group it was in.
  *
- * The camera's travelling shot and the cube turn are two halves of one beat,
- * so they must agree on what just happened — how far the click travelled down
- * the rail, in which direction, and whether it left the group it was in. They
- * read it from here rather than each keeping their own memory of the last
- * destination, which is how the two would drift apart on the first route that
- * reached them in a different order.
+ * The cube turn reads all three — rows set the duration, the group boundary
+ * sets the axis, the direction sets which way the box swings. It is kept apart
+ * from the driver because remembering the PREVIOUS destination is the whole
+ * subtlety here, and it belongs to the last committed effect rather than to
+ * the last render.
  */
 
 export interface NavigationIntent {

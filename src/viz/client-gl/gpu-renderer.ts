@@ -116,9 +116,10 @@ import {
   hidePointerLight,
 } from './pointer-light.js';
 import { TooltipLayer } from './renderer/tooltip.js';
-import { publishSceneCapture } from './scene-capture.js';
+import { publishSceneCapture, type SceneStill } from './scene-capture.js';
+import { cubeTurnPlan } from './cube-turn.js';
 import { viewFrameGutterRects } from './renderer/view-frame.js';
-import { navRowDistance, type GpuUiState, type ViewName } from './store.js';
+import { navRowDistance, navRowGroup, type GpuUiState, type ViewName } from './store.js';
 import { GPU_COLORS, GPU_LAYOUT, gpuTextRasterOptions, sidebarWidthForViewport } from './theme.js';
 import { VIZ_VISUAL_DEPTH } from './visual-depth.js';
 import type { AuthUiSnapshot } from './AuthControls.js';
@@ -129,7 +130,6 @@ import {
   sceneCameraEase,
   sceneCameraIsMoving,
   sceneCameraForMode,
-  sceneCameraNavigationShot,
   sceneCameraRenderTransform,
   sceneCameraTransitionDuration,
   sceneCameraViewport,
@@ -1931,11 +1931,11 @@ export class GpuRenderer {
         from: this.previousView,
         to: snapshot.state.view,
         startedAt: performance.now(),
-        durationMs: sceneCameraNavigationShot(navRowDistance(
-          snapshot.data.auth,
-          this.previousView,
-          snapshot.state.view
-        )).durationMs,
+        durationMs: cubeTurnPlan(
+          navRowDistance(snapshot.data.auth, this.previousView, snapshot.state.view),
+          navRowGroup(this.previousView) === navRowGroup(snapshot.state.view),
+          true
+        ).durationMs,
       };
     }
     this.previousView = snapshot.state.view;
@@ -4457,10 +4457,11 @@ export class GpuRenderer {
    * presented. Resolution 1 halves the readback on a retina display, and the
    * face it feeds is rotating away while it is looked at.
    */
-  captureSceneBitmap(): HTMLCanvasElement | null {
+  captureSceneBitmap(): SceneStill | null {
     const width = this.app.screen.width;
     const height = this.app.screen.height;
-    if (this.suspended || width <= 0 || height <= 0) return null;
+    const view = this.snapshot?.state.view;
+    if (this.suspended || !view || width <= 0 || height <= 0) return null;
     let target: RenderTexture | null = null;
     try {
       target = RenderTexture.create({ width, height, resolution: 1 });
@@ -4473,7 +4474,7 @@ export class GpuRenderer {
       const still = this.app.renderer.extract.canvas({ target });
       // `ICanvas` is the platform-agnostic surface; only a real one can be
       // mounted on a face, and a worker canvas here would be a silent blank.
-      return still instanceof HTMLCanvasElement ? still : null;
+      return still instanceof HTMLCanvasElement ? { canvas: still, view } : null;
     } catch (error) {
       console.warn('[viz:gpu] scene capture failed', error);
       return null;

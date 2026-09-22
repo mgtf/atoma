@@ -97,6 +97,21 @@ button, input, textarea, select { font: inherit; }
   width: 100%;
   height: 100%;
 }
+/* THE RAIL, HELD STILL. It is inside the arriving face — the whole scene plane
+   is — so the box is clipped to the content column and the rail is served for
+   the length of the turn by a still of the DESTINATION, pinned above both
+   faces. Its own ground, because a still of a canvas drawn on
+   `backgroundAlpha: 0` carries no background of its own. */
+.gpu-cube__rail {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: none;
+}
+.gpu-cube[data-cube-turn="turning"] .gpu-cube__rail {
+  display: block;
+  background: #0d1726;
+}
 
 .gpu-ui-host {
   z-index: 1;

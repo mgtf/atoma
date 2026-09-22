@@ -5,21 +5,17 @@ import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SceneCameraPlane } from '../src/viz/client-gl/SceneCameraPlane.js';
 import { setReducedMotionOverrideForTests } from '../src/viz/client-gl/renderer/motion.js';
-import {
-  sceneCameraForMode,
-  sceneCameraNavigationShot,
-} from '../src/viz/client-gl/scene-camera.js';
+import { sceneCameraForMode } from '../src/viz/client-gl/scene-camera.js';
 
 /**
- * THE CAMERA DRIVER, from the click that moves it.
+ * THE CAMERA DRIVER.
  *
- * Reaching another section from the rail while the camera is already focused
- * moved nothing: the content swapped under a static lens. What is asserted
- * here is the production path for that click — the same prop the app publishes
- * when `activateView` routes — and it is asserted on the PAINTED matrix, since
+ * The camera moves for a MODE change and for nothing else: routing between two
+ * sections is the cube's move, and the camera holds still through it so the
+ * rail stays where the reader left it. Asserted on the PAINTED matrix, since
  * that one matrix is what the DOM overlays, the Pixi render transform and the
- * inverse hit tests all read. A test that only asked the pure pose functions
- * would have passed while the driver never scheduled a frame.
+ * inverse hit tests all read — a test that only asked the pure pose functions
+ * would pass while the driver never scheduled a frame.
  */
 
 const WIDTH = 1_440;
@@ -36,7 +32,7 @@ function paintedScale(plane: HTMLElement): number {
   return Number(match[1]!.split(',')[0]);
 }
 
-function plane(container: HTMLElement): HTMLElement {
+function pane(container: HTMLElement): HTMLElement {
   const element = container.querySelector<HTMLElement>('[data-scene-camera="perspective"]');
   if (!element) throw new Error('no camera plane');
   return element;
@@ -87,44 +83,23 @@ afterEach(() => {
 });
 
 describe('the scene camera plane', () => {
-  const focused = (key: string, rank: number, onSettled?: () => void) => ({
-    mode: 'focus' as const,
-    navigation: { key, rank, group: 'workspace' },
-    onSettled,
-    children: null,
-  });
+  const plane = (mode: 'overview' | 'focus') => ({ mode, children: null });
 
-  it('plays a travelling shot when the rail routes to another section', () => {
+  it('travels the long approach when the mode changes, and lands exactly', () => {
     const settled = vi.fn();
-    const view = render(createElement(
-      SceneCameraPlane,
-      focused('runs', 1, settled),
-    ));
-    const element = plane(view.container);
+    const view = render(createElement(SceneCameraPlane, { ...plane('overview'), onSettled: settled }));
+    const element = pane(view.container);
     settle();
-    const focus = sceneCameraForMode('focus', WIDTH, HEIGHT).sceneScale;
-    expect(paintedScale(element)).toBeCloseTo(focus, 9);
+    expect(paintedScale(element)).toBeCloseTo(1, 9);
     const arrivals = settled.mock.calls.length;
 
-    view.rerender(createElement(SceneCameraPlane, focused('skills', 3, settled)));
+    view.rerender(createElement(SceneCameraPlane, { ...plane('focus'), onSettled: settled }));
     expect(element.dataset['sceneCameraMotion']).toBe('moving');
-    const startedAt = clock;
-
-    // Departure: the camera eases back along its own axis, so more of the
-    // scene is on screen than the focused crop shows.
-    runFrames(8);
-    const departure = paintedScale(element);
-    expect(departure).toBeLessThan(focus);
-    expect(element.dataset['sceneCameraMotion']).toBe('moving');
-
-    // Landing: the approach carries a little past the pose it settles on.
-    const shot = sceneCameraNavigationShot(2);
-    let punch = departure;
-    while (frames.size > 0 && clock - startedAt < shot.durationMs * 0.92) {
-      runFrames(1);
-      punch = Math.max(punch, paintedScale(element));
-    }
-    expect(punch).toBeGreaterThan(focus);
+    runFrames(6);
+    const focus = sceneCameraForMode('focus', WIDTH, HEIGHT).sceneScale;
+    const midway = paintedScale(element);
+    expect(midway).toBeGreaterThan(1);
+    expect(midway).toBeLessThan(focus);
 
     settle();
     expect(element.dataset['sceneCameraMotion']).toBe('settled');
@@ -133,80 +108,26 @@ describe('the scene camera plane', () => {
     expect(settled.mock.calls.length).toBeGreaterThan(arrivals);
   });
 
-  it('travels further for a longer jump down the rail', () => {
-    const reveal = (fromRank: number, toRank: number) => {
-      const view = render(createElement(
-        SceneCameraPlane,
-        focused('runs', fromRank)
-      ));
-      const element = plane(view.container);
-      settle();
-      view.rerender(createElement(SceneCameraPlane, focused('other', toRank)));
-      let widest = Number.POSITIVE_INFINITY;
-      while (frames.size > 0) {
-        runFrames(1);
-        widest = Math.min(widest, paintedScale(element));
-      }
-      cleanup();
-      clock = 0;
-      return widest;
-    };
-    // Neighbours get a beat; crossing the rail gets the whole move.
-    expect(reveal(0, 5)).toBeLessThan(reveal(0, 1));
-  });
-
-  it('does not move for anything but a change of destination', () => {
-    const settled = vi.fn();
-    const view = render(createElement(
-      SceneCameraPlane,
-      focused('runs', 1, settled),
-    ));
-    const element = plane(view.container);
+  it('holds still for anything that is not a mode change', () => {
+    const view = render(createElement(SceneCameraPlane, plane('focus')));
+    const element = pane(view.container);
     settle();
     const painted = paintedScale(element);
-
-    // A new object for the SAME destination is a re-render, not a route.
-    view.rerender(createElement(SceneCameraPlane, focused('runs', 1, settled)));
+    // A re-render at the same mode schedules nothing: a route belongs to the
+    // box, and a camera that moved for it would take the rail along.
+    view.rerender(createElement(SceneCameraPlane, plane('focus')));
     expect(frames.size).toBe(0);
     expect(element.dataset['sceneCameraMotion']).toBe('settled');
     expect(paintedScale(element)).toBeCloseTo(painted, 12);
   });
 
-  it('honours reduced motion by landing on the pose with no shot at all', () => {
+  it('honours reduced motion by landing on the pose with no travel at all', () => {
     setReducedMotionOverrideForTests(true);
-    const view = render(createElement(SceneCameraPlane, focused('runs', 1)));
-    const element = plane(view.container);
-    const focus = sceneCameraForMode('focus', WIDTH, HEIGHT).sceneScale;
-    expect(frames.size).toBe(0);
-    expect(paintedScale(element)).toBeCloseTo(focus, 9);
-
-    view.rerender(createElement(SceneCameraPlane, focused('skills', 4)));
+    const view = render(createElement(SceneCameraPlane, plane('overview')));
+    const element = pane(view.container);
+    view.rerender(createElement(SceneCameraPlane, plane('focus')));
     expect(frames.size).toBe(0);
     expect(element.dataset['sceneCameraMotion']).toBe('settled');
-    expect(paintedScale(element)).toBeCloseTo(focus, 9);
-  });
-
-  it('keeps the long mode move for arrival and departure', () => {
-    const view = render(createElement(
-      SceneCameraPlane,
-      { mode: 'overview' as const, navigation: { key: 'runs', rank: 1, group: 'workspace' }, children: null },
-    ));
-    const element = plane(view.container);
-    settle();
-    expect(paintedScale(element)).toBeCloseTo(1, 9);
-
-    // Clicking a rail row from the overview changes BOTH the mode and the
-    // destination; that click is the long approach, never a shot on top of it.
-    view.rerender(createElement(
-      SceneCameraPlane,
-      { mode: 'focus' as const, navigation: { key: 'skills', rank: 3, group: 'workspace' }, children: null },
-    ));
-    let widest = Number.POSITIVE_INFINITY;
-    while (frames.size > 0) {
-      runFrames(1);
-      widest = Math.min(widest, paintedScale(element));
-    }
-    expect(widest).toBeGreaterThanOrEqual(1);
     expect(paintedScale(element)).toBeCloseTo(
       sceneCameraForMode('focus', WIDTH, HEIGHT).sceneScale,
       9

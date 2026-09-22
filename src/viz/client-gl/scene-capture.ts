@@ -13,7 +13,19 @@
  * must not hold a reference to it to ask a question between two frames.
  */
 
-type SceneCapture = () => HTMLCanvasElement | null;
+/**
+ * A still, and the view it depicts. The turn needs BOTH faces: the one it
+ * leaves, taken before the renderer redraws, and the destination's, taken once
+ * the renderer has drawn it — the rail is served from that second one, which is
+ * why the row you clicked is lit from the first frame of the turn instead of
+ * catching up when the box lands.
+ */
+export interface SceneStill {
+  readonly canvas: HTMLCanvasElement;
+  readonly view: string;
+}
+
+type SceneCapture = () => SceneStill | null;
 
 let capture: SceneCapture | null = null;
 
@@ -23,7 +35,7 @@ export function publishSceneCapture(next: SceneCapture | null): void {
 }
 
 /** Null whenever no renderer is mounted, or the readback failed. */
-export function captureScene(): HTMLCanvasElement | null {
+export function captureScene(): SceneStill | null {
   try {
     return capture?.() ?? null;
   } catch {

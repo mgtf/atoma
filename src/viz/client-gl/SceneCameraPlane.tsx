@@ -4,16 +4,12 @@ import {
   type ReactNode,
 } from 'react';
 import { prefersReducedMotion } from './renderer/motion.js';
-import { useNavigationTracker, type NavigationIntent } from './navigation-intent.js';
 import {
   applySceneCamera,
   interpolateSceneCamera,
   pinSceneCameraTopRight,
-  sceneCameraAxis,
   sceneCameraEase,
   sceneCameraForMode,
-  sceneCameraNavigationPose,
-  sceneCameraNavigationShot,
   sceneCameraTransitionDuration,
   sceneCameraViewport,
   type SceneCamera,
@@ -38,31 +34,22 @@ function sameCamera(left: SceneCamera, right: SceneCamera): boolean {
  * to the shared camera registry, so rendering and inverse hit-testing cannot
  * observe different points in the travelling shot.
  *
- * Two intents reach it. A MODE change is the long move between the whole-scene
- * overview and the focused content column. A change of DESTINATION at an
- * unchanged mode is the navigation shot: the same axis, travelled out and back
- * in one beat, so reaching a section from the rail is a camera move rather
- * than a silent content swap under a static lens.
+ * It moves for a MODE change and for nothing else — the long approach between
+ * the whole-scene overview and the focused content column. Routing between two
+ * sections is the CUBE's move (`cube-turn.ts`), and the camera deliberately
+ * holds still through it: the rail has to stay where the reader left it, and
+ * any pose the camera travelled would take the rail with it.
  */
 export function SceneCameraPlane({
   mode,
-  navigation,
   onSettled,
   children,
 }: {
   mode: SceneCameraMode;
-  navigation?: NavigationIntent;
   onSettled?: () => void;
   children: ReactNode;
 }) {
   const planeRef = useRef<HTMLDivElement>(null);
-  // The route is read from the shared tracker, never from the painted pose: a
-  // navigation shot begins and ends on the same pose, so only the intent
-  // records that one was asked for.
-  const readRoute = useNavigationTracker();
-  const navigationKey = navigation?.key ?? null;
-  const navigationRank = navigation?.rank ?? -1;
-  const navigationGroup = navigation?.group ?? '';
 
   useLayoutEffect(() => {
     const plane = planeRef.current;
@@ -70,7 +57,6 @@ export function SceneCameraPlane({
     let frameRequest: number | null = null;
     let disposed = false;
 
-    const { navigated, route } = readRoute(mode, navigation);
 
     const targetCamera = () => sceneCameraForMode(
       mode,
@@ -110,21 +96,7 @@ export function SceneCameraPlane({
 
     const animatable = typeof requestAnimationFrame !== 'undefined' &&
       !prefersReducedMotion();
-    if (animatable && navigated && mode === 'focus') {
-      // The rail moved the reader sideways at an unchanged mode. Depart from
-      // where the camera actually stands rather than from the nominal focus
-      // pose, so a second click during the first shot continues the move
-      // instead of cutting back to focus for it.
-      const shot = sceneCameraNavigationShot(route.rowDistance);
-      const fromAxis = sceneCameraAxis(current, plane.clientWidth, plane.clientHeight);
-      travel(shot.durationMs, (progress) => sceneCameraNavigationPose(
-        progress,
-        shot,
-        plane.clientWidth,
-        plane.clientHeight,
-        fromAxis
-      ));
-    } else if (animatable && !sameCamera(current, targetCamera())) {
+    if (animatable && !sameCamera(current, targetCamera())) {
       travel(sceneCameraTransitionDuration(mode), (progress) => pinSceneCameraTopRight(
         interpolateSceneCamera(
           current,
@@ -152,9 +124,7 @@ export function SceneCameraPlane({
       observer?.disconnect();
       if (frameRequest !== null) cancelAnimationFrame(frameRequest);
     };
-    // `navigation` is read through its parts: a new object for the same
-    // destination is a re-render, never a route.
-  }, [mode, navigationKey, navigationRank, navigationGroup, onSettled, readRoute]);
+  }, [mode, onSettled]);
 
   return (
     <div

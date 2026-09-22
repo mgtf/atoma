@@ -7,39 +7,54 @@ import {
 } from './cube-turn.js';
 import { useNavigationTracker, type NavigationIntent } from './navigation-intent.js';
 import { captureScene } from './scene-capture.js';
-import type { SceneCameraMode } from './scene-camera.js';
+import {
+  projectScenePointInFrame,
+  sceneCameraViewport,
+  type SceneCameraMode,
+} from './scene-camera.js';
+import { sidebarWidthForViewport } from './theme.js';
+
+/** Mounts a still on a layer, replacing whatever it held. */
+function mountStill(layer: HTMLElement, still: HTMLCanvasElement): void {
+  still.className = 'gpu-cube__still';
+  layer.replaceChildren(still);
+}
 
 /**
- * Mounts the still of the screen being left onto its face.
+ * Where the rail ends and the content column begins, ON SCREEN.
  *
- * Taken in a LAYOUT effect, which is the last moment the scene still holds the
- * view being left: the renderer redraws from an ordinary effect, after paint.
- * False means no still — no renderer, a suspended one, or a readback the
- * browser refused — and the caller then skips the turn rather than swinging an
- * empty face through the frame.
+ * The rail's width is a SOURCE measurement and the focused camera crops it, so
+ * the boundary has to be projected through the live camera frame rather than
+ * read off the layout. The frame is asked of the scene plane INSIDE the face —
+ * `sceneCameraViewport` looks upwards from the element it is given, and the
+ * plane is this face's child, not its ancestor. Null means there is no frame
+ * to ask, and the caller then declines the turn rather than cutting the column
+ * at a guess.
  */
-function mountLeavingFace(face: HTMLElement | null): boolean {
-  if (!face) return false;
-  const still = captureScene();
-  if (!still) {
-    face.replaceChildren();
-    return false;
-  }
-  still.className = 'gpu-cube__still';
-  face.replaceChildren(still);
-  return true;
+function contentColumnLeft(face: Element): number | null {
+  const plane = face.querySelector('[data-scene-camera="perspective"]');
+  const frame = plane === null ? null : sceneCameraViewport(plane);
+  if (!frame) return null;
+  const rail = sidebarWidthForViewport(frame.width);
+  return projectScenePointInFrame({ x: rail, y: 0 }, frame).x;
 }
 
 /**
  * THE CUBE TURN, driven.
  *
- * Wraps the scene plane in the face of a box and turns that box a quarter of a
- * revolution whenever the rail routes somewhere else. The face being reached
- * is the live scene — canvas AND DOM overlays in one transformed subtree, so a
- * form keeps its state and stays where it belongs on the face. The face being
- * left is a still taken from the renderer, which is why it carries no
- * overlays: the DOM of the view being left is already gone when the turn
- * begins, and a bitmap has none to give back.
+ * Turns the content column a quarter of a revolution whenever the rail routes
+ * somewhere else, and leaves the rail alone. The face being reached is the
+ * live scene — canvas AND DOM overlays in one transformed subtree, so a form
+ * keeps its state and stays where it belongs on the face. The face being left
+ * is a still, which is why it carries no overlays: the DOM of the view being
+ * left is already gone when the turn begins.
+ *
+ * The rail is the part that must NOT move, and it lives inside the arriving
+ * face, so it is clipped out of the box and served from a still of the
+ * DESTINATION for the length of the turn. That still can only be taken a frame
+ * late — the renderer draws from an ordinary effect, after paint — so the
+ * driver asks each frame until it gets one that depicts the destination, and
+ * never pins the view being left over the rail.
  *
  * Canvas pointer input is suspended while the box moves. The inverse hit test
  * knows about the camera, not about the box, so a click during the turn would
@@ -59,6 +74,7 @@ export function CubeTurnPlane({
   const cubeRef = useRef<HTMLDivElement>(null);
   const leavingRef = useRef<HTMLDivElement>(null);
   const arrivingRef = useRef<HTMLDivElement>(null);
+  const railRef = useRef<HTMLDivElement>(null);
   const readRoute = useNavigationTracker();
   const navigationKey = navigation?.key ?? null;
   const navigationRank = navigation?.rank ?? -1;
@@ -68,50 +84,77 @@ export function CubeTurnPlane({
     const cube = cubeRef.current;
     const leaving = leavingRef.current;
     const arriving = arrivingRef.current;
-    if (!cube || !leaving || !arriving) return;
+    const rail = railRef.current;
+    if (!cube || !leaving || !arriving || !rail) return;
     const { navigated, route } = readRoute(mode, navigation);
 
     const rest = () => {
       cube.dataset['cubeTurn'] = 'idle';
       cube.dataset['cubeTurnProgress'] = '1';
-      leaving.style.transform = CUBE_TURN_AT_REST;
-      arriving.style.transform = CUBE_TURN_AT_REST;
-      leaving.style.zIndex = '';
-      arriving.style.zIndex = '';
-      // The still is a full-screen bitmap. Holding it between routes would
-      // keep a screen of pixels alive for nothing.
+      for (const layer of [leaving, arriving, rail]) {
+        layer.style.transform = CUBE_TURN_AT_REST;
+        layer.style.transformOrigin = '';
+        layer.style.clipPath = '';
+        layer.style.zIndex = '';
+      }
+      // The stills are whole screens of pixels. Holding them between routes
+      // would keep two of them alive for nothing.
       leaving.replaceChildren();
+      rail.replaceChildren();
     };
 
     const turnable = navigated &&
       mode === 'focus' &&
       typeof requestAnimationFrame !== 'undefined' &&
-      !prefersReducedMotion() &&
-      mountLeavingFace(leaving);
-    if (!turnable) {
+      !prefersReducedMotion();
+    const columnLeft = turnable ? contentColumnLeft(arriving) : null;
+    const leavingStill = columnLeft === null ? null : captureScene();
+    if (columnLeft === null || !leavingStill) {
       rest();
       return;
     }
 
     const plan = cubeTurnPlan(route.rowDistance, route.sameGroup, route.descending);
+    const destination = navigationKey;
     const startedAt = performance.now();
     let frameRequest: number | null = null;
     let disposed = false;
+    let railPinned = false;
+    mountStill(leaving, leavingStill.canvas);
     cube.dataset['cubeTurn'] = 'turning';
     cube.dataset['cubeTurnAxis'] = plan.axis;
+
     const paint = (progress: number) => {
       const frame = cubeTurnFrame(
         progress,
         plan,
         cube.clientWidth,
-        cube.clientHeight
+        cube.clientHeight,
+        columnLeft
       );
+      for (const layer of [leaving, arriving]) {
+        layer.style.transformOrigin = frame.transformOrigin;
+        layer.style.clipPath = frame.columnClip;
+      }
       leaving.style.transform = frame.outgoingTransform;
       arriving.style.transform = frame.incomingTransform;
       leaving.style.zIndex = frame.outgoingOnTop ? '2' : '1';
       arriving.style.zIndex = frame.outgoingOnTop ? '1' : '2';
+      rail.style.clipPath = frame.railClip;
       cube.dataset['cubeTurnProgress'] = progress.toFixed(4);
+      // The destination's own rail, pinned as soon as the renderer has drawn
+      // it. Asking every frame until then costs ONE readback in total, not one
+      // a frame: the first still that depicts the destination is the last one
+      // this turn takes.
+      if (!railPinned) {
+        const arrival = captureScene();
+        if (arrival && arrival.view === destination) {
+          mountStill(rail, arrival.canvas);
+          railPinned = true;
+        }
+      }
     };
+
     paint(0);
     const tick = (now: number) => {
       if (disposed) return;
@@ -142,6 +185,7 @@ export function CubeTurnPlane({
       <div className="gpu-cube__face gpu-cube__face--arriving" ref={arrivingRef}>
         {children}
       </div>
+      <div className="gpu-cube__rail" ref={railRef} aria-hidden="true" />
     </div>
   );
 }

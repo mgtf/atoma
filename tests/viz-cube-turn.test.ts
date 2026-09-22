@@ -4,7 +4,6 @@ import {
   cubeTurnPlan,
   type CubeTurnPlan,
 } from '../src/viz/client-gl/cube-turn.js';
-import { sceneCameraNavigationShot } from '../src/viz/client-gl/scene-camera.js';
 
 /**
  * THE GEOMETRY OF THE TURN.
@@ -40,6 +39,8 @@ function parseFace(transform: string): ParsedFace {
 }
 
 const SAMPLES = Array.from({ length: 81 }, (_, index) => index / 80);
+/** The focused rail leaves roughly this much of itself on screen. */
+const COLUMN_LEFT = 57;
 
 describe('the cube turn', () => {
   it('reports the route through the axis and the direction', () => {
@@ -48,11 +49,12 @@ describe('the cube turn', () => {
     // Leaving the rail group tips the box instead of swinging it, so the one
     // boundary in the rail that means something is the one the motion shows.
     expect(cubeTurnPlan(2, false, true)).toMatchObject({ axis: 'x', direction: 1 });
-    // One beat, one clock: the camera's travelling shot sets the duration.
-    for (const rows of [1, 3, 7]) {
-      expect(cubeTurnPlan(rows, true, true).durationMs)
-        .toBe(sceneCameraNavigationShot(rows).durationMs);
+    // Rail rows set the clock: a neighbour is a beat, a jump is the move.
+    const durations = [1, 2, 3, 4, 5, 9].map((rows) => cubeTurnPlan(rows, true, true).durationMs);
+    for (let index = 1; index < 5; index += 1) {
+      expect(durations[index]).toBeGreaterThan(durations[index - 1]!);
     }
+    expect(durations.at(-1)).toBe(durations[4]);
   });
 
   it('hinges both faces on the same edge, a quarter turn apart', () => {
@@ -63,7 +65,7 @@ describe('the cube turn', () => {
         { axis: 'x', direction: 1, durationMs: 520 },
       ] as CubeTurnPlan[]) {
         for (const progress of SAMPLES) {
-          const frame = cubeTurnFrame(progress, plan, width, height);
+          const frame = cubeTurnFrame(progress, plan, width, height, COLUMN_LEFT);
           const leaving = parseFace(frame.outgoingTransform);
           const arriving = parseFace(frame.incomingTransform);
           const where = `${width}x${height} ${plan.axis}${plan.direction} at ${progress}`;
@@ -81,7 +83,7 @@ describe('the cube turn', () => {
           // The box is as deep as the side it turns about is long, so its
           // cross-section is square and the quarter turn is a real quarter.
           expect(Math.abs(leaving.hingeBack) * 2, `${where} depth`)
-            .toBeCloseTo(plan.axis === 'y' ? width : height, 6);
+            .toBeCloseTo(plan.axis === 'y' ? width - COLUMN_LEFT : height, 6);
         }
       }
     }
@@ -90,8 +92,8 @@ describe('the cube turn', () => {
   it('starts square, lands square, and turns exactly ninety degrees', () => {
     for (const direction of [1, -1] as const) {
       const plan: CubeTurnPlan = { axis: 'y', direction, durationMs: 600 };
-      const start = cubeTurnFrame(0, plan, 1_440, 900);
-      const end = cubeTurnFrame(1, plan, 1_440, 900);
+      const start = cubeTurnFrame(0, plan, 1_440, 900, COLUMN_LEFT);
+      const end = cubeTurnFrame(1, plan, 1_440, 900, COLUMN_LEFT);
       expect(parseFace(start.outgoingTransform).rotation).toBe(0);
       expect(parseFace(start.incomingTransform).rotation).toBeCloseTo(90 * direction, 3);
       expect(parseFace(end.outgoingTransform).rotation).toBeCloseTo(-90 * direction, 3);
@@ -106,7 +108,7 @@ describe('the cube turn', () => {
   it('draws the box back while it turns, and only while it turns', () => {
     const plan: CubeTurnPlan = { axis: 'y', direction: 1, durationMs: 600 };
     const scales = SAMPLES.map(
-      (progress) => parseFace(cubeTurnFrame(progress, plan, 1_440, 900).outgoingTransform).scale
+      (progress) => parseFace(cubeTurnFrame(progress, plan, 1_440, 900, COLUMN_LEFT).outgoingTransform).scale
     );
     expect(scales[0]).toBe(1);
     expect(scales.at(-1)).toBe(1);
@@ -115,10 +117,27 @@ describe('the cube turn', () => {
     expect(deepest).toBeGreaterThan(0.88);
   });
 
+  it('turns the column about its own axis and leaves the rail out of it', () => {
+    for (const [width, columnLeft] of [[1_440, 57], [2_560, 57], [432, 24]] as const) {
+      const plan: CubeTurnPlan = { axis: 'y', direction: 1, durationMs: 600 };
+      for (const progress of [0, 0.3, 0.7, 1]) {
+        const frame = cubeTurnFrame(progress, plan, width, 900, columnLeft);
+        // The box hinges on the COLUMN's centre. Turning about the viewport's
+        // would swing the column's own edge through the rail.
+        expect(frame.transformOrigin)
+          .toBe(`${(columnLeft + (width - columnLeft) / 2).toFixed(3)}px 50%`);
+        // And the two clips are complementary: everything the box may paint
+        // starts where the rail stops, and the rail's still stops there too.
+        expect(frame.columnClip).toBe(`inset(0 0 0 ${columnLeft.toFixed(3)}px)`);
+        expect(frame.railClip).toBe(`inset(0 ${(width - columnLeft).toFixed(3)}px 0 0)`);
+      }
+    }
+  });
+
   it('hands the front of the box to whichever face is facing the reader', () => {
     const plan: CubeTurnPlan = { axis: 'y', direction: 1, durationMs: 600 };
     const order = SAMPLES.map(
-      (progress) => cubeTurnFrame(progress, plan, 1_440, 900).outgoingOnTop
+      (progress) => cubeTurnFrame(progress, plan, 1_440, 900, COLUMN_LEFT).outgoingOnTop
     );
     expect(order[0]).toBe(true);
     expect(order.at(-1)).toBe(false);

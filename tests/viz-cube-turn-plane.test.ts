@@ -22,6 +22,8 @@ let clock = 0;
 let nextFrame = 1;
 const frames = new Map<number, FrameRequestCallback>();
 let captures = 0;
+/** What the renderer would currently draw; the driver waits for the arrival. */
+let drawnView = 'runs';
 
 function cube(container: HTMLElement): HTMLElement {
   const element = container.querySelector<HTMLElement>('.gpu-cube');
@@ -33,6 +35,21 @@ function face(container: HTMLElement, which: 'leaving' | 'arriving'): HTMLElemen
   const element = container.querySelector<HTMLElement>(`.gpu-cube__face--${which}`);
   if (!element) throw new Error(`no ${which} face`);
   return element;
+}
+
+function railLayer(container: HTMLElement): HTMLElement {
+  const element = container.querySelector<HTMLElement>('.gpu-cube__rail');
+  if (!element) throw new Error('no rail layer');
+  return element;
+}
+
+/**
+ * The scene plane the driver projects the rail boundary through. In the app it
+ * is `SceneCameraPlane`; here it only has to BE one, because the boundary is
+ * read off the published camera frame and not off the layout.
+ */
+function scenePlane() {
+  return createElement('div', { 'data-scene-camera': 'perspective' });
 }
 
 function runFrames(count: number): void {
@@ -50,9 +67,10 @@ beforeEach(() => {
   captures = 0;
   frames.clear();
   setReducedMotionOverrideForTests(false);
+  drawnView = 'runs';
   publishSceneCapture(() => {
     captures += 1;
-    return document.createElement('canvas');
+    return { canvas: document.createElement('canvas'), view: drawnView };
   });
   vi.spyOn(performance, 'now').mockImplementation(() => clock);
   vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1_440);
@@ -80,7 +98,7 @@ describe('the cube turn plane', () => {
   const at = (key: string, rank: number, group = 'workspace') => ({
     mode: 'focus' as const,
     navigation: { key, rank, group },
-    children: null,
+    children: scenePlane(),
   });
 
   it('turns the box when the rail routes somewhere else', () => {
@@ -92,14 +110,36 @@ describe('the cube turn plane', () => {
     view.rerender(createElement(CubeTurnPlane, at('skills', 3)));
     expect(box.dataset['cubeTurn']).toBe('turning');
     expect(box.dataset['cubeTurnAxis']).toBe('y');
-    // The face being left carries a still of the screen being left, and it is
-    // taken ONCE — a second capture would be of the view already swapped in.
-    expect(captures).toBe(1);
+    // The face being left carries a still of the screen being left.
     expect(face(view.container, 'leaving').childElementCount).toBe(1);
 
-    runFrames(6);
     const leaving = face(view.container, 'leaving');
     const arriving = face(view.container, 'arriving');
+    const rail = railLayer(view.container);
+    // THE RAIL DOES NOT MOVE. Both faces are cut back to the content column,
+    // and the rail is served beside them, never transformed.
+    for (const layer of [leaving, arriving]) {
+      expect(layer.style.clipPath).toMatch(/^inset\(0 0 0 \d/);
+      expect(layer.style.transformOrigin).toMatch(/px 50%$/);
+    }
+    expect(rail.style.clipPath).toMatch(/^inset\(0 \d/);
+    // Never transformed, at any point of the turn: that is the whole promise.
+    expect(rail.style.transform).toBe('none');
+
+    // And it shows the DESTINATION's rail: until the renderer has drawn it,
+    // the driver pins nothing rather than pinning the view being left.
+    expect(rail.childElementCount).toBe(0);
+    runFrames(2);
+    expect(rail.childElementCount).toBe(0);
+    drawnView = 'skills';
+    runFrames(2);
+    expect(rail.childElementCount).toBe(1);
+    const afterPinned = captures;
+    runFrames(4);
+    // One capture for the leaving face, one for the arrived rail. A turn that
+    // read the screen back every frame would be a readback per frame.
+    expect(captures).toBe(afterPinned);
+
     expect(leaving.style.transform).toMatch(/rotateY\(-\d/);
     expect(arriving.style.transform).toMatch(/rotateY\(\d/);
     expect(box.dataset['cubeTurn']).toBe('turning');
@@ -111,7 +151,10 @@ describe('the cube turn plane', () => {
     // released rather than held as a screen of pixels between routes.
     expect(leaving.style.transform).toBe('none');
     expect(arriving.style.transform).toBe('none');
+    expect(leaving.style.clipPath).toBe('');
+    expect(arriving.style.clipPath).toBe('');
     expect(leaving.childElementCount).toBe(0);
+    expect(rail.childElementCount).toBe(0);
   });
 
   it('tips the box when the route leaves the rail group', () => {
@@ -136,6 +179,7 @@ describe('the cube turn plane', () => {
     expect(cube(view.container).dataset['cubeTurn']).toBe('idle');
     expect(frames.size).toBe(0);
     expect(face(view.container, 'leaving').childElementCount).toBe(0);
+    expect(railLayer(view.container).childElementCount).toBe(0);
   });
 
   it('declines the turn for reduced motion, for a re-render, and from overview', () => {
