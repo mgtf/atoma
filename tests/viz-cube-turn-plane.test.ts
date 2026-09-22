@@ -48,8 +48,22 @@ function railLayer(container: HTMLElement): HTMLElement {
  * is `SceneCameraPlane`; here it only has to BE one, because the boundary is
  * read off the published camera frame and not off the layout.
  */
-function scenePlane() {
-  return createElement('div', { 'data-scene-camera': 'perspective' });
+function scenePlane(overlays?: ReturnType<typeof createElement>) {
+  return createElement(
+    'div',
+    { 'data-scene-camera': 'perspective' },
+    createElement('div', { className: 'gpu-ui-host', key: 'host' }),
+    overlays ?? null
+  );
+}
+
+/** A view's own DOM overlay: a form React unmounts when the view changes. */
+function projectForm() {
+  return createElement(
+    'form',
+    { className: 'gpu-project-form', key: 'form' },
+    createElement('input', { id: 'project-name', defaultValue: '', key: 'input' })
+  );
 }
 
 function runFrames(count: number): void {
@@ -110,8 +124,9 @@ describe('the cube turn plane', () => {
     view.rerender(createElement(CubeTurnPlane, at('skills', 3)));
     expect(box.dataset['cubeTurn']).toBe('turning');
     expect(box.dataset['cubeTurnAxis']).toBe('y');
-    // The face being left carries a still of the screen being left.
-    expect(face(view.container, 'leaving').childElementCount).toBe(1);
+    // The face being left carries a still of the screen being left, and a
+    // dead copy of the overlays that were on it.
+    expect(face(view.container, 'leaving').querySelector('.gpu-cube__still')).not.toBeNull();
 
     const leaving = face(view.container, 'leaving');
     const arriving = face(view.container, 'arriving');
@@ -205,5 +220,52 @@ describe('the cube turn plane', () => {
     view.rerender(createElement(CubeTurnPlane, at('registry', 2)));
     expect(cube(view.container).dataset['cubeTurn']).toBe('idle');
     expect(frames.size).toBe(0);
+  });
+});
+
+describe('the face being left', () => {
+  const at = (key: string, rank: number, overlays?: ReturnType<typeof createElement>) => ({
+    mode: 'focus' as const,
+    navigation: { key, rank, group: 'workspace' },
+    children: scenePlane(overlays),
+  });
+
+  it('takes the overlays with it instead of losing them on the first frame', () => {
+    const view = render(createElement(CubeTurnPlane, at('projects', 0, projectForm())));
+    const typed = view.container.querySelector<HTMLInputElement>('.gpu-project-form input');
+    expect(typed).not.toBeNull();
+    typed!.value = 'stopwatch';
+
+    // The route unmounts the form: its state belongs to the view being left.
+    view.rerender(createElement(CubeTurnPlane, at('runs', 1)));
+    const leaving = face(view.container, 'leaving');
+    const ghost = leaving.querySelector<HTMLElement>('.gpu-project-form');
+    expect(ghost, 'the leaving face must carry the overlays it owned').not.toBeNull();
+    // What the viewer TYPED rides with it — `cloneNode` copies attributes, and
+    // a typed value is not one, so a form mid-edit would turn away blank.
+    expect(ghost!.querySelector('input')!.value).toBe('stopwatch');
+
+    // And it is a DEAD copy: out of the focus order, out of the
+    // accessibility tree, and holding no id the live subtree still needs.
+    const clonedPlane = leaving.querySelector<HTMLElement>('.gpu-cube__still + *')
+      ?? leaving.lastElementChild as HTMLElement;
+    expect(clonedPlane.getAttribute('aria-hidden')).toBe('true');
+    expect(clonedPlane.hasAttribute('data-scene-camera')).toBe(false);
+    expect(leaving.querySelector('#project-name')).toBeNull();
+    // The canvas host is not cloned: the still already carries those pixels,
+    // and a cloned canvas is blank.
+    expect(leaving.querySelector('.gpu-ui-host')).toBeNull();
+
+    runFrames(200);
+    expect(leaving.querySelector('.gpu-project-form')).toBeNull();
+  });
+
+  it('carries nothing when the view being left had no overlays', () => {
+    const view = render(createElement(CubeTurnPlane, at('runs', 1)));
+    view.rerender(createElement(CubeTurnPlane, at('skills', 3)));
+    const leaving = face(view.container, 'leaving');
+    expect(leaving.querySelector('.gpu-project-form')).toBeNull();
+    // Still exactly one child: the still itself, plus the emptied plane copy.
+    expect(leaving.querySelector('.gpu-cube__still')).not.toBeNull();
   });
 });

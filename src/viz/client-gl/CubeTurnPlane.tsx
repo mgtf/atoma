@@ -1,4 +1,10 @@
-import { useLayoutEffect, useRef, type ReactNode } from 'react';
+import {
+  Component,
+  useLayoutEffect,
+  useRef,
+  type ReactNode,
+  type RefObject,
+} from 'react';
 import { prefersReducedMotion } from './renderer/motion.js';
 import {
   CUBE_TURN_AT_REST,
@@ -28,22 +34,107 @@ function mountStill(layer: HTMLElement, still: HTMLCanvasElement): void {
 }
 
 /**
+ * A DEAD COPY of the scene plane's overlays, for the face being left.
+ *
+ * The still is a picture of the CANVAS, and the forms are not on the canvas —
+ * they are real HTML over it. React unmounts them the instant the view
+ * changes, so the face being left lost every form it had before it had turned
+ * a single degree (owner report, 2026-09-22: "les formulaires disparaissent").
+ * They cannot be kept alive: their state belongs to the view that is leaving.
+ * So they are cloned, and the copy turns away with the face that owned them.
+ *
+ * The copy keeps the plane's own class and inline style, which is what the
+ * overlays are positioned against, and gives up everything that would let it
+ * be mistaken for the live one: it is `inert` and `aria-hidden`, its ids are
+ * stripped so the live subtree keeps them, and the canvas host goes — the
+ * still already carries those pixels, and a cloned canvas is blank anyway.
+ */
+function cloneOverlays(plane: HTMLElement): HTMLElement {
+  const ghost = plane.cloneNode(true) as HTMLElement;
+  ghost.removeAttribute('data-scene-camera');
+  ghost.removeAttribute('data-scene-camera-mode');
+  ghost.setAttribute('aria-hidden', 'true');
+  ghost.inert = true;
+  ghost.querySelector('.gpu-ui-host')?.remove();
+  for (const element of ghost.querySelectorAll('[id]')) element.removeAttribute('id');
+  // `cloneNode` copies attributes, and what a viewer TYPED is not one. A form
+  // left mid-edit would turn away blank without this.
+  const live = plane.querySelectorAll('input, textarea, select');
+  const copies = ghost.querySelectorAll('input, textarea, select');
+  for (const [index, element] of copies.entries()) {
+    const source = live[index];
+    if (source instanceof HTMLInputElement && element instanceof HTMLInputElement) {
+      element.value = source.value;
+      element.checked = source.checked;
+    } else if (
+      (source instanceof HTMLTextAreaElement && element instanceof HTMLTextAreaElement) ||
+      (source instanceof HTMLSelectElement && element instanceof HTMLSelectElement)
+    ) {
+      element.value = source.value;
+    }
+  }
+  return ghost;
+}
+
+/**
  * Where the rail ends and the content column begins, ON SCREEN.
  *
  * The rail's width is a SOURCE measurement and the focused camera crops it, so
  * the boundary has to be projected through the live camera frame rather than
- * read off the layout. The frame is asked of the scene plane INSIDE the face —
- * `sceneCameraViewport` looks upwards from the element it is given, and the
- * plane is this face's child, not its ancestor. Null means there is no frame
+ * read off the layout. It is asked of the scene plane INSIDE the arriving face
+ * — `sceneCameraViewport` looks upwards from the element it is given, and the
+ * plane is that face's child, not its ancestor. Null means there is no frame
  * to ask, and the caller then declines the turn rather than cutting the column
  * at a guess.
  */
-function contentColumnLeft(face: Element): number | null {
-  const plane = face.querySelector('[data-scene-camera="perspective"]');
-  const frame = plane === null ? null : sceneCameraViewport(plane);
+function contentColumnLeft(plane: Element): number | null {
+  const frame = sceneCameraViewport(plane);
   if (!frame) return null;
   const rail = sidebarWidthForViewport(frame.width);
   return projectScenePointInFrame({ x: rail, y: 0 }, frame).x;
+}
+
+interface GhostProps {
+  /** Changes exactly when a route does; nothing else takes a copy. */
+  readonly signal: string;
+  readonly face: RefObject<HTMLDivElement | null>;
+  readonly onGhost: (ghost: HTMLElement) => void;
+  readonly children: ReactNode;
+}
+
+/**
+ * Takes the copy of the overlays at the ONE moment it can be taken.
+ *
+ * A layout effect is already too late: React has mutated the DOM by then, and
+ * the forms of the view being left are gone — measured, not assumed, when the
+ * first attempt at this cloned an empty plane. `getSnapshotBeforeUpdate` runs
+ * BEFORE the mutation, and a class is the only thing that has it; that is the
+ * whole reason there is a class in a file of hooks.
+ *
+ * It hands the copy to the driver through `componentDidUpdate`, which runs in
+ * the same commit and, being a descendant, before the driver's own layout
+ * effect — so the face has its ghost by the time the turn starts.
+ */
+class CubeOverlayGhost extends Component<GhostProps, Record<string, never>, HTMLElement | null> {
+  override getSnapshotBeforeUpdate(previous: Readonly<GhostProps>): HTMLElement | null {
+    if (previous.signal === this.props.signal) return null;
+    const plane = this.props.face.current?.querySelector<HTMLElement>(
+      '[data-scene-camera="perspective"]'
+    );
+    return plane ? cloneOverlays(plane) : null;
+  }
+
+  override componentDidUpdate(
+    _previous: Readonly<GhostProps>,
+    _state: Readonly<Record<string, never>>,
+    snapshot?: HTMLElement | null
+  ): void {
+    if (snapshot) this.props.onGhost(snapshot);
+  }
+
+  override render(): ReactNode {
+    return this.props.children;
+  }
 }
 
 /**
@@ -82,6 +173,8 @@ export function CubeTurnPlane({
   const leavingRef = useRef<HTMLDivElement>(null);
   const arrivingRef = useRef<HTMLDivElement>(null);
   const railRef = useRef<HTMLDivElement>(null);
+  /** Set from `CubeOverlayGhost`, one commit before the driver reads it. */
+  const ghostRef = useRef<HTMLElement | null>(null);
   const readRoute = useNavigationTracker();
   const navigationKey = navigation?.key ?? null;
   const navigationRank = navigation?.rank ?? -1;
@@ -108,15 +201,19 @@ export function CubeTurnPlane({
       // would keep two of them alive for nothing.
       leaving.replaceChildren();
       rail.replaceChildren();
+      ghostRef.current = null;
     };
 
     const turnable = navigated &&
       mode === 'focus' &&
       typeof requestAnimationFrame !== 'undefined' &&
       !prefersReducedMotion();
-    const columnLeft = turnable ? contentColumnLeft(arriving) : null;
+    const plane = turnable
+      ? arriving.querySelector<HTMLElement>('[data-scene-camera="perspective"]')
+      : null;
+    const columnLeft = plane === null ? null : contentColumnLeft(plane);
     const leavingStill = columnLeft === null ? null : captureScene();
-    if (columnLeft === null || !leavingStill) {
+    if (plane === null || columnLeft === null || !leavingStill) {
       rest();
       return;
     }
@@ -127,6 +224,10 @@ export function CubeTurnPlane({
     let disposed = false;
     let railRefreshedAt = Number.NEGATIVE_INFINITY;
     mountStill(leaving, leavingStill.canvas);
+    // The overlays of the view being left, copied before React mutated them
+    // away, so they turn out of frame on the face that owned them.
+    if (ghostRef.current) leaving.append(ghostRef.current);
+    ghostRef.current = null;
     cube.dataset['cubeTurn'] = 'turning';
     cube.dataset['cubeTurnAxis'] = plan.axis;
 
@@ -193,7 +294,13 @@ export function CubeTurnPlane({
     <div className="gpu-cube" ref={cubeRef} data-cube-turn="idle" data-cube-turn-progress="1">
       <div className="gpu-cube__face gpu-cube__face--leaving" ref={leavingRef} aria-hidden="true" />
       <div className="gpu-cube__face gpu-cube__face--arriving" ref={arrivingRef}>
-        {children}
+        <CubeOverlayGhost
+          signal={`${mode}:${navigationKey ?? ''}`}
+          face={arrivingRef}
+          onGhost={(ghost) => { ghostRef.current = ghost; }}
+        >
+          {children}
+        </CubeOverlayGhost>
       </div>
       <div className="gpu-cube__rail" ref={railRef} aria-hidden="true" />
     </div>
