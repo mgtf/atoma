@@ -71,7 +71,7 @@ import {
 } from '../view-frame.js';
 import { drawAtomDetail } from './atom-detail.js';
 
-const RUN_STATUS_COLOR: Record<RunStatus, number> = {
+export const RUN_STATUS_COLOR: Record<RunStatus, number> = {
   live: GPU_COLORS.success,
   delivered: GPU_COLORS.success,
   cancelled: GPU_COLORS.warning,

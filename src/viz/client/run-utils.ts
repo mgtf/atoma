@@ -1,4 +1,4 @@
-import type { RegistryType, VizEvent, VizRun } from './types.js';
+import type { RegistryType, RunIndexEntry, VizEvent, VizRun } from './types.js';
 import { taxonomyForTier } from '../../core/taxonomy.js';
 
 /**
@@ -12,7 +12,7 @@ export {
   isIndexEntryLive,
   isRunLive,
 } from '../liveness.js';
-import { isAbandoned, isRunLive } from '../liveness.js';
+import { isAbandoned, isIndexEntryLive, isRunLive } from '../liveness.js';
 
 /**
  * LLM calls that have STARTED and not yet returned.
@@ -66,6 +66,36 @@ export function runStatus(run: VizRun, now = Date.now()): RunStatus {
   if (!run.endedAt) return isAbandoned(run, now) ? 'abandoned' : 'live';
   return run.error ? 'failed' : 'delivered';
 }
+
+/**
+ * The same question as `runStatus`, asked of an INDEX ENTRY.
+ *
+ * A picker holds the index and not the traces, and it was inventing its own
+ * answer — `!` for an error, `✕` for a cancellation, nothing at all for a run
+ * that worked. Same precedence as `runStatus`, deliberately: cancellation
+ * before the error flag, because a signal-cancelled run records an error
+ * message BY DESIGN. `lastEventAt` is on the entry for exactly this reason.
+ */
+export function runIndexStatus(entry: RunIndexEntry, now = Date.now()): RunStatus {
+  if (entry.cancelled) return 'cancelled';
+  if (!entry.endedAt) return isIndexEntryLive(entry, now) ? 'live' : 'abandoned';
+  return entry.hasError ? 'failed' : 'delivered';
+}
+
+/**
+ * The compact marker for a status, where there is no room for its word.
+ *
+ * The same glyphs the `runs.flag.*` copy carries, so the abbreviation and the
+ * sentence cannot say different things. Cancelled and failed share a mark and
+ * are told apart by COLOUR, exactly as the status chip tells them apart.
+ */
+export const RUN_STATUS_GLYPH: Record<RunStatus, string> = {
+  live: '●',
+  delivered: '✓',
+  cancelled: '✕',
+  failed: '✕',
+  abandoned: '⚠',
+};
 
 export function mergeRunDelta(current: VizRun, incoming: VizRun): VizRun {
   const from = incoming.eventsFrom ?? 0;

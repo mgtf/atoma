@@ -14,10 +14,12 @@ import {
   projectRunUpdate,
   runElapsedMs,
   runHeading,
+  runIndexStatus,
+  RUN_STATUS_GLYPH,
   tryParseJson,
   usedAtomNames,
 } from '../src/viz/client/run-utils.js';
-import type { VizRun } from '../src/viz/client/types.js';
+import type { RunIndexEntry, VizRun } from '../src/viz/client/types.js';
 
 function run(overrides: Partial<VizRun> = {}): VizRun {
   return {
@@ -379,5 +381,47 @@ describe('run heading — family apart, goal whole', () => {
       family: null,
       title: sentence,
     });
+  });
+});
+
+describe('what happened to a run, asked of the index', () => {
+  const entry = (over: Partial<RunIndexEntry> = {}): RunIndexEntry => ({
+    id: 'r1',
+    label: 'build-app: something',
+    startedAt: new Date(Date.now() - 60_000).toISOString(),
+    ...over,
+  });
+
+  it('answers with the same precedence the trace reader uses', () => {
+    // A signal-cancelled run records an error message BY DESIGN, so
+    // cancellation has to be read before the error flag — the same lie the
+    // burn-in CSV told until 2026-08-15 if it is not.
+    expect(runIndexStatus(entry({ cancelled: true, hasError: true, endedAt: new Date().toISOString() })))
+      .toBe('cancelled');
+    expect(runIndexStatus(entry({ hasError: true, endedAt: new Date().toISOString() }))).toBe('failed');
+    expect(runIndexStatus(entry({ endedAt: new Date().toISOString() }))).toBe('delivered');
+  });
+
+  it('tells a live run from one that died without its closing stamp', () => {
+    const now = Date.now();
+    expect(runIndexStatus(entry({ inFlight: true, lastEventAt: now - 1_000 }), now)).toBe('live');
+    expect(runIndexStatus(
+      entry({ inFlight: true, lastEventAt: now - ABANDONED_AFTER_MS - 1_000 }),
+      now
+    )).toBe('abandoned');
+  });
+
+  it('marks every outcome, including the one that worked', () => {
+    // The picker had no mark at all for a delivered run, which made success
+    // the one outcome the list could not name.
+    expect(RUN_STATUS_GLYPH.delivered).toBe('✓');
+    expect(RUN_STATUS_GLYPH.failed).toBe('✕');
+    expect(RUN_STATUS_GLYPH.abandoned).toBe('⚠');
+    expect(RUN_STATUS_GLYPH.live).toBe('●');
+    // Cancelled and failed share a mark and are told apart by COLOUR, exactly
+    // as the status chip tells them apart.
+    expect(RUN_STATUS_GLYPH.cancelled).toBe('✕');
+    expect(new Set(Object.keys(RUN_STATUS_GLYPH)))
+      .toEqual(new Set(['live', 'delivered', 'cancelled', 'failed', 'abandoned']));
   });
 });

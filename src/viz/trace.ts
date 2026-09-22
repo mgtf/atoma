@@ -334,6 +334,14 @@ export interface VizRunIndexEntry {
   label: string;
   /** The run's goal, for surfaces with room for more than the label. */
   goal?: string;
+  /**
+   * Fresh tokens the run spent: input plus output, and NOT cache reads.
+   *
+   * Cache reads are routinely two orders of magnitude larger and would be the
+   * only thing a one-number budget ever showed. The card still reports all
+   * three separately, where there is room to read them apart.
+   */
+  tokens?: number;
   startedAt: string;
   endedAt?: string;
   durationMs?: number;
@@ -708,6 +716,8 @@ export class TraceRecorder {
     };
     const goal = this.run.task?.description?.trim();
     if (goal) entry.goal = runLabelFromGoal(goal, RUN_INDEX_GOAL_MAX);
+    const spent = (this.run.totals?.inputTokens ?? 0) + (this.run.totals?.outputTokens ?? 0);
+    if (spent > 0) entry.tokens = spent;
     if (this.run.endedAt !== undefined) entry.endedAt = this.run.endedAt;
     if (this.run.durationMs !== undefined) entry.durationMs = this.run.durationMs;
     if (this.run.degraded) entry.degraded = true;

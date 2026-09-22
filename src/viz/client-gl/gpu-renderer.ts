@@ -392,6 +392,9 @@ function paintPanelShadow(
 export * from './renderer/chip-layout.js';
 export * from './renderer/shaders.js';
 export { gpuEventCardCopy, type GpuEventCardCopy, type GpuTranslate } from './renderer/copy.js';
+import { fmtTokenCount } from './renderer/copy.js';
+import { relativeTime } from './renderer/relative-time.js';
+import { RUN_STATUS_GLYPH, runIndexStatus } from '../client/run-utils.js';
 export {
   emptyRenderMetrics,
   type GpuHitTarget,
@@ -415,7 +418,7 @@ import {
 } from './tuning.js';
 import { prefersReducedMotion } from './renderer/motion.js';
 import { drawScrollbarThumb } from './renderer/scroll-pane.js';
-import { drawRuns, runsPaneLayout, runsPickerControlLayout } from './renderer/views/runs.js';
+import { drawRuns, runsPaneLayout, runsPickerControlLayout, RUN_STATUS_COLOR } from './renderer/views/runs.js';
 import { drawRegistry } from './renderer/views/registry.js';
 import { drawSkills } from './renderer/views/skills.js';
 import { drawBurnin } from './renderer/views/burnin.js';
@@ -454,6 +457,16 @@ import {
   loadTimelineCardMaterial,
   type TimelineCardMaterial,
 } from './renderer/timeline-card-material.js';
+
+/**
+ * The run picker's row carries TWO lines: what the run was, and when it ran
+ * with what it spent. The tops are stated together because that is the only
+ * thing keeping them inside one 38px control — the first is passed to
+ * `button` as its label offset, the second is drawn beside it.
+ */
+const RUN_PICKER_ROW_LABEL_TOP = 5;
+const RUN_PICKER_ROW_SECOND_TOP = 24;
+const RUN_PICKER_ROW_SECOND_SIZE = 10;
 
 export class GpuRenderer {
   app = new Application();
@@ -5040,15 +5053,12 @@ export class GpuRenderer {
       const rowY = listY + index * rowHeight - scrollY;
       const keyboardActive = index === snapshot.state.runPickerActiveIndex;
       const selected = snapshot.state.selectedRunId === run.id;
-      const status = run.cancelled
-        ? '✕'
-        : run.hasError
-          ? '!'
-          : run.inFlight
-            ? '●'
-            : selected
-              ? '◆'
-              : '';
+      // The SAME answer the run header gives, from the same precedence, and
+      // marked with the same glyphs its status chip spells out. The picker
+      // used to invent its own — `!` for an error, `✕` for a cancellation,
+      // and NOTHING for a run that worked, so a delivered run was the one
+      // outcome the list could not name.
+      const status = runIndexStatus(run);
       this.button(
         listLayer,
         `run.select.${run.id}`,
@@ -5064,7 +5074,7 @@ export class GpuRenderer {
         // COMPACT form — capped at 80 characters when the run was recorded —
         // and this row is as wide as the panel. The label remains the fallback
         // for an index that predates the goal, or a run that never had one.
-        `${status ? `${status} ` : ''}${run.projectSlug ? `${run.projectSlug} · ` : ''}${
+        `${RUN_STATUS_GLYPH[status]} ${run.projectSlug ? `${run.projectSlug} · ` : ''}${
           run.goal ?? run.label.replace(/^(?:build-app|baseline):\s*/i, '')
         }`,
         x + 5,
@@ -5073,14 +5083,33 @@ export class GpuRenderer {
         38,
         keyboardActive,
         snapshot.onActivate,
-        run.hasError
-          ? GPU_COLORS.error
-          : run.inFlight
-            ? GPU_COLORS.success
-            : selected
-              ? GPU_COLORS.tiers[3]
-              : GPU_COLORS.primary
+        // Selection keeps its own accent; everything else wears its outcome.
+        selected ? GPU_COLORS.tiers[3] : RUN_STATUS_COLOR[status],
+        false,
+        false,
+        undefined,
+        RUN_PICKER_ROW_LABEL_TOP
       );
+      // WHEN it ran and WHAT IT SPENT, under the goal. The list used to say
+      // neither, so choosing between two runs of the same project meant
+      // opening them. Drawn beside the button rather than inside it: a button
+      // carries one label, and this line is not part of the thing you click.
+      const spent = typeof run.tokens === 'number'
+        ? `${fmtTokenCount(run.tokens)} ${snapshot.t('runs.picker.tokens')}`
+        : '';
+      const second = [
+        relativeTime(run.startedAt, snapshot.t, snapshot.state.locale),
+        spent,
+      ].filter(Boolean).join(' · ');
+      if (second) {
+        this.text(
+          listLayer,
+          this.fitText(second, popupWidth - 38, { size: RUN_PICKER_ROW_SECOND_SIZE }),
+          x + 5 + BUTTON_LABEL_INSET,
+          rowY + RUN_PICKER_ROW_SECOND_TOP,
+          { size: RUN_PICKER_ROW_SECOND_SIZE, color: GPU_COLORS.muted, singleLine: true }
+        );
+      }
     });
 
     // ONE scrollbar-thumb definition (renderer/scroll-pane.ts) — the popup

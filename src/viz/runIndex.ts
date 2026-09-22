@@ -24,7 +24,7 @@ export const TRACE_HEADER_KEYS = [
 
 type TraceFileHeader = {
   readonly [K in (typeof TRACE_HEADER_KEYS)[number]]?: K extends 'totals'
-    ? { calls?: unknown; costUsd?: unknown }
+    ? { calls?: unknown; costUsd?: unknown; inputTokens?: unknown; outputTokens?: unknown }
     : K extends 'task'
     ? { description?: unknown }
     : unknown;
@@ -118,6 +118,9 @@ export function summarizeTraceFile(file: string): VizRunIndexEntry | null {
     // the entry the recorder wrote at the time.
     const goal = typeof run.task?.description === 'string' ? run.task.description.trim() : '';
     if (goal) entry.goal = runLabelFromGoal(goal, RUN_INDEX_GOAL_MAX);
+    const input = typeof run.totals?.inputTokens === 'number' ? run.totals.inputTokens : 0;
+    const output = typeof run.totals?.outputTokens === 'number' ? run.totals.outputTokens : 0;
+    if (input + output > 0) entry.tokens = input + output;
     if (typeof run.endedAt === 'string') entry.endedAt = run.endedAt;
     if (typeof run.durationMs === 'number') entry.durationMs = run.durationMs;
     if (run.degraded === true) entry.degraded = true;

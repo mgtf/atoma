@@ -352,6 +352,9 @@ function gatedStubs() {
         // review fixture exercises that preference rather than the fallback.
         goal:
           'server.js already exists and serves GET /api/expenses and POST /api/expenses — do not rewrite it. Add the frontend with a form, a list and a running total.',
+        // The fresh tokens the run spent, as the index carries them, so the
+        // picker's second line shows what a real one shows.
+        tokens: 90_561,
         projectId,
         projectName: 'Stopwatch E2E two',
         projectSlug: 'stopwatch-e2e-two',

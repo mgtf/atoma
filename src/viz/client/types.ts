@@ -7,6 +7,8 @@ export interface RunIndexEntry {
   label: string;
   /** The run's goal in full, where the label is the compact form. */
   goal?: string;
+  /** Fresh tokens spent: input plus output, never cache reads. */
+  tokens?: number;
   startedAt: string;
   endedAt?: string;
   durationMs?: number;

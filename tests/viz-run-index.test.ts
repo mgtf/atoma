@@ -178,6 +178,28 @@ describe('the row carries the goal its label was cut from', () => {
     }
   });
 
+  it('carries the fresh tokens a run spent, and not its cache reads', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-run-index-tokens-'));
+    try {
+      const file = join(dir, 'tokens.json');
+      writeFileSync(file, JSON.stringify({
+        id: 'tokens', label: 'x', startedAt: '2026-09-22T10:00:00.000Z', events: [],
+        totals: { inputTokens: 10_181, outputTokens: 80_380, cacheReadInputTokens: 8_400_000 },
+      }));
+      // Cache reads are routinely two orders of magnitude larger and would be
+      // the only thing a one-number budget ever showed.
+      expect(summarizeTraceFile(file)?.tokens).toBe(90_561);
+
+      const none = join(dir, 'none.json');
+      writeFileSync(none, JSON.stringify({
+        id: 'none', label: 'x', startedAt: '2026-09-22T10:00:00.000Z', events: [],
+      }));
+      expect(summarizeTraceFile(none)?.tokens).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('bounds what it carries, and says nothing when there is no goal', () => {
     const dir = mkdtempSync(join(tmpdir(), 'atoma-run-index-goal-'));
     try {

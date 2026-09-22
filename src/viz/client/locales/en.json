@@ -667,6 +667,7 @@
   "runs.search_other": "Search {{count}} runs…",
   "runs.notFound": "Run not found.",
   "runs.picker": "Runs (newest → oldest)",
+  "runs.picker.tokens": "tokens",
   "runs.project.operator": "Operator runs",
   "runs.flag.cancelled": "✕ cancelled",
   "runs.flag.delivered": "✓ delivered",
