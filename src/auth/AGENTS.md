@@ -139,3 +139,37 @@ Loopback HTTP keeps its development cookie names and paths.
   replay revokes the grant; every issuance/revocation uses the existing token
   journal events. Temporary consent state is bounded and dies on restart;
   issued grants survive. Details: [OAuth contract](../../docs/mcp-oauth.md).
+
+## Intentional choices and rejected shortcuts
+
+- Joining OAuth identities on email: refused. Identities join only on
+  `(provider, subject)`. A provider email is a display attribute, and
+  GitHub's is not even a verified-email assertion — matching on it would let
+  a re-used address inherit someone's organisation.
+- Deriving the platform-admin flag from an OAuth claim, a domain or an
+  allowlist: refused. It lives in `auth_platform_admins`, granted and revoked
+  ONLY by the operator CLI, for the same reason: a provider claim is not an
+  authority statement about this instance.
+- Building browser redirects from the request `Host` header: refused. They
+  always use `${ATOMA_VIZ_PUBLIC_ORIGIN}/auth/callback`, because a redirect a
+  caller can steer is an open redirect.
+- Accepting legacy unprefixed cookies on HTTPS "for one release": refused.
+  `__Host-` names are selected from the configured public origin, which costs
+  a re-login at the upgrade and is what stops a preview subdomain from
+  planting an auth bearer.
+- Re-checking the delegation rule inside each door: refused. One body serves
+  the CLI, the HTTP route and the MCP tool. A second copy is how two doors
+  end up with two rules, and the looser one is the one that matters.
+- Erasing a delegate's pins on withdrawal: refused. The pins are DATA, refused
+  by name at the next launch exactly as for a revoked flag. Deleting them
+  would lose "who chose this payer", which is the question the journal exists
+  to answer.
+- Adding the delegation table to `AUTH_TABLE_NAMES`: deliberately not done. It
+  post-dates the first stores, so a read-only open of an older product DB
+  answers "no delegates" instead of refusing the whole schema.
+- Letting a subscription belong to an organisation: refused. It belongs to one
+  principal. An organisation-owned login would make "whose quota paid for this
+  run" unanswerable.
+- Failing on the first empty `account/read`: refused (2026-09-15). The
+  app-server may report no account before `account/updated` arrives; the
+  caller retries until the window closes.

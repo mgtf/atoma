@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
-import { posix, win32 } from 'node:path';
+import { globSync, readFileSync } from 'node:fs';
+import { join, posix, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
@@ -7,12 +8,15 @@ import { describe, expect, it } from 'vitest';
 import {
   SUBSYSTEM_LINE_BUDGET,
   SUBSYSTEM_LINE_BUDGET_OVERRIDES,
+  hasIntentionalChoices,
+  INTENTIONAL_CHOICES_HEADING,
   repoRelativeIfInside,
   subsystemLineBudget,
   toPosix,
 } from '../scripts/agent-docs-predicates.mjs';
 
 const checkerPath = fileURLToPath(new URL('../scripts/check-agent-docs.mjs', import.meta.url));
+const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 
 // Regression coverage for 2026-08-31: check-agent-docs.mjs had two separator
 // bugs that only fire on a win32 host — a `repoRoot + '/'` prefix test that
@@ -70,6 +74,30 @@ describe('subsystem line budgets', () => {
     expect(SUBSYSTEM_LINE_BUDGET).toBe(500);
   });
 
+  it('requires the intentional-choices heading in EVERY subsystem doc', () => {
+    // The root contract asserts this as fact, and on 2026-09-23 it was false
+    // for eight of eighteen files with nothing checking it. The cost is not
+    // tidiness: `proposedFix.checkedIntentionalChoices` is required of the
+    // analyst, so a subsystem with no such section could never produce a
+    // mender-eligible defect.
+    const docs = globSync('src/*/AGENTS.md', { cwd: repoRoot }).sort();
+    expect(docs.length).toBeGreaterThan(10);
+    const missing = docs.filter(
+      (doc) => !hasIntentionalChoices(readFileSync(join(repoRoot, doc), 'utf8')),
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it('matches the heading exactly, not a prefix of it', () => {
+    // Two files carried a truncated '## Intentional choices' until 2026-09-23.
+    // A predicate that accepted the prefix would have left the catalogue with
+    // two spellings of one section, which is the opposite of what a reader
+    // told to go find it needs.
+    expect(hasIntentionalChoices(`# doc\n\n${INTENTIONAL_CHOICES_HEADING}\n\n- a\n`)).toBe(true);
+    expect(hasIntentionalChoices('# doc\n\n## Intentional choices\n\n- a\n')).toBe(false);
+    expect(hasIntentionalChoices(`# doc\n\ntext ${INTENTIONAL_CHOICES_HEADING} inline\n`)).toBe(false);
+  });
+
   it('keys every override in POSIX, the shape the lookup normalises to', () => {
     // The 2026-08-31 bug in mirror image: an override added with backslashes
     // would never match on ANY platform, silently re-imposing the default.
@@ -82,11 +110,11 @@ describe('subsystem line budgets', () => {
     // The second 2026-08-31 bug: the Map is keyed 'src/viz/AGENTS.md', and a
     // raw win32 relative() ('src\\viz\\AGENTS.md') missed it, re-imposing the
     // 500-line default on a 569-line file.
-    expect(subsystemLineBudget('C:\\repo', 'C:\\repo\\src\\viz\\AGENTS.md', win32)).toBe(620);
+    expect(subsystemLineBudget('C:\\repo', 'C:\\repo\\src\\viz\\AGENTS.md', win32)).toBe(660);
   });
 
   it('resolves the same exception on a POSIX root', () => {
-    expect(subsystemLineBudget('/repo', '/repo/src/viz/AGENTS.md', posix)).toBe(620);
+    expect(subsystemLineBudget('/repo', '/repo/src/viz/AGENTS.md', posix)).toBe(660);
   });
 
   it('gives every other subsystem the default, on either root shape', () => {

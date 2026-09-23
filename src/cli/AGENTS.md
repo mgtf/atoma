@@ -227,3 +227,38 @@ Retention plans are read-only. Apply requires stopped services, a restorable
 backup and the existing global run lease without recovery. Limits are
 operator-owned and updated atomically with their audit receipt.
 [Commands and preconditions](../../docs/project-maintenance.md).
+## Intentional choices and rejected shortcuts
+
+- Remote completion calls in doctor: refused. Doctor is quota-free, and a
+  diagnostic that spends is one nobody runs when it matters.
+- Failing doctor on a missing static-server binary: refused, it is a WARNING.
+  A task that never serves a page is unaffected, and doctor must not fail a
+  run that would succeed. Container and egress modes are where the same
+  finding becomes hard, because there the capability is the point.
+- Reading the container runtime list from `$PATH`: refused, it comes from
+  `docker info`. gVisor installed is not gVisor registered, and that gap is
+  exactly where a Docker Desktop machine sits.
+- Migrating a pre-T4 store on the fly: refused, it is a hard failure. The
+  schema is the schema, and `CREATE TABLE IF NOT EXISTS` will not migrate it —
+  a silent half-migration is worse than a refusal.
+- `--preview` on by default: refused. It is the one check that ALLOCATES
+  rather than observing, so it stays opt-in.
+- Backing the store up first, or copying its file raw: refused on both counts.
+  The store goes LAST, through SQLite's online backup — since W4
+  (2026-09-18), because every file+row mutation writes its file before its
+  row. Rows never older than the bodies can only pair a body with a state the
+  registry already tolerates; the reverse would restore a freshly compiled
+  script carrying the llm recipe's earned trust.
+- Declaring the store optional in a snapshot, or allowing the destination
+  inside the repository: refused. Without the store at its resolved path the
+  summary refuses the word complete and the restore drill fails.
+- Verifying a snapshot with the tool that wrote it: refused, and this is not
+  theory. Two producer defects were invisible on the writing machine until
+  2026-09-22 — the online backup inherits the source's journal mode, and macOS
+  metadata rode into the tar. A snapshot must be readable by a FOREIGN reader,
+  which is why the drill is `python3 scripts/restore-drill.py` and not a
+  product command.
+- Erasing successful recovery evidence while fixing friction: refused. A
+  recovered error is proof the recovery works; act on a signature only when it
+  recurs across two consecutive batches and its root cause lives inside the
+  sandbox.

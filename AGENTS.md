@@ -48,7 +48,11 @@ Use it when a rule's rationale matters, not as default session context.
 Every subsystem file names its own neighbours, so one hop is usually enough.
 `npm run docs:check` enforces the shape: each subsystem `AGENTS.md` is listed
 above, each has a sibling `CLAUDE.md` holding exactly the import, links resolve,
-and no file exceeds its budget.
+no file exceeds its budget, and each carries its own
+`## Intentional choices and rejected shortcuts` section. That last one was
+asserted here and checked nowhere until 2026-09-23, when it was false for eight
+of the eighteen files — and a subsystem without one cannot produce a
+mender-eligible defect, because the analyst must cite the section it read.
 
 ## Evidence map
 

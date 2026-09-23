@@ -163,7 +163,7 @@ Neighbours:
   authorization boundary, and `src/skills/scriptScan.ts` records what happens
   to a pattern list mistaken for one: 8 of 9 obfuscated payloads passed it.
 
-## Intentional choices
+## Intentional choices and rejected shortcuts
 
 - The cost rule is an operator ALERT THRESHOLD, not a budget. The product has
   no per-run cost budget — `Limits` bounds iterations, the runner bounds wall

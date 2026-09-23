@@ -68,3 +68,27 @@ Polling hits read the journal; misses recheck and insert under an immediate
 transaction. Publish only after commit, through the existing notification
 router to org owners. Domains receive `CrossOrgReadSink`, not the store.
 Design, polling basis and deferred tests: [W11](../../docs/cross-org-read-audit.md).
+## Intentional choices and rejected shortcuts
+
+- Calling the notifier directly, from the domain that knows it wants a push:
+  refused. Every push must be attributable to a journalled fact, so an emitter
+  journals and `PUSH_ROUTES` decides the audience. A direct call is a push no
+  audit row explains.
+- `PUSH_ROUTES` with a default audience, or a non-exhaustive severity map:
+  refused. Both are exhaustive `Record<PlatformEventKind, …>` so a new kind
+  does NOT COMPILE until someone states its severity and who hears it. A
+  default would make "everyone" the answer nobody chose.
+- Handing domain modules the store instead of a `PlatformEventSink`: refused.
+  The dependency arrow points from the server at the domain, and an absent
+  sink must mean "no journal" rather than "no server".
+- A SQL uniqueness constraint over (kind, run_id, dedupeKey) to deduplicate:
+  refused. De-duplication by read-back is a cross-tick guarantee only, and
+  exclusivity between watchers is a LEASE ([src/sentinel](../sentinel/AGENTS.md)).
+  A constraint would look like exclusivity without providing it.
+- Joining `platform_events` with `lifecycle_events` for one admin read:
+  refused. `lifecycle_events` keeps its counter-checking semantics and its own
+  `ledger check` consumer; two tables, two reads.
+- Fail-open on a cross-organisation read receipt: refused, and it is the one
+  strict exception to the fail-open append above. A missing receipt must
+  COMMIT before foreign payload is returned, because a journal that loses the
+  row is a read that never happened.

@@ -390,3 +390,43 @@ Per-org admission defaults to one (zero suspends), with the global lease still
 limiting the host to one run. Recheck inside reservation after idempotency.
 The operator commands and offline prerequisites live in
 [W9/W10](../../docs/project-maintenance.md).
+## Intentional choices and rejected shortcuts
+
+- Reading egress settings, or an ollama destination, from a tenant prompt:
+  refused. They come from the HOST snapshot. An organisation picks ollama
+  MODELS, never an endpoint — a tenant URL would be SSRF from the platform's
+  own process.
+- A `sub:` selector as a deployment-wide or organisation-wide default:
+  refused whatever the requester's flag, because it is a payer-bearing default
+  nobody chose. The former whole-deployment regime (`ATOMA_LLM=claude-cli`) no
+  longer exists.
+- Storing the authority to spend a subscription: refused, and this is the
+  sharpest line here. A stored pin is DATA; permission is not storable.
+  Authority is re-asked per run through `resolveSubscriptionGrant`, both
+  resolvers fail closed, and the run is never told which one answered.
+  `platformAdmins` reaches the coordinator as a QUESTION — absent, `false` or
+  throwing all mean refusal — deliberately the opposite of `tierModelsFor`,
+  which is fail-open: a preferences lookup must not block a run, and an
+  authority lookup must never be read as permission to spend.
+- Falling through to a host login when a personal Codex profile is missing,
+  revoked or mixed: refused, it THROWS. Fall-through is permitted WITHIN a
+  payer and forbidden ACROSS payers.
+- Letting a reader repair a `running` row it noticed: refused. That is
+  `reconcileInterrupted`'s job at the next boot. `hasProjectTables` exists
+  precisely so a reader can ask about the control plane without triggering
+  `ProjectStore.open`'s DDL.
+- Offering to change a repository's visibility later: refused, and anything
+  in a UI that offers it is lying. `ensureRepository` refuses a repository
+  whose visibility disagrees with the row ("never a convergence") and
+  `REPOSITORY_TRANSITIONS.ready` is empty.
+- A public repository default: refused. The published set is the finished
+  workspace inventory, the filter is filenames only, publication is automatic
+  on delivery, and the manifest never crosses the API — so a public default
+  would hand an unreviewed set to the internet whenever nobody looks.
+- Creating the repository at project creation: deliberately not done. It is
+  created at PUBLICATION, so a project with no delivered run leaves no empty
+  repository behind.
+- Resolving the request-key conflict outside a transaction: refused. Two
+  processes write this file, and the loser of that race met the index instead
+  of the typed conflict, handing the caller a driver's UNIQUE prose naming an
+  index.

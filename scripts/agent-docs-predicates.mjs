@@ -59,10 +59,36 @@ export const SUBSYSTEM_LINE_BUDGET = 500;
 // (one line). Raised to 620 for the same reason as above rather than
 // condensing an unrelated rule to make room; a test pins the number so the
 // next raise is a conscious change too.
+// 2026-09-23: 620 → 660, the conscious raise that comment asked for. Every
+// subsystem doc now owes an intentional-choices section (see
+// `INTENTIONAL_CHOICES_HEADING` below), and src/viz was the one file with no
+// room for its own. The alternative was again to shave unrelated rules, on
+// the largest subtree, to make space for the section that exists to keep
+// rules from being re-proposed.
 export const SUBSYSTEM_LINE_BUDGET_OVERRIDES = new Map([
-  ['src/viz/AGENTS.md', 620],
+  ['src/viz/AGENTS.md', 660],
   ['src/preview/AGENTS.md', 560],
 ]);
+
+/**
+ * The heading every subsystem doc must carry.
+ *
+ * The root AGENTS.md states it as fact — "Every subsystem file carries its own
+ * intentional-choices section listing the shortcuts already tried and reverted
+ * there" — and on 2026-09-23 it was false for eight of eighteen files, with
+ * nothing checking it. That gap is not cosmetic: the analyst's `proposedFix`
+ * REQUIRES naming the intentional-choices section it read
+ * (`checkedIntentionalChoices`), and a proposal without one is refused, so a
+ * finding landing in a subsystem with no such section could never become a
+ * mender-eligible defect. A missing section silently removed a subsystem from
+ * the repair loop.
+ */
+export const INTENTIONAL_CHOICES_HEADING = '## Intentional choices and rejected shortcuts';
+
+/** True when a subsystem doc carries the heading above, at the start of a line. */
+export function hasIntentionalChoices(text) {
+  return text.split('\n').some((line) => line.trimEnd() === INTENTIONAL_CHOICES_HEADING);
+}
 
 /**
  * The line budget for one subsystem doc. The override Map is keyed in POSIX,

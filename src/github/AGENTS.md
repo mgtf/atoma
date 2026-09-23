@@ -151,3 +151,35 @@ Neighbours:
 - Repository snapshots read bounded immutable trees/blobs; truncated trees,
   unsafe paths, symlinks and submodules fail before model work. No GitHub
   credential enters the worker. Fork adoption requires the exact parent id.
+
+## Intentional choices and rejected shortcuts
+
+- Trusting `installation_id` as it arrives on `/auth/github/setup`: refused.
+  It comes from a URL the viewer can type, so the view must be CORROBORATED
+  against the connecting user, and callers must pass a view obtained from
+  `verifyInstallation`, never from `getAppInstallation` alone. The two
+  predecessors each checked half of this and wrote no audit row.
+- Reading a discovery error as an empty installation list: refused. An error
+  is a visible failure; treating it as "none found" would silently restart an
+  install the tenant already completed.
+- Starting a repository through the git data API: refused, and measured
+  against real GitHub on 2026-08-23 — it cannot create the first commit of an
+  empty repository. A first publication SEEDS through the contents API with a
+  REAL manifest file, never a placeholder, so no commit needs explaining
+  later; git data completes the tree only when there is more than one file or
+  a mode to preserve.
+- Re-seeding a branch that has gone missing: refused (`GitHubBranchGoneError`).
+  A second root history in a repository the tenant has already cloned is worse
+  than a stopped publication.
+- Letting an incremental commit replace the parent tree: refused. It MERGES
+  onto `base_tree`, so publication can add and overwrite but never remove —
+  a manifest that shrank must not delete a tenant's file.
+- Relaxing the two load-bearing GitHub App settings because they are obscure:
+  refused. *Request user authorization (OAuth) during installation* stays OFF
+  (it removes the Setup URL field, and the post-install arrival on
+  `/auth/callback` is then refused for want of a tx cookie); *Expire user
+  authorization tokens* stays ENABLED (`persistGitHubUserTokens` throws on a
+  null `expires_in`).
+- A reconciliation poll over installation status: deliberately absent. Status
+  mutation lives only in `recordWebhookDelivery`; an installation row simply
+  never leaves `active` without a delivery.

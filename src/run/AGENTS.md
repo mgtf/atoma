@@ -115,3 +115,29 @@ Neighbours:
 - The runner's `ATOMA_RUN_STATS` JSON epilogue is the burn-in accounting
   contract. `parseRunLog` keeps text parsing only for interrupted legacy runs;
   never add global regexes over model-authored prose.
+
+## Intentional choices and rejected shortcuts
+
+- An override switch for the run host: refused, and stated above at length.
+  The defect this contract replaces was SILENCE, not the platform's limits.
+- A base client, or one `ATOMA_LLM` selector: gone. Provider construction has
+  one switch per TRANSPORT (`makeTransportClient`), and the three
+  `ATOMA_MODEL_L*` pins are REQUIRED and parsed at launch. A missing pin is a
+  `RunnerConfigError`, never a silent default — a run that quietly picks a
+  model spends the operator's quota on a decision nobody made.
+- Re-reading `process.env` for pins the router already resolved from the
+  snapshot: refused. A run's own writes must never become the next run's
+  "operator intent".
+- Treating a landed run as a failure: refused. `partial` is a THIRD
+  success-side outcome, and `runTask` exits 0 and parks on it exactly as on a
+  delivery, because there IS something to look at. Scripts that branch on
+  "not delivered" are reading the wrong field; the typed
+  `Result.unfinishedPhases` is what separates the two.
+- Raising the run budget as the answer to a truncated run: refused as the
+  MAIN answer. A bigger budget only moves the cliff; landing is what recovers
+  the spend. The 30 → 60 minute raise of 2026-09-22 shipped as the smaller
+  half of that change, beside moving preparation off the tenant's clock.
+- Global regexes over the runner's stdout: refused. `ATOMA_RUN_STATS` is the
+  accounting contract and `parseRunLog` keeps text parsing only for
+  interrupted legacy runs. A regex over model-authored prose is a parser whose
+  input nobody controls.

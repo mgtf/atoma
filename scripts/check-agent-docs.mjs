@@ -4,7 +4,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { repoRelativeIfInside, subsystemLineBudget, toPosix } from './agent-docs-predicates.mjs';
+import { hasIntentionalChoices, INTENTIONAL_CHOICES_HEADING, repoRelativeIfInside, subsystemLineBudget, toPosix } from './agent-docs-predicates.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const agentsPath = resolve(repoRoot, 'AGENTS.md');
@@ -138,6 +138,13 @@ for (const doc of subsystemDocs) {
   const budget = subsystemLineBudget(repoRoot, doc);
   if (lines > budget) {
     fail(`${shown} is ${lines} lines; budget is ${budget}`);
+  }
+  // The root contract claims every subsystem carries this section, and the
+  // analyst's citation rule depends on it: no section, no `proposedFix`, no
+  // mender-eligible defect for that subtree. It was a claim nothing checked
+  // until 2026-09-23, and false for eight of eighteen files.
+  if (!hasIntentionalChoices(text)) {
+    fail(`${shown} has no "${INTENTIONAL_CHOICES_HEADING}" section`);
   }
   checkImportMirror(doc);
   checkNoPhantomImports(doc, text);

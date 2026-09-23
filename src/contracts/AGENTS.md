@@ -182,3 +182,33 @@ Neighbours:
   a retry's failed first attempt; siblings in other lanes keep waiting.
 - A reference holds completed AND credited signatures only, newest
   `TRAJECTORY_REFERENCE_MAX_PER_KEY` per key. Assemble it oldest-first.
+
+## Intentional choices and rejected shortcuts
+
+- A second definition of manifest merge semantics, near a writer that needs
+  "just one field": refused. `probeManifest.ts` owns entry identity per shape,
+  and the three writers' corrupt-input policies sit side by side there so they
+  can be compared rather than discovered.
+- Teaching a reported web-probe alias, or widening the on-disk checker to
+  accept one: refused. `REPORTED_WEB_PROBE_ALIASES` is READER tolerance for
+  recipes distilled before a rename, nothing more — a compiled script
+  dispatches on that discriminator, so an accepted alias becomes a real code
+  path.
+- Naming one widget's controls in the taught smoke shape: refused. Generic
+  vocabulary only — control, milestone, reset. A shape that names a widget
+  teaches the page instead of the method, and is the vocabulary-frozen
+  detector class in another costume.
+- Relabelling a model-declared `Witness` as transport-observed, or folding
+  transport witnesses into the recorded-probe rendering: refused. Who observed
+  a fact is part of the fact; transport witnesses are references and carry no
+  `cmd`.
+- Upgrading historical evidence implicitly when a contract tightens: refused.
+  Revalidation follows the RECORDED coverage. A rule that reaches backwards
+  turns old traces into claims nobody made.
+- Deciding `baseSha` from anything: refused. It is OBSERVED, the same rule
+  `attestation.ts` states for a tool observation; the authority to publish
+  onto an existing branch is read from GitHub at publish time.
+- Letting the trajectory contract carry `args`, `result` or prose: refused.
+  Identities only, and a structural event type so every `VizEvent` satisfies
+  it without a `src/viz` import — a shared shape that imports a subsystem is a
+  dependency edge nobody asked for.

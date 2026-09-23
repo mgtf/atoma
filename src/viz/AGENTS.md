@@ -617,3 +617,38 @@ npm run viz:mark-turn:analyze
   fail-open, so an oversized row would lose the audit trail AND the push.
   The router refuses to deliver a push that renders no title. The composer
   is its own admin view (above), not a form at the foot of another.
+
+## Intentional choices and rejected shortcuts
+
+- `vite-plugin-pwa`: rejected and restated here because it looks like the
+  obvious answer every time. `devOptions` does not unregister workers,
+  `generateSW` cannot emit our push/click handlers, and `injectManifest` would
+  add Workbox to the shipped bundle and change the build's tested
+  publicDir-copy contract. Reconsider it only for deliberate offline
+  precaching.
+- Filtering loaded pages client-side: refused. Filters ride the QUERY KEY,
+  because filtering after the fact THINS each page instead of finding more
+  matching rows — a list that empties as you refine it is a lie about the
+  corpus.
+- Writing the event-kind families a second time: refused.
+  `PLATFORM_EVENT_FAMILIES` is derived from the kind list, so a new kind
+  cannot acquire a family nobody chose.
+- An aggregate "nothing is watching" indicator: forbidden. A sentinel on
+  another machine or another store is invisible here, so the scope is stated
+  on screen in every state, and a stale incumbent renders as an age and a
+  timestamp rather than a red light. The panel still offers no control: a
+  finding is a fact, not a button.
+- Printing `v?` for an unknowable registry version: refused, the card omits it.
+  `/api/runs` stays raw at the client reader for the same reason — a delta
+  must rejoin the complete run BEFORE projection, or an earlier patch is
+  invisible.
+- A rail row for Settings: deliberately absent. The account menu is its
+  entrance, and a second one would put one job in two places.
+- Giving `chip-layout.ts` a Pixi dependency: refused. It stays renderer-free
+  so recordings test geometry with no renderer, and it obeys the measurement
+  rule by INJECTION — the view passes `ctx.measureText` through the layout's
+  `measure` option.
+- Authoring or repairing a target locale catalog by hand: refused for agents
+  and humans alike. `en.json` is the source, a blank target means "awaiting
+  translation", and CI fills it. A hand-written translation is a value no
+  drift check can ever invalidate.

@@ -228,7 +228,7 @@ Neighbours:
   writing to it. An ungated checkout keeps its file outputs and journals
   nothing, and says so in its banner.
 
-## Intentional choices
+## Intentional choices and rejected shortcuts
 
 - Out of product first, in product now. The analyst was validated as a script
   (P0, 2026-08-22) to settle the verdict format before touching `src/`; the
