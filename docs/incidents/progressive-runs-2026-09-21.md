@@ -1,9 +1,10 @@
 # Progressive project runs under `mgtf2` — 2026-09-21
 
 Status: evidence collected; one claimed defect WITHDRAWN as a misreading of
-the product model, two confirmed, and — by the operator's same-day decision
-against the collected backlog set — two changes landed (see "Acted on" at the
-end). Everything else stays observation.
+the product model, two confirmed, and — by the operator's decisions against
+the collected backlog set — three rounds of changes landed on 2026-09-21,
+2026-09-22 and 2026-09-23 (see the "Acted on" sections at the end).
+Everything else stays observation.
 
 Continues the campaign recorded in
 [the second-account production run](mgf2-production-run-2026-09-21.md). That
@@ -340,12 +341,67 @@ credit on a run that delivered nothing is now narrower but not gone (the
 truncated phase was never credited either way), and sentinel `llm`-event
 blindness is untouched.
 
+## Acted on — the analyst's `defect` bar, 2026-09-23
+
+The calibration question left open below was taken up two days after the runs,
+against the whole collected set rather than a single verdict. The review found
+TWO locks, where the note had recorded one.
+
+**Lock 1 — the boundary was drawn on the SHAPE of the remedy.** `defect` asked
+for four conjunctive conditions; `mechanism_candidate` opened on "anything
+whose remedy is a NEW gate, heuristic, validator rule, prompt rule, or
+threshold". Almost any fix can be described as a new rule, so the wide door
+took everything. Nothing told the analyst what to do when a finding had both a
+mechanism at a `file:line` and a remedy expressible as a rule — the ordinary
+case — and nothing stated a cost for choosing the cautious-looking kind, while
+"Be conservative" sat immediately below the classification rules and `defect`
+was described as what "the mender may take".
+
+The boundary now asks one question instead: **does the code already have a
+contract it is failing to keep?** Already-decided behaviour that the code does
+not honour is a `defect`, even when the fix reads like a new rule, because a
+refusal, a validation and a guard are ordinary code. A `mechanism_candidate`
+is one whose fix would mean CHOOSING the behaviour rather than restoring it.
+The prompt carries the worked example — this note's own `d3098d25` probe
+finding, filed `mechanism_candidate` and fixed the next day in
+`src/tools/builtin.ts` with a regression test, which is this prompt's own
+definition of `defect`. That is the measurement the recalibration rests on: the
+classification was refuted by its own correction, in one day.
+
+**Lock 2 — `proposedFix` was a second gate, and the prompt pushed findings into
+it.** `eligibleFindings` requires a `proposedFix`, and the citation rule ended
+"omit `proposedFix` instead" — so a correctly-kinded defect could still be
+unreachable. The prompt now says omitting it is a decision about the PROPOSAL
+and never about the `kind`: keep the kind, name the `AGENTS.md` you would have
+needed, leave the proposal out.
+
+**And the hole that widening would have opened.** Routing was exhaustive for
+`mechanism_candidate` and `security_incident` only; a `defect` the mender
+cannot take — no `proposedFix`, or confidence under its floor — was routed
+nowhere, living solely inside a 7–12 KB verdict nobody re-reads. More defects
+would have meant more findings in that blind spot, so `defect` is now also
+indexed in `supervisor/defects.jsonl`, recording the facts eligibility turns on
+without re-deriving the mender's policy. It also makes "has the analyst ever
+emitted a defect?" answerable with `wc -l` instead of the SSH-and-sudo read
+this note needed.
+
+Regression cover crosses the analyst's real routing path
+(`tests/analyst.test.ts`): both new assertions fail on the unfixed code.
+`ANALYST_PROMPT_VERSION` is `p5-2026-09-23-defect-calibration`, so verdicts
+before and after stay attributable.
+
+Validation is deliberately IN PRODUCTION, on the operator's call: the mender
+only ever runs there, against production verdicts, so a local replay would
+measure nothing about the behaviour in question. The first production verdicts
+under p5 are the measurement, and the question they answer is whether the
+mender finally receives an eligible finding.
+
 ## Still open, deliberately
 
-- The analyst's `defect` bar and the mender's reachability: 17/17 backlog
-  entries are `mechanism_candidate`, several at `high` confidence, so the
-  mender has never had an eligible finding. Whether that bar is right is a
-  calibration question for its own review, not a same-day prompt edit.
+- Whether p5 moves the bar: the recalibration above is a change to a judgement
+  prompt, and only production verdicts can say whether the analyst now emits a
+  `defect` where it emitted a candidate — and whether any of them survives the
+  mender's exit contract into a pull request a person merges.
 - The org owner's blindness: six verdicts and three sentinel findings on
   their runs, zero observable signals on their account, and a tenant trace
   reader that omits `result.ok === false` so the tenant cannot re-derive the

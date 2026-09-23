@@ -29,7 +29,13 @@ export const verdictGradeSchema = z.enum(['sound', 'wasteful', 'deficient']);
 export const findingKindSchema = z.enum([
   /** A net bug in atoma with a mechanism in `src/`; the mender may take it. */
   'defect',
-  /** Wants a NEW gate, heuristic, rule or threshold — cooling-off backlog, never same-day. */
+  /**
+   * The remedy needs a DESIGN DECISION nobody has taken yet — a threshold to
+   * choose, a policy to invent — so it goes to the cooling-off backlog, never
+   * same-day. NOT a finding whose fix merely READS like a new rule: code that
+   * breaks a contract the repository already states is a `defect`, and filing
+   * one here loses it (calibration of 2026-09-23, `analystPrompt.ts`).
+   */
   'mechanism_candidate',
   /** Injection, exfiltration, sandbox or egress anomaly — an alert for a person. */
   'security_incident',

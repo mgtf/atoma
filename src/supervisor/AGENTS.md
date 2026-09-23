@@ -127,8 +127,25 @@ Neighbours:
 - Routing reads FINDINGS, never the grade: `mechanism_candidate` → the dated
   backlog (`supervisor/backlog.jsonl`, COOLING-OFF: never same-day),
   `security_incident` → `supervisor/ALERTS.jsonl` plus a console warning,
-  `defect` → left in the verdict for the mender. `runAssessment` is about this
-  run alone; a `sound` run may carry a candidate.
+  `defect` → indexed in `supervisor/defects.jsonl` AND left in the verdict for
+  the mender. That index is not a work queue and never re-derives the mender's
+  eligibility, which stays in `menderPolicy.ts`; it records the facts that
+  decide it, so a defect the mender cannot take is not routed NOWHERE — which
+  is what it was before 2026-09-23. `runAssessment` is about this run alone; a
+  `sound` run may carry a candidate.
+- `defect` vs `mechanism_candidate` is decided by whether the right behaviour
+  is ALREADY DECIDED, never by the shape of the remedy. Code that breaks a
+  contract the repository already states is a `defect` even when the fix reads
+  like a new rule — a refusal, a validation, a guard are ordinary code. A
+  `mechanism_candidate` is one whose fix would mean CHOOSING the behaviour
+  rather than restoring it. The prompt carries the rule, the worked example and
+  the reason under-classifying is not the cautious direction; it was calibrated
+  on 2026-09-23 against a backlog that had held 17 candidates and zero defects
+  since 2026-09-06, one of them a probe defect fixed in `src/tools/builtin.ts`
+  with a regression test the day after it was filed as a candidate
+  ([incident](../../docs/incidents/progressive-runs-2026-09-21.md)). Omitting a
+  `proposedFix` is a decision about the proposal, never a reason to downgrade
+  the kind.
 - An invalid verdict is kept raw beside the verdicts and journals NOTHING: a
   row about a verdict that does not exist would be a fact about nothing.
 - TRIGGER ECONOMICS are settled by measurement (design, P0 results): analysis

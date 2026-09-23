@@ -42,6 +42,16 @@ import {
  *     to the supervisor itself.
  *   - A `mechanism_candidate` goes to the dated backlog and nowhere else:
  *     COOLING-OFF says a new gate is never designed the day it is found.
+ *   - A `defect` is indexed in `defects.jsonl` AND left in the verdict for the
+ *     mender. The index is not a work queue — the mender reads verdicts, as
+ *     before — it is what makes the analyst's defect rate readable without
+ *     opening every verdict file. It also closes a hole the 2026-09-23
+ *     calibration would otherwise have widened: a defect the mender cannot
+ *     take (no `proposedFix`, or confidence under its floor) was routed
+ *     nowhere at all, so it existed only inside a verdict nobody re-reads.
+ *     The row records the facts that decide eligibility and never re-derives
+ *     the mender's policy, which lives in `menderPolicy.ts` and is the
+ *     mender's to apply.
  *   - The verdict is validated against the ONE schema in `src/contracts`, the
  *     same schema the session was held to; an invalid one is kept raw and
  *     journaled as nothing.
@@ -56,6 +66,7 @@ export interface AnalystPaths {
   readonly workDir: string;
   readonly backlogPath: string;
   readonly alertsPath: string;
+  readonly defectsPath: string;
 }
 
 export function analystPaths(supervisorDir: string): AnalystPaths {
@@ -65,6 +76,7 @@ export function analystPaths(supervisorDir: string): AnalystPaths {
     workDir: join(supervisorDir, 'work'),
     backlogPath: join(supervisorDir, 'backlog.jsonl'),
     alertsPath: join(supervisorDir, 'ALERTS.jsonl'),
+    defectsPath: join(supervisorDir, 'defects.jsonl'),
   };
 }
 
@@ -189,6 +201,24 @@ export function routeVerdict(
           confidence: finding.confidence,
           fixDirection: finding.proposedFix ?? null,
           coolingOff: 'design later against the full incident set, never same-day',
+        }) + '\n'
+      );
+    }
+    if (finding.kind === 'defect') {
+      appendFileSync(
+        paths.defectsPath,
+        JSON.stringify({
+          recordedAt: meta.analysedAt,
+          runId: verdict.runId,
+          runGrade: verdict.runAssessment.grade,
+          title: finding.title,
+          detail: finding.detail,
+          evidence: finding.evidence,
+          confidence: finding.confidence,
+          // The two facts the mender's eligibility turns on, recorded rather
+          // than judged: its floor is its own configuration, not ours.
+          fixDirection: finding.proposedFix ?? null,
+          verdictPath,
         }) + '\n'
       );
     }

@@ -8,6 +8,7 @@ import { PlatformEventLog } from '../src/platform/events.js';
 import { analyseRun, analyseTarget, pendingRuns, pendingTargets, resolveTarget, type AnalystOptions } from '../src/supervisor/analyst.js';
 import type { FetchLike } from '../src/supervisor/dispatch.js';
 import { digestRun, runStatusOf } from '../src/supervisor/digest.js';
+import { eligibleFindings } from '../src/supervisor/menderPolicy.js';
 import { acquireRunLeaseWithoutRecovery, peekRunLease } from '../src/mcp/runLock.js';
 
 /**
@@ -240,6 +241,13 @@ describe('analyseRun', () => {
     // Routing by finding kind.
     expect(readFileSync(join(f.supervisorDir, 'backlog.jsonl'), 'utf8')).toContain('A repeated-tool-name rule');
     expect(readFileSync(join(f.supervisorDir, 'ALERTS.jsonl'), 'utf8')).toContain('Instruction-shaped payload');
+    const defects = JSON.parse(readFileSync(join(f.supervisorDir, 'defects.jsonl'), 'utf8').trim()) as Record<string, unknown>;
+    expect(defects).toMatchObject({
+      runId: RUN_ID,
+      title: 'validate_html reports ok on a rejected smoke',
+      confidence: 'high',
+      fixDirection: { where: 'src/tools/browserProbe.ts' },
+    });
 
     // The session's leash.
     const args = JSON.parse(readFileSync(f.claudeArgs, 'utf8')) as string[];
@@ -249,6 +257,11 @@ describe('analyseRun', () => {
     expect(args[args.indexOf('--model') + 1]).toBe('glm-5.3');
     expect(args.at(-1)).toContain('supervisor/work/');
     expect(args.at(-1)).toContain('Required review of every stage');
+    // The prompt the session is held to carries the calibration, because the
+    // kind a finding gets is decided there and nowhere else.
+    expect(args.at(-1)).toContain('Choosing between `defect` and `mechanism_candidate`');
+    expect(args.at(-1)).toContain('does the code already have a contract it is failing to');
+    expect(args.at(-1)).toContain('Under-classifying is not the safe direction');
     const outputSchema = JSON.parse(args[args.indexOf('--json-schema') + 1]!) as {
       required: string[]; properties: { stageReviews: { required: string[] } };
     };
@@ -272,6 +285,38 @@ describe('analyseRun', () => {
 
     // A second attempt is a no-op without --force.
     expect((await analyseRun(RUN_ID, f.options())).outcome).toBe('already-analysed');
+  });
+
+  it('indexes a defect the mender cannot take, instead of leaving it only in the verdict', async () => {
+    // The 2026-09-23 calibration tells the analyst to keep the `defect` kind
+    // when it cannot finish the intentional-choices citation, and to omit
+    // `proposedFix` instead. Such a finding is INELIGIBLE for the mender by
+    // `eligibleFindings`, and before this it was routed nowhere at all: not
+    // the backlog (that is for candidates), not the alerts. It existed only
+    // inside a verdict file nobody re-reads.
+    const f = fixture();
+    const unmendable = {
+      kind: 'defect',
+      title: 'the run deadline discards completed phases',
+      detail: 'mechanism at src/atoms/dispatch.ts; could not finish reading the intentional choices',
+      evidence: [{ ref: 'src/atoms/dispatch.ts:61', quote: 'dispatchWithAggregation' }],
+      confidence: 'high',
+    };
+    process.env['STUB_VERDICT'] = JSON.stringify({ ...verdict, findings: [unmendable] });
+    const result = await analyseRun(RUN_ID, f.options());
+    expect(result.outcome).toBe('analysed');
+
+    expect(eligibleFindings({ findings: [unmendable] as never })).toHaveLength(0);
+    const row = JSON.parse(readFileSync(join(f.supervisorDir, 'defects.jsonl'), 'utf8').trim()) as Record<string, unknown>;
+    expect(row).toMatchObject({
+      runId: RUN_ID,
+      title: 'the run deadline discards completed phases',
+      confidence: 'high',
+      fixDirection: null,
+    });
+    expect(row['verdictPath']).toBe(result.verdictPath);
+    // It is a defect, so it never reaches the cooling-off design queue.
+    expect(existsSync(join(f.supervisorDir, 'backlog.jsonl'))).toBe(false);
   });
 
   it('keeps an invalid verdict raw and journals nothing', async () => {
