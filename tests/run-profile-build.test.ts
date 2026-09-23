@@ -178,6 +178,9 @@ describe('parseRunnerArgs equivalence — documented invocations', () => {
       container: false,
       egress: false,
       baseline: false,
+      // An ordinary run is not a measurement arm, so it takes the family's
+      // supervision default (tests/project-run-supervision-depth.test.ts).
+      comparison: false,
     });
   });
 

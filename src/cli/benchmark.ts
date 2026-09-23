@@ -339,6 +339,9 @@ async function runOne(
     logPath: join(logsDir, `${label}.log`),
     extraArgs: [
       ...(arm === 'baseline' ? ['--baseline'] : []),
+      // Both arms are measurement: they keep the protocol the round was
+      // registered under, whatever default ships later (`RunnerArgs.comparison`).
+      '--comparison',
       ...(task.seed ? ['--seed', task.seed] : []),
     ],
     extraEnv,

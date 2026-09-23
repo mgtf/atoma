@@ -229,7 +229,11 @@ export async function runRetrievalCampaign(
           extraArgs: [
             entry.arm === 'frontier-direct' ? '--baseline' : '--no-baseline',
             '--container', '--no-egress', '--worker-image', registration.spec.workerImage,
-            '--no-learn-skills', '--no-promote-skills', '--no-direct-skills', '--seed', prepared.workspace,
+            // `--comparison` is what holds this arm's protocol fixed. It used to
+            // ride on `--seed`, which project runs also pass for an unrelated
+            // reason (see `RunnerArgs.comparison`).
+            '--no-learn-skills', '--no-promote-skills', '--no-direct-skills', '--comparison',
+            '--seed', prepared.workspace,
           ],
         }));
         const log = await withUnkillableBackstop(pending.finally(() => { childSettled = true; options.onChild?.(null); }),

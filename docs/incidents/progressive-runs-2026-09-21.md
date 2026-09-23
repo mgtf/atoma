@@ -396,6 +396,70 @@ measure nothing about the behaviour in question. The first production verdicts
 under p5 are the measurement, and the question they answer is whether the
 mender finally receives an eligible finding.
 
+## What p5 found on its first run — 2026-09-23
+
+The calibration was validated in production, on the operator's call that the
+mender only ever runs there. Run `e743b47d` (an inventory service in the same
+project, a goal the prompt does not name, so not the circular case) was
+analysed under p5 and produced **the first `defect` this analyst has ever
+emitted** — against 17 candidates and zero defects since 2026-09-06.
+
+Three things landed at once, and two of them were the changes of 2026-09-22
+working as designed:
+
+- The finding kept `kind: defect` while omitting `proposedFix`, saying in
+  `detail` which `AGENTS.md` it had read. That is exactly p5's second rule; p4
+  would have downgraded it.
+- It is INELIGIBLE for the mender — `confidence: medium`, `fixDirection: null`
+  — and it is visible anyway, in `supervisor/defects.jsonl`, created by that
+  run. Without the routing added in the same commit it would have existed only
+  inside a verdict file nobody reopens: not the backlog (it is a defect), not
+  the mender.
+- Its one checkable claim was WRONG. It said `src/atoms/AGENTS.md` "contained
+  no intentional-choices text"; the section is there, at line 215 of 237. What
+  the check of that claim found is the substance below.
+
+**The analyst was right about the smell and wrong about the mechanism.** It
+suspected `rootAcceptance.ts` and could not name "the exact caller or
+verdict-parsing path that bypassed or overruled this contract", so it stayed
+at `medium`. The answer is that the caller never runs. `startTask` skipped the
+family's supervision default whenever `--seed` was present, and the
+coordinator passes `--seed` for every project run after a project's first.
+So `runDepthTask` — and with it root delivery acceptance, the ground-truth
+probe, the delivery proof floor and the attestation log — was absent from
+`fd557ba9`, `a34e4d7e`, `cc894dad`, `d3098d25` and `e743b47d`. The protection
+disappeared exactly as each project's corpus grew and its deliveries got
+harder to judge, which is why `e743b47d` published `probes: []` to a tenant
+repository.
+
+The exemption was not an oversight, it was a misread: `--seed` was carrying
+"this is a measurement arm", and two unrelated populations pass it. A campaign
+arm seeds to hold its protocol fixed; a project run seeds to continue its own
+corpus. The depth design had already settled the intent — "The default is
+resolved inside `startTask`, so CLI, MCP and project launches all inherit it"
+([depth routing](../depth-routing-experiment-2026-09-13.md)) — so this is a
+contract the code did not keep, which is what p5 calls a `defect`. Fixed by
+naming the intent: `--comparison`, passed by `benchmark.ts` and
+`retrievalCampaign.ts`, and `resolveSupervisionDepth` exported and tested
+beside `resolveSkillPromotion`. Regression cover crosses both halves of the
+boundary the defect crossed (`tests/project-run-supervision-depth.test.ts`,
+plus the coordinator and campaign launch assertions).
+
+Not changed, and deliberately: the `build` profile's hard-coded floor
+(`dom-interaction` on `index.html`) does not follow the nature of the
+deliverable, so an HTTP service is measured against a page it never had to
+produce. That one IS conformant — `src/atoms/AGENTS.md` describes it word for
+word, and making the floor follow the goal would mean sniffing the goal, the
+vocabulary-frozen detector class the 2026-08-14 review measured and rejected.
+It is a `mechanism_candidate` and it waits for its own design.
+
+The same check also found that eight of eighteen subsystem docs had no
+intentional-choices section at all, though the root contract asserts every one
+does. Since `proposedFix.checkedIntentionalChoices` is required, a finding
+landing in those subtrees could never become mender-eligible: a second,
+independent reason the mender was unreachable. Written and enforced by
+`docs:check` the same day.
+
 ## Still open, deliberately
 
 - Whether p5 moves the bar: the recalibration above is a change to a judgement

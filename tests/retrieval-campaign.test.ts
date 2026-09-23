@@ -197,6 +197,10 @@ describe('retrieval campaign execution through the shared launcher seam', () => 
     for (const o of calls) {
       expect(o.extraArgs).toContain('--container');
       expect(o.extraArgs).toContain('--no-egress');
+      // A registered arm keeps the protocol of its round whatever default
+      // ships later. This used to ride on `--seed`, which project runs pass
+      // for an unrelated reason (tests/project-run-supervision-depth.test.ts).
+      expect(o.extraArgs).toContain('--comparison');
       expect(o.extraArgs![o.extraArgs!.indexOf('--worker-image') + 1]).toBe(spec.workerImage);
       expect(readdirSync(o.env!['ATOMA_BUILD_WORKSPACE']!)).not.toContain('questions.json');
     }

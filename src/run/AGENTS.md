@@ -85,7 +85,16 @@ Neighbours:
 
 - New ordinary build runs default to short-first supervision. `--depth deep`
   explicitly enters through L3; `--depth short` selects the default. Baseline
-  and seeded comparison runs retain their existing protocol. Depth routing keeps model pins and
+  and REGISTERED COMPARISON ARMS (`--comparison`) retain their existing
+  protocol — and that flag exists because the rule read `--seed` until
+  2026-09-23. Two unrelated populations pass `--seed`: a campaign arm seeds to
+  hold its protocol fixed, a PROJECT run seeds to continue its own corpus. So
+  every project run after a project's first silently lost `runDepthTask`, and
+  with it root delivery acceptance, the ground-truth probe, the delivery proof
+  floor and the attestation log. `resolveSupervisionDepth` is the one decision,
+  exported and tested like `resolveSkillPromotion` beside it; the depth design
+  had already settled the intent ("CLI, MCP and project launches all inherit
+  it"). Depth routing keeps model pins and
   one run deadline, cost ledger and trace. Its profile freezes the delivery
   `proofFloor` before routing, without adding it to phase `proofObligations`.
   Deep enters through L3; short plans and executes
@@ -137,6 +146,10 @@ Neighbours:
   MAIN answer. A bigger budget only moves the cliff; landing is what recovers
   the spend. The 30 → 60 minute raise of 2026-09-22 shipped as the smaller
   half of that change, beside moving preparation off the tenant's clock.
+- Reading `--seed` as "this run is a measurement arm": refused since
+  2026-09-23, and it is the reason `--comparison` exists. A seed says where
+  the workspace came from, never why. Measured on run `e743b47d`, delivered
+  and published to a tenant repository with `probes: []`.
 - Global regexes over the runner's stdout: refused. `ATOMA_RUN_STATS` is the
   accounting contract and `parseRunLog` keeps text parsing only for
   interrupted legacy runs. A regex over model-authored prose is a parser whose

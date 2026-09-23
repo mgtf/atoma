@@ -930,6 +930,11 @@ describe('ProjectRunCoordinator', () => {
     const seedAt = extraArgs.indexOf('--seed');
     expect(seedAt).toBeGreaterThanOrEqual(0);
     expect(extraArgs[seedAt + 1]).toBe(first.hostPaths.workspacePath);
+    // A project run seeds to CONTINUE ITS CORPUS, never to hold a measurement
+    // protocol fixed, so it must not claim to be a comparison arm: that claim
+    // is what skips the family's supervision default, and with it root
+    // delivery acceptance (tests/project-run-supervision-depth.test.ts).
+    expect(extraArgs).not.toContain('--comparison');
     await coordinator.waitForIdle();
   });
 

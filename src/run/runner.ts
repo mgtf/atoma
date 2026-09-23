@@ -107,6 +107,23 @@ export interface RunnerArgs {
    * which is the shape we already measured four times.
    */
   seed?: string;
+  /**
+   * This run is an arm of a MEASUREMENT campaign, so it keeps the protocol it
+   * was registered under and never acquires a new default.
+   *
+   * It exists because `--seed` was carrying that meaning implicitly and two
+   * unrelated populations pass `--seed`: benchmark and retrieval-campaign arms
+   * seed a workspace to hold the protocol fixed, while a PROJECT run seeds one
+   * to continue its own corpus ("the workspace is the seed of the next",
+   * [src/projects](../projects/AGENTS.md)). Reading the second as the first
+   * silently removed root delivery acceptance from every project run after a
+   * project's first — measured 2026-09-23 on run `e743b47d`, whose result
+   * carried `probes: []` and published anyway. The depth design had already
+   * settled the intent: "The default is resolved inside `startTask`, so CLI,
+   * MCP and project launches all inherit it"
+   * (`docs/depth-routing-experiment-2026-09-13.md`).
+   */
+  comparison: boolean;
   /** Optional immutable worker identity, used by registered experiments. */
   workerImage?: string;
 }
@@ -194,6 +211,7 @@ const RUNNER_BOOLEAN_FLAGS = [
   '--no-promote-skills',
   '--no-direct-skills',
   '--clean-workspace',
+  '--comparison',
 ] as const;
 /** Booleans that also accept an explicit `--no-` form; the LAST spelling wins. */
 const RUNNER_NEGATABLE_FLAGS = ['--baseline', '--container', '--egress'] as const;
@@ -260,8 +278,9 @@ export function parseRunnerArgs(argv: readonly string[]): RunnerArgs {
       : process.env['ATOMA_BASELINE'] === '1';
   const workerImage = flags['worker-image'];
   const depth = flags['depth'] === undefined ? undefined : depthModeSchema.safeParse(flags['depth']);
-  if (depth && (!depth.success || baseline || seed)) {
-    throw new RunnerConfigError('--depth must be deep or short and cannot be combined with baseline or a seed');
+  const comparison = flags['comparison'] === 'true';
+  if (depth && (!depth.success || baseline || comparison)) {
+    throw new RunnerConfigError('--depth must be deep or short and cannot be combined with baseline or a comparison arm');
   }
   if (workerImage !== undefined &&
       (!backendMode.container || !containerImageDigestSchema.safeParse(workerImage).success)) {
@@ -276,6 +295,7 @@ export function parseRunnerArgs(argv: readonly string[]): RunnerArgs {
     cleanWorkspace: flags['clean-workspace'] === 'true',
     ...backendMode,
     baseline,
+    comparison,
     ...(seed ? { seed } : {}),
     ...(workerImage ? { workerImage } : {}),
   };
@@ -301,6 +321,31 @@ export function resolveSkillPromotion(
   }
   if (args.seed) return { enabled: true, source: 'seed-default' };
   return { enabled: false, source: 'default-disable' };
+}
+
+/**
+ * The supervision depth a run ENTERS with.
+ *
+ * Extracted from `startTask` for the reason `resolveSkillPromotion` above was:
+ * the decision is one line of policy that four callers inherit (CLI, MCP,
+ * project launches, campaigns), and it was only observable by starting a run.
+ *
+ * An explicit `--depth` always wins. A baseline or a registered comparison arm
+ * keeps the protocol it was registered under, whatever default ships later.
+ * EVERYTHING ELSE takes the family's default — including a project run, which
+ * seeds a workspace to continue its corpus rather than to hold a protocol
+ * fixed. Reading those two as one is what removed root delivery acceptance
+ * from every project run after a project's first; the depth design had already
+ * settled it ("CLI, MCP and project launches all inherit it",
+ * `docs/depth-routing-experiment-2026-09-13.md`).
+ */
+export function resolveSupervisionDepth(
+  args: Pick<RunnerArgs, 'depth' | 'baseline' | 'comparison'>,
+  defaultMode: DepthMode | undefined
+): DepthMode | undefined {
+  if (args.depth) return args.depth;
+  if (args.baseline || args.comparison) return undefined;
+  return defaultMode;
 }
 
 /**
@@ -499,11 +544,8 @@ export async function startTask(
   const useClaudeCli = referencedTransports(selectors).includes('claude-cli');
 
   const args = parseRunnerArgs(argv);
-  // Baselines and seeded comparison runs keep their explicit protocol. New
-  // ordinary runs use the family's depth policy unless the caller overrides it.
-  if (!args.depth && !args.baseline && !args.seed && profile.depthExperiment?.defaultMode) {
-    args.depth = profile.depthExperiment.defaultMode;
-  }
+  const resolvedDepth = resolveSupervisionDepth(args, profile.depthExperiment?.defaultMode);
+  if (resolvedDepth) args.depth = resolvedDepth;
   if (args.depth && !profile.depthExperiment) throw new RunnerConfigError('This profile has no supervision depth contract');
   const goal = args.goal ?? profile.defaultGoal;
   // AMBIENT BY DESIGN, unlike the lifecycle toggles and tier pins: the
