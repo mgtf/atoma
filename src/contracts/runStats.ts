@@ -69,6 +69,18 @@ export const runStatsSchema = z.object({
   // 'cancelled' outcome note above records.
   uncoveredObligations: countSchema.default(0),
   deepenings: countSchema.default(0),
+  /**
+   * Times root delivery acceptance REFUSED a result and handed its reasons
+   * back for another pass, rather than ending the run.
+   *
+   * Counted because the two outcomes it separates look identical from the
+   * outside: a run that was accepted first time and a run that was refused,
+   * told what was missing, and came back. Measured 2026-09-23 — with one pass
+   * only, a goal naming nine verifiable behaviours was refused twice while a
+   * goal naming six was delivered, and the refusals named exactly what had not
+   * been probed.
+   */
+  rootRemediations: countSchema.default(0),
 });
 
 export type RunStats = z.infer<typeof runStatsSchema>;
@@ -84,7 +96,8 @@ export type RunStatSignal =
   | 'demotion'
   | 'dispatch-fallback'
   | 'uncovered-obligation'
-  | 'deepening';
+  | 'deepening'
+  | 'root-remediation';
 
 export function formatRunStatsEpilogue(stats: RunStats): string {
   return RUN_STATS_PREFIX + JSON.stringify(runStatsSchema.parse(stats));

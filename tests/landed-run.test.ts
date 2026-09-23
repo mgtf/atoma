@@ -46,6 +46,7 @@ const PARTIAL_STATS: RunStats = {
   otherCalls: 24,
   deterministicPhases: 0,
   deepenings: 0,
+  rootRemediations: 0,
   escalations: 0,
   learnedSkills: 0,
   learnedEventSkills: 1,

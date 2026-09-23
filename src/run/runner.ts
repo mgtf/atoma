@@ -188,6 +188,7 @@ function machineRunStats(
     dispatchFallbacks: signals['dispatch-fallback'],
     uncoveredObligations: signals['uncovered-obligation'],
     deepenings: signals.deepening,
+    rootRemediations: signals['root-remediation'],
   };
 }
 
@@ -759,6 +760,7 @@ export async function startTask(
     'dispatch-fallback': 0,
     'uncovered-obligation': 0,
     deepening: 0,
+    'root-remediation': 0,
   };
   // ONE construction switch per transport, shared with curriculum and the viz
   // server (review §3.9): only the transports the three selectors reach are

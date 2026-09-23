@@ -99,7 +99,19 @@ Neighbours:
   `proofFloor` before routing, without adding it to phase `proofObligations`.
   Deep enters through L3; short plans and executes
   through the canonical L2, including its peers. Every result goes through
-  the same root acceptance; rejection fails delivery without remediation.
+  the same root acceptance; a refusal is handed BACK ONCE
+  (`MAX_ROOT_REMEDIATIONS`) and fails delivery on the second. The refusal
+  rides in the task's `inputs` as `rootAcceptanceRefusal` — never appended to
+  the description, which planning and skill matching key on — and the pass
+  runs in the SAME attempt and workspace, so the attestations already earned
+  still cover their deliverables (`rootProofCoverage` re-reads each file and
+  compares its digest, so a proof lives exactly as long as the bytes it was
+  made against). The budget is one extra pass per RUN, not per attempt: a
+  deepening is already this run's second chance at a structural failure.
+  A pass the wall clock cannot pay for (`outOfPhaseBudget`) is not opened.
+  Measured 2026-09-23: with one pass only, a goal naming nine verifiable
+  behaviours was refused twice while a goal naming six was delivered, and the
+  refusals named exactly which behaviours had never been probed.
 - Only the first short attempt may deepen, at the existing supervision
   fallback moment after its branch retry. Cancel and drain all branches,
   confirm tool processes have exited, archive the workspace, then construct

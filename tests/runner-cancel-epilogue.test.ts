@@ -35,6 +35,7 @@ const cancelledStats: RunStats = {
   otherCalls: 3,
   deterministicPhases: 0,
   deepenings: 0,
+  rootRemediations: 0,
   escalations: 0,
   learnedSkills: 0,
   learnedEventSkills: 0,

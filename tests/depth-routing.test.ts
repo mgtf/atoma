@@ -11,7 +11,7 @@ import { dispatchWithAggregation } from '../src/atoms/dispatch.js';
 import { NON_JSON_PAYLOAD_SUMMARY_PREFIX } from '../src/atoms/json.js';
 import { buildResultGateEnv, runResultGates } from '../src/atoms/resultGates.js';
 import { PROBE_MANIFEST_FILENAME } from '../src/contracts/probeManifest.js';
-import { runDepthTask, RootAcceptanceError } from '../src/run/depth.js';
+import { runDepthTask, RootAcceptanceError, MAX_ROOT_REMEDIATIONS } from '../src/run/depth.js';
 import { acceptanceSchema, type AcceptanceInfo, type PhaseCoverageRecord, type TopologyInfo } from '../src/contracts/depthRouting.js';
 import { makeCtx, jsonText } from './helpers.js';
 import { makePlan, makeTools } from './helpers/factories.js';
@@ -247,7 +247,11 @@ describe('depth transition through the production supervision loop', () => {
   it('exhausts the branch retry, cancels and drains siblings, then permits deep fallback and root rejection', async () => {
     const ctx = context();
     ctx.limits = { ...ctx.limits, maxPlanIterations: 1 };
+    // TWO refusals since 2026-09-23: a refused delivery is handed back for one
+    // more pass before the run ends (`MAX_ROOT_REMEDIATIONS`), and that budget
+    // is per RUN, so a deepened run still gets exactly one.
     ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'Missing final proof' }));
+    ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'Still missing final proof' }));
     const short = new Actor(2, true);
     const deep = new Actor(3, true);
     const children: Actor[] = [];
@@ -262,7 +266,12 @@ describe('depth transition through the production supervision loop', () => {
       createExecutor: (mode) => {
         const actor = mode === 'short' ? short : deep;
         return { actor, handle: async (receivedTask, current) => {
-          expect(receivedTask).toBe(originalTask);
+          // The deepened attempt runs the ORIGINAL task, and a remediation pass
+          // keeps its description and constraints — only `inputs` gains the
+          // acceptor's reasons, so planning and skill matching still key on the
+          // same task.
+          expect(receivedTask.description).toBe(originalTask.description);
+          expect(receivedTask.constraints).toBe(originalTask.constraints);
           expect(current.deadlineAt).toBe(ctx.deadlineAt);
           const supervise = async () => {
             const child = new Actor(1);
@@ -288,22 +297,100 @@ describe('depth transition through the production supervision loop', () => {
       },
     })).rejects.toBeInstanceOf(RootAcceptanceError);
     expect(short.fallbackExecutions).toBe(0);
-    expect(deep.fallbackExecutions).toBe(1);
-    expect(children.filter((child) => child.plans === 1)).toHaveLength(4);
+    // Two, since 2026-09-23: the deepened attempt runs once, is refused, and
+    // runs once more with the acceptor's reasons.
+    expect(deep.fallbackExecutions).toBe(2);
+    // Six, since 2026-09-23: the remediation pass supervises its own children.
+    expect(children.filter((child) => child.plans === 1)).toHaveLength(6);
     expect(order).toEqual(['sibling-drained', 'restart']);
     expect(restart).toHaveBeenCalledTimes(1);
     expect(topologies).toEqual([{ at: 'entry', mode: 'short', reason: 'arm', attempt: 1 },
       { at: 'deepening', mode: 'deep', reason: 'fallback-moment', attempt: 2 }]);
-    expect(acceptances).toMatchObject([{ attempt: 2, approved: false, executor: { tier: 3, viaFallback: true }, floorCoverage: [{ status: 'uncovered' }] }]);
+    expect(acceptances).toMatchObject([
+      { attempt: 2, approved: false, executor: { tier: 3, viaFallback: true }, floorCoverage: [{ status: 'uncovered' }] },
+      { attempt: 2, approved: false },
+    ]);
     expect(stats.mock.calls.filter(([signal]) => signal === 'deepening')).toHaveLength(1);
-    expect(ctx.llm.calls).toHaveLength(1);
+    expect(stats.mock.calls.filter(([signal]) => signal === 'root-remediation')).toHaveLength(1);
+    expect(ctx.llm.calls).toHaveLength(2);
   });
+  it('hands a refusal back for ONE more pass, in the same attempt and workspace', async () => {
+    // Measured 2026-09-23 on production runs 69f6f608 and 671da856: root
+    // acceptance refused both, naming exactly which behaviours were never
+    // probed, and the run ended there. One pass does not cover a goal naming
+    // nine verifiable behaviours — the same goal, told to verify, came back
+    // with FEWER gaps — so the refusal is handed back instead of ending it.
+    const ctx = context();
+    const restart = vi.fn();
+    const stats = vi.fn();
+    const seen: Task[] = [];
+    ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'DELETE and restart persistence remain unverified' }));
+    ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'Every named behaviour is now probed' }));
+    const accepted = vi.fn();
+    const delivered = await runDepthTask({
+      mode: 'short', task, floor, restart, onTopology: vi.fn(), onAcceptance: accepted,
+      ctx: { ...ctx, recordRunStat: stats },
+      createExecutor: () => ({ actor: new Actor(), handle: async (t) => { seen.push(t); return result; } }),
+    });
+    expect(delivered).toBe(result);
+    expect(seen).toHaveLength(2);
+    // The refusal reaches the second pass as DATA, under inputs — the
+    // description is what planning and skill matching key on and must not move.
+    expect(seen[0]!.inputs?.['rootAcceptanceRefusal']).toBeUndefined();
+    expect(seen[1]!.description).toBe(task.description);
+    expect(seen[1]!.inputs).toMatchObject({
+      rootAcceptanceRefusal: 'DELETE and restart persistence remain unverified',
+      rootAcceptanceAttempt: 1,
+    });
+    // Same attempt, same workspace: the first pass's proof still stands, and
+    // nothing is archived. Deepening is the mechanism that replaces a
+    // workspace, and this is deliberately not it.
+    expect(restart).not.toHaveBeenCalled();
+    expect(accepted.mock.calls.map(([info]) => info.attempt)).toEqual([1, 1]);
+    expect(stats.mock.calls.filter(([signal]) => signal === 'root-remediation')).toHaveLength(1);
+  });
+
+  it('refuses for good after the last remediation, without a third pass', async () => {
+    const ctx = context();
+    const stats = vi.fn();
+    let passes = 0;
+    ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'first refusal' }));
+    ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'second refusal' }));
+    await expect(runDepthTask({
+      mode: 'short', task, floor, restart: vi.fn(), onTopology: vi.fn(), onAcceptance: vi.fn(),
+      ctx: { ...ctx, recordRunStat: stats },
+      createExecutor: () => ({ actor: new Actor(), handle: async () => { passes++; return result; } }),
+    })).rejects.toBeInstanceOf(RootAcceptanceError);
+    expect(passes).toBe(1 + MAX_ROOT_REMEDIATIONS);
+    expect(stats.mock.calls.filter(([signal]) => signal === 'root-remediation')).toHaveLength(MAX_ROOT_REMEDIATIONS);
+  });
+
+  it('spends no pass the wall clock cannot pay for', async () => {
+    // Same floor landing already uses: opening work the deadline will truncate
+    // buys nothing, and here it would also cost the refusal's own diagnosis.
+    const ctx = context();
+    const stats = vi.fn();
+    let passes = 0;
+    ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'unverified' }));
+    await expect(runDepthTask({
+      mode: 'short', task, floor, restart: vi.fn(), onTopology: vi.fn(), onAcceptance: vi.fn(),
+      ctx: { ...ctx, recordRunStat: stats, deadlineAt: Date.now() + 5_000 },
+      createExecutor: () => ({ actor: new Actor(), handle: async () => { passes++; return result; } }),
+    })).rejects.toBeInstanceOf(RootAcceptanceError);
+    expect(passes).toBe(1);
+    expect(stats.mock.calls.filter(([signal]) => signal === 'root-remediation')).toHaveLength(0);
+  });
+
   it('arm A uses the same root rejection for an L3 fallback and never restarts', async () => {
     const ctx = context();
     const actor = new Actor(3, true);
     const restart = vi.fn();
     const accepted = vi.fn();
+    // TWO refusals, since 2026-09-23: the first is handed back for one more
+    // pass (`MAX_ROOT_REMEDIATIONS`), and the run ends on the second. What this
+    // test pins is unchanged — an L3 fallback never restarts the workspace.
     ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'Reject root' }));
+    ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'Reject root again' }));
     await expect(runDepthTask({ mode: 'deep', task, ctx: { ...ctx, limits: { ...ctx.limits, maxPlanIterations: 1 } }, floor,
       restart, onTopology: vi.fn(), onAcceptance: accepted,
       createExecutor: () => ({ actor, handle: (t, c) => superviseLoop(actor, new Actor(2), t, c, {

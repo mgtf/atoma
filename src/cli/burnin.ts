@@ -156,6 +156,10 @@ export function parseRunLog(log: string): RunStats {
       llmCalls === null ? 0 : Math.max(0, llmCalls - opusCalls - sonnetCalls - haikuCalls),
     deterministicPhases: (log.match(/ran via deterministic dispatch/g) ?? []).length,
     deepenings: 0,
+    // Prose fallback only, and there is no prose marker to count: this reader
+    // exists for runs killed before their epilogue, where the counter is
+    // simply unknown. Zero is the same answer `deepenings` gives above.
+    rootRemediations: 0,
     // Prose fallback only: count the runner-owned escalation marker, never
     // arbitrary model prose or routine prefilter decisions containing the
     // same word.

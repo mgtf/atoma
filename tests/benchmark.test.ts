@@ -26,6 +26,7 @@ const stats = (over: Partial<RunStats> = {}): RunStats => ({
   otherCalls: 0,
   deterministicPhases: 0,
   deepenings: 0,
+  rootRemediations: 0,
   escalations: 0,
   learnedSkills: 0,
   learnedEventSkills: 0,
