@@ -314,7 +314,7 @@ describe('depth transition through the production supervision loop', () => {
     expect(stats.mock.calls.filter(([signal]) => signal === 'root-remediation')).toHaveLength(1);
     expect(ctx.llm.calls).toHaveLength(2);
   });
-  it('carries a LANDED result through root acceptance, and shows the validator is never told', async () => {
+  it('carries a LANDED result through root acceptance, and tells the validator what a landing is', async () => {
     // Root acceptance reached project runs on 2026-09-23 (commit 2102979).
     // Landing on the budget shipped on 2026-09-22, and was never exercised
     // under depth routing, because depth routing was not running on the path
@@ -322,11 +322,14 @@ describe('depth transition through the production supervision loop', () => {
     //
     // A landed result reaches the root with `unfinishedPhases` set and a
     // summary whose first word is INCOMPLETE. The profile floor is uncovered
-    // (a landed run stopped before proving it), so `review` is true and an
-    // LLM verdict decides — and NOTHING in the payload it is handed says that
-    // an incomplete result can be legitimate. The assertion at the end of this
-    // test is the finding, not a preference: if it ever fails because the word
-    // appears, that is the fix landing, not a regression.
+    // (a landed run stopped before proving it), so `review` is true and an LLM
+    // verdict decides.
+    //
+    // Until 2026-09-24 nothing in the payload said an incomplete result could
+    // be legitimate, and the only statement the host made about incompleteness
+    // was a rejection. `LANDED_RESULT_GUIDANCE` now travels with a landed
+    // result and nowhere else; the ordinary-result half below is what proves
+    // the "nowhere else".
     const ctx = context();
     const landed: Result = {
       ...result,
@@ -357,6 +360,11 @@ describe('depth transition through the production supervision loop', () => {
     // and decides on model prose alone.
     const landedPrompt = JSON.stringify(ctx.llm.calls[0]).toLowerCase();
     expect(landedPrompt).toContain('incomplete');
+    // Since 2026-09-24 the host NAMES the landing for the judge that decides
+    // it. Before that, everything below was true and this line was not, which
+    // is the whole finding: the validator ruled on model prose alone.
+    expect(landedPrompt).toContain('this result landed on the run budget');
+    expect(landedPrompt).toContain('reject it for being incomplete');
 
     const plain = context();
     plain.llm.enqueueText(jsonText({ approved: true, reasoning: 'fine' }));

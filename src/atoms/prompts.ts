@@ -398,6 +398,35 @@ export const PROOF_OBLIGATION_GUIDANCE = [
  * is the between-phases half. Landed on the operator's 2026-09-21 decision
  * against the collected backlog set, not against a single run.
  */
+/**
+ * WHAT A LANDED RESULT IS, said to the judge that decides its fate.
+ *
+ * A run that reaches its budget with phases already accepted reports those
+ * instead of discarding them (`markLanded`, `src/atoms/dispatch.ts`), and its
+ * summary opens with INCOMPLETE. Root acceptance then judges it — always
+ * through a validation call, because a landed run stopped before it could
+ * prove the delivery floor, so `floorCoverage` is uncovered by construction.
+ *
+ * Until 2026-09-24 that judge was told nothing about landings. Everything it
+ * knew came from the executor's own summary, while the only statement the host
+ * made about incompleteness was "a visually-incomplete artefact is a failed
+ * deliverable" — scoped to visual artefacts, but the only hint there was, and
+ * it pointed at rejection. Characterised in `tests/depth-routing.test.ts`.
+ *
+ * The wording follows the analyst's, deliberately: one definition of a landing,
+ * served to both judges rather than restated differently in each.
+ */
+export const LANDED_RESULT_GUIDANCE: string = [
+  '== THIS RESULT LANDED ON THE RUN BUDGET ==',
+  'The run reached its wall-clock budget with phases already accepted, and',
+  'reported those instead of discarding them. Its deliverable is REAL and',
+  'INCOMPLETE, it names the phases that never ran, and it is NOT a failure.',
+  'Judge the phases it DID complete on the same terms as a delivery: do not',
+  'reject it for being incomplete, and do not approve it for having landed.',
+  'Reject it only if the work it DOES claim fails on its own evidence, or if',
+  'the phases it reports as accepted were not in fact accepted.',
+].join('\n');
+
 export const STANDING_PROOF_PLANNING_GUIDANCE = [
   `== RECORDED PROOF IS STANDING PROOF ==`,
   `Verification belongs INSIDE the phase that builds or changes an artefact,`,

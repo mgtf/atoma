@@ -7,6 +7,7 @@ import type { AcceptanceInfo, PhaseCoverageRecord, ProofFloor } from '../contrac
 import { buildResultGateEnv, renderResultGateFindings, runResultGates } from './resultGates.js';
 import { checkGroundTruth } from './groundTruth.js';
 import { llmVerdict } from './verdict.js';
+import { LANDED_RESULT_GUIDANCE } from './prompts.js';
 
 /** Root proof is stricter than phase proof: no binding or unreadable bytes never cover. */
 export async function rootProofCoverage(ctx: RunContext, floor: ProofFloor): Promise<AcceptanceInfo['floorCoverage']> {
@@ -58,6 +59,10 @@ export async function acceptRootResult(args: {
       groundTruthBlock: probe.block,
       mechanicalFindingsBlock: renderResultGateFindings(gates.reviewFindings),
       proofCoverageBlock: 'ROOT DELIVERY PROOF (no effect on phase credits):\n' + JSON.stringify(floorCoverage),
+      // A landed run always reaches here through a validation call, because it
+      // stopped before it could prove the floor. Saying what a landing IS costs
+      // one block and decides whether the phases it did complete survive.
+      ...(result.unfinishedPhases?.length ? { landingBlock: LANDED_RESULT_GUIDANCE } : {}),
     }) : { approved: true, reasoning: 'No mechanical finding requires review.' };
   const produced = result.producedBy;
   return {

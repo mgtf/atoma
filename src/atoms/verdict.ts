@@ -708,6 +708,12 @@ export async function llmVerdict(args: {
    * The caller resolves it (it has the SkillRegistry); we just render.
    */
   activeSkill?: { id: string; body: string };
+  /**
+   * Rendered `== THIS RESULT LANDED ON THE RUN BUDGET ==` block
+   * (`LANDED_RESULT_GUIDANCE`). Supplied by ROOT acceptance only: landing is a
+   * property of the whole run, and a phase supervisor never sees one.
+   */
+  landingBlock?: string;
 }): Promise<Verdict> {
   // `Subject kind` is repeated as its own field so the validator cannot miss
   // the PLAN-vs-RESULT distinction — the bar is different between the two and
@@ -787,6 +793,7 @@ export async function llmVerdict(args: {
     browserEvidence,
     args.mechanicalFindingsBlock ?? '',
     args.proofCoverageBlock ?? '',
+    args.landingBlock ?? '',
     // Adherence is a RESULT-phase judgment: a plan merely STATES intent to
     // follow the recipe, only the executed work can demonstrate it. Plan
     // verdicts therefore never carry the block even when a skill is active.

@@ -51,6 +51,16 @@ Neighbours:
   plan/verdict/fallback trace quotes are not delivery claims. Phase coverage
   is collected with its original attempt and branch, never reevaluated
   against the root floor. The floor is not inherited by phases.
+- A LANDED result carries `LANDED_RESULT_GUIDANCE` to that validator, and
+  nothing else does. A landed run stopped before it could prove the floor, so
+  `floorCoverage` is uncovered BY CONSTRUCTION and the verdict is always a
+  validation call — never the mechanical path. Until 2026-09-24 the judge was
+  told nothing about landings while the prompt's only statement on
+  incompleteness was a rejection ("a visually-incomplete artefact is a failed
+  deliverable"), so an honest landing's fate rested on model prose alone. The
+  wording follows the analyst's on purpose: one definition of a landing, served
+  to both judges. A phase supervisor never receives it — landing is a property
+  of the whole run.
 
 ## Planning, prefilter, and trust
 
