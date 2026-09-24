@@ -1130,6 +1130,33 @@ export class ProjectStore {
     return this.getProject(orgId, projectId)!;
   }
 
+  /**
+   * Move a project from an installation GitHub no longer knows to its
+   * organisation's replacement installation of the SAME account. Compare-and-
+   * set on the old id, so two publishers racing to rebind converge on one row.
+   * The caller decides eligibility (see `GitHubPublisher`); this only writes.
+   */
+  rebindInstallation(input: {
+    readonly orgId: string;
+    readonly projectId: string;
+    readonly from: string;
+    readonly to: string;
+  }): Project | null {
+    const orgId = organisationIdSchema.parse(input.orgId);
+    const projectId = projectIdSchema.parse(input.projectId);
+    const current = this.getProject(orgId, projectId);
+    if (!current) return null;
+    if (current.repositoryTarget.installationId === input.to) return current;
+    const changed = this.db
+      .prepare(
+        `UPDATE projects SET github_installation_id = ?, updated_at = ?
+         WHERE project_id = ? AND org_id = ? AND github_installation_id = ?`
+      )
+      .run(input.to, new Date().toISOString(), projectId, orgId, input.from).changes;
+    if (changed !== 1) throw new ProjectStateConflict('installation rebind lost to a concurrent change');
+    return this.getProject(orgId, projectId)!;
+  }
+
   /** Read an exact retry without reserving another run or taking its lease. */
   findProjectRunForRequest(
     orgIdInput: string,

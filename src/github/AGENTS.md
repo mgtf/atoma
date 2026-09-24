@@ -137,6 +137,26 @@ Neighbours:
 - HTTP 422 from repository creation is not proof a name is taken: an account
   can also refuse to create a repository of that visibility, and
   `GitHubApiError` carries no body. See [`src/projects`](../projects/AGENTS.md).
+- THE PUBLICATION PRE-FLIGHT reads before the first write. A `selected`
+  installation is asked for its own repository list
+  (`installationIncludesRepository`) once the repository id is known, and a
+  repository outside it is refused with the settings URL to fix it. Measured
+  2026-09-24: a narrowed installation still minted tokens and read public
+  forks, then answered the first blob with a bare `HTTP 403` — the client drops
+  response bodies by contract, so the journal could not say why. An `all`
+  installation costs no extra call. The selection read is the token's own
+  `repository_selection`, never the stored row, which moves only on webhooks.
+- A PROJECT BOUND TO AN INSTALLATION GITHUB NO LONGER KNOWS moves to its
+  organisation's replacement (`GitHubPublisher.projectInstallationToken`). A
+  404 on the App-JWT token request is GitHub's own statement, so the row is
+  recorded `deleted` with a `github.installation_status` event. The project is
+  rebound only to EXACTLY ONE active installation of the same account in the
+  same organisation — already corroborated by `bindInstallation`, so the move
+  grants nothing new — and the move is journaled as
+  `github.installation_linked`. Zero or several candidates, another
+  organisation's installation, and any SUSPENDED installation are refusals:
+  suspension is a person's decision on GitHub. Measured 2026-09-24: seven
+  projects on reinstalled App `155229027 → 158307021`, with no way forward.
 
 
 ## Existing repositories
@@ -181,5 +201,7 @@ Neighbours:
   authorization tokens* stays ENABLED (`persistGitHubUserTokens` throws on a
   null `expires_in`).
 - A reconciliation poll over installation status: deliberately absent. Status
-  mutation lives only in `recordWebhookDelivery`; an installation row simply
-  never leaves `active` without a delivery.
+  mutation lives in `recordWebhookDelivery`, plus ONE authoritative
+  observation on the publication path: a 404 answered to the App's own token
+  request records `deleted` (2026-09-25). Nothing polls, and a 403 never moves
+  the row — narrowing is not deletion.

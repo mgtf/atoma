@@ -102,6 +102,16 @@ export class FakeGitHub {
    */
   forcedUpdates = 0;
   readonly defaultBranch: string;
+  /**
+   * What the App's installations can reach. `all` by default; `selected` with
+   * `selectedRepositories` is the narrowed installation measured on
+   * 2026-09-24 — it still mints tokens and still reads the repository, then
+   * refuses the first write with 403 (`git/blobs`, `contents`).
+   */
+  repositorySelection: 'all' | 'selected' = 'all';
+  readonly selectedRepositories = new Set<string>();
+  /** Installation ids GitHub no longer knows: their token request answers 404. */
+  readonly deletedInstallations = new Set<string>();
 
   constructor(options: FakeGitHubOptions = {}) {
     this.defaultBranch = options.defaultBranch ?? 'main';
@@ -260,13 +270,22 @@ export class FakeGitHub {
     const body: Record<string, unknown> =
       typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : {};
 
-    if (method === 'POST' && /^\/app\/installations\/[^/]+\/access_tokens$/.test(pathname)) {
+    const tokenRoute = /^\/app\/installations\/([^/]+)\/access_tokens$/.exec(pathname);
+    if (method === 'POST' && tokenRoute && this.deletedInstallations.has(tokenRoute[1]!)) {
+      return json({ message: 'Not Found' }, 404);
+    }
+    if (method === 'GET' && pathname === '/installation/repositories') {
+      const visible = [...this.repos.values()].filter((repo) =>
+        this.repositorySelection === 'all' || this.selectedRepositories.has(`${repo.owner}/${repo.name}`));
+      return json({ total_count: visible.length, repositories: visible.map((repo) => this.repoJson(repo)) });
+    }
+    if (method === 'POST' && tokenRoute) {
       return json(
         {
           token: 'ghs_fake-installation-token',
           expires_at: new Date(Date.UTC(2026, 7, 23, 23, 0, 0)).toISOString(),
           permissions: body['permissions'] ?? { administration: 'write', contents: 'write' },
-          repository_selection: 'all',
+          repository_selection: this.repositorySelection,
         },
         201
       );
@@ -294,6 +313,10 @@ export class FakeGitHub {
     const empty = repo.refs.size === 0;
 
     if (method === 'GET' && rest === '') return json(this.repoJson(repo));
+    if (method !== 'GET' && this.repositorySelection === 'selected' &&
+      !this.selectedRepositories.has(`${owner}/${name}`)) {
+      return json({ message: 'Resource not accessible by integration' }, 403);
+    }
     if (rest === '/forks' && method === 'POST') {
       const destinationOwner = str(body['organization'], 'alice');
       const destinationName = str(body['name'], name);

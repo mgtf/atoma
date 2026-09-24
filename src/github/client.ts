@@ -657,6 +657,43 @@ export class GitHubAppClient {
     throw new Error(`GitHub user installations exceed the ${MAX_GITHUB_INSTALLATION_PAGES}-page safety bound`);
   }
 
+  /**
+   * Does the installation behind `installationToken` include this repository?
+   *
+   * The publication pre-flight. An installation whose selection was narrowed
+   * after a project was created still mints tokens and still reads PUBLIC
+   * repositories, then answers the first write with a bare
+   * `403 Resource not accessible by integration` — measured on 2026-09-24,
+   * two forks refused this way while the local row still said `all`. The
+   * installation's own repository list is the authoritative answer.
+   */
+  async installationIncludesRepository(installationToken: string, repositoryId: string): Promise<boolean> {
+    const id = canonicalGitHubId(repositoryId, 'GitHub repository id');
+    let seen = 0;
+    for (let page = 1; page <= MAX_GITHUB_INSTALLATION_PAGES; page += 1) {
+      const result = await this.request({
+        token: installationToken,
+        path: `/installation/repositories?per_page=100&page=${page}`,
+      });
+      const object = asObject(result.json, 'GitHub installation repositories response');
+      if (!Array.isArray(object['repositories'])) {
+        throw new Error('GitHub installation repositories response has an invalid shape');
+      }
+      const repositories = object['repositories'] as unknown[];
+      for (const repository of repositories) {
+        const entry = asObject(repository, 'GitHub installation repository');
+        if (canonicalGitHubId(entry['id'], 'GitHub repository id') === id) return true;
+      }
+      seen += repositories.length;
+      const totalCount = object['total_count'];
+      if (!Number.isSafeInteger(totalCount) || (totalCount as number) < 0) {
+        throw new Error('GitHub installation repositories count has an invalid value');
+      }
+      if (seen >= (totalCount as number) || repositories.length === 0) return false;
+    }
+    throw new Error(`GitHub installation repositories exceed the ${MAX_GITHUB_INSTALLATION_PAGES}-page safety bound`);
+  }
+
   async getAppInstallation(installationId: string): Promise<GitHubInstallationView> {
     const id = canonicalGitHubId(installationId, 'GitHub installation id');
     const result = await this.request({

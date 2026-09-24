@@ -178,6 +178,115 @@ export class GitHubPublisher {
     this.events = deps.events ?? (() => undefined);
   }
 
+  /**
+   * The installation token for a project, repairing the one binding the
+   * product could not repair before: a project bound to an installation
+   * GitHub no longer knows.
+   *
+   * Measured 2026-09-24: seven projects were bound to installation 155229027
+   * after the App was reinstalled as 158307021, and every publication died on
+   * `POST /app/installations/155229027/access_tokens → 404`. A 404 there is
+   * answered under the App's own JWT, so it is GitHub saying this App has no
+   * such installation — an authoritative fact, recorded as `deleted` exactly as
+   * the webhook would have, not a reconciliation poll.
+   *
+   * A project then moves to its organisation's replacement ONLY when there is
+   * exactly one active installation of the SAME account in the SAME
+   * organisation. That installation was already bound through
+   * `bindInstallation`, which corroborated it against a connecting user, so
+   * the move grants nothing the organisation did not already hold. A
+   * SUSPENDED installation is never replaced: suspension is a person's
+   * decision on GitHub, and routing around it would override them.
+   */
+  private async projectInstallationToken(
+    project: Project,
+    pullRequests: boolean
+  ): Promise<{
+    project: Project;
+    installation: { installationId: string; targetType: 'User' | 'Organization' };
+    token: Awaited<ReturnType<GitHubAppClient['createInstallationToken']>>;
+  }> {
+    const recorded = this.github.getInstallation(project.repositoryTarget.installationId);
+    let gone = recorded?.orgId === project.orgId && recorded.status === 'deleted';
+    const installation = resolveProjectInstallation(this.github, project);
+    if (installation) {
+      try {
+        const token = await this.client.createInstallationToken(installation.installationId, pullRequests);
+        return { project, installation, token };
+      } catch (error) {
+        if (!(error instanceof GitHubApiError && error.status === 404)) throw error;
+        if (this.github.transitionInstallation(installation.installationId, 'deleted')) {
+          this.events({
+            kind: 'github.installation_status',
+            actorType: 'system',
+            orgId: project.orgId,
+            summary: `GitHub installation ${installation.installationId} is now deleted`,
+            detail: { installationId: installation.installationId, status: 'deleted' },
+          });
+        }
+        gone = true;
+      }
+    }
+    if (!gone) throw new Error('GitHub installation is not linked to this organisation or is inactive');
+    const from = project.repositoryTarget.installationId;
+    const owner = project.repositoryTarget.owner.toLowerCase();
+    const candidates = this.github.listInstallations(project.orgId).filter((candidate) =>
+      candidate.status === 'active' &&
+      candidate.installationId !== from &&
+      candidate.accountLogin.toLowerCase() === owner
+    );
+    if (candidates.length !== 1) {
+      throw new Error(
+        candidates.length === 0
+          ? `GitHub installation ${from} no longer exists on GitHub and this organisation has no other installation for ${project.repositoryTarget.owner}: reconnect GitHub for this organisation, then retry the publication`
+          : `GitHub installation ${from} no longer exists on GitHub and this organisation has ${candidates.length} installations for ${project.repositoryTarget.owner}: the project cannot be moved automatically`
+      );
+    }
+    const replacement = candidates[0]!;
+    const rebound = this.store.rebindInstallation({
+      orgId: project.orgId, projectId: project.projectId, from, to: replacement.installationId,
+    });
+    if (!rebound) throw new Error(`project ${project.slug} disappeared while moving to installation ${replacement.installationId}`);
+    this.events({
+      kind: 'github.installation_linked',
+      actorType: 'system',
+      orgId: project.orgId,
+      projectId: project.projectId,
+      summary: `Project ${eventLabel(project.slug, 60)} moved from deleted installation ${from} to ${replacement.installationId}`,
+      detail: { project: project.slug, from, to: replacement.installationId },
+    });
+    const next = resolveProjectInstallation(this.github, rebound);
+    if (!next) throw new Error('GitHub installation is not linked to this organisation or is inactive');
+    const token = await this.client.createInstallationToken(next.installationId, pullRequests);
+    return { project: rebound, installation: next, token };
+  }
+
+  /**
+   * The publication PRE-FLIGHT, before the first write. An installation whose
+   * repository selection was narrowed still mints a token with the right
+   * permissions and still reads a public repository, then refuses the first
+   * blob with a bare 403 — the response body is dropped by contract, so the
+   * journal said only `HTTP 403`. A `selected` installation is asked for its
+   * own repository list; `all` covers every repository of its account.
+   */
+  private async assertInstallationCoversRepository(input: {
+    token: Awaited<ReturnType<GitHubAppClient['createInstallationToken']>>;
+    installationId: string;
+    targetType: 'User' | 'Organization';
+    owner: string;
+    repositoryId: string;
+    fullName: string;
+  }): Promise<void> {
+    if (input.token.repositorySelection !== 'selected') return;
+    if (await this.client.installationIncludesRepository(input.token.token, input.repositoryId)) return;
+    const settings = input.targetType === 'Organization'
+      ? `https://github.com/organizations/${input.owner}/settings/installations/${input.installationId}`
+      : `https://github.com/settings/installations/${input.installationId}`;
+    throw new Error(
+      `the GitHub App installation no longer includes ${input.fullName}: add it under Repository access at ${settings}, then retry the publication`
+    );
+  }
+
   /** Creation-time read: resolve actual visibility and the source's immutable identity. */
   async inspectTarget(target: RepositoryTarget, orgId: string, principalId: string): Promise<RepositoryTarget> {
     const source = target.source;
@@ -223,11 +332,11 @@ export class GitHubPublisher {
     const source = project.repositoryTarget.source;
     if (!source?.repositoryId) throw new Error('Project source must be verified before starting a run');
     const target = project.repositoryTarget;
-    const installation = resolveProjectInstallation(this.github, project);
-    if (!installation) throw new Error('GitHub installation is not linked to this organisation or is inactive');
+    const resolved = await this.projectInstallationToken(project, source.mode === 'pull-request');
+    const installation = resolved.installation;
     const linked = this.github.getInstallation(installation.installationId)!;
     if (target.owner.toLowerCase() !== linked.accountLogin.toLowerCase()) throw new Error('Repository account does not match its installation');
-    let token = (await this.client.createInstallationToken(installation.installationId, source.mode === 'pull-request')).token;
+    let token = resolved.token.token;
     let repository = await this.client.getRepository(token, target.owner, target.name);
     signal.throwIfAborted();
     if (!repository && source.mode === 'fork' && project.repositoryStatus !== 'ready') {
@@ -327,13 +436,11 @@ export class GitHubPublisher {
     if (!publishing) return null;
 
     try {
-      const installation = resolveProjectInstallation(this.github, project);
-      if (!installation) {
-        throw new Error('GitHub installation is not linked to this organisation or is inactive');
-      }
-      const installationToken = await this.client.createInstallationToken(
-        installation.installationId, project.repositoryTarget.source?.mode === 'pull-request'
+      const resolved = await this.projectInstallationToken(
+        project, project.repositoryTarget.source?.mode === 'pull-request'
       );
+      const installation = resolved.installation;
+      const installationToken = resolved.token;
       const linked = this.github.getInstallation(installation.installationId);
       if (!linked) {
         throw new Error('GitHub installation disappeared after resolution');
@@ -425,6 +532,14 @@ export class GitHubPublisher {
         });
       }
       const repository = receipt;
+      await this.assertInstallationCoversRepository({
+        token: installationToken,
+        installationId: installation.installationId,
+        targetType: installation.targetType,
+        owner: project.repositoryTarget.owner,
+        repositoryId: repository.repositoryId,
+        fullName: repository.fullName,
+      });
       if (project.repositoryTarget.source) {
         const remote = await this.client.getRepository(installationToken.token, project.repositoryTarget.owner, project.repositoryTarget.name);
         if (!remote || remote.id !== repository.repositoryId || remote.private !== (project.repositoryTarget.visibility === 'private')) {
