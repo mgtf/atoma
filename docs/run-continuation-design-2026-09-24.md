@@ -1,6 +1,9 @@
 # Continuing a run that did not finish — design, 2026-09-24
 
-Status: DESIGN, nothing built. Written against four runs measured on
+Status: storeys 1 and 2 BUILT on 2026-09-24 — a refusal lands as `partial`
+(`e0afcf9`), and the landing reasons ride the epilogue to the next run
+(`923bbab`). Storey 3 remains a question, unbuilt. The body below is the design
+as written before either commit. Written against four runs measured on
 2026-09-23 and 2026-09-24, after root delivery acceptance was restored to
 project runs ([progressive runs](incidents/progressive-runs-2026-09-21.md)).
 It asks one question — what should happen when a run does not deliver — and
