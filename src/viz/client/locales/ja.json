@@ -1164,5 +1164,17 @@
   "projects.actionsHint.readyImported": "GitHubのデフォルトブランチから開始します。部分的な変更は再利用されません。",
   "pane.skillUnavailable": "このレシピを読み取れませんでした。削除または統合されたか、その後移動されたIDで学習された可能性があります。",
   "detail.field.executorName": "実行者",
-  "now.doing.draftChecklist": "runは目標に基づき、成果物が示すべき振る舞いをリストアップしています。"
+  "now.doing.draftChecklist": "runは目標に基づき、成果物が示すべき振る舞いをリストアップしています。",
+  "projects.criteria": "受け入れ基準",
+  "projects.criteriaPlaceholder": "任意の基準を1行に1件入力。GET /api/items 200 — 項目を一覧表示",
+  "projects.criteriaInvalidLine": "{{line}}行目の受け入れ基準：{{message}}",
+  "projects.criteriaTooMany": "受け入れ基準は最大{{max}}件",
+  "depth.checklist.user_one": "承認した基準{{count}}件、HTTPチェック{{http}}件中{{observed}}件を確認",
+  "depth.checklist.user_other": "承認した基準{{count}}件、HTTPチェック{{http}}件中{{observed}}件を確認",
+  "depth.checklist.drafted_one": "作成済みチェックリスト項目{{count}}件、HTTPチェック{{http}}件中{{observed}}件を確認",
+  "depth.checklist.drafted_other": "作成済みチェックリスト項目{{count}}件、HTTPチェック{{http}}件中{{observed}}件を確認",
+  "detail.field.checklist": "受け入れチェックリスト",
+  "detail.field.checklistSource": "チェックリストのソース",
+  "detail.field.checklistDigest": "チェックリストのダイジェスト",
+  "detail.field.behaviour": "動作"
 }

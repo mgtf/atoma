@@ -1164,5 +1164,17 @@
   "projects.actionsHint.readyImported": "Démarre à partir de la branche par défaut de GitHub. Les modifications partielles ne sont pas réutilisées.",
   "pane.skillUnavailable": "Cette recette n’a pas pu être lue — elle a peut-être été supprimée, fusionnée ou apprise sous une identité qui a depuis été déplacée.",
   "detail.field.executorName": "Exécuté par",
-  "now.doing.draftChecklist": "Le run dresse, à partir de l’objectif, la liste des comportements que sa livraison doit présenter."
+  "now.doing.draftChecklist": "Le run dresse, à partir de l’objectif, la liste des comportements que sa livraison doit présenter.",
+  "projects.criteria": "Critères d’acceptation",
+  "projects.criteriaPlaceholder": "Critères facultatifs, un par ligne. GET /api/items 200 — liste les éléments",
+  "projects.criteriaInvalidLine": "Critère d’acceptation à la ligne {{line}} : {{message}}",
+  "projects.criteriaTooMany": "Au maximum {{max}} critères d’acceptation",
+  "depth.checklist.user_one": "{{count}} critère que tu as approuvé, {{observed}} contrôles HTTP observés sur {{http}}",
+  "depth.checklist.user_other": "{{count}} critères que tu as approuvés, {{observed}} contrôles HTTP observés sur {{http}}",
+  "depth.checklist.drafted_one": "{{count}} élément de liste de contrôle rédigé, {{observed}} contrôles HTTP observés sur {{http}}",
+  "depth.checklist.drafted_other": "{{count}} éléments de liste de contrôle rédigés, {{observed}} contrôles HTTP observés sur {{http}}",
+  "detail.field.checklist": "Liste de contrôle d’acceptation",
+  "detail.field.checklistSource": "Source de la liste de contrôle",
+  "detail.field.checklistDigest": "Empreinte de la liste de contrôle",
+  "detail.field.behaviour": "Comportement"
 }

@@ -1164,5 +1164,17 @@
   "projects.actionsHint.readyImported": "GitHub की डिफ़ॉल्ट ब्रांच से शुरू करता है। आंशिक बदलावों का दोबारा इस्तेमाल नहीं किया जाता।",
   "pane.skillUnavailable": "यह recipe पढ़ी नहीं जा सकी — हो सकता है कि इसे हटा दिया गया हो, मर्ज कर दिया गया हो, या किसी ऐसी पहचान के तहत सीखा गया हो जो अब स्थानांतरित हो चुकी है।",
   "detail.field.executorName": "इसके द्वारा निष्पादित",
-  "now.doing.draftChecklist": "run, लक्ष्य के आधार पर, उन व्यवहारों की सूची बना रहा है जो उसकी डिलीवरी में दिखाई देने चाहिए।"
+  "now.doing.draftChecklist": "run, लक्ष्य के आधार पर, उन व्यवहारों की सूची बना रहा है जो उसकी डिलीवरी में दिखाई देने चाहिए।",
+  "projects.criteria": "स्वीकृति मानदंड",
+  "projects.criteriaPlaceholder": "वैकल्पिक मानदंड, हर पंक्ति में एक। GET /api/items 200 — आइटम सूचीबद्ध करता है",
+  "projects.criteriaInvalidLine": "पंक्ति {{line}} पर स्वीकृति मानदंड: {{message}}",
+  "projects.criteriaTooMany": "अधिकतम {{max}} स्वीकृति मानदंड",
+  "depth.checklist.user_one": "आपके द्वारा स्वीकृत {{count}} मानदंड, {{http}} में से {{observed}} HTTP जाँच देखी गई",
+  "depth.checklist.user_other": "आपके द्वारा स्वीकृत {{count}} मानदंड, {{http}} में से {{observed}} HTTP जाँच देखी गईं",
+  "depth.checklist.drafted_one": "{{count}} प्रारूपित चेकलिस्ट आइटम, {{http}} में से {{observed}} HTTP जाँच देखी गई",
+  "depth.checklist.drafted_other": "{{count}} प्रारूपित चेकलिस्ट आइटम, {{http}} में से {{observed}} HTTP जाँच देखी गईं",
+  "detail.field.checklist": "स्वीकृति चेकलिस्ट",
+  "detail.field.checklistSource": "चेकलिस्ट स्रोत",
+  "detail.field.checklistDigest": "चेकलिस्ट सारांश",
+  "detail.field.behaviour": "व्यवहार"
 }

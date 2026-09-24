@@ -1164,5 +1164,17 @@
   "projects.actionsHint.readyImported": "Parte de la rama predeterminada de GitHub. Los cambios parciales no se reutilizan.",
   "pane.skillUnavailable": "No se pudo leer esta receta; puede que se haya descartado, fusionado o aprendido con una identidad que se haya trasladado desde entonces.",
   "detail.field.executorName": "Ejecutado por",
-  "now.doing.draftChecklist": "El run está enumerando, a partir del objetivo, los comportamientos que debe mostrar su entrega."
+  "now.doing.draftChecklist": "El run está enumerando, a partir del objetivo, los comportamientos que debe mostrar su entrega.",
+  "projects.criteria": "Criterios de aceptación",
+  "projects.criteriaPlaceholder": "Criterios opcionales, uno por línea. GET /api/items 200 — enumera los elementos",
+  "projects.criteriaInvalidLine": "Criterio de aceptación en la línea {{line}}: {{message}}",
+  "projects.criteriaTooMany": "Como máximo, {{max}} criterios de aceptación",
+  "depth.checklist.user_one": "{{count}} criterio aprobado por ti, se observaron {{observed}} de {{http}} comprobaciones HTTP",
+  "depth.checklist.user_other": "{{count}} criterios aprobados por ti, se observaron {{observed}} de {{http}} comprobaciones HTTP",
+  "depth.checklist.drafted_one": "{{count}} elemento de la lista de verificación redactado, se observaron {{observed}} de {{http}} comprobaciones HTTP",
+  "depth.checklist.drafted_other": "{{count}} elementos de la lista de verificación redactados, se observaron {{observed}} de {{http}} comprobaciones HTTP",
+  "detail.field.checklist": "Lista de verificación de aceptación",
+  "detail.field.checklistSource": "Origen de la lista de verificación",
+  "detail.field.checklistDigest": "Resumen de la lista de verificación",
+  "detail.field.behaviour": "Comportamiento"
 }

@@ -1164,5 +1164,17 @@
   "projects.actionsHint.readyImported": "GitHub-এর default branch থেকে শুরু করে। আংশিক পরিবর্তন পুনরায় ব্যবহার করা হয় না।",
   "pane.skillUnavailable": "এই রেসিপিটি পড়া যায়নি—এটি হয়তো বাদ দেওয়া হয়েছে, একীভূত করা হয়েছে, অথবা এমন কোনো পরিচয়ের অধীনে শেখা হয়েছিল যা পরে স্থানান্তরিত হয়েছে।",
   "detail.field.executorName": "নির্বাহ করেছেন",
-  "now.doing.draftChecklist": "run লক্ষ্য থেকে তার ডেলিভারিতে অবশ্যই দেখাতে হবে এমন আচরণগুলোর তালিকা করছে।"
+  "now.doing.draftChecklist": "run লক্ষ্য থেকে তার ডেলিভারিতে অবশ্যই দেখাতে হবে এমন আচরণগুলোর তালিকা করছে।",
+  "projects.criteria": "গ্রহণযোগ্যতার মানদণ্ড",
+  "projects.criteriaPlaceholder": "ঐচ্ছিক মানদণ্ড, প্রতি লাইনে একটি। GET /api/items 200 — আইটেমের তালিকা দেখায়",
+  "projects.criteriaInvalidLine": "{{line}} নম্বর লাইনের গ্রহণযোগ্যতার মানদণ্ড: {{message}}",
+  "projects.criteriaTooMany": "সর্বাধিক {{max}}টি গ্রহণযোগ্যতার মানদণ্ড",
+  "depth.checklist.user_one": "আপনার অনুমোদিত {{count}}টি মানদণ্ড, {{http}}টি HTTP যাচাইয়ের মধ্যে {{observed}}টি পর্যবেক্ষণ করা হয়েছে",
+  "depth.checklist.user_other": "আপনার অনুমোদিত {{count}}টি মানদণ্ড, {{http}}টি HTTP যাচাইয়ের মধ্যে {{observed}}টি পর্যবেক্ষণ করা হয়েছে",
+  "depth.checklist.drafted_one": "{{count}}টি খসড়া চেকলিস্ট আইটেম, {{http}}টি HTTP যাচাইয়ের মধ্যে {{observed}}টি পর্যবেক্ষণ করা হয়েছে",
+  "depth.checklist.drafted_other": "{{count}}টি খসড়া চেকলিস্ট আইটেম, {{http}}টি HTTP যাচাইয়ের মধ্যে {{observed}}টি পর্যবেক্ষণ করা হয়েছে",
+  "detail.field.checklist": "গ্রহণযোগ্যতার চেকলিস্ট",
+  "detail.field.checklistSource": "চেকলিস্টের উৎস",
+  "detail.field.checklistDigest": "চেকলিস্টের সারসংক্ষেপ",
+  "detail.field.behaviour": "আচরণ"
 }

@@ -1164,5 +1164,17 @@
   "projects.actionsHint.readyImported": "从 GitHub 的默认分支开始。部分更改不会被复用。",
   "pane.skillUnavailable": "无法读取此配方——它可能已被删除、合并，或其学习时使用的身份此后已迁移。",
   "detail.field.executorName": "执行者",
-  "now.doing.draftChecklist": "该 run 正在根据目标列出其交付结果必须展现的行为。"
+  "now.doing.draftChecklist": "该 run 正在根据目标列出其交付结果必须展现的行为。",
+  "projects.criteria": "验收标准",
+  "projects.criteriaPlaceholder": "可选标准，每行一条。GET /api/items 200 — 列出项目",
+  "projects.criteriaInvalidLine": "第{{line}}行的验收标准：{{message}}",
+  "projects.criteriaTooMany": "最多{{max}}条验收标准",
+  "depth.checklist.user_one": "您已批准{{count}}条标准，已观测到{{http}}项HTTP检查中的{{observed}}项",
+  "depth.checklist.user_other": "您已批准{{count}}条标准，已观测到{{http}}项HTTP检查中的{{observed}}项",
+  "depth.checklist.drafted_one": "{{count}}条拟定的检查清单项，已观测到{{http}}项HTTP检查中的{{observed}}项",
+  "depth.checklist.drafted_other": "{{count}}条拟定的检查清单项，已观测到{{http}}项HTTP检查中的{{observed}}项",
+  "detail.field.checklist": "验收检查清单",
+  "detail.field.checklistSource": "检查清单来源",
+  "detail.field.checklistDigest": "检查清单摘要",
+  "detail.field.behaviour": "行为"
 }

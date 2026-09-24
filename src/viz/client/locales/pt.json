@@ -1164,5 +1164,17 @@
   "projects.actionsHint.readyImported": "Começa no branch predefinido do GitHub. As alterações parciais não são reutilizadas.",
   "pane.skillUnavailable": "Não foi possível ler esta receita — pode ter sido removida, integrada ou aprendida sob uma identidade que entretanto foi movida.",
   "detail.field.executorName": "Executado por",
-  "now.doing.draftChecklist": "O run está a enumerar, a partir do objetivo, os comportamentos que a sua entrega deve demonstrar."
+  "now.doing.draftChecklist": "O run está a enumerar, a partir do objetivo, os comportamentos que a sua entrega deve demonstrar.",
+  "projects.criteria": "Critérios de aceitação",
+  "projects.criteriaPlaceholder": "Critérios opcionais, um por linha. GET /api/items 200 — lista itens",
+  "projects.criteriaInvalidLine": "Critério de aceitação na linha {{line}}: {{message}}",
+  "projects.criteriaTooMany": "No máximo {{max}} critérios de aceitação",
+  "depth.checklist.user_one": "{{count}} critério que aprovou, {{observed}} de {{http}} verificações HTTP observadas",
+  "depth.checklist.user_other": "{{count}} critérios que aprovou, {{observed}} de {{http}} verificações HTTP observadas",
+  "depth.checklist.drafted_one": "{{count}} item da lista de verificação em rascunho, {{observed}} de {{http}} verificações HTTP observadas",
+  "depth.checklist.drafted_other": "{{count}} itens da lista de verificação em rascunho, {{observed}} de {{http}} verificações HTTP observadas",
+  "detail.field.checklist": "Lista de verificação de aceitação",
+  "detail.field.checklistSource": "Origem da lista de verificação",
+  "detail.field.checklistDigest": "Resumo da lista de verificação",
+  "detail.field.behaviour": "Comportamento"
 }

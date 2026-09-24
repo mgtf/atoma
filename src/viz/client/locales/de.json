@@ -1164,5 +1164,17 @@
   "projects.actionsHint.readyImported": "Startet vom Standard-Branch auf GitHub. Unvollständige Änderungen werden nicht wiederverwendet.",
   "pane.skillUnavailable": "Dieses Rezept konnte nicht gelesen werden – möglicherweise wurde es verworfen, zusammengeführt oder unter einer Identität gelernt, die inzwischen verschoben wurde.",
   "detail.field.executorName": "Ausgeführt von",
-  "now.doing.draftChecklist": "Der run listet ausgehend vom Ziel die Verhaltensweisen auf, die sein Ergebnis zeigen muss."
+  "now.doing.draftChecklist": "Der run listet ausgehend vom Ziel die Verhaltensweisen auf, die sein Ergebnis zeigen muss.",
+  "projects.criteria": "Akzeptanzkriterien",
+  "projects.criteriaPlaceholder": "Optionale Kriterien, eines pro Zeile. GET /api/items 200 — listet Elemente auf",
+  "projects.criteriaInvalidLine": "Akzeptanzkriterium in Zeile {{line}}: {{message}}",
+  "projects.criteriaTooMany": "Höchstens {{max}} Akzeptanzkriterien",
+  "depth.checklist.user_one": "{{count}} von Ihnen genehmigtes Kriterium, {{observed}} von {{http}} HTTP-Prüfungen beobachtet",
+  "depth.checklist.user_other": "{{count}} von Ihnen genehmigte Kriterien, {{observed}} von {{http}} HTTP-Prüfungen beobachtet",
+  "depth.checklist.drafted_one": "{{count}} entworfener Prüfpunkt, {{observed}} von {{http}} HTTP-Prüfungen beobachtet",
+  "depth.checklist.drafted_other": "{{count}} entworfene Prüfpunkte, {{observed}} von {{http}} HTTP-Prüfungen beobachtet",
+  "detail.field.checklist": "Akzeptanzprüfliste",
+  "detail.field.checklistSource": "Prüflistenquelle",
+  "detail.field.checklistDigest": "Prüflisten-Digest",
+  "detail.field.behaviour": "Verhalten"
 }

@@ -1164,5 +1164,17 @@
   "projects.actionsHint.readyImported": "GitHub کی ڈیفالٹ برانچ سے شروع ہوتا ہے۔ جزوی تبدیلیاں دوبارہ استعمال نہیں کی جاتیں۔",
   "pane.skillUnavailable": "یہ ترکیب پڑھی نہیں جا سکی — ممکن ہے اسے حذف یا ضم کر دیا گیا ہو، یا اسے ایسی شناخت کے تحت سیکھا گیا ہو جو بعد میں منتقل ہو گئی۔",
   "detail.field.executorName": "کے ذریعے عمل درآمد",
-  "now.doing.draftChecklist": "run ہدف کی بنیاد پر ان رویّوں کی فہرست بنا رہا ہے جن کا اظہار اس کی فراہمی میں ہونا ضروری ہے۔"
+  "now.doing.draftChecklist": "run ہدف کی بنیاد پر ان رویّوں کی فہرست بنا رہا ہے جن کا اظہار اس کی فراہمی میں ہونا ضروری ہے۔",
+  "projects.criteria": "قبولیت کے معیارات",
+  "projects.criteriaPlaceholder": "اختیاری معیارات، ہر سطر میں ایک۔ GET /api/items 200 — آئٹمز کی فہرست دیتا ہے",
+  "projects.criteriaInvalidLine": "سطر {{line}} پر قبولیت کا معیار: {{message}}",
+  "projects.criteriaTooMany": "زیادہ سے زیادہ {{max}} قبولیت کے معیارات",
+  "depth.checklist.user_one": "آپ کا منظور کردہ {{count}} معیار، {{http}} HTTP جانچوں میں سے {{observed}} کا مشاہدہ کیا گیا",
+  "depth.checklist.user_other": "آپ کے منظور کردہ {{count}} معیارات، {{http}} HTTP جانچوں میں سے {{observed}} کا مشاہدہ کیا گیا",
+  "depth.checklist.drafted_one": "چیک لسٹ کا {{count}} تیار کردہ آئٹم، {{http}} HTTP جانچوں میں سے {{observed}} کا مشاہدہ کیا گیا",
+  "depth.checklist.drafted_other": "چیک لسٹ کے {{count}} تیار کردہ آئٹمز، {{http}} HTTP جانچوں میں سے {{observed}} کا مشاہدہ کیا گیا",
+  "detail.field.checklist": "قبولیت کی چیک لسٹ",
+  "detail.field.checklistSource": "چیک لسٹ کا ماخذ",
+  "detail.field.checklistDigest": "چیک لسٹ کا خلاصہ",
+  "detail.field.behaviour": "طرزِ عمل"
 }

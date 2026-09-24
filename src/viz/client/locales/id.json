@@ -1164,5 +1164,17 @@
   "projects.actionsHint.readyImported": "Dimulai dari branch default GitHub. Perubahan parsial tidak digunakan kembali.",
   "pane.skillUnavailable": "Resep ini tidak dapat dibaca — mungkin telah dihapus, digabungkan, atau dipelajari dengan identitas yang kemudian berpindah.",
   "detail.field.executorName": "Dijalankan oleh",
-  "now.doing.draftChecklist": "Run sedang menyusun daftar perilaku yang harus ditunjukkan oleh hasilnya berdasarkan sasaran."
+  "now.doing.draftChecklist": "Run sedang menyusun daftar perilaku yang harus ditunjukkan oleh hasilnya berdasarkan sasaran.",
+  "projects.criteria": "Kriteria penerimaan",
+  "projects.criteriaPlaceholder": "Kriteria opsional, satu per baris. GET /api/items 200 — mencantumkan item",
+  "projects.criteriaInvalidLine": "Kriteria penerimaan pada baris {{line}}: {{message}}",
+  "projects.criteriaTooMany": "Maksimal {{max}} kriteria penerimaan",
+  "depth.checklist.user_one": "{{count}} kriteria yang Anda setujui, {{observed}} dari {{http}} pemeriksaan HTTP teramati",
+  "depth.checklist.user_other": "{{count}} kriteria yang Anda setujui, {{observed}} dari {{http}} pemeriksaan HTTP teramati",
+  "depth.checklist.drafted_one": "{{count}} item daftar periksa yang disusun, {{observed}} dari {{http}} pemeriksaan HTTP teramati",
+  "depth.checklist.drafted_other": "{{count}} item daftar periksa yang disusun, {{observed}} dari {{http}} pemeriksaan HTTP teramati",
+  "detail.field.checklist": "Daftar periksa penerimaan",
+  "detail.field.checklistSource": "Sumber daftar periksa",
+  "detail.field.checklistDigest": "Ringkasan daftar periksa",
+  "detail.field.behaviour": "Perilaku"
 }

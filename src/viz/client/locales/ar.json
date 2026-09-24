@@ -1164,5 +1164,17 @@
   "projects.actionsHint.readyImported": "يبدأ من الفرع الافتراضي في GitHub. لا يُعاد استخدام التغييرات الجزئية.",
   "pane.skillUnavailable": "تعذّرت قراءة هذه الوصفة — ربما أُسقطت أو دُمجت أو جرى تعلّمها بهوية انتقلت منذ ذلك الحين.",
   "detail.field.executorName": "نُفّذت بواسطة",
-  "now.doing.draftChecklist": "يقوم run، انطلاقًا من الهدف، بسرد السلوكيات التي يجب أن يُظهرها ناتجه."
+  "now.doing.draftChecklist": "يقوم run، انطلاقًا من الهدف، بسرد السلوكيات التي يجب أن يُظهرها ناتجه.",
+  "projects.criteria": "معايير القبول",
+  "projects.criteriaPlaceholder": "معايير اختيارية، معيار واحد في كل سطر. GET /api/items 200 — يسرد العناصر",
+  "projects.criteriaInvalidLine": "معيار القبول في السطر {{line}}: {{message}}",
+  "projects.criteriaTooMany": "بحد أقصى {{max}} من معايير القبول",
+  "depth.checklist.user_one": "{{count}} معيار وافقت عليه، تم رصد {{observed}} من أصل {{http}} من عمليات تحقق HTTP",
+  "depth.checklist.user_other": "{{count}} من المعايير التي وافقت عليها، تم رصد {{observed}} من أصل {{http}} من عمليات تحقق HTTP",
+  "depth.checklist.drafted_one": "{{count}} عنصر مصاغ في قائمة التحقق، تم رصد {{observed}} من أصل {{http}} من عمليات تحقق HTTP",
+  "depth.checklist.drafted_other": "{{count}} من عناصر قائمة التحقق المصاغة، تم رصد {{observed}} من أصل {{http}} من عمليات تحقق HTTP",
+  "detail.field.checklist": "قائمة تحقق القبول",
+  "detail.field.checklistSource": "مصدر قائمة التحقق",
+  "detail.field.checklistDigest": "بصمة قائمة التحقق",
+  "detail.field.behaviour": "السلوك"
 }
