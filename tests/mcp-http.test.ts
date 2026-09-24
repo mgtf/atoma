@@ -16,7 +16,7 @@ import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
 import { resetRunsForTest, startRun, type RunDriver } from '../src/mcp/run.js';
 import { FAMILIES_URI, operatorRunUri } from '../src/mcp/resources.js';
-import { McpHttpHost } from '../src/mcp/http.js';
+import { McpHttpHost, type McpHttpHostOptions } from '../src/mcp/http.js';
 import { callerTier, type McpCaller } from '../src/mcp/identity.js';
 import { buildServer } from '../src/mcp/server.js';
 import { MCP_TOOL_NAMES, MCP_TOOLS, visibleTools, type McpToolDeps } from '../src/mcp/tools.js';
@@ -80,7 +80,12 @@ const TENANT_HOST: McpToolDeps = {
   operatorRuns: true,
 };
 
-async function listen(resolveCaller: (req: IncomingMessage) => McpCaller | null, deps: McpToolDeps): Promise<{ url: string; host: McpHttpHost }> {
+async function listen(
+  resolveCaller: (req: IncomingMessage) => McpCaller | null,
+  deps: McpToolDeps,
+  /** Ceilings and the origin pin, so a test can reach them without a hundred sessions. */
+  extra: Partial<Pick<McpHttpHostOptions, 'allowedOrigins' | 'maxSessions' | 'maxSessionsPerCaller'>> = {}
+): Promise<{ url: string; host: McpHttpHost }> {
   const server = createServer((req, res) => void host.handle(req, res));
   servers.push(server);
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
@@ -90,9 +95,22 @@ async function listen(resolveCaller: (req: IncomingMessage) => McpCaller | null,
     resolveCaller,
     buildServer: (caller) => buildServer(caller, deps),
     allowedHosts: [`127.0.0.1:${port}`],
+    ...extra,
   });
   hosts.push(host);
   return { url: `http://127.0.0.1:${port}/mcp`, host };
+}
+
+/** One `initialize` over plain fetch: the session id it opened, or the refusal's status. */
+async function initialize(url: string, headers: Record<string, string> = {}): Promise<{ status: number; sessionId: string | null }> {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...headers },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '0' } } }),
+  });
+  // Drain: an unread SSE body keeps the socket busy and the server's close waiting.
+  await response.text();
+  return { status: response.status, sessionId: response.headers.get('mcp-session-id') };
 }
 
 async function connect(url: string, bearer?: string): Promise<Client> {
@@ -681,6 +699,115 @@ describe('the stream — SSE frames and replay', () => {
     expect(store.size()).toBe(4);
     expect(await store.replayEventsAfter(a1, { send: async () => {} })).toBe('');
     expect(await store.replayEventsAfter('never', { send: async () => {} })).toBe('');
+  });
+
+  it('evicts the LONGEST stream, so a run log cannot drop the response of a quiet call', async () => {
+    const { SessionEventStore } = await import('../src/mcp/eventStore.js');
+    const store = new SessionEventStore(4);
+    // One response on its own stream, then the run log floods the standalone
+    // one. Under a globally-FIFO ring the response is the FIRST frame out —
+    // the one the replay exists to preserve.
+    const answer = await store.storeEvent('request-7', { jsonrpc: '2.0', id: 7, result: { ok: true } });
+    for (let n = 0; n < 6; n += 1) {
+      await store.storeEvent('standalone', { jsonrpc: '2.0', method: 'notifications/message', params: { n } });
+    }
+    expect(await store.getStreamIdForEventId(answer)).toBe('request-7');
+    const replayed: unknown[] = [];
+    expect(await store.replayEventsAfter(answer, { send: async (_id, message) => { replayed.push(message); } })).toBe('request-7');
+    expect(replayed).toEqual([]);
+    expect(store.size()).toBe(4);
+    expect(store.evictions()).toBe(3);
+  });
+
+  it('holds a byte budget too, because a log frame carries the child chunk verbatim', async () => {
+    const { SessionEventStore } = await import('../src/mcp/eventStore.js');
+    const store = new SessionEventStore(512, 2048);
+    for (let n = 0; n < 5; n += 1) {
+      await store.storeEvent('standalone', { jsonrpc: '2.0', method: 'notifications/message', params: { chunk: 'x'.repeat(900), n } });
+    }
+    // Far inside the 512-frame count, and still bounded: ~970 bytes a frame.
+    expect(store.size()).toBe(2);
+    expect(store.evictions()).toBe(3);
+  });
+});
+
+describe('session ceilings, and what a refused initialize leaves behind', () => {
+  afterEach(() => resetRunsForTest());
+
+  it("drops a caller's stalest session rather than the host's newest", async () => {
+    const { url, host } = await listen(() => ({ kind: 'operator' }), NO_TENANT, { maxSessionsPerCaller: 2 });
+    const first = await initialize(url);
+    const second = await initialize(url);
+    const third = await initialize(url);
+    expect(first.sessionId).toBeTruthy();
+    expect(third.status).toBe(200);
+    expect(host.health().sessions).toBe(2);
+    expect(host.health().evicted).toBe(1);
+    // The stalest is gone and says so; the newest two are untouched.
+    const reused = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'mcp-session-id': first.sessionId! },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'ping' }),
+    });
+    expect(reused.status).toBe(404);
+    await reused.text();
+    expect([second.sessionId, third.sessionId].every((id) => typeof id === 'string' && id.length > 0)).toBe(true);
+  });
+
+  it('refuses a new session past the host ceiling with 503, and counts it', async () => {
+    const { url, host } = await listen(() => ({ kind: 'operator' }), NO_TENANT, { maxSessions: 2, maxSessionsPerCaller: 8 });
+    await initialize(url);
+    await initialize(url);
+    const refused = await initialize(url);
+    expect(refused.status).toBe(503);
+    expect(host.health().sessions).toBe(2);
+    expect(host.health().overflowed).toBe(1);
+  });
+
+  it('closes the server it built for a caller when the initialize throws', async () => {
+    let closed = 0;
+    const server = createServer((req, res) =>
+      void host.handle(req, res).catch(() => {
+        // The viz server's own shape: the throw reaches a catch, never the client.
+        res.writeHead(500, { 'content-type': 'application/json' });
+        res.end('{}');
+      })
+    );
+    servers.push(server);
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+    const address = server.address();
+    const port = typeof address === 'object' && address ? address.port : 0;
+    const host = new McpHttpHost({
+      resolveCaller: () => ({ kind: 'operator' }),
+      buildServer: () => ({
+        connect: () => Promise.reject(new Error('transport refused')),
+        close: () => { closed += 1; return Promise.resolve(); },
+      }) as unknown as ReturnType<typeof buildServer>,
+      allowedHosts: [`127.0.0.1:${port}`],
+    });
+    hosts.push(host);
+    const answered = await initialize(`http://127.0.0.1:${port}/mcp`);
+    expect(answered.status).toBe(500);
+    // Nothing holds this server: it never entered `sessions`, so the idle
+    // sweeper would never have reached it either.
+    expect(closed).toBe(1);
+    expect(host.health().sessions).toBe(0);
+  });
+
+  it('reports the replay depth its live sessions lost, so a flood is visible', async () => {
+    const { url, host } = await listen(() => ({ kind: 'operator' }), NO_TENANT);
+    await initialize(url);
+    // A fresh session has a ring it has barely filled: nothing dropped yet.
+    expect(host.health().sessions).toBe(1);
+    expect(host.health().replayEvictions).toBe(0);
+  });
+
+  it('refuses a foreign Origin and ignores an absent one', async () => {
+    const { url } = await listen(() => ({ kind: 'operator' }), NO_TENANT, { allowedOrigins: ['https://atoma.example'] });
+    expect((await initialize(url, { origin: 'https://evil.example' })).status).toBe(403);
+    expect((await initialize(url, { origin: 'https://atoma.example' })).status).toBe(200);
+    // A CLI client sends no Origin at all, and the pin must not touch it.
+    expect((await initialize(url)).status).toBe(200);
   });
 });
 

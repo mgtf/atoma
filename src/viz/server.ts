@@ -1249,7 +1249,9 @@ const ANALYST: ResidentAnalyst | null = (() => {
  * (`src/mcp/AGENTS.md`). Gated, a caller is a bearer API token a principal
  * minted (`/api/tokens`), and the tools it sees are its tier's. Ungated, the
  * caller is the operator on loopback, as for the CLI. Host is pinned either
- * way so a page in a browser cannot address this port through DNS rebinding.
+ * way so a page in a browser cannot address this port through DNS rebinding,
+ * and Origin is pinned beside it — checked only when a client sends one, so
+ * the CLI clients that send none are untouched (`src/mcp/http.ts`).
  */
 const BENCHMARK_RUNS = new BenchmarkRuns(join(RUNS_DIR, 'benchmarks'));
 const MCP_DEPS: McpToolDeps = {
@@ -1300,6 +1302,9 @@ const MCP_HOST = new McpHttpHost({
   allowedHosts: AUTH_RUNTIME
     ? [AUTH_RUNTIME.publicOrigin.host]
     : [`127.0.0.1:${cli.port}`, `localhost:${cli.port}`, `[::1]:${cli.port}`],
+  allowedOrigins: AUTH_RUNTIME
+    ? [AUTH_RUNTIME.publicOrigin.origin]
+    : [`http://127.0.0.1:${cli.port}`, `http://localhost:${cli.port}`, `http://[::1]:${cli.port}`],
   logger: (line) => console.error(`[mcp] ${line}`),
 });
 // An operator run started through the MCP is a child of THIS process; a

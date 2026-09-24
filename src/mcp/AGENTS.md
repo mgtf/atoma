@@ -52,7 +52,12 @@ Neighbours:
   request must present the same caller or the session ends with a 401. Hiding
   a tool is therefore never the only guard: a revoked or demoted token cannot
   ride the session it opened. Sessions are memory-only and idle-swept; a
-  restart forgets them and the client re-initialises.
+  restart forgets them and the client re-initialises. They are also CEILINGED
+  TWICE, because a session holds a whole server and a replay ring worth
+  megabytes and the idle sweep is thirty minutes away: a caller past
+  `MCP_MAX_SESSIONS_PER_CALLER` loses its OWN stalest session, and the host's
+  `MCP_MAX_SESSIONS` backstop answers 503. Both are counted in `health()`, so
+  a client re-initialising in a loop is visible rather than merely survived.
 - IDENTITY. Gated: `Authorization: Bearer atoma_…`, an API token a principal
   minted for ONE organisation (`/api/tokens`, or `npm run auth -- token`).
   `AuthStore.resolveApiToken` returns a fresh viewer — role and platform flag
@@ -60,10 +65,16 @@ Neighbours:
   are `token.created` / `token.revoked` journal rows. Ungated: the caller is
   the operator, by possession of the machine, as for the CLI; there is no
   token to present and no organisation to act in.
-- HOST IS PINNED. The transport's DNS-rebinding protection is on with the
-  public origin's host (gated) or the loopback host:port (ungated), so a page
-  in a browser cannot address this port by name. Bearer tokens make CSRF
-  moot; there is no cookie path into `/mcp`.
+- HOST IS PINNED, AND ORIGIN BESIDE IT. The transport's DNS-rebinding
+  protection carries `allowedHosts` — the public origin's host (gated) or the
+  loopback host:port (ungated) — which is the control that defeats rebinding:
+  a page on an attacker domain still sends that domain as Host. `allowedOrigins`
+  pins the Origin, and the SDK checks it ONLY when the header is present, so a
+  CLI client that sends none is untouched. Say which does what: Origin is
+  defence in depth, since nothing here emits CORS headers and MCP's required
+  headers are not CORS-safelisted, so a cross-origin page never gets past a
+  preflight this server does not answer. Bearer tokens make CSRF moot; there
+  is no cookie path into `/mcp`.
 - WHAT DID NOT CHANGE: payloads are BOUNDED and honest about trust — traces
   page (`offset`/`limit`, capped), error strings truncate, run output, skill
   bodies, verdicts and trace text are marked UNTRUSTED model data; the
@@ -153,7 +164,14 @@ Neighbours:
   frames with ids so a client cut mid-call reconnects with `Last-Event-ID`
   and receives the frames it missed, the response included. The ring dies
   with the session; a cursor that fell off replays nothing rather than
-  something wrong.
+  something wrong, and the ring counts what it dropped so the host's
+  `health()` reports `replayEvictions` — depth lost, not merely never used. EVICTION IS PER STREAM, NOT GLOBALLY FIFO: the standalone stream
+  carries one frame per output chunk of a run while a tool call's response is
+  a single frame on its own stream, so one queue would let the log evict the
+  very response the replay exists to preserve. A frame goes from the LONGEST
+  stream, oldest first. The ring is bounded by BOTH a frame count and a byte
+  budget, because a log frame carries the child's chunk verbatim and a pipe
+  read is up to 64 KiB — the count alone is not a memory bound.
 - THE RUN LOG: the server declares `logging`, and the session that started an
   operator run receives each output chunk as `notifications/message` (`info`,
   logger `atoma.run.<runId>`, `untrusted: true`) and one `notice` when it
@@ -281,6 +299,13 @@ Neighbours:
   long-poll never delivered its progress line in the JSON transport mode it
   shipped with. Do not re-add a wait parameter to a reader; a host that wants
   to wait drives the task.
+- A bigger ring was the obvious answer to a run log evicting a response, and
+  it is the wrong one: the log outgrows any constant, so the ring is fair per
+  stream instead and its size stops being the thing that decides correctness.
+- Refusing a caller at its own session ceiling, rather than dropping its
+  stalest session, was rejected: a client whose sessions leak would lock
+  itself out of a working server, and the sessions it lost were its own to
+  lose. The host ceiling refuses, because there the cost falls on everyone.
 - Keeping stdio "for local development" was considered and dropped
   (2026-09-05): `npm run viz` already serves loopback ungated, so the local
   MCP is the same URL on `127.0.0.1`, and a second transport was code kept
