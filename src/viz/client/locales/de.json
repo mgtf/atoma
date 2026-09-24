@@ -1148,5 +1148,17 @@
   "settings.subscriptionDelegated": "Host-Abonnement delegiert.",
   "settings.subscriptionDelegationWithdrawn": "Delegierung des Host-Abonnements widerrufen.",
   "runs.project.operator": "Operator-runs",
-  "runs.picker.tokens": "Token"
+  "runs.picker.tokens": "Token",
+  "card.llmStart.issued": "Aufruf gesendet – noch keine Antwort erfasst",
+  "detail.field.elapsed": "Verstrichene Zeit",
+  "detail.field.lastElements": "Neueste Elementaufrufe",
+  "detail.field.elementErrors": "Elementfehler",
+  "detail.field.llmEventId": "ID des zugehörigen Aufrufs",
+  "detail.field.branchId": "Branch-ID",
+  "detail.llmStart.status.inFlight": "Wird ausgeführt – noch keine Antwort",
+  "detail.llmStart.status.completed": "Zurückgegeben – der zugehörige Aufruf enthält den Beleg",
+  "detail.llmStart.completedExplain": "Die Antwort ist eingegangen. Das Ereignis des zugehörigen Aufrufs enthält den Prompt, die Antwort und die Nutzungsdaten.",
+  "detail.llmStart.interruptedExplain": "Der run wurde beendet, bevor dieser Aufruf zurückgegeben wurde. Dafür gibt es keine Antwort, keine Nutzungsdaten und keinen Beleg.",
+  "detail.llmStart.elements": "In diesem Aufruf aufgerufene Elemente",
+  "detail.llmStart.identifiers": "Kennungen"
 }

@@ -1148,5 +1148,17 @@
   "settings.subscriptionDelegated": "已委派主机订阅。",
   "settings.subscriptionDelegationWithdrawn": "已撤回主机订阅委派。",
   "runs.project.operator": "操作员 run",
-  "runs.picker.tokens": "token"
+  "runs.picker.tokens": "token",
+  "card.llmStart.issued": "已发起调用——尚未记录响应",
+  "detail.field.elapsed": "已用时间",
+  "detail.field.lastElements": "最近的元素调用",
+  "detail.field.elementErrors": "元素错误",
+  "detail.field.llmEventId": "配对调用 ID",
+  "detail.field.branchId": "分支 ID",
+  "detail.llmStart.status.inFlight": "进行中——尚无响应",
+  "detail.llmStart.status.completed": "已返回——配对调用中包含回执",
+  "detail.llmStart.completedExplain": "响应已返回。配对调用事件包含提示词、回答和用量。",
+  "detail.llmStart.interruptedExplain": "run 在此调用返回前已结束。该调用没有响应、用量或回执。",
+  "detail.llmStart.elements": "此调用中使用的元素",
+  "detail.llmStart.identifiers": "标识符"
 }

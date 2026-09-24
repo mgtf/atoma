@@ -1148,5 +1148,17 @@
   "settings.subscriptionDelegated": "Langganan mesin host telah didelegasikan.",
   "settings.subscriptionDelegationWithdrawn": "Delegasi langganan mesin host telah ditarik.",
   "runs.project.operator": "run operator",
-  "runs.picker.tokens": "token"
+  "runs.picker.tokens": "token",
+  "card.llmStart.issued": "panggilan dikirim — belum ada respons yang tercatat",
+  "detail.field.elapsed": "Waktu berlalu",
+  "detail.field.lastElements": "Panggilan elemen terbaru",
+  "detail.field.elementErrors": "Kesalahan elemen",
+  "detail.field.llmEventId": "ID panggilan pasangan",
+  "detail.field.branchId": "ID cabang",
+  "detail.llmStart.status.inFlight": "Sedang berlangsung — belum ada respons",
+  "detail.llmStart.status.completed": "Telah kembali — panggilan pasangan menyimpan tanda terima",
+  "detail.llmStart.completedExplain": "Respons telah diterima. Peristiwa panggilan pasangan memuat prompt, jawaban, dan penggunaan.",
+  "detail.llmStart.interruptedExplain": "run berakhir sebelum panggilan ini kembali. Tidak ada respons, penggunaan, maupun tanda terima untuk panggilan ini.",
+  "detail.llmStart.elements": "Elemen yang dipanggil dalam panggilan ini",
+  "detail.llmStart.identifiers": "Pengidentifikasi"
 }

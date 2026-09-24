@@ -1148,5 +1148,17 @@
   "settings.subscriptionDelegated": "تم تفويض اشتراك المضيف.",
   "settings.subscriptionDelegationWithdrawn": "تم سحب تفويض اشتراك المضيف.",
   "runs.project.operator": "عمليات run الخاصة بالمشغّل",
-  "runs.picker.tokens": "الرموز"
+  "runs.picker.tokens": "الرموز",
+  "card.llmStart.issued": "تم إصدار الاستدعاء — لم تُسجّل أي استجابة بعد",
+  "detail.field.elapsed": "الوقت المنقضي",
+  "detail.field.lastElements": "أحدث استدعاءات العناصر",
+  "detail.field.elementErrors": "أخطاء العناصر",
+  "detail.field.llmEventId": "معرّف الاستدعاء المقترن",
+  "detail.field.branchId": "معرّف الفرع",
+  "detail.llmStart.status.inFlight": "جارٍ التنفيذ — لا استجابة بعد",
+  "detail.llmStart.status.completed": "تمت الاستجابة — يتضمن الاستدعاء المقترن الإيصال",
+  "detail.llmStart.completedExplain": "وصلت الاستجابة. يتضمن حدث الاستدعاء المقترن المطالبة والإجابة والاستخدام.",
+  "detail.llmStart.interruptedExplain": "انتهى run قبل أن يعود هذا الاستدعاء. لا توجد له استجابة ولا بيانات استخدام ولا إيصال.",
+  "detail.llmStart.elements": "العناصر المستدعاة في هذا الاستدعاء",
+  "detail.llmStart.identifiers": "المعرّفات"
 }
