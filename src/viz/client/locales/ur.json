@@ -1148,5 +1148,17 @@
   "settings.subscriptionDelegated": "میزبان کی سبسکرپشن تفویض کر دی گئی۔",
   "settings.subscriptionDelegationWithdrawn": "میزبان کی سبسکرپشن کی تفویض واپس لے لی گئی۔",
   "runs.project.operator": "آپریٹر کے runs",
-  "runs.picker.tokens": "ٹوکنز"
+  "runs.picker.tokens": "ٹوکنز",
+  "card.llmStart.issued": "کال جاری کر دی گئی — ابھی تک کوئی جواب ریکارڈ نہیں ہوا",
+  "detail.field.elapsed": "گزرا ہوا وقت",
+  "detail.field.lastElements": "تازہ ترین عنصر کالز",
+  "detail.field.elementErrors": "عنصر کی خرابیاں",
+  "detail.field.llmEventId": "جوڑی والی کال کی ID",
+  "detail.field.branchId": "برانچ ID",
+  "detail.llmStart.status.inFlight": "زیرِ عمل — ابھی تک کوئی جواب نہیں",
+  "detail.llmStart.status.completed": "جواب موصول — جوڑی والی کال میں رسید موجود ہے",
+  "detail.llmStart.completedExplain": "جواب موصول ہو گیا ہے۔ جوڑی والی کال کے ایونٹ میں پرامپٹ، جواب اور استعمال کی تفصیل موجود ہے۔",
+  "detail.llmStart.interruptedExplain": "اس کال کا جواب آنے سے پہلے run ختم ہو گیا۔ اس کے لیے کوئی جواب، استعمال کی تفصیل یا رسید موجود نہیں ہے۔",
+  "detail.llmStart.elements": "اس کال میں طلب کیے گئے عناصر",
+  "detail.llmStart.identifiers": "شناخت کنندگان"
 }

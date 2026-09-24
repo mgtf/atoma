@@ -1148,5 +1148,17 @@
   "settings.subscriptionDelegated": "Subscrição do anfitrião delegada.",
   "settings.subscriptionDelegationWithdrawn": "Delegação da subscrição do anfitrião retirada.",
   "runs.project.operator": "Runs do operador",
-  "runs.picker.tokens": "tokens"
+  "runs.picker.tokens": "tokens",
+  "card.llmStart.issued": "chamada emitida — ainda sem resposta registada",
+  "detail.field.elapsed": "Tempo decorrido",
+  "detail.field.lastElements": "Chamadas de elementos mais recentes",
+  "detail.field.elementErrors": "Erros de elementos",
+  "detail.field.llmEventId": "ID da chamada associada",
+  "detail.field.branchId": "ID da ramificação",
+  "detail.llmStart.status.inFlight": "Em curso — ainda sem resposta",
+  "detail.llmStart.status.completed": "Concluída — a chamada associada contém o recibo",
+  "detail.llmStart.completedExplain": "A resposta foi recebida. O evento da chamada associada contém o prompt, a resposta e os dados de utilização.",
+  "detail.llmStart.interruptedExplain": "A run terminou antes de esta chamada devolver uma resposta. Não há resposta, dados de utilização nem recibo para esta chamada.",
+  "detail.llmStart.elements": "Elementos invocados nesta chamada",
+  "detail.llmStart.identifiers": "Identificadores"
 }

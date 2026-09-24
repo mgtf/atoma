@@ -1148,5 +1148,17 @@
   "settings.subscriptionDelegated": "Подписка хоста делегирована.",
   "settings.subscriptionDelegationWithdrawn": "Делегирование подписки хоста отозвано.",
   "runs.project.operator": "run оператора",
-  "runs.picker.tokens": "токены"
+  "runs.picker.tokens": "токены",
+  "card.llmStart.issued": "вызов отправлен — ответ пока не зафиксирован",
+  "detail.field.elapsed": "Прошло времени",
+  "detail.field.lastElements": "Последние вызовы элементов",
+  "detail.field.elementErrors": "Ошибки элементов",
+  "detail.field.llmEventId": "ID парного вызова",
+  "detail.field.branchId": "ID ветки",
+  "detail.llmStart.status.inFlight": "Выполняется — ответа пока нет",
+  "detail.llmStart.status.completed": "Ответ получен — квитанция хранится в парном вызове",
+  "detail.llmStart.completedExplain": "Ответ получен. Событие парного вызова содержит запрос, ответ и данные об использовании.",
+  "detail.llmStart.interruptedExplain": "run завершился до получения ответа на этот вызов. Для него нет ответа, данных об использовании и квитанции.",
+  "detail.llmStart.elements": "Элементы, вызванные в этом вызове",
+  "detail.llmStart.identifiers": "Идентификаторы"
 }

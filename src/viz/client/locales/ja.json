@@ -1148,5 +1148,17 @@
   "settings.subscriptionDelegated": "ホストのサブスクリプションを委任しました。",
   "settings.subscriptionDelegationWithdrawn": "ホストのサブスクリプションの委任を取り消しました。",
   "runs.project.operator": "オペレーターのrun",
-  "runs.picker.tokens": "トークン"
+  "runs.picker.tokens": "トークン",
+  "card.llmStart.issued": "呼び出し発行済み—応答はまだ記録されていません",
+  "detail.field.elapsed": "経過時間",
+  "detail.field.lastElements": "最新の要素呼び出し",
+  "detail.field.elementErrors": "要素エラー",
+  "detail.field.llmEventId": "対応する呼び出しID",
+  "detail.field.branchId": "ブランチID",
+  "detail.llmStart.status.inFlight": "処理中—応答待ち",
+  "detail.llmStart.status.completed": "応答済み—対応する呼び出しにレシートがあります",
+  "detail.llmStart.completedExplain": "応答が返されました。対応する呼び出しイベントには、プロンプト、回答、使用量が含まれます。",
+  "detail.llmStart.interruptedExplain": "この呼び出しが応答を返す前にrunが終了しました。応答、使用量、レシートはいずれもありません。",
+  "detail.llmStart.elements": "この呼び出しで実行された要素",
+  "detail.llmStart.identifiers": "識別子"
 }

@@ -1148,5 +1148,17 @@
   "settings.subscriptionDelegated": "হোস্ট সাবস্ক্রিপশন অর্পণ করা হয়েছে।",
   "settings.subscriptionDelegationWithdrawn": "হোস্ট সাবস্ক্রিপশনের অর্পণ প্রত্যাহার করা হয়েছে।",
   "runs.project.operator": "অপারেটরের run",
-  "runs.picker.tokens": "টোকেন"
+  "runs.picker.tokens": "টোকেন",
+  "card.llmStart.issued": "কল জারি হয়েছে — এখনও কোনো প্রতিক্রিয়া রেকর্ড হয়নি",
+  "detail.field.elapsed": "অতিবাহিত সময়",
+  "detail.field.lastElements": "সাম্প্রতিক এলিমেন্ট কল",
+  "detail.field.elementErrors": "এলিমেন্টের ত্রুটি",
+  "detail.field.llmEventId": "জোড়া কলের আইডি",
+  "detail.field.branchId": "ব্রাঞ্চ আইডি",
+  "detail.llmStart.status.inFlight": "প্রক্রিয়াধীন — এখনও কোনো প্রতিক্রিয়া নেই",
+  "detail.llmStart.status.completed": "ফিরেছে — জোড়া কলে রসিদটি রয়েছে",
+  "detail.llmStart.completedExplain": "প্রতিক্রিয়াটি ফিরে এসেছে। জোড়া কল ইভেন্টে প্রম্পট, উত্তর এবং ব্যবহারসংক্রান্ত তথ্য রয়েছে।",
+  "detail.llmStart.interruptedExplain": "এই কলটি ফেরার আগেই run শেষ হয়েছে। এর জন্য কোনো প্রতিক্রিয়া, ব্যবহারসংক্রান্ত তথ্য বা রসিদ নেই।",
+  "detail.llmStart.elements": "এই কলে আহ্বান করা এলিমেন্টসমূহ",
+  "detail.llmStart.identifiers": "শনাক্তকারী"
 }

@@ -1148,5 +1148,17 @@
   "settings.subscriptionDelegated": "Suscripción del host delegada.",
   "settings.subscriptionDelegationWithdrawn": "Se retiró la delegación de la suscripción del host.",
   "runs.project.operator": "Runs del operador",
-  "runs.picker.tokens": "tokens"
+  "runs.picker.tokens": "tokens",
+  "card.llmStart.issued": "llamada emitida — aún no se ha registrado ninguna respuesta",
+  "detail.field.elapsed": "Transcurrido",
+  "detail.field.lastElements": "Últimas llamadas a elementos",
+  "detail.field.elementErrors": "Errores de elementos",
+  "detail.field.llmEventId": "Id. de llamada emparejada",
+  "detail.field.branchId": "Id. de rama",
+  "detail.llmStart.status.inFlight": "En curso — aún sin respuesta",
+  "detail.llmStart.status.completed": "Devuelta — la llamada emparejada contiene el recibo",
+  "detail.llmStart.completedExplain": "La respuesta ha llegado. El evento de llamada emparejada contiene el prompt, la respuesta y el uso.",
+  "detail.llmStart.interruptedExplain": "El run terminó antes de que esta llamada respondiera. No hay respuesta, uso ni recibo para ella.",
+  "detail.llmStart.elements": "Elementos invocados en esta llamada",
+  "detail.llmStart.identifiers": "Identificadores"
 }

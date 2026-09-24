@@ -1148,5 +1148,17 @@
   "settings.subscriptionDelegated": "होस्ट सदस्यता प्रत्यायोजित की गई।",
   "settings.subscriptionDelegationWithdrawn": "होस्ट सदस्यता का प्रत्यायोजन वापस लिया गया।",
   "runs.project.operator": "ऑपरेटर run",
-  "runs.picker.tokens": "टोकन"
+  "runs.picker.tokens": "टोकन",
+  "card.llmStart.issued": "कॉल जारी — अभी तक कोई प्रतिक्रिया दर्ज नहीं हुई",
+  "detail.field.elapsed": "बीता समय",
+  "detail.field.lastElements": "नवीनतम एलिमेंट कॉल",
+  "detail.field.elementErrors": "एलिमेंट त्रुटियाँ",
+  "detail.field.llmEventId": "युग्मित कॉल आईडी",
+  "detail.field.branchId": "ब्रांच आईडी",
+  "detail.llmStart.status.inFlight": "प्रक्रिया में — अभी तक कोई प्रतिक्रिया नहीं",
+  "detail.llmStart.status.completed": "वापस आया — युग्मित कॉल में रसीद है",
+  "detail.llmStart.completedExplain": "प्रतिक्रिया वापस आ गई है। युग्मित कॉल इवेंट में प्रॉम्प्ट, उत्तर और उपयोग का विवरण है।",
+  "detail.llmStart.interruptedExplain": "इस कॉल के वापस आने से पहले run समाप्त हो गया। इसके लिए कोई प्रतिक्रिया, उपयोग का विवरण या रसीद नहीं है।",
+  "detail.llmStart.elements": "इस कॉल में इनवोक किए गए एलिमेंट",
+  "detail.llmStart.identifiers": "पहचानकर्ता"
 }

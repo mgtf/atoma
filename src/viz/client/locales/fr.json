@@ -1148,5 +1148,17 @@
   "settings.subscriptionDelegated": "Abonnement de l’hôte délégué.",
   "settings.subscriptionDelegationWithdrawn": "Délégation de l’abonnement de l’hôte retirée.",
   "runs.project.operator": "Runs de l’opérateur",
-  "runs.picker.tokens": "tokens"
+  "runs.picker.tokens": "tokens",
+  "card.llmStart.issued": "appel lancé — aucune réponse enregistrée pour l’instant",
+  "detail.field.elapsed": "Temps écoulé",
+  "detail.field.lastElements": "Derniers appels d’éléments",
+  "detail.field.elementErrors": "Erreurs d’éléments",
+  "detail.field.llmEventId": "ID de l’appel associé",
+  "detail.field.branchId": "ID de la branche",
+  "detail.llmStart.status.inFlight": "En cours — aucune réponse pour l’instant",
+  "detail.llmStart.status.completed": "Réponse reçue — l’appel associé contient le reçu",
+  "detail.llmStart.completedExplain": "La réponse est arrivée. L’événement d’appel associé contient le prompt, la réponse et l’utilisation.",
+  "detail.llmStart.interruptedExplain": "Le run s’est terminé avant le retour de cet appel. Il n’y a ni réponse, ni utilisation, ni reçu pour cet appel.",
+  "detail.llmStart.elements": "Éléments invoqués dans cet appel",
+  "detail.llmStart.identifiers": "Identifiants"
 }
