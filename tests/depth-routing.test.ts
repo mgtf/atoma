@@ -82,6 +82,7 @@ describe('root delivery coverage', () => {
     if (kind === 'abandoned') ctx.attempt = 2;
     if (kind === 'unbound') {
       const record = ctx.attestations.forAttempt(1)[0]!;
+      if (record.observation.kind !== 'browser') throw new Error('expected browser observation');
       const { document: _document, ...observation } = record.observation;
       ctx.attestations = createAttestationLog();
       ctx.attestations.append({ ...record, observation });
@@ -112,14 +113,16 @@ describe('one common root acceptance, independent of phase credit', () => {
     ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'Unexpected review' }));
     const actor = new Actor(tier, false, ['read_file', 'write_file']);
     const accepted = await acceptRootResult({ actor, task, result: delivered, ctx, floor: [], phaseCoverage: [] });
-    expect(accepted).toMatchObject({ approved: true, basis: 'mechanical', probe: { requiresReview: false, contradiction: false } });
-    expect(ctx.llm.calls).toHaveLength(0);
+    expect(accepted).toMatchObject({ approved: true, basis: 'validation-call', probe: { requiresReview: false, contradiction: false } });
+    expect(ctx.llm.calls).toHaveLength(1);
+    expect(ctx.llm.calls[0]!.userContent).not.toContain('abandoned implementation');
+    ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'False quote' }));
 
     // The SAME false quote in the final summary is still a delivery claim.
     const reviewed = await acceptRootResult({ actor, task, result: { ...delivered, summary: staleQuote }, ctx, floor: [], phaseCoverage: [] });
     expect(reviewed).toMatchObject({ basis: 'validation-call', probe: { requiresReview: true, contradiction: true } });
-    expect(ctx.llm.calls).toHaveLength(1);
-    expect(ctx.llm.calls[0]!.userContent).toContain('NOT FOUND');
+    expect(ctx.llm.calls).toHaveLength(2);
+    expect(ctx.llm.calls[1]!.userContent).toContain('NOT FOUND');
   });
   it('accepts covered delivery mechanically and copies phase records without reevaluating them', async () => {
     const ctx = context();
@@ -183,6 +186,7 @@ describe('depth transition through the production supervision loop', () => {
   });
   it('rearms mechanical one-shots in a fresh attempt while sharing them across its branches', async () => {
     const ctx = context();
+    ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'Delivery reviewed' }));
     const checkedAttempts: number[] = [];
     const gateTask = { description: 'running node test-api.js must exit 0' };
     await runDepthTask({ mode: 'short', task, ctx, floor: [], restart: async () => new Executor(),
@@ -210,6 +214,7 @@ describe('depth transition through the production supervision loop', () => {
   });
   it('deepens when a mutualized peer reaches the entry fallback moment', async () => {
     const ctx = context();
+    ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'Delivery reviewed' }));
     const peer = new Actor(2, true);
     const restart = vi.fn(async () => new Executor());
     const root = new Actor(2);

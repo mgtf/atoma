@@ -27,7 +27,7 @@ export async function rootProofCoverage(ctx: RunContext, floor: ProofFloor): Pro
   };
   return Promise.all(floor.map(async ({ obligation, deliverable }) => {
     const current = await digest(deliverable);
-    const matches = records.filter((record) => establishesDomInteraction(record) &&
+    const matches = records.filter((record) => record.observation.kind === 'browser' && establishesDomInteraction(record) &&
       record.observation.document?.path === deliverable && current !== undefined &&
       record.observation.document.sha256 === current);
     return { kind: obligation, deliverable, status: matches.length ? 'covered' : 'uncovered',
@@ -47,7 +47,7 @@ export async function acceptRootResult(args: {
     payload: { output: result.output, summary: result.summary }, child: actor,
     ...(result.evidence ? { evidence: result.evidence } : {}) });
   const floorCoverage = await rootProofCoverage(ctx, floor);
-  const review = gates.reviewFindings.length > 0 || probe.requiresReview ||
+  const review = floor.length === 0 || gates.reviewFindings.length > 0 || probe.requiresReview ||
     floorCoverage.some((item) => item.status === 'uncovered');
   const verdict = gates.rejection
     ? { approved: false, reasoning: gates.rejection.reasoning }

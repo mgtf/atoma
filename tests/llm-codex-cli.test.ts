@@ -7,6 +7,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -899,6 +900,24 @@ describe('Codex L1 host-side action loop', () => {
     expect(inputs[1]).not.toContain('No tool results were returned');
     expect(result.text).toBe('Verified observed-file');
     expect(result.usage).toMatchObject({ inputTokens: 16, outputTokens: 6, cacheReadInputTokens: 4 });
+  });
+
+  it('explains that host writes remain available under the read-only native sandbox', async () => {
+    const execute = vi.fn(async () => ({ ok: true }));
+    const actions = [
+      { type: 'tool', name: 'write_file', arguments: { path: 'flags.mjs', content: 'export {};' } },
+      { type: 'final', text: 'Written through Atoma' },
+    ];
+    const client = new CodexCliLlmClient({ env: {}, spawnFn: (args) => {
+      expect(args).toContain('permissions.atoma-text-only.network.enabled=false');
+      const instructionPath = args.find(arg => arg.startsWith('model_instructions_file='))!.slice('model_instructions_file='.length);
+      const instructions = readFileSync(instructionPath, 'utf8');
+      expect(instructions).toContain('read-only filesystem and disabled native tools do not restrict these host tools');
+      expect(instructions).toContain('Only an observed Atoma tool result');
+      return fakeChild({ lines: messages(actions.shift()) });
+    } });
+    await client.complete(req({ tools: makeTools(['write_file']), executor: { execute, has: () => true } }));
+    expect(execute).toHaveBeenCalledExactlyOnceWith('write_file', { path: 'flags.mjs', content: 'export {};' });
   });
 
   it('keeps each subprocess isolated, refuses off-scope tools, and feeds observed results back', async () => {

@@ -97,6 +97,8 @@ Neighbours:
   it"). Depth routing keeps model pins and
   one run deadline, cost ledger and trace. Its profile freezes the delivery
   `proofFloor` before routing, without adding it to phase `proofObligations`.
+  The general build profile uses an empty floor and semantic root review,
+  rather than demanding `index.html` from every API and CLI.
   Deep enters through L3; short plans and executes
   through the canonical L2, including its peers. Every result goes through
   the same root acceptance; a refusal is handed BACK ONCE
@@ -152,7 +154,10 @@ Neighbours:
   look at. A landed run is not a failure and must not be scripted as one.
 - The runner's `ATOMA_RUN_STATS` JSON epilogue is the burn-in accounting
   contract. `parseRunLog` keeps text parsing only for interrupted legacy runs;
-  never add global regexes over model-authored prose.
+  never add global regexes over model-authored prose. Epilogue serialization
+  bounds landing explanations to the shared schema limits and marks truncation;
+  full descriptions remain in the trace. An unrelated finalization error must
+  not be relabeled timeout merely because the run signal has expired.
 
 ## Intentional choices and rejected shortcuts
 

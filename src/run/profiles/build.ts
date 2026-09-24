@@ -92,7 +92,9 @@ export const BUILD_TASK_CONSTRAINTS: readonly string[] = [
 export const buildProfile: TaskProfile = {
   depthExperiment: {
     defaultMode: 'short',
-    floor: [{ obligation: 'dom-interaction', deliverable: 'index.html' }],
+    // This family also builds APIs and CLIs. No universal HTML deliverable exists.
+    // Empty floors still receive semantic root review; plans declare UI obligations.
+    floor: [],
     entryCell({ registry, toolDecls }) {
       const cell = ensureCanonicalFullStack(registry, toolDecls, 2);
       if (!cell) throw new Error('Depth routing requires the full-stack tool set');

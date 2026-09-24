@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { ToolExecutor } from './types.js';
 import {
   parseBrowserObservation,
+  parseExecutionObservation,
   type AttestationLog,
   type AttestationRecord,
 } from '../contracts/attestation.js';
@@ -53,13 +54,6 @@ export function createAttestationLog(onAppend?: (record: AttestationRecord) => v
   return new MemoryAttestationLog(onAppend);
 }
 
-/**
- * Tools whose result carries an observation worth attesting. Everything else
- * flows through untouched: a `write_file` is an action, not evidence, and
- * attesting it would inflate the log without making any claim checkable.
- */
-const ATTESTABLE_TOOLS = new Set(['validate_html']);
-
 /** Marker so nested forks re-wrap the BASE executor instead of stacking. */
 const BASE = Symbol('atoma.attesting.base');
 
@@ -90,9 +84,8 @@ export function attestingExecutor(
     has: (name: string) => base.has(name),
     async execute(name: string, args: Record<string, unknown>): Promise<unknown> {
       const result = await base.execute(name, args);
-      if (!ATTESTABLE_TOOLS.has(name)) return result;
       try {
-        const observation = parseBrowserObservation(args, result);
+        const observation = name === 'validate_html' ? parseBrowserObservation(args, result) : parseExecutionObservation(name, args, result);
         if (observation) {
           log.append({
             eventId: randomUUID(),

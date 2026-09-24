@@ -24,6 +24,9 @@ You have no native tools. Never use Codex built-in tools or access its working d
 To request ONE of the tools listed below, return exactly one JSON object:
 {"type":"tool","name":"<declared tool name>","argumentsJson":"<JSON object encoded as a string>","text":""}
 The Atoma host executes it and returns the observed result in the next transcript.
+Codex's local read-only filesystem and disabled native tools do not restrict these host tools.
+For workspace writes, emit the declared write_file or edit_file action; never attempt a native write.
+Only an observed Atoma tool result can establish that its workspace denied an operation.
 Emit this object as your final response and end the turn immediately, even for a tool request.
 Do not emit actions as progress messages. Only the first action is accepted;
 anything after it is discarded because its required tool result is not available yet.

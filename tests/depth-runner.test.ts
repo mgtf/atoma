@@ -26,11 +26,13 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); resetHostLifecycleSn
 describe('runner supervision depth, concrete L3/L2/L1 and real backend', () => {
   it.each<{ mode: string; matched: boolean; rootApproved: boolean; deadline?: boolean }>([
     { mode: 'short', matched: false, rootApproved: true, deadline: true },
+    { mode: 'short', matched: false, rootApproved: false, deadline: true },
     { mode: 'default', matched: false, rootApproved: false }, { mode: 'default', matched: true, rootApproved: false },
     { mode: 'default', matched: false, rootApproved: true },
     { mode: 'short', matched: false, rootApproved: false }, { mode: 'deep', matched: false, rootApproved: false },
     { mode: 'short', matched: true, rootApproved: false }, { mode: 'deep', matched: true, rootApproved: false },
   ])('keeps phase trust and learning/credit with $mode supervision (matched=$matched, rootApproved=$rootApproved)', async ({ mode, matched, rootApproved, deadline }) => {
+    const unfinishedDescription = 'Write unfinished.txt. ' + 'Verify restart persistence and concurrent writes. '.repeat(100);
     const root = mkdtempSync(join(tmpdir(), 'atoma-depth-credit-'));
     const runs = join(root, 'runs');
     const skillRoot = join(root, 'skills');
@@ -76,11 +78,11 @@ describe('runner supervision depth, concrete L3/L2/L1 and real backend', () => {
           expect(registry.getByName(leafName)!.successes).toBe(1);
           expect(skills.loadFor(leafId)).toHaveLength(1);
           if (matched) expect(skills.loadFor(leafId)[0]!.successes).toBe(1);
-          reply = { approved: rootApproved, reasoning: rootApproved ? 'Reviewed delivery accepted' : 'Root DOM proof is missing' };
+          reply = { approved: rootApproved, reasoning: rootApproved ? 'Reviewed delivery accepted' : 'Required route behavior is unverified' };
         } else reply = { approved: true, reasoning: 'Server phase approved', activeSkillFollowed: true };
       } else if (req.role === 'plan' && req.actor?.tier !== 1) reply = [
         { strategy: 'reuse', target: req.actor?.tier === 3 ? cellName : leafName, reasoning: 'One server phase' },
-        makePlan({ subtasks: [{ description: 'Write server.js', outputs: ['server.js'] }, ...(deadline ? [{ description: 'Write unfinished.txt', outputs: ['unfinished.txt'] }] : [])], aggregation: { mode: 'sequential' } }),
+        makePlan({ subtasks: [{ description: 'Write server.js', outputs: ['server.js'] }, ...(deadline ? [{ description: unfinishedDescription, outputs: ['unfinished.txt'] }] : [])], aggregation: { mode: 'sequential' } }),
       ];
       else if (req.role === 'plan') reply = { reasoning: 'Write the server', proposedAction: 'Write server.js', expectedOutput: 'Server on disk' };
       else if (req.role === 'execute') {
@@ -117,7 +119,12 @@ describe('runner supervision depth, concrete L3/L2/L1 and real backend', () => {
       const trace = JSON.parse(readFileSync(join(runs, path), 'utf8')) as VizRun;
       if (deadline) {
         expect(deadlineController.signal.aborted).toBe(true);
-        expect(trace.result?.unfinishedPhases).toEqual(['Write unfinished.txt']);
+        expect(trace.result?.unfinishedPhases).toEqual([unfinishedDescription]);
+        const stats = parseRunLog(logs.join('\n'));
+        expect(stats.outcome).toBe('partial');
+        expect(stats.landingReasons?.[0]).toContain('[truncated]');
+        expect(stats.landingReasons?.[0]!.length).toBeLessThanOrEqual(2000);
+        if (!rootApproved) expect(stats.landingReasons).toHaveLength(2);
         expect(existsSync(join(root, 'workspace', 'server.js'))).toBe(true);
       }
       expect(trace.events.filter((event) => event.kind === 'topology')).toMatchObject([
@@ -125,7 +132,7 @@ describe('runner supervision depth, concrete L3/L2/L1 and real backend', () => {
       ]);
       if (mode !== 'deep') expect(calls.some((req) => req.actor?.tier === 3 && req.actor.name !== 'run-root')).toBe(false);
       expect(trace.events.filter((event) => event.kind === 'acceptance'), trace.error).toMatchObject([
-        { approved: rootApproved, floorCoverage: [{ status: 'uncovered' }], phaseCoverage: [{ obligations: [] }] },
+        { approved: rootApproved, floorCoverage: [], phaseCoverage: [{ obligations: [] }] },
       ]);
       expect(calls.filter((req) => req.actor?.name === 'run-root')).toHaveLength(1);
       expect(calls.some((req) => req.role === 'skill')).toBe(!matched);

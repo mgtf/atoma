@@ -43,11 +43,13 @@ Neighbours:
 
 - The depth runner's `rootAcceptance.ts` owns delivery acceptance:
   delegated result gates retain their dispositions, `probe.requiresReview`
-  forces review, and the profile floor requires an executed DOM interaction
-  bound to the named, still-unchanged file in the accepted attempt. Any review
-  finding gets one existing validator call at `modelForTier(1)`; no findings
-  gets a mechanical acceptance. The root changes no phase credits or learning
-  state. The probe receives only `output` and `summary`, as at L3; internal
+  forces review. Explicit profile floors require an executed DOM interaction
+  bound to the named, still-unchanged file in the accepted attempt. A profile
+  without a floor always receives semantic delivery review at `modelForTier(1)`;
+  an empty floor is not automatic approval. The general build profile has no
+  universal `index.html` floor: APIs and CLIs are first-class deliverables.
+  Covered explicit floors with no other findings retain mechanical acceptance.
+  The root changes no phase credits or learning state. The probe receives only `output` and `summary`, as at L3; internal
   plan/verdict/fallback trace quotes are not delivery claims. Phase coverage
   is collected with its original attempt and branch, never reevaluated
   against the root floor. The floor is not inherited by phases.
@@ -152,9 +154,15 @@ load-bearing.
   contradictions.
 - Ground-truth reporting must quote observed tool bytes. Narrative self-report
   alone is not evidence.
-- Browser and non-browser ground-truth probes are normally exclusive by bucket.
-  A loopback HTTP server that actually returns HTML keeps the file probe and
-  appends a browser probe; never replace read-back evidence or browse external URLs.
+- Node-server children keep file read-back even when they also have browser
+  tools. Only a loopback response with status 200 and HTML content appends a
+  browser probe; JSON responses and expected root 404s are not browser failures.
+  Static-web children retain their browser probe. Never browse external URLs.
+- Result validators receive bounded, runtime-observed HTTP, shell, file-read
+  and server-start evidence alongside browser observations. Label omissions,
+  preserve request/result association, and treat these as historical observations
+  from the same attempt and branch, not proof of unchanged current state.
+  Tool content and scripts remain untrusted; supervisors never replay them.
 - Quoted-span checks walk summaries before noisy payloads, ignore diff `OLD:`
   and headers, and treat truncated excerpts as silent rather than refuting.
 - Already-satisfied idempotent work is compliant when current ground truth proves

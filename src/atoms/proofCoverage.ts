@@ -47,7 +47,7 @@ async function documentStillMatches(
   ctx: RunContext,
   record: AttestationRecord
 ): Promise<{ ok: boolean; detail: string }> {
-  const doc = record.observation.document;
+  const doc = record.observation.kind === 'browser' ? record.observation.document : undefined;
   // No binding: the observation cannot be shown stale, so it is not refused.
   if (!doc) return { ok: true, detail: 'no document binding' };
   const tools = ctx.tools;
@@ -100,7 +100,7 @@ export async function checkProofCoverage(args: {
     const executed = browserRecords.filter(establishesDomInteraction);
     if (executed.length === 0) {
       const filtered = browserRecords.reduce(
-        (total, r) => total + r.observation.ignoredInteractions,
+        (total, r) => total + (r.observation.kind === 'browser' ? r.observation.ignoredInteractions : 0),
         0
       );
       const seen =

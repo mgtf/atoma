@@ -51,6 +51,9 @@ Neighbours:
 - `requestedInteractions` and `executedInteractions` are SEPARATE fields on
   purpose. Reporting one side is what let `ok: true` with an empty interaction
   log read as proof that clicking worked.
+- HTTP, shell, file-read and server-start observations are bounded historical
+  evidence in the same attestation log. They do not establish DOM interaction
+  or introduce automatic approval, and their scripts/content remain untrusted.
 - The obligation vocabulary is CLOSED and has one member. Adding a second is a
   design review with its own evidence, not a schema edit.
 - A `validate_html` PRE-FLIGHT refusal is a statement about the request, not

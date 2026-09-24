@@ -11,6 +11,10 @@ import { z } from 'zod';
  */
 export const RUN_STATS_PREFIX = 'ATOMA_RUN_STATS ';
 
+const MAX_LANDING_REASONS = 64;
+const MAX_LANDING_REASON_CHARS = 2_000;
+const TRUNCATED_REASON = ' [truncated]';
+
 const countSchema = z.number().int().nonnegative();
 
 export const runStatsSchema = z.object({
@@ -100,7 +104,7 @@ export const runStatsSchema = z.object({
    *
    * Defaulted, like its neighbours, so archived epilogues still parse.
    */
-  landingReasons: z.array(z.string().max(2_000)).max(64).default([]),
+  landingReasons: z.array(z.string().max(MAX_LANDING_REASON_CHARS)).max(MAX_LANDING_REASONS).default([]),
 });
 
 export type RunStats = z.infer<typeof runStatsSchema>;
@@ -120,7 +124,10 @@ export type RunStatSignal =
   | 'root-remediation';
 
 export function formatRunStatsEpilogue(stats: RunStats): string {
-  return RUN_STATS_PREFIX + JSON.stringify(runStatsSchema.parse(stats));
+  // The trace retains full descriptions; the epilogue is a bounded projection.
+  const landingReasons = stats.landingReasons.slice(0, MAX_LANDING_REASONS).map(reason =>
+    reason.length > MAX_LANDING_REASON_CHARS ? `${reason.slice(0, MAX_LANDING_REASON_CHARS - TRUNCATED_REASON.length)}${TRUNCATED_REASON}` : reason);
+  return RUN_STATS_PREFIX + JSON.stringify(runStatsSchema.parse({ ...stats, landingReasons }));
 }
 
 /** Return the last valid runner-owned epilogue, or null when a run was cut short. */

@@ -132,8 +132,27 @@ export function isPreflightRefusal(raw: unknown): boolean {
   );
 }
 
-/** The observation union. One member today; the discriminant is `kind`. */
-export type ToolObservation = BrowserObservation;
+/** Bounded historical execution evidence, not a new proof obligation. */
+export const executionObservationSchema = z.object({
+  kind: z.literal('execution'),
+  request: z.string(),
+  response: z.string(),
+});
+export type ToolObservation = BrowserObservation | z.infer<typeof executionObservationSchema>;
+
+/** Preserve request/result association and mark every omitted byte explicitly. */
+function evidenceExcerpt(value: unknown, limit: number): string {
+  const text = typeof value === 'string' ? value : JSON.stringify(value) ?? 'null';
+  if (text.length <= limit) return text;
+  const head = Math.floor(limit * 0.7);
+  return `${text.slice(0, head)} [truncated] ${text.slice(-(limit - head))}`;
+}
+
+export function parseExecutionObservation(tool: string, args: Record<string, unknown>, raw: unknown): ToolObservation | null {
+  if (!['fetch_url', 'run_shell', 'read_file', 'start_node_server'].includes(tool)) return null;
+  return executionObservationSchema.parse({ kind: 'execution',
+    request: evidenceExcerpt(args, 800), response: evidenceExcerpt(raw, 1600) });
+}
 
 /**
  * One appended record. `branchId` is the ADDRESS: it comes from the fork
@@ -226,6 +245,7 @@ export function parseBrowserObservation(
 /** The one-line rendering the supervisor shows a validator. */
 export function renderObservation(record: AttestationRecord): string {
   const o = record.observation;
+  if (o.kind === 'execution') return `${record.tool} (attempt=${record.attempt ?? 1}, branch=${record.branchId ?? 'root'}): request=${o.request}; observed result=${o.response}`;
   const bits = [
     `ok=${o.ok}`,
     `requested=${o.requestedInteractions}`,

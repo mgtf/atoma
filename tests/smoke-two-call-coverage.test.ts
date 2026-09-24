@@ -262,7 +262,7 @@ describe('what the taught calls prove, through the production seam', () => {
 
     const records = root.attestations!.forBranch('phase-1');
     expect(records).toHaveLength(2);
-    expect(records.every((r) => r.observation.executedInteractions.length > 0)).toBe(true);
+    expect(records.every((r) => r.observation.kind === 'browser' && r.observation.executedInteractions.length > 0)).toBe(true);
 
     const coverage = await checkProofCoverage({ ctx: phase, obligations: ['dom-interaction'] });
     expect(coverage).toHaveLength(1);

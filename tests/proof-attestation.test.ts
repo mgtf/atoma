@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
 import { L2Atom } from '../src/atoms/L2Atom.js';
+import { llmVerdict } from '../src/atoms/verdict.js';
 import { L1Atom } from '../src/atoms/L1Atom.js';
 import { L3Atom } from '../src/atoms/L3Atom.js';
 import { FALLBACK_OPUS } from './tier-pins.js';
@@ -27,6 +28,7 @@ import {
   encodeMessage,
   isToolCallResponse,
 } from '../src/tools/containerProtocol.js';
+import { makePlan } from './helpers/factories.js';
 import { makeCtx, jsonText, nsOf } from './helpers.js';
 import type { RunContext, SkillEventInfo, Tool, ToolExecutor } from '../src/core/types.js';
 import type { PhaseCoverageRecord } from '../src/contracts/depthRouting.js';
@@ -596,7 +598,7 @@ describe('L2 — an uncovered obligation withholds METHOD credit, never approval
     await neuron.handleDirect(TASK, ctx);
 
     const prompt = ctx.llm.calls.find((call) => call.userContent.includes('RESULT — the child claims'))!.userContent;
-    expect(prompt).toContain('TRANSPORT-OBSERVED BROWSER EVIDENCE');
+    expect(prompt).toContain('TRANSPORT-OBSERVED TOOL EVIDENCE');
     expect(prompt).toContain(`"blobCaptured":${ok}`);
     expect(prompt).toContain(`"timestampMatches":${ok}`);
     expect(prompt).toContain('requested=2, executed=2');
@@ -842,5 +844,50 @@ describe('an obligation declared at L3 reaches the supervisor that watches the t
     // End 2: the run refused to credit the method.
     expect(reg.getByName(l1Type.name)!.successes).toBe(0);
     expect(stats).toContain('uncovered-obligation');
+  });
+});
+
+
+describe('HTTP and shell evidence reaches validation', () => {
+  it('carries ordered host observations through L1 without trusting its summary or sibling attempts', async () => {
+    const seed = makeCtx();
+    const attestations = createAttestationLog();
+    const names = ['fetch_url', 'run_shell', 'read_file'];
+    const tools: Tool[] = names.map(name => ({ name, description: name, inputSchema: { type: 'object', properties: {} } }));
+    const child = new L1Atom({ name: 'Methane', ordinal: 2, systemPrompt: 'API builder', tools, params: {} });
+    const base: ToolExecutor = { has: name => names.includes(name), execute: async (name, args) => {
+      if (name === 'fetch_url') return { status: 201, body: JSON.stringify({ key: args['url'] }) };
+      if (name === 'run_shell') return { exitCode: 0, stdout: '20 concurrent creates: 20 passed', stderr: '' };
+      return { content: 'file evidence '.repeat(300) + 'TAIL-SENTINEL' };
+    } };
+    await attestingExecutor(base, attestations, 'sibling', undefined, 2)!.execute('fetch_url', { url: 'sibling-secret' });
+    await attestingExecutor(base, attestations, 'api', undefined, 1)!.execute('fetch_url', { url: 'abandoned-attempt' });
+    const ctx = { ...seed, attestations, currentBranchId: 'api', attempt: 2, tools: attestingExecutor(base, attestations, 'api', undefined, 2)! };
+    ctx.llm.enqueue(async req => {
+      for (const [name, args] of [
+        ['fetch_url', { url: 'http://localhost:3210/flags', method: 'POST', body: { key: 'beta' } }],
+        ['run_shell', { cmd: 'node verify-concurrent.mjs' }],
+        ['read_file', { path: 'flags.json' }],
+      ] as const) {
+        const result = await req.executor!.execute(name, args);
+        req.onToolInvocation?.({ name, args, result, startedAt: 1, durationMs: 1 });
+      }
+      return { text: jsonText({ output: {}, summary: 'Done; details omitted' }), stopReason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 } };
+    });
+    const result = await child.execute({ description: 'Build a JSON API' }, makePlan({ proposedAction: 'verify' }), ctx);
+    ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'Evidence reviewed' }));
+    await llmVerdict({ ctx, model: FALLBACK_OPUS, supervisorName: 'Sclereid', supervisorTier: 2,
+      child, task: { description: 'Build a JSON API' }, subject: 'RESULT', payload: { output: result.output, summary: result.summary }, evidence: result.evidence, groundTruthBlock: '' });
+    const prompt = ctx.llm.calls.at(-1)!.userContent;
+    expect(prompt).toContain('TRANSPORT-OBSERVED TOOL EVIDENCE');
+    expect(prompt).toContain('20 concurrent creates: 20 passed');
+    expect(prompt).toContain('"status":201');
+    expect(prompt).toContain('http://localhost:3210/flags');
+    expect(prompt).toContain('[truncated]');
+    expect(prompt).toContain('TAIL-SENTINEL');
+    expect(prompt).not.toContain('sibling-secret');
+    expect(prompt).not.toContain('abandoned-attempt');
+    expect(prompt).toContain('later writes, mutations or restarts may change state');
+    expect(ctx.attestations.forAttempt(2).every(record => !establishesDomInteraction(record))).toBe(true);
   });
 });

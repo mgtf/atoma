@@ -196,14 +196,12 @@ export async function probeGroundTruthEx(args: {
   if (args.ctx.signal?.aborted) return empty;
   const tools = args.ctx.tools;
   if (!tools) return empty;
-  // Bucket dispatch. The two probes are MUTUALLY EXCLUSIVE: a child that
-  // declares validate_html gets the web load-and-look probe below; every
-  // other file-producing child gets the read-back probe (#F9). Running both
-  // would double the cost and, for a non-web artefact, add Puppeteer noise
-  // the validator reads as contradiction.
+  // Node-capable children may deliver JSON or HTML regardless of which other
+  // tools they own. Reuse the loopback/content check below and retain file
+  // read-back; a full-stack tool list is not evidence of a browser deliverable.
   const webProbeEligible =
     tools.has('validate_html') && args.child.toolNames().includes('validate_html');
-  if (!webProbeEligible) {
+  if (!webProbeEligible || args.child.toolNames().includes('start_node_server')) {
     // HYBRID refinement (#F1b, app-task-tracker run 2026-08-07, REWORKED
     // after adversarial review): an HTTP-bucket child can legitimately
     // SERVE html — one server exposing both a JSON API and an embedded UI
@@ -266,9 +264,7 @@ export async function probeGroundTruthEx(args: {
           '',
           '== GROUND-TRUTH EVIDENCE (browser probe — hybrid server) ==',
           `The child's URL serves HTML, so the supervisor ALSO loaded ${hybridUrl}`,
-          'in a headless browser (the child itself has no browser tool, so its',
-          "RESULT cannot contain first-hand browser observations — weigh any such",
-          'claims against THIS evidence).',
+          'in a headless browser. Judge browser claims against this observation.',
           summary,
         ].join('\n'),
         facts: filesProbe.facts,

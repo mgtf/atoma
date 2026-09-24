@@ -1170,11 +1170,8 @@ export async function startTask(
       // Everything stays best-effort: a diagnostic crash must not mask
       // the underlying error.
       const errMsg = (err as Error).message ?? String(err);
-      const isTimeout =
-        signal.aborted &&
-        (signal.reason instanceof Error
-          ? /timeout|aborted/i.test(signal.reason.message ?? '')
-          : true);
+      const isTimeout = signal.aborted && (err === signal.reason ||
+        (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')));
       const run = recorder.currentRun;
       let postMortem = '';
       if (run) {

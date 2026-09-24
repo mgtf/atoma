@@ -1,3 +1,5 @@
+import { checkGroundTruth } from '../src/atoms/groundTruth.js';
+import { makeTools } from './helpers/factories.js';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { describe, it, expect } from 'vitest';
@@ -457,5 +459,25 @@ describe('llmVerdict — probe fires on output-as-URL-string payloads (regressio
     expect(tools.calls).toHaveLength(1);
     expect(tools.calls[0]!.name).toBe('validate_html');
     expect(tools.calls[0]!.args['url']).toBe('http://localhost:8000/index.html');
+  });
+});
+
+
+describe('full-stack tools do not turn JSON APIs into browser deliverables', () => {
+  it.each([
+    { status: 404, headers: { 'content-type': 'application/json' }, body: '{"error":"not found"}', browser: false },
+    { status: 200, headers: { 'content-type': 'application/json' }, body: '{"ok":true}', browser: false },
+    { status: 404, headers: { 'content-type': 'text/html' }, body: '<html>Not found</html>', browser: false },
+    { status: 200, headers: { 'content-type': 'text/html' }, body: '<html><button>Save</button></html>', browser: true },
+  ])('probes the served artifact: $status $body', async ({ browser, ...reply }) => {
+    const child = new L1Atom({ name: 'CarbonDioxide', ordinal: 4, systemPrompt: 'full stack',
+      tools: makeTools(['write_file', 'read_file', 'fetch_url', 'start_node_server', 'validate_html']), params: {} });
+    const tools = new MockToolExecutor({ fetch_url: reply, read_file: { content: 'export const ready = true;' },
+      validate_html: { ok: true, errors: [], failedRequests: [] } });
+    const checked = await checkGroundTruth({ ctx: { ...makeCtx(), tools }, child, subject: 'RESULT',
+      payload: { output: { url: 'http://localhost:43210/', files: ['api.mjs'] }, summary: 'API ready' } });
+    expect(tools.calls.some(call => call.name === 'validate_html')).toBe(browser);
+    expect(tools.calls.some(call => call.name === 'read_file' && call.args.path === 'api.mjs')).toBe(true);
+    if (!browser) expect(checked.block).not.toContain('console error');
   });
 });

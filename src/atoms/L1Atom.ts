@@ -479,7 +479,8 @@ export class L1Atom extends Atom {
       // it out of the N>1 aggregation losses.
       evidence: [
         ...witnessesFromPayload({ output }),
-        ...(ctx.attestations?.forBranch(ctx.currentBranchId) ?? []).map(
+        ...(ctx.attestations?.forBranch(ctx.currentBranchId) ?? [])
+          .filter(record => (record.attempt ?? 1) === (ctx.attempt ?? 1)).map(
           (record): Witness => ({
             source: 'transport-observed',
             eventId: record.eventId,
