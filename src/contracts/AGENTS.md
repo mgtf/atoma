@@ -83,6 +83,16 @@ Neighbours:
   transport-observed, and never fold transport witnesses into the
   recorded-probe rendering — they are references, and they carry no `cmd`.
 
+## Acceptance lists
+
+- `acceptanceChecklist.ts` owns BOTH lists. The drafted parse is lenient (a
+  model's bad item is dropped); the user-approved input
+  (`approvedChecklistInputSchema`, `acceptanceSpecSchema`) is STRICT, because
+  a criterion the user approved and the run lost is the contract's named
+  failure. `parseChecklistLines` is the ONE line grammar for console, CLI and
+  MCP. The module stays browser-safe: the digest and the env transport live
+  in `src/run/acceptanceSpec.ts`, because the client imports this directory.
+
 ## Reading a trace without holding it
 
 - `src/contracts/traceFields.ts` owns the ONE projecting reader over a run

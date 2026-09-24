@@ -459,6 +459,34 @@ describe('depth transition through the production supervision loop', () => {
     expect(stats.mock.calls.filter(([signal]) => signal === 'root-remediation')).toHaveLength(1);
   });
 
+  it('keeps the user-approved list through a remediation, on the task and on every acceptance', async () => {
+    // docs/acceptance-contract-2026-09-14.md: the planner cannot delete a
+    // criterion, and the acceptor reads the HOST-held list, not task inputs.
+    const ctx = context();
+    const checklist = [{ id: 'c1', behaviour: 'the page shows the monthly total', check: { kind: 'review' as const } }];
+    const digest = 'a'.repeat(64);
+    ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'the total is not shown' }));
+    ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'the total is shown' }));
+    const seen: Task[] = [];
+    const accepted = vi.fn();
+    await runDepthTask({
+      mode: 'short', task, floor, restart: vi.fn(), onTopology: vi.fn(), onAcceptance: accepted, ctx,
+      checklist, checklistOrigin: { source: 'user', digest },
+      createExecutor: () => ({ actor: new Actor(), handle: async (t) => {
+        seen.push(t);
+        // A planner that rewrites its own inputs changes nothing the root reads.
+        if (t.inputs) delete t.inputs['acceptanceChecklist'];
+        return result;
+      } }),
+    });
+    expect(seen).toHaveLength(2);
+    expect(accepted.mock.calls.map(([info]) => [info.checklistSource, info.checklistDigest, info.checklist?.[0]?.id]))
+      .toEqual([['user', digest, 'c1'], ['user', digest, 'c1']]);
+    const verdictPrompts = ctx.llm.calls.filter((call) => call.actor?.name === 'run-root').map((call) => call.userContent);
+    expect(verdictPrompts).toHaveLength(2);
+    for (const prompt of verdictPrompts) expect(prompt).toContain('- [REVIEW] c1 the page shows the monthly total');
+  });
+
   it('refuses for good after the last remediation, without a third pass', async () => {
     const ctx = context();
     const stats = vi.fn();

@@ -240,10 +240,15 @@ export function gpuEventCardCopy(event: VizEvent, t: GpuTranslate): GpuEventCard
   if (event.kind === 'topology') {
     body = t(event.at === 'deepening' ? 'depth.deepening' : `depth.entry.${event.mode}`);
   } else if (event.kind === 'acceptance') {
+    const http = event.checklist?.filter((item) => item.kind === 'http') ?? [];
     body = [event.reasoning, t('depth.coverage', {
       covered: event.floorCoverage?.filter((item) => item.status === 'covered').length ?? 0,
       total: event.floorCoverage?.length ?? 0,
-    })].filter(Boolean).join(' · ');
+    }), event.checklist?.length ? t(event.checklistSource === 'user' ? 'depth.checklist.user' : 'depth.checklist.drafted', {
+      count: event.checklist.length,
+      observed: http.filter((item) => item.status === 'covered').length,
+      http: http.length,
+    }) : ''].filter(Boolean).join(' · ');
   } else if (event.kind === 'tool' && !event.error) {
     body = [toolArgSummary(event.args), resultFacts(event.result)].filter(Boolean).join(' · ');
   } else if (

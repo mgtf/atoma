@@ -432,7 +432,7 @@ npm run viz:mark-turn:analyze
   dragging clamps the complete window inside the viewport; slider values stay
   in the mutable live sample so pointer motion never rebuilds the GPU scene.
 - The project form is ONE form with TWO shapes, never one that grows: the
-  create fields with no project selected, the run prompt with one. A selected
+  create fields with no project selected, the run prompt and criteria with one. A selected
   project's name owns the page title (`Project : <name>`) and is NOT repeated
   as an active row in its detail card. Re-clicking Projects in the rail returns
   to the full list and create form; the accessible DOM mirror also preserves

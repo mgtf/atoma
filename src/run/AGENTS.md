@@ -142,6 +142,10 @@ Neighbours:
   corpus from nothing and seeded the next run from that. A seed that cannot be
   copied at restart fails the run with the first attempt in `.prevN`. The copy
   filters the inherited probe manifest ([src/contracts](../contracts/AGENTS.md)).
+- `ATOMA_ACCEPTANCE_SPEC` is read and re-digested at LAUNCH
+  (`readAcceptanceSpec`): unreadable, or present on a run that is not
+  depth-routed, is a `RunnerConfigError` before any model call. Present, it
+  replaces `draftAcceptanceChecklist` for the whole run, both attempts.
 
 - A run has THREE success-side outcomes, not two. `partial` is a run that ended
   with real work and did NOT deliver, for either of TWO typed reasons, and they

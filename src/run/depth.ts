@@ -6,7 +6,7 @@ import { landingSignal } from '../atoms/cost.js';
 import { acceptRootResult } from '../atoms/rootAcceptance.js';
 import { outOfPhaseBudget } from '../core/limits.js';
 import type { AcceptanceInfo, DepthMode, PhaseCoverageRecord, ProofFloor, TopologyInfo } from '../contracts/depthRouting.js';
-import { checklistPlanningLines, type AcceptanceChecklist } from '../contracts/acceptanceChecklist.js';
+import { checklistPlanningLines, type AcceptanceChecklist, type ChecklistSource } from '../contracts/acceptanceChecklist.js';
 
 export class DeepeningSignal extends Error {
   constructor() { super('Entry cell exhausted supervision; deepen once.'); this.name = 'DeepeningSignal'; }
@@ -73,16 +73,20 @@ export function remediationTask(task: Task, acceptance: AcceptanceInfo): Task {
  * and skill matching key on. The note says what the list is for, because
  * planners receive `inputs` as raw JSON with no other guidance.
  */
-export function withAcceptanceChecklist(task: Task, checklist: AcceptanceChecklist): Task {
+export function withAcceptanceChecklist(task: Task, checklist: AcceptanceChecklist, source: ChecklistSource = 'drafted'): Task {
   if (checklist.length === 0) return task;
   return {
     ...task,
     inputs: {
       ...(task.inputs ?? {}),
       acceptanceChecklist: {
-        note: 'Drafted from the goal: the root acceptor will look for evidence of each behaviour. Plan work that ' +
-          'exercises every HTTP item with fetch_url against the server this run starts; it adds no requirement ' +
-          'the goal did not state.',
+        note: source === 'user'
+          ? 'Approved by the user before launch: the root acceptor will judge the delivery against each criterion. ' +
+            'Plan work that satisfies every one and exercises every HTTP item with fetch_url against the server ' +
+            'this run starts.'
+          : 'Drafted from the goal: the root acceptor will look for evidence of each behaviour. Plan work that ' +
+            'exercises every HTTP item with fetch_url against the server this run starts; it adds no requirement ' +
+            'the goal did not state.',
         items: checklistPlanningLines(checklist),
       },
     },
@@ -110,9 +114,15 @@ export async function runDepthTask(args: {
   onAcceptance: (info: AcceptanceInfo) => void;
   /** Drafted once by the caller, before the attempt loop; a deepening keeps it. */
   checklist?: AcceptanceChecklist;
+  /**
+   * Set when `checklist` is the USER's approved list. It is held HERE, by the
+   * host, and handed to every root acceptance: never re-read from
+   * `task.inputs`, which the planners see and remediation re-spreads.
+   */
+  checklistOrigin?: { readonly source: ChecklistSource; readonly digest?: string };
 }): Promise<Result> {
   const { ctx } = args;
-  const task = withAcceptanceChecklist(args.task, args.checklist ?? []);
+  const task = withAcceptanceChecklist(args.task, args.checklist ?? [], args.checklistOrigin?.source);
   const attestations = (ctx.attestations ??= createAttestationLog());
   const phaseCoverage: PhaseCoverageRecord[] = [];
   let tools = ctx.tools;
@@ -183,7 +193,8 @@ export async function runDepthTask(args: {
         let acceptance: AcceptanceInfo;
         try {
           acceptance = await withinSignal(acceptRootResult({ actor, task: currentTask, result, ctx: acceptanceCtx,
-            floor: args.floor, phaseCoverage, ...(args.checklist ? { checklist: args.checklist } : {}) }), acceptanceCtx.signal);
+            floor: args.floor, phaseCoverage, ...(args.checklist ? { checklist: args.checklist } : {}),
+            ...(args.checklistOrigin ? { checklistOrigin: args.checklistOrigin } : {}) }), acceptanceCtx.signal);
           acceptanceCtx.signal.throwIfAborted();
         } catch (error) {
           cancellation.signal.throwIfAborted();

@@ -49,4 +49,23 @@ describe('depth evidence in persisted traces and GPU timeline', () => {
       recorder.endRun({});
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
+
+  it('says on the acceptance card whose checklist it was and how much of it was observed', () => {
+    const base = acceptanceSchema.parse({ attempt: 1, approved: true, reasoning: 'Accepted',
+      acceptor: { name: 'run-root', tier: 3, role: 'root-acceptor' },
+      executor: { name: 'Water', tier: 1, viaFallback: false }, gates: [],
+      probe: { requiresReview: false, contradiction: false }, phaseCoverage: [], basis: 'validation-call', floorCoverage: [],
+      checklistSource: 'user', checklistDigest: 'b'.repeat(64), checklist: [
+        { id: 'c1', behaviour: 'lists notes', kind: 'http', status: 'covered', observationRefs: ['e1'] },
+        { id: 'c2', behaviour: 'unknown id is 404', kind: 'http', status: 'uncovered', observationRefs: [] },
+        { id: 'c3', behaviour: 'README explains start', kind: 'review', status: 'review', observationRefs: [] },
+      ] });
+    const t = (key: string, vars?: Record<string, unknown>) => `${key}${vars ? JSON.stringify(vars) : ''}`;
+    const event = { id: 'a', ts: 1, kind: 'acceptance' as const, ...base };
+    expect(gpuEventCardCopy(event, t).body).toContain('depth.checklist.user{"count":3,"observed":1,"http":2}');
+    const drafted = { ...event, checklistSource: 'drafted' as const };
+    expect(gpuEventCardCopy(drafted, t).body).toContain('depth.checklist.drafted');
+    const none = { ...event, checklist: undefined };
+    expect(gpuEventCardCopy(none, t).body).not.toContain('depth.checklist');
+  });
 });

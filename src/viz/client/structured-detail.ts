@@ -147,6 +147,8 @@ const DETAIL_RANKS: ReadonlyMap<string, DetailRank> = new Map<string, DetailRank
   ['verifications', DETAIL_RANK.answer],
   ['gates', DETAIL_RANK.answer],
   ['checks', DETAIL_RANK.answer],
+  ['checklist', DETAIL_RANK.answer],
+  ['checklistSource', DETAIL_RANK.answer],
 
   ['name', DETAIL_RANK.locator],
   ['path', DETAIL_RANK.locator],
@@ -245,6 +247,7 @@ const DETAIL_RANKS: ReadonlyMap<string, DetailRank> = new Map<string, DetailRank
   ['modifiedAt', DETAIL_RANK.identity],
   ['expiresAt', DETAIL_RANK.identity],
   ['sha256', DETAIL_RANK.identity],
+  ['checklistDigest', DETAIL_RANK.identity],
   ['citation', DETAIL_RANK.identity],
   ['headers', DETAIL_RANK.identity],
 

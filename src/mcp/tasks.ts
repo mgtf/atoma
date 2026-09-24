@@ -4,6 +4,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult, Request, RequestId, Result, Task } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { retrievalRegistrationSchema } from '../contracts/retrievalCampaign.js';
+import { MAX_CHECKLIST_ITEMS, parseChecklistLines } from '../contracts/acceptanceChecklist.js';
 import type { RetrievalCampaignStart } from '../cli/retrievalCampaignHost.js';
 import { ProjectHttpError } from '../projects/service.js';
 import type { Viewer } from '../auth/store.js';
@@ -203,6 +204,9 @@ export const PROJECT_RUN_INPUT = {
   projectId: z.string().min(1),
   goal: z.string().min(1).max(MAX_GOAL_CHARS),
   idempotencyKey: z.string().min(1).max(200).optional().describe('Idempotency key; the same key returns the same run.'),
+  acceptanceCriteria: z.array(z.string().min(1).max(400)).min(1).max(MAX_CHECKLIST_ITEMS).optional().describe(
+    'Acceptance criteria you approve for this run, one per entry. "GET /api/notes/:id 404 — unknown id is refused" is an HTTP criterion (status optional, any 2xx without one); any other text is judged by review. The run is checked against exactly these; one malformed entry refuses the call.'
+  ),
 };
 
 /**
@@ -284,10 +288,22 @@ export function projectRunTaskHandler(host: RunTaskHost, deps: ProjectRunTaskDep
     const task = await extra.taskStore.createTask({ ttl: deps.service.runTaskBudgetMs() + TASK_RESULT_GRACE_MS, pollInterval: pollMs });
     const viewer = deps.viewer();
     let started: { projectRunId: string; status: string };
+    // The same line grammar as the console and the CLI: one parser, and a
+    // criterion that does not parse refuses the call rather than vanishing.
+    const parsed = args.acceptanceCriteria?.map((entry) => parseChecklistLines(entry));
+    const invalid = (parsed ?? []).flatMap((entry, index) => entry.errors.length > 0 || entry.items.length !== 1
+      ? [`entry ${index + 1}: ${entry.errors[0]?.message ?? 'must hold exactly one criterion'}`] : []);
+    if (invalid.length > 0) {
+      await extra.taskStore.storeTaskResult(task.taskId, 'failed',
+        errorResult(`refused (400): invalid acceptance criteria — ${invalid.join('; ')}`));
+      return { task: await extra.taskStore.getTask(task.taskId) };
+    }
+    const criteria = parsed ? { items: parsed.flatMap((entry) => entry.items) } : null;
     try {
       started = (await deps.service.startProjectRunFromInput(viewer, args.projectId, {
         goal: args.goal,
         idempotencyKey: args.idempotencyKey ?? `mcp-task-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        ...(criteria ? { acceptanceChecklist: criteria.items } : {}),
       })) as { projectRunId: string; status: string };
     } catch (error) {
       if (error instanceof ProjectHttpError) {

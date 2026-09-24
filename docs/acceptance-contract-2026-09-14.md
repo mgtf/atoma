@@ -1,6 +1,9 @@
 # User acceptance contract — design, 2026-09-14
 
-Status: proposed, not implemented. Companion:
+Status: proposed; two narrowed slices built on 2026-09-25 — the
+[drafted checklist](acceptance-checklist-2026-09-25.md) and the
+[user-approved list](#built-the-user-approved-list-2026-09-25). Neither
+implements dispositions, artifact binding or a verification reserve. Companion:
 [coverage and local value audit](value-audit-2026-09-14.md).
 This document specifies a reviewable boundary before extending the runner.
 It does not establish a measured improvement in delivery quality or cost.
@@ -173,7 +176,7 @@ the runner epilogue, and acceptance must not collapse those two facts.
 This record is evidence about one run's artifact, not atom/skill trust,
 platform-body approval, execution rights or permission to reuse a recipe.
 It cannot increment trust or admit a body to the commons. The
-[SaaS storage decision gate](saas-architecture.md#the-next-code-decision)
+[SaaS storage decision gate](saas-architecture.md#storage-decision-closed)
 still applies: “primary product store” names the logical owner, not permission
 to add a temporary SQLite table before the hardened-SQLite/PostgreSQL decision.
 This proposal authorizes no DDL or migration. The storage implementation must
@@ -246,3 +249,41 @@ All multi-user descriptions must state this shared-lease limit. Acceptance
 verification is part of that run's lifecycle and must not create an unleased
 parallel execution path. A published concurrency queue or recovery SLA would
 require additional implementation and evidence.
+
+## Built: the user-approved list, 2026-09-25
+
+The first executable piece of "the user submits or accepts the criteria
+before planning". What exists, and what it deliberately leaves out:
+
+- **Input.** `createProjectRunInputSchema.acceptanceChecklist`, optional and
+  STRICT (`approvedChecklistInputSchema`): 1–12 items `{behaviour, check}`,
+  where `check` is the drafted checklist's `http` or `review` shape. An
+  unknown key, an id, a malformed item or a thirteenth item refuses the
+  request; nothing is dropped. The console, the CLI (`--criteria <file>`) and
+  the MCP (`atoma_run_start.acceptanceCriteria`) take ONE line grammar,
+  `parseChecklistLines`: a line starting with an uppercase method and an
+  absolute path is `http`, any other line is `review`. The grammar is the
+  user's syntax, never an inference from the goal.
+- **Capture.** The host numbers the items `c1..cN`, digests the canonical
+  form (`src/run/acceptanceSpec.ts`) and writes it to `project_run_acceptance`
+  in the reservation transaction, immutable by trigger. The idempotency check
+  compares the digest, so the same key and goal with another list is a
+  conflict, never a retry. Storage is additive under the closed gate 0.
+- **Transport.** The coordinator reads the spec back from the store and
+  passes it in `ATOMA_ACCEPTANCE_SPEC`; the runner re-parses and re-digests it
+  at launch and fails as a configuration error before any model call when it
+  cannot — or when the run is not depth-routed, the only path that reads a
+  checklist.
+- **Use.** The approved list REPLACES the drafted one; no drafting call is
+  made. The host holds it and hands it to every root acceptance, across
+  remediation and deepening, independently of `task.inputs`. The planner and
+  the acceptor are told the user wrote it, and a user list of review items
+  alone is rendered, where a drafted one is not. The acceptance record carries
+  `checklistSource` and `checklistDigest`.
+- **Still inform-only.** Coverage decides nothing; the acceptor judges. There
+  are no `passed/failed/unverified` dispositions, no artifact binding, no
+  verification reserve and no publication provenance yet.
+- **No paid drafting before launch.** A pre-launch draft would be paid outside
+  the run's payer ledger and statistics, which the payer contract refuses.
+  Until that is designed, the user writes the criteria or the run drafts its
+  own inside its own accounting.

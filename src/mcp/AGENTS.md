@@ -152,6 +152,11 @@ Neighbours:
   terminal result when the run ends — a synchronous call, minutes long, over
   the SSE stream that keeps alive and replays. A refused start is a task that
   fails at once, never a hung call.
+- `atoma_run_start.acceptanceCriteria` takes one criterion per ENTRY in the
+  console's line grammar (`parseChecklistLines`), not the structured shape: one
+  grammar for every human entry point, and a JSON Schema free of transforms.
+  An entry that does not parse to exactly one criterion fails the task before
+  the service is called.
 - `createTask` calls the very start the HTTP routes call (`startRun`,
   `startProjectRunFromInput`), and the cancel hook calls the cancel tool's
   body (`cancelRun`, `cancelProjectRun`). The operator watcher turns each

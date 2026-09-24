@@ -7,6 +7,8 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { parseRunLog, spawnRun, DEFAULT_HARD_KILL_MARGIN_MS, UNKILLABLE_BACKSTOP_EXTRA_MS, type RunStats } from '../cli/burnin.js';
 import { encodePreviousLanding, PREVIOUS_LANDING_ENV } from '../contracts/runLanding.js';
+import { ACCEPTANCE_SPEC_ENV } from '../contracts/acceptanceChecklist.js';
+import { encodeAcceptanceSpec } from '../run/acceptanceSpec.js';
 import { declaredArtifactManifestSchema } from '../contracts/artifactManifest.js';
 import type {
   ArtifactManifest,
@@ -1380,6 +1382,12 @@ export class ProjectRunCoordinator {
           ? encodePreviousLanding(seedRun?.stats?.landingReasons)
           : null;
         if (landing) environment[PREVIOUS_LANDING_ENV] = landing;
+        // THE USER'S APPROVED CRITERIA, read back from the STORE the
+        // reservation wrote them to, never from the request: the child runs
+        // against the captured version, and a row that no longer matches its
+        // digest fails the run here instead of launching it without them.
+        const acceptance = this.store.getRunAcceptanceSpec(run.orgId, run.projectRunId);
+        if (acceptance) environment[ACCEPTANCE_SPEC_ENV] = encodeAcceptanceSpec(acceptance);
         return launch();
       })();
     } catch (error) {

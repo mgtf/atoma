@@ -7,6 +7,7 @@ import {
 } from 'react';
 import { projectSlugFromName, parseGitHubRepository } from '../../contracts/projects.js';
 import { isLocale } from '../../contracts/locales.js';
+import { MAX_CHECKLIST_ITEMS, parseChecklistLines } from '../../contracts/acceptanceChecklist.js';
 import { applyDocumentLocale, translate } from '../client/i18n-catalog.js';
 import { loginBounceParams, providerLoginHref } from '../client/session-guard.js';
 import { isIndexEntryLive } from '../client/run-utils.js';
@@ -454,7 +455,7 @@ function GpuAppContent({
           !ui.accountMenuOpen && !ui.localeMenuOpen && !ui.notificationsMenuOpen && !latest.projectBusy && !latest.pendingLoginProvider && !latest.adminInvitation &&
           pendingApiMutations() === 0 && queryClient.isMutating() === 0 &&
           !['settings', 'announce', 'admin'].includes(ui.view) && !ui.tuningPanelOpen &&
-          !ui.search.projectSource && !ui.search.projectName && !ui.search.projectPrompt && !ui.search.projectRepository && !ui.search.displayName;
+          !ui.search.projectSource && !ui.search.projectName && !ui.search.projectPrompt && !ui.search.projectCriteria && !ui.search.projectRepository && !ui.search.displayName;
       },
       beforeReload: () => {
         const auth = updateState.current.authSnapshot;
@@ -632,12 +633,23 @@ function GpuAppContent({
       setProjectError(t('projects.promptRequired'));
       return;
     }
+    // Parsed HERE with the host's own grammar, so a line that would be
+    // refused is named before the request, and the host re-validates anyway.
+    const criteria = parseChecklistLines(useGpuStore.getState().search.projectCriteria);
+    if (criteria.errors.length > 0) {
+      const first = criteria.errors[0]!;
+      setProjectError(first.line > 0
+        ? t('projects.criteriaInvalidLine', { line: first.line, message: first.message })
+        : t('projects.criteriaTooMany', { max: MAX_CHECKLIST_ITEMS }));
+      return;
+    }
     setProjectBusy(true);
     setProjectError(null);
     try {
       await api.startProjectRun(projectId, {
         idempotencyKey: crypto.randomUUID(),
         goal,
+        ...(criteria.items.length > 0 ? { acceptanceChecklist: criteria.items } : {}),
       });
       await queryClient.invalidateQueries({ queryKey: ['viz', 'project', projectId, 'runs'] });
       await queryClient.invalidateQueries({ queryKey: ['viz', 'projects'] });

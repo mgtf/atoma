@@ -953,7 +953,7 @@ describe('runs as tasks, and the run log', () => {
       updateTaskStatus: (taskId: string, status: 'working' | 'input_required' | 'completed' | 'failed' | 'cancelled', message?: string) => store.updateTaskStatus(taskId, status, message),
     };
     const extra = { taskStore: requestStore, signal: new AbortController().signal, requestId: 1, sendNotification: async () => {}, sendRequest: async () => ({}) } as never;
-    const created = await handler.createTask({ projectId: 'p-1', goal: 'ship it', idempotencyKey: undefined }, extra);
+    const created = await handler.createTask({ projectId: 'p-1', goal: 'ship it', idempotencyKey: undefined, acceptanceCriteria: undefined }, extra);
     expect(created.task.status).toBe('working');
     expect(created.task.statusMessage).toBe('run run-1 queued');
     await tick(120);
@@ -963,9 +963,44 @@ describe('runs as tasks, and the run log', () => {
     expect(result.structuredContent.status).toBe('delivered');
     // A second task, cancelled the way the SDK's tasks/cancel handler does it: the run is cancelled too.
     statuses.splice(0, statuses.length, 'running');
-    const second = await handler.createTask({ projectId: 'p-1', goal: 'stop me', idempotencyKey: undefined }, extra);
+    const second = await handler.createTask({ projectId: 'p-1', goal: 'stop me', idempotencyKey: undefined, acceptanceCriteria: undefined }, extra);
     await store.updateTaskStatus(second.task.taskId, 'cancelled', 'Client cancelled task execution.');
     expect(cancelled).toEqual(['run-1']);
+    for (const cleanup of host.cleanups) cleanup();
+    store.close();
+  });
+
+  it('parses atoma_run_start acceptanceCriteria with the console grammar, and refuses a bad entry before any run', async () => {
+    const bodies: unknown[] = [];
+    const service = {
+      startProjectRunFromInput: async (_v: unknown, _p: string, body: unknown) => { bodies.push(body); return { projectRunId: 'run-1', status: 'queued' }; },
+      projectRunStatus: () => ({ projectRunId: 'run-1', status: 'delivered' }),
+      runTaskBudgetMs: () => 60_000,
+      cancelProjectRun: async () => ({}),
+    };
+    const store = new SessionTaskStore();
+    const host: RunTaskHost = { store, follow: () => {}, cleanups: [] };
+    const handler = projectRunTaskHandler(host, { viewer: () => viewer('org:member'), service, pollMs: 10 });
+    const requestStore = {
+      createTask: (params: { ttl?: number | null; pollInterval?: number }) => store.createTask(params, 1, { method: 'tools/call' }),
+      getTask: async (taskId: string) => (await store.getTask(taskId))!,
+      storeTaskResult: (taskId: string, status: 'completed' | 'failed', result: { content: unknown[] }) => store.storeTaskResult(taskId, status, result),
+      getTaskResult: (taskId: string) => store.getTaskResult(taskId),
+      updateTaskStatus: (taskId: string, status: 'working' | 'input_required' | 'completed' | 'failed' | 'cancelled', message?: string) => store.updateTaskStatus(taskId, status, message),
+    };
+    const extra = { taskStore: requestStore, signal: new AbortController().signal, requestId: 1, sendNotification: async () => {}, sendRequest: async () => ({}) } as never;
+    await handler.createTask({ projectId: 'p-1', goal: 'notes API', idempotencyKey: 'k-1',
+      acceptanceCriteria: ['GET /api/notes/:id 404 — unknown id is refused', 'The README explains how to start it'] }, extra);
+    expect(bodies).toEqual([{ goal: 'notes API', idempotencyKey: 'k-1', acceptanceChecklist: [
+      { behaviour: 'unknown id is refused', check: { kind: 'http', method: 'GET', path: '/api/notes/:id', status: 404 } },
+      { behaviour: 'The README explains how to start it', check: { kind: 'review' } },
+    ] }]);
+    const refused = await handler.createTask({ projectId: 'p-1', goal: 'notes API', idempotencyKey: 'k-2',
+      acceptanceCriteria: ['fine', 'two\ncriteria'] }, extra);
+    expect(bodies).toHaveLength(1);
+    expect(refused.task.status).toBe('failed');
+    const result = (await store.getTaskResult(refused.task.taskId)) as { content: Array<{ text: string }> };
+    expect(result.content[0]!.text).toContain('entry 2: must hold exactly one criterion');
     for (const cleanup of host.cleanups) cleanup();
     store.close();
   });
@@ -993,7 +1028,7 @@ describe('runs as tasks, and the run log', () => {
     };
     const extra = { taskStore: requestStore, signal: new AbortController().signal, requestId: 1, sendNotification: async () => {}, sendRequest: async () => ({}) } as never;
     try {
-      const created = await handler.createTask({ projectId: 'p', goal: 'long', idempotencyKey: undefined }, extra);
+      const created = await handler.createTask({ projectId: 'p', goal: 'long', idempotencyKey: undefined, acceptanceCriteria: undefined }, extra);
       await vi.advanceTimersByTimeAsync(131 * 60_000);
       expect(await store.getTask(created.task.taskId)).toMatchObject({ status: 'working' });
       runStatus = terminal;

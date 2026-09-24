@@ -29,26 +29,128 @@ const checklistPathSchema = z
     message: 'path must be an absolute request path',
   });
 
-export const checklistCheckSchema = z.discriminatedUnion('kind', [
-  z.object({
-    kind: z.literal('http'),
-    method: httpMethodSchema,
-    path: checklistPathSchema,
-    status: z.number().int().min(100).max(599).optional(),
-  }),
-  z.object({ kind: z.literal('review') }),
-]);
+const httpCheckObject = z.object({
+  kind: z.literal('http'),
+  method: httpMethodSchema,
+  path: checklistPathSchema,
+  status: z.number().int().min(100).max(599).optional(),
+});
+const reviewCheckObject = z.object({ kind: z.literal('review') });
+const behaviourSchema = z.string().trim().min(1).max(MAX_CHECKLIST_BEHAVIOUR_CHARS);
+
+export const checklistCheckSchema = z.discriminatedUnion('kind', [httpCheckObject, reviewCheckObject]);
 export type ChecklistCheck = z.infer<typeof checklistCheckSchema>;
 
 export const checklistItemSchema = z.object({
   id: z.string().regex(/^c\d{1,2}$/),
-  behaviour: z.string().trim().min(1).max(MAX_CHECKLIST_BEHAVIOUR_CHARS),
+  behaviour: behaviourSchema,
   check: checklistCheckSchema,
 });
 export type ChecklistItem = z.infer<typeof checklistItemSchema>;
 
 export const acceptanceChecklistSchema = z.array(checklistItemSchema).max(MAX_CHECKLIST_ITEMS);
 export type AcceptanceChecklist = z.infer<typeof acceptanceChecklistSchema>;
+
+/**
+ * WHO WROTE THE LIST. A `drafted` list is the model's reading of the goal and
+ * may only add what the acceptor looks for. A `user` list is what the person
+ * who launched the run approved before it started: the host captured it,
+ * digested it and carried it to the child, and no model output replaces it.
+ */
+export const checklistSourceSchema = z.enum(['drafted', 'user']);
+export type ChecklistSource = z.infer<typeof checklistSourceSchema>;
+
+/**
+ * THE USER-APPROVED LIST, as a caller submits it — docs/acceptance-contract-2026-09-14.md.
+ *
+ * STRICT where the drafted parse is lenient: an unknown key, a malformed item
+ * or a thirteenth item refuses the whole request instead of being dropped,
+ * because silently losing a criterion the user approved is exactly what the
+ * contract forbids. Ids are not accepted: the host assigns `c1..cN` in the
+ * submitted order at capture.
+ */
+const approvedCheckSchema = z.discriminatedUnion('kind', [httpCheckObject.strict(), reviewCheckObject.strict()]);
+export const approvedChecklistItemInputSchema = z.object({
+  behaviour: behaviourSchema,
+  check: approvedCheckSchema,
+}).strict();
+export const approvedChecklistInputSchema = z.array(approvedChecklistItemInputSchema).min(1).max(MAX_CHECKLIST_ITEMS);
+export type ApprovedChecklistInput = z.input<typeof approvedChecklistInputSchema>;
+
+/** The captured specification: numbered items and the digest the host computed over them. */
+export const acceptanceSpecSchema = z.object({
+  version: z.literal(1),
+  items: z.array(checklistItemSchema.extend({ check: approvedCheckSchema }).strict()).min(1).max(MAX_CHECKLIST_ITEMS),
+  digest: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict();
+export type AcceptanceSpec = z.infer<typeof acceptanceSpecSchema>;
+
+/** Environment variable carrying the captured spec from the coordinator to the child runner. */
+export const ACCEPTANCE_SPEC_ENV = 'ATOMA_ACCEPTANCE_SPEC';
+export const MAX_ACCEPTANCE_SPEC_BYTES = 16_384;
+
+/**
+ * The items in their ONE canonical order and key order, the bytes the digest
+ * is computed over. Numbered here, from the submitted order.
+ */
+export function canonicalAcceptanceItems(input: ApprovedChecklistInput): AcceptanceSpec['items'] {
+  return approvedChecklistInputSchema.parse(input).map((item, index) => ({
+    id: `c${index + 1}`,
+    behaviour: item.behaviour,
+    check: item.check.kind === 'http'
+      ? { kind: 'http' as const, method: item.check.method, path: item.check.path,
+          ...(item.check.status !== undefined ? { status: item.check.status } : {}) }
+      : { kind: 'review' as const },
+  }));
+}
+
+const LINE_METHOD = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\/\S*)(?:\s+([1-5]\d\d))?(?:\s*(?:—|–|-|:)\s*|\s+|$)(.*)$/;
+
+/**
+ * THE LINE GRAMMAR a person types, one criterion per line — deterministic,
+ * written by the user, never inferred from the goal:
+ *
+ *   GET /api/notes/:id 404 — an unknown id is refused
+ *   The monthly total is shown under the chart
+ *
+ * A line that starts with an UPPERCASE HTTP method and an absolute path is an
+ * `http` criterion (status optional; without one, any 2xx); every other line
+ * is a `review` criterion with its text kept as written. Blank lines and a
+ * leading `- ` or `* ` bullet are ignored. Errors are reported per line, and
+ * the caller refuses the whole list while any remain.
+ */
+export function parseChecklistLines(text: string): {
+  readonly items: ApprovedChecklistInput;
+  readonly errors: ReadonlyArray<{ readonly line: number; readonly message: string }>;
+} {
+  const items: Array<z.input<typeof approvedChecklistItemInputSchema>> = [];
+  const errors: Array<{ line: number; message: string }> = [];
+  text.split(/\r?\n/).forEach((raw, index) => {
+    const line = raw.trim().replace(/^[-*]\s+/, '').trim();
+    if (!line) return;
+    const http = LINE_METHOD.exec(line);
+    // A trailing `:` ends the path, so `POST /api/notes: creates one` separates
+    // like a dash; a `:name` segment inside the path is untouched.
+    const path = http?.[2]!.replace(/:$/, '');
+    const candidate = http
+      ? {
+          behaviour: http[4]!.trim() || `${http[1]} ${path}${http[3] ? ` ${http[3]}` : ''}`,
+          check: { kind: 'http' as const, method: http[1]!, path: path!,
+            ...(http[3] ? { status: Number(http[3]) } : {}) },
+        }
+      : { behaviour: line, check: { kind: 'review' as const } };
+    const parsed = approvedChecklistItemInputSchema.safeParse(candidate);
+    if (!parsed.success) {
+      errors.push({ line: index + 1, message: parsed.error.issues[0]?.message ?? 'invalid criterion' });
+      return;
+    }
+    items.push(candidate);
+  });
+  if (items.length > MAX_CHECKLIST_ITEMS) {
+    errors.push({ line: 0, message: `at most ${MAX_CHECKLIST_ITEMS} criteria` });
+  }
+  return { items, errors };
+}
 
 /**
  * Parse a drafted checklist. The model's ids are ignored and renumbered, and
@@ -156,25 +258,32 @@ export function checklistPlanningLines(checklist: AcceptanceChecklist): string[]
 }
 
 /**
- * The block the ROOT ACCEPTOR reads beside the delivery proof, or '' when the
- * checklist names no HTTP check: a list of REVIEW items alone adds no
- * observation and would only read as extra requirements. On a LANDED result
- * the phases that never ran could not be observed, and the block says so,
- * because the landing guidance tells the acceptor not to refuse for that.
+ * The block the ROOT ACCEPTOR reads beside the delivery proof, or '' when a
+ * DRAFTED checklist names no HTTP check: a model's list of REVIEW items alone
+ * adds no observation and would only read as extra requirements. A USER list
+ * always renders, because its review items are requirements the person who
+ * launched the run approved, not a model's reading of the goal. On a LANDED
+ * result the phases that never ran could not be observed, and the block says
+ * so, because the landing guidance tells the acceptor not to refuse for that.
  */
 export function renderChecklistCoverage(
   checklist: AcceptanceChecklist,
   coverage: readonly ChecklistCoverage[],
-  options: { readonly landed?: boolean } = {}
+  options: { readonly landed?: boolean; readonly source?: ChecklistSource } = {}
 ): string {
-  if (!coverage.some((entry) => entry.kind === 'http')) return '';
+  const user = options.source === 'user';
+  if (coverage.length === 0 || (!user && !coverage.some((entry) => entry.kind === 'http'))) return '';
   const lines = coverage.map((entry, i) => {
     const label = entry.status === 'covered' ? 'OBSERVED' : entry.status === 'uncovered' ? 'NOT OBSERVED' : 'REVIEW';
     return `- [${label}] ${entry.id} ${entry.behaviour} (${describeCheck(checklist[i]!.check)})`;
   });
   return [
-    'ACCEPTANCE CHECKLIST — drafted from the goal before planning. It adds nothing the goal did not ask',
-    'for and decides nothing by itself. OBSERVED / NOT OBSERVED are mechanical: whether THIS attempt made',
+    user
+      ? 'ACCEPTANCE CRITERIA — approved by the user before launch; the host captured them and no model wrote them.\n' +
+        'They are what the user asked this delivery to show. This block decides nothing by itself: judge each one.'
+      : 'ACCEPTANCE CHECKLIST — drafted from the goal before planning. It adds nothing the goal did not ask\n' +
+        'for and decides nothing by itself.',
+    'OBSERVED / NOT OBSERVED are mechanical: whether THIS attempt made',
     'that request through fetch_url to a server it started, and got that status. OBSERVED is status only,',
     'not bound to the current bytes. NOT OBSERVED means no such request was seen — a request made with',
     'run_shell is invisible here — not that the behaviour is broken; weigh it with the rest of the evidence.',

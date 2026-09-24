@@ -17,7 +17,7 @@
  * to browser-started runs.
  */
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { AuthStore } from '../auth/store.js';
 import { snapshotProviderRegistry } from '../auth/providers.js';
 import {
@@ -43,6 +43,7 @@ import {
 } from '../contracts/projects.js';
 import { storeDbPath } from '../core/stores.js';
 import { parseCliArgs } from './args.js';
+import { parseChecklistLines, type ApprovedChecklistInput } from '../contracts/acceptanceChecklist.js';
 import { applyCheckoutDotenvForSourceEntry } from './loadDotenv.js';
 
 const USAGE = `atoma projects — organisation-scoped runs
@@ -52,8 +53,16 @@ usage:
   npm run projects -- create --as <who> --name "<name>" [--repo <repo-name>]
                              [--visibility private|public] [--installation <id>]
                              [--slug <slug>] [--family <family>] [--prompt "<text>"]
-  npm run projects -- run --project <slug-or-id> --as <principal-id-or-email> "<goal>" [--db path]
+  npm run projects -- run --project <slug-or-id> --as <principal-id-or-email> "<goal>"
+                          [--criteria <file>] [--db path]
   npm run projects -- publish --project <slug-or-id> --as <who> --run <run-id> [--db path]
+
+acceptance criteria:
+  --criteria names a text file with ONE criterion per line, the grammar the
+  console uses. "GET /api/notes/:id 404 — unknown id is refused" is an HTTP
+  criterion (status optional; any 2xx without one); any other line is judged
+  by review. The run is checked against exactly these instead of a list it
+  drafts itself; one malformed line refuses the launch.
 
 why not run:build:
   \`run:build\` writes the OPERATOR corpus (./runs). A project run is stored
@@ -305,6 +314,7 @@ async function main(): Promise<void> {
       'project',
       'as',
       'run',
+      'criteria',
       'name',
       'slug',
       'repo',
@@ -489,6 +499,23 @@ async function main(): Promise<void> {
   // that is how the runner prints it; milliseconds across the boundary because
   // that is what every deadline downstream is in. An unparsable value is a
   // refusal here rather than a silent default budget.
+  // THE USER'S ACCEPTANCE CRITERIA, read and parsed BEFORE anything is
+  // reserved: a line that does not parse is a refusal, never a dropped criterion.
+  const criteriaFlag = args.flags['criteria'];
+  let criteria: ApprovedChecklistInput | undefined;
+  if (criteriaFlag !== undefined) {
+    if (criteriaFlag.trim().length === 0) fail('--criteria <file> needs a path');
+    let text: string;
+    try { text = readFileSync(criteriaFlag, 'utf8'); }
+    catch (error) { fail(`cannot read --criteria ${safeTerminal(criteriaFlag)}: ${(error as Error).message}`); }
+    const parsed = parseChecklistLines(text);
+    if (parsed.errors.length > 0) {
+      fail(`invalid --criteria: ${parsed.errors.map((e) => e.line > 0 ? `line ${e.line}: ${e.message}` : e.message).join('; ')}`);
+    }
+    if (parsed.items.length === 0) fail('--criteria names a file with no criterion');
+    criteria = parsed.items;
+  }
+
   const timeoutFlag = args.flags['timeout'];
   let timeoutMs: number | undefined;
   if (typeof timeoutFlag === 'string' && timeoutFlag.trim().length > 0) {
@@ -610,7 +637,7 @@ async function main(): Promise<void> {
     orgId: target.orgId,
     principalId: principal.principalId,
     projectId: target.projectId,
-    request: { goal, idempotencyKey: randomUUID() },
+    request: { goal, idempotencyKey: randomUUID(), ...(criteria ? { acceptanceChecklist: criteria } : {}) },
   });
   events.append({
     kind: 'run.started',

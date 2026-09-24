@@ -444,7 +444,7 @@ export const MCP_TOOLS: readonly McpToolSpec[] = [
         {
           title: 'Start a project run',
           description:
-            'Start a run in one of your organisation’s projects, as an MCP TASK: the call answers with a task id, tasks/get reports the run’s status, tasks/result returns the final atoma_run_status payload, tasks/cancel cancels the run. Called without task augmentation it returns when the run ends (minutes). Runs are SERIALISED on this instance (one at a time, a second is queued or refused) and spend the organisation’s configured provider. The goal is prose describing the artefact; do not name tools in it. idempotencyKey makes the call idempotent.',
+            'Start a run in one of your organisation’s projects, as an MCP TASK: the call answers with a task id, tasks/get reports the run’s status, tasks/result returns the final atoma_run_status payload, tasks/cancel cancels the run. Called without task augmentation it returns when the run ends (minutes). Runs are SERIALISED on this instance (one at a time, a second is queued or refused) and spend the organisation’s configured provider. The goal is prose describing the artefact; do not name tools in it. acceptanceCriteria, optional, are the criteria the run is judged against instead of a list it drafts itself. idempotencyKey makes the call idempotent.',
           inputSchema: PROJECT_RUN_INPUT,
           annotations: MUTATING,
           execution: { taskSupport: 'optional' },

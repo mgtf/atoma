@@ -73,6 +73,11 @@ Neighbours:
   model-drafted list may only add what the acceptor looks for. Rendered only
   when it holds an http item; a landed result is told NOT OBSERVED is
   expected for its unfinished phases.
+- A USER-APPROVED list ([contract](../../docs/acceptance-contract-2026-09-14.md#built-the-user-approved-list-2026-09-25))
+  replaces the draft: no drafting call, `checklistOrigin: {source: 'user',
+  digest}` held by `runDepthTask` and passed to every `acceptRootResult`,
+  never re-read from `task.inputs`. It always renders, review items included,
+  under a header saying the user approved it; it still decides nothing.
 
 ## Planning, prefilter, and trust
 

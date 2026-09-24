@@ -13,6 +13,7 @@ import {
   renderChecklistCoverage,
   type AcceptanceChecklist,
   type ChecklistCoverage,
+  type ChecklistSource,
 } from '../contracts/acceptanceChecklist.js';
 
 /**
@@ -59,12 +60,15 @@ export async function acceptRootResult(args: {
   actor: Atom; task: Task; result: Result; ctx: RunContext; floor: ProofFloor;
   phaseCoverage: readonly PhaseCoverageRecord[];
   checklist?: AcceptanceChecklist;
+  /** A `user` list is the host-held approved one; its digest rides the acceptance record. */
+  checklistOrigin?: { readonly source: ChecklistSource; readonly digest?: string };
 }): Promise<AcceptanceInfo> {
   const { actor, task, result, ctx, floor } = args;
   const checklist = args.checklist ?? [];
+  const source = args.checklistOrigin?.source ?? 'drafted';
   const coverage = checklistCoverage(ctx, checklist);
   const checklistBlock = renderChecklistCoverage(checklist, coverage,
-    { landed: Boolean(result.unfinishedPhases?.length) });
+    { landed: Boolean(result.unfinishedPhases?.length), source });
   const gates = await runResultGates(buildResultGateEnv({ task, result, ctx,
     childName: actor.name, childToolNames: actor.toolNames() }), ctx.mechanicalResultRejections, 'delegated');
   const probe = await checkGroundTruth({ ctx, subject: 'RESULT',
@@ -99,7 +103,8 @@ export async function acceptRootResult(args: {
       .map((finding) => ({ id: finding.gateId, disposition: finding.disposition })),
     probe: { requiresReview: probe.requiresReview, contradiction: probe.contradiction },
     floorCoverage, phaseCoverage: [...args.phaseCoverage],
-    ...(coverage.length > 0 ? { checklist: coverage } : {}),
+    ...(coverage.length > 0 ? { checklist: coverage, checklistSource: source,
+      ...(args.checklistOrigin?.digest ? { checklistDigest: args.checklistOrigin.digest } : {}) } : {}),
     basis: review && !gates.rejection ? 'validation-call' : 'mechanical',
   };
 }

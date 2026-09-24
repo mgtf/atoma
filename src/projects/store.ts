@@ -42,6 +42,8 @@ import {
   type RepositoryStatus,
 } from '../contracts/projects.js';
 import { artifactManifestHash } from './artifacts.js';
+import { captureAcceptanceSpec, parseAcceptanceSpec } from '../run/acceptanceSpec.js';
+import type { AcceptanceSpec } from '../contracts/acceptanceChecklist.js';
 
 /**
  * The `project_runs` table, parameterised by its NAME — the one table whose
@@ -233,6 +235,31 @@ CREATE TRIGGER IF NOT EXISTS project_run_payers_immutable
 BEFORE UPDATE ON project_run_payers
 BEGIN
   SELECT RAISE(ABORT, 'a recorded payer is immutable');
+END;
+
+/*
+ * THE ACCEPTANCE CRITERIA A USER APPROVED for one run, captured by the host
+ * before the run existed (docs/acceptance-contract-2026-09-14.md). One row
+ * per run that carried a list, written in the SAME transaction as the run
+ * reservation, so a queued run is never observable without the list it was
+ * launched with. Immutable: it is what the run was asked to show, and a list
+ * that could be edited afterwards would make every later reading of the
+ * run's acceptance meaningless. Additive under decision gate 0 (hardened
+ * SQLite, closed 2026-09-18); scoped to the run's organisation (R6). The
+ * text is the user's, stored as data and never used as a key or path (R2).
+ */
+CREATE TABLE IF NOT EXISTS project_run_acceptance (
+  project_run_id TEXT PRIMARY KEY REFERENCES project_runs(project_run_id),
+  org_id         TEXT NOT NULL REFERENCES auth_organisations(org_id),
+  spec_json      TEXT NOT NULL CHECK (json_valid(spec_json)),
+  digest         TEXT NOT NULL,
+  recorded_at    TEXT NOT NULL
+);
+
+CREATE TRIGGER IF NOT EXISTS project_run_acceptance_immutable
+BEFORE UPDATE ON project_run_acceptance
+BEGIN
+  SELECT RAISE(ABORT, 'an approved acceptance list is immutable');
 END;
 
 CREATE TRIGGER IF NOT EXISTS project_publications_identity_immutable
@@ -1175,7 +1202,12 @@ export class ProjectStore {
       .prepare('SELECT * FROM project_runs WHERE project_id = ? AND request_key = ? AND org_id = ?')
       .get(projectId, request.idempotencyKey, orgId) as ProjectRunRow | undefined;
     if (!existing) return null;
-    if (existing.requested_by_principal_id !== principalId || existing.goal !== request.goal) {
+    // The approved list is part of the request: the same key and goal with a
+    // different list is a different request, never a retry of the old run.
+    const wantedDigest = request.acceptanceChecklist ? captureAcceptanceSpec(request.acceptanceChecklist).digest : null;
+    const storedDigest = this.getRunAcceptanceSpec(orgId, existing.project_run_id)?.digest ?? null;
+    if (existing.requested_by_principal_id !== principalId || existing.goal !== request.goal ||
+        wantedDigest !== storedDigest) {
       throw new ProjectStateConflict('run idempotency key was already used for different input');
     }
     return runFromRow(existing);
@@ -1221,6 +1253,7 @@ export class ProjectStore {
     const request = createProjectRunInputSchema.parse(input.request);
     const paths = hostPaths(input.hostPaths);
     const requestedRunId = projectRunIdSchema.parse(input.projectRunId ?? randomUUID());
+    const acceptance = request.acceptanceChecklist ? captureAcceptanceSpec(request.acceptanceChecklist) : null;
     const transact = this.db.transaction(() => {
       const project = this.getProject(orgId, projectId);
       if (!project) return null;
@@ -1253,6 +1286,14 @@ export class ProjectStore {
           now,
           now
         );
+      if (acceptance) {
+        this.db
+          .prepare(
+            `INSERT INTO project_run_acceptance (project_run_id, org_id, spec_json, digest, recorded_at)
+             VALUES (?, ?, ?, ?, ?)`
+          )
+          .run(requestedRunId, orgId, JSON.stringify(acceptance), acceptance.digest, now);
+      }
       return { run: this.getProjectRun(orgId, requestedRunId)!, created: true } as const;
     });
     return transact.immediate();
@@ -1265,6 +1306,29 @@ export class ProjectStore {
       .prepare('SELECT * FROM project_runs WHERE project_run_id = ? AND org_id = ?')
       .get(projectRunId, orgId) as ProjectRunRow | undefined;
     return row ? runFromRow(row) : null;
+  }
+
+  /**
+   * The acceptance list the user approved for a run, re-parsed and
+   * re-digested on read; null when the run was launched without one. A row
+   * that no longer matches its digest THROWS: a corrupted list is not "none".
+   */
+  getRunAcceptanceSpec(orgIdInput: string, projectRunIdInput: string): AcceptanceSpec | null {
+    const orgId = organisationIdSchema.parse(orgIdInput);
+    const projectRunId = projectRunIdSchema.parse(projectRunIdInput);
+    // A store opened with `initialize: false` ran no DDL and may predate the
+    // table; no table means no run of that store was launched with a list.
+    const table = this.db
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'project_run_acceptance'")
+      .get();
+    if (!table) return null;
+    const row = this.db
+      .prepare('SELECT spec_json, digest FROM project_run_acceptance WHERE project_run_id = ? AND org_id = ?')
+      .get(projectRunId, orgId) as { spec_json: string; digest: string } | undefined;
+    if (!row) return null;
+    const spec = parseAcceptanceSpec(parseJson(row.spec_json, 'acceptance specification'));
+    if (spec.digest !== row.digest) throw new Error('acceptance specification row digest does not match its content');
+    return spec;
   }
 
   /** A platform admin's READ across organisations; never a write path. */

@@ -464,7 +464,7 @@ html.atoma-cursor-active * {
 .gpu-project-form--run {
   height: 184px;
   grid-template-areas:
-    "prompt prompt prompt"
+    "prompt prompt criteria"
     "actions actions actions"
     "hint hint hint";
 }
@@ -507,13 +507,15 @@ html.atoma-cursor-active * {
   height: 32px;
 }
 .gpu-project-visibility { height: 32px; }
-.gpu-project-prompt {
+.gpu-project-prompt,
+.gpu-project-criteria {
   grid-area: prompt;
   height: 72px;
   padding: 8px 11px;
   resize: none;
   line-height: 1.4;
 }
+.gpu-project-criteria { grid-area: criteria; }
 
 .gpu-project-actions {
   grid-area: actions;
@@ -591,9 +593,10 @@ html.atoma-cursor-active * {
   .gpu-project-target .gpu-dom-select { width: 100%; }
 
   .gpu-project-form--run {
-    height: 248px;
+    height: 328px;
     grid-template-areas:
       "prompt"
+      "criteria"
       "actions"
       "hint";
   }

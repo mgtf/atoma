@@ -57,6 +57,7 @@ import type { Logger, Plan, Result, RunContext, Task } from '../core/types.js';
 import type { TaskProfile } from './profile.js';
 import { describeSeedManifest, seedWorkspace } from './workspace.js';
 import { draftAcceptanceChecklist } from '../atoms/acceptanceChecklist.js';
+import { readAcceptanceSpec } from './acceptanceSpec.js';
 
 export const consoleLogger: Logger = {
   debug: (m, meta) => console.debug(m, meta ?? ''),
@@ -581,6 +582,17 @@ export async function startTask(
       `${ARTIFACT_MANIFEST_PATH_ENV} requires ATOMA_RUN_ID for correlation`
     );
   }
+  // THE USER'S APPROVED ACCEPTANCE LIST, captured by the project host before
+  // this process existed (docs/acceptance-contract-2026-09-14.md). Read and
+  // re-digested HERE, at launch, so a list that cannot be read fails the run
+  // before any model call; and refused outside depth routing, the only path
+  // that reads a checklist, so no approved criterion is silently ignored.
+  let acceptanceSpec: ReturnType<typeof readAcceptanceSpec>;
+  try { acceptanceSpec = readAcceptanceSpec(process.env); }
+  catch (error) { throw new RunnerConfigError((error as Error).message); }
+  if (acceptanceSpec && !args.depth) {
+    throw new RunnerConfigError('an approved acceptance list requires depth routing; baseline and comparison arms read none');
+  }
   let retrievalBinding: ProjectRetrievalBinding | undefined;
   let prepareRetrieval: ReturnType<typeof openProjectRunHaystack>['prepare'] | undefined;
   let haystackLaunch: ReturnType<typeof readHaystackLaunch> | undefined;
@@ -882,8 +894,13 @@ export async function startTask(
       const experiment = profile.depthExperiment!;
       // The acceptance checklist is drafted ONCE, here, before the attempt
       // loop: a deepening keeps it (docs/acceptance-checklist-2026-09-25.md).
+      // A list the user approved REPLACES the draft, and no drafting call is
+      // made: the model's reading of the goal never overrides the person's.
       handle = async (t, c) => runDepthTask({
-        checklist: await draftAcceptanceChecklist(c, t.description),
+        ...(acceptanceSpec
+          ? { checklist: acceptanceSpec.items,
+              checklistOrigin: { source: 'user' as const, digest: acceptanceSpec.digest } }
+          : { checklist: await draftAcceptanceChecklist(c, t.description) }),
         mode: args.depth!, task: t, ctx: c, floor: t.proofFloor!,
         createExecutor: (mode) => {
           const currentSeed = { ...seedCtx, toolDecls: backend.toolDecls };

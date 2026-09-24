@@ -26,6 +26,12 @@ list. These values come from the host snapshot, never a tenant prompt.
   `orgs/<orgId>/projects/<projectId>/runs/<runId>/` (override the host root
   with `ATOMA_PROJECTS_ROOT`, default `~/.atoma`). It does not mix the
   operator `./runs` corpus used by CLI, MCP and ungated viz.
+- A run's USER-APPROVED acceptance list is captured in `project_run_acceptance`
+  in the reservation transaction, digested by `src/run/acceptanceSpec.ts` and
+  immutable by trigger; `getRunAcceptanceSpec` re-digests on read and throws
+  on a mismatch. The digest joins the idempotency comparison: same key and
+  goal with another list is a conflict. The coordinator hands the child the
+  STORED spec in `ATOMA_ACCEPTANCE_SPEC`, never the request's.
 
 ## Tier selectors and credentials
 

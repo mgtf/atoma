@@ -135,6 +135,7 @@ export type InputKind =
   | 'projectSource'
   | 'projectName'
   | 'projectPrompt'
+  | 'projectCriteria'
   | 'projectRepository'
   | 'displayName'
   | null;
@@ -436,6 +437,7 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
     projectName: '',
     projectSource: '',
     projectPrompt: '',
+    projectCriteria: '',
     projectRepository: '',
     displayName: '',
   },

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { runStatsSchema } from './runStats.js';
+import { approvedChecklistInputSchema } from './acceptanceChecklist.js';
 
 /** Zero suspends admission; the host still has one global run slot. */
 export const orgRunLimitSchema = z.number().int().min(0).max(1);
@@ -233,6 +234,12 @@ export const createProjectRunInputSchema = z
   .object({
     goal: projectGoalSchema,
     idempotencyKey: idempotencyKeySchema,
+    /**
+     * The acceptance criteria the user approved before launch. Optional:
+     * without it the run drafts its own checklist. Strict — one malformed
+     * criterion refuses the request (docs/acceptance-contract-2026-09-14.md).
+     */
+    acceptanceChecklist: approvedChecklistInputSchema.optional(),
   })
   .strict();
 

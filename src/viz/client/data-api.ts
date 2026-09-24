@@ -28,6 +28,7 @@ import type {
 } from './types.js';
 import { redirectIfAuthenticationRequired } from './session-guard.js';
 import type { PreviewOpenOptions } from '../../contracts/preview.js';
+import type { ApprovedChecklistInput } from '../../contracts/acceptanceChecklist.js';
 
 let activeMutations = 0;
 export function pendingApiMutations(): number { return activeMutations; }
@@ -113,7 +114,7 @@ export const api = {
     repositoryTarget: VizProject['repositoryTarget'];
   }) =>
     mutateJson<VizProject>('/api/projects', body),
-  startProjectRun: (projectId: string, body: { goal: string; idempotencyKey: string }) =>
+  startProjectRun: (projectId: string, body: { goal: string; idempotencyKey: string; acceptanceChecklist?: ApprovedChecklistInput }) =>
     mutateJson<VizProjectRun>(
       `/api/projects/${encodeURIComponent(projectId)}/runs`,
       body

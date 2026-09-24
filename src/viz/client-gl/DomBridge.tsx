@@ -479,6 +479,20 @@ export function DomBridge({
               onBlur={() => setFocusedInput(null)}
               onChange={(event) => setSearch('projectPrompt', event.target.value)}
             />
+          ) : null}
+          {selectedProjectName ? (
+            // THE USER'S ACCEPTANCE CRITERIA, optional, one per line — the
+            // grammar `parseChecklistLines` reads. Beside the goal, not below
+            // it, so the wide run form keeps its height contract.
+            <textarea
+              className="gpu-dom-input gpu-project-criteria"
+              aria-label={t('projects.criteria')}
+              value={search.projectCriteria}
+              placeholder={t('projects.criteriaPlaceholder')}
+              onFocus={() => setFocusedInput('projectCriteria')}
+              onBlur={() => setFocusedInput(null)}
+              onChange={(event) => setSearch('projectCriteria', event.target.value)}
+            />
           ) : (
             <>
               <div className="gpu-project-source">

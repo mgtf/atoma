@@ -342,6 +342,22 @@ describe('ProjectService — roles, IDOR and slug identity', () => {
     }
   });
 
+  it('forwards an approved acceptance list and refuses a malformed one with 400 before the coordinator', async () => {
+    linkInstallation(alice, '501', 'alice-org');
+    const { svc, start } = service();
+    const created = await svc.createProject(jsonReq(payload('501')), alice) as { projectId: string };
+    start.mockResolvedValue({ projectRunId: randomUUID(), status: 'queued' });
+    const acceptanceChecklist = [{ behaviour: 'lists notes', check: { kind: 'http', method: 'GET', path: '/api/notes' } }];
+    await svc.startProjectRun(jsonReq({ idempotencyKey: 'run-1', goal: 'Build a notes API.', acceptanceChecklist }), alice, created.projectId)
+      .catch(() => undefined);
+    expect(start.mock.calls[0]?.[0]).toMatchObject({ request: { acceptanceChecklist } });
+    start.mockClear();
+    await expect(svc.startProjectRun(jsonReq({ idempotencyKey: 'run-2', goal: 'Build a notes API.',
+      acceptanceChecklist: [{ behaviour: 'lists notes', check: { kind: 'http', method: 'FETCH', path: '/api/notes' } }] }),
+    alice, created.projectId)).rejects.toMatchObject({ status: 400 } satisfies Partial<ProjectHttpError>);
+    expect(start).not.toHaveBeenCalled();
+  });
+
   it('maps a project-run configuration error to 400', async () => {
     linkInstallation(alice, '501', 'alice-org');
     const { svc, start } = service();

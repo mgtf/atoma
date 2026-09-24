@@ -57,6 +57,7 @@ beforeEach(() => {
       skills: '',
       projectName: '', projectSource: '',
       projectPrompt: '',
+      projectCriteria: '',
       projectRepository: '',
       displayName: '',
     },

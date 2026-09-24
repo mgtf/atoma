@@ -133,7 +133,7 @@ export const PROJECTS_DOM_FORM_HEIGHT = { create: 186, run: 184 } as const;
 /** Below this content width the DOM form stacks fields instead of squeezing them. */
 export const PROJECTS_NARROW_CONTENT_WIDTH = 480;
 /** Must match the narrow media query in styles.css. */
-export const PROJECTS_DOM_FORM_NARROW_HEIGHT = { create: 364, run: 248 } as const;
+export const PROJECTS_DOM_FORM_NARROW_HEIGHT = { create: 364, run: 328 } as const;
 
 export type ProjectsFormMode = keyof typeof PROJECTS_DOM_FORM_HEIGHT;
 
