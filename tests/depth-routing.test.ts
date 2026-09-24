@@ -314,6 +314,87 @@ describe('depth transition through the production supervision loop', () => {
     expect(stats.mock.calls.filter(([signal]) => signal === 'root-remediation')).toHaveLength(1);
     expect(ctx.llm.calls).toHaveLength(2);
   });
+  it('carries a LANDED result through root acceptance, and shows the validator is never told', async () => {
+    // Root acceptance reached project runs on 2026-09-23 (commit 2102979).
+    // Landing on the budget shipped on 2026-09-22, and was never exercised
+    // under depth routing, because depth routing was not running on the path
+    // that lands. This test exists to put the two together.
+    //
+    // A landed result reaches the root with `unfinishedPhases` set and a
+    // summary whose first word is INCOMPLETE. The profile floor is uncovered
+    // (a landed run stopped before proving it), so `review` is true and an
+    // LLM verdict decides — and NOTHING in the payload it is handed says that
+    // an incomplete result can be legitimate. The assertion at the end of this
+    // test is the finding, not a preference: if it ever fails because the word
+    // appears, that is the fix landing, not a regression.
+    const ctx = context();
+    const landed: Result = {
+      ...result,
+      summary: 'INCOMPLETE — the run deadline landed this plan with 1 phase(s) never run: write the README. Delivered so far: built the API',
+      unfinishedPhases: ['write the README'],
+    };
+    ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'The phases that ran are honest' }));
+    const accepted = vi.fn();
+    const delivered = await runDepthTask({
+      mode: 'short', task, ctx, floor, restart: vi.fn(), onTopology: vi.fn(), onAcceptance: accepted,
+      createExecutor: () => ({ actor: new Actor(), handle: async () => landed }),
+    });
+    // The landing survives the root: the typed field is what every reader
+    // downstream uses to call the run `partial` rather than a delivery.
+    expect(delivered.unfinishedPhases).toEqual(['write the README']);
+    expect(accepted).toHaveBeenCalledTimes(1);
+    // An uncovered floor forces the verdict call — a landed run stopped before
+    // it could prove the floor, so this is its ordinary shape, not an edge.
+    expect(accepted.mock.calls[0]![0].basis).toBe('validation-call');
+    expect(accepted.mock.calls[0]![0].floorCoverage).toMatchObject([{ status: 'uncovered' }]);
+    expect(ctx.llm.calls).toHaveLength(1);
+
+    // THE GAP, stated as a comparison so it cannot be read as a preference.
+    // Everything the validator learns about the landing comes from the
+    // EXECUTOR'S OWN SUMMARY. Run the same acceptance over an ordinary result
+    // and the concept vanishes entirely: the host never names it, so the
+    // validator has no statement that an incomplete result can be legitimate,
+    // and decides on model prose alone.
+    const landedPrompt = JSON.stringify(ctx.llm.calls[0]).toLowerCase();
+    expect(landedPrompt).toContain('incomplete');
+
+    const plain = context();
+    plain.llm.enqueueText(jsonText({ approved: true, reasoning: 'fine' }));
+    await runDepthTask({
+      mode: 'short', task, ctx: plain, floor, restart: vi.fn(), onTopology: vi.fn(), onAcceptance: vi.fn(),
+      createExecutor: () => ({ actor: new Actor(), handle: async () => result }),
+    });
+    const plainPrompt = JSON.stringify(plain.llm.calls[0]).toLowerCase();
+    for (const word of ['landed', 'unfinishedphases', 'deadline landed']) {
+      expect(plainPrompt).not.toContain(word);
+    }
+    // And the ONE thing the validator is told about incompleteness points the
+    // other way. The sentence is scoped to visual artefacts, so it does not
+    // decide a landed run on its own — but it is the only statement on the
+    // subject the host makes, and it is a rejection.
+    expect(plainPrompt).toContain('a visually-incomplete artefact is a failed deliverable');
+  });
+
+  it('turns a refused landing into a failure, losing the phases that did run', async () => {
+    // The consequence, stated as behaviour: the same landed result, refused,
+    // leaves through RootAcceptanceError. The runner's catch path records
+    // `failed`, `previousSeedRun` skips a failed run on its status filter, and
+    // the accepted phases on disk seed nothing. This is what the run
+    // continuation design of 2026-09-24 proposes to change.
+    const ctx = context();
+    const landed: Result = {
+      ...result,
+      summary: 'INCOMPLETE — the run deadline landed this plan with 1 phase(s) never run: write the README.',
+      unfinishedPhases: ['write the README'],
+    };
+    ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'The README was never written' }));
+    ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'Still no README' }));
+    await expect(runDepthTask({
+      mode: 'short', task, ctx, floor, restart: vi.fn(), onTopology: vi.fn(), onAcceptance: vi.fn(),
+      createExecutor: () => ({ actor: new Actor(), handle: async () => landed }),
+    })).rejects.toBeInstanceOf(RootAcceptanceError);
+  });
+
   it('hands a refusal back for ONE more pass, in the same attempt and workspace', async () => {
     // Measured 2026-09-23 on production runs 69f6f608 and 671da856: root
     // acceptance refused both, naming exactly which behaviours were never

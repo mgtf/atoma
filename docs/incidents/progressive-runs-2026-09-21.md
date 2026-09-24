@@ -324,6 +324,13 @@ landed run is a THIRD outcome, not a delivery with a softer bar.
   phases that completed instead of rebuilding them. Without it the new status
   would be a nicer label on the same loss.
 - **The budget default went 30 → 60 minutes, and the preparation came off it.**
+  CORRECTION, 2026-09-24: true of the DEFAULT and false of this deployment.
+  `/home/atoma/config/atoma.env` sets `ATOMA_PROJECT_TIMEOUT_MS=1800000`, the
+  exact variable `projectRunTimeoutMs` reads, so production has been on thirty
+  minutes throughout and run `6ab0ae3b` died at 1802.9 s. Whether to remove the
+  override is argued in
+  [run continuation](../run-continuation-design-2026-09-24.md) — which
+  recommends keeping it.
   The repository import and corpus build now have their own ceiling; they used
   to be billed to the tenant, which is the arithmetic behind `1787s` on an
   1800 s setting. The raise is explicitly the smaller half: a bigger budget only
