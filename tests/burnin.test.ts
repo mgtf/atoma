@@ -344,6 +344,50 @@ describe('burnin ensureBurninCsvHeader — the CSV belongs to ONE writer', () =>
   });
 });
 
+describe('spawnRun — reaping a child that parked', () => {
+  // `runTask` parks forever on EVERY success-side outcome so the sandbox stays
+  // reachable, printing one of two banners first. The reaper armed on the
+  // delivery banner only, so a LANDED child parked until the hard timer,
+  // holding the machine-global run lease and its container while the project
+  // row stayed `running`. It never bit because no project run had ever landed
+  // in production — the depth routing that lands only reached project runs on
+  // 2026-09-23. This drives a real child process, because that is the boundary
+  // the defect lives on.
+  it.each([
+    ['delivered', '\u2713 build finished. Any server the run started is still reachable.'],
+    ['landed', '\u25d0 build LANDED on its budget: 1 phase(s) were never run.'],
+  ])('arms the kill timer on the %s banner and does not wait for the timeout', async (_name, banner) => {
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-burnin-park-'));
+    const fakeNpm = join(dir, 'npm');
+    const previousPath = process.env['PATH'];
+    writeFileSync(
+      fakeNpm,
+      ['#!/bin/sh', `printf '%s\\n' "${banner}"`, 'sleep 30'].join('\n') + '\n',
+      'utf8'
+    );
+    chmodSync(fakeNpm, 0o755);
+    try {
+      process.env['PATH'] = `${dir}:${previousPath ?? ''}`;
+      const startedAt = Date.now();
+      const log = await spawnRun({
+        goal: 'park behind a banner',
+        timeoutMs: 15_000,
+        logPath: join(dir, 'child.log'),
+        cleanWorkspace: false,
+      });
+      const elapsed = Date.now() - startedAt;
+      expect(log).toContain('build');
+      // The kill timer is 1.5 s after the banner. Without it the child sleeps
+      // 30 s and spawnRun only returns when its own timeout fires at 15 s.
+      expect(elapsed).toBeLessThan(10_000);
+    } finally {
+      if (previousPath === undefined) delete process.env['PATH'];
+      else process.env['PATH'] = previousPath;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 40_000);
+});
+
 describe('spawnRun — experiment env isolation', () => {
   it('does not leak shell-level baseline or seed settings into the child', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'atoma-burnin-env-'));

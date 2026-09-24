@@ -227,6 +227,26 @@ Retention plans are read-only. Apply requires stopped services, a restorable
 backup and the existing global run lease without recovery. Limits are
 operator-owned and updated atomically with their audit receipt.
 [Commands and preconditions](../../docs/project-maintenance.md).
+## Reaping a parked child
+
+- `runTask` parks forever on EVERY success-side outcome, printing one of two
+  banners first: `✓ build finished` or `◐ build LANDED`. `DELIVERED_BANNER` and
+  `LANDED_BANNER` are the one home for both, and three readers key on them —
+  the prose fallback parser, the provider-limit screen and `spawnRun`'s kill
+  timer. Any future outcome that parks is added THERE, never at one call site.
+- Until 2026-09-24 all three knew only the delivery banner. A landed child
+  therefore armed nothing and parked until `timeoutMs +
+  DEFAULT_HARD_KILL_MARGIN_MS` — for a project run at a 30-minute ceiling, a
+  33-minute stall holding the machine-global run lease and its container while
+  the row stayed `running`. Measured: 30 s against 1.8 s on a real child
+  (`tests/burnin.test.ts`). It never bit because no project run had ever
+  landed; depth routing, which is what lands, only reached project runs on
+  2026-09-23.
+- The prose parser can now say `partial`. It could not before, so a landed run
+  whose epilogue never reached the log read as `error` — the one thing it
+  certainly was not. It stays ranked below `delivered`: the runner prints
+  exactly one banner, so a log carrying both is a goal echoing one of them.
+
 ## Intentional choices and rejected shortcuts
 
 - Remote completion calls in doctor: refused. Doctor is quota-free, and a

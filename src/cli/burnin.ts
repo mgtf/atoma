@@ -103,7 +103,8 @@ export function parseRunLog(log: string): RunStats {
   // `TIMEOUT after` these two share. Conflating them is what made the first
   // version of this fix break the reap race.
   const runnerFailed = /--- run failed ---|⏱ TIMEOUT after/.test(log);
-  const completed = /✓ build finished/.test(log);
+  const completed = DELIVERED_BANNER.test(log);
+  const landedOnBudget = LANDED_BANNER.test(log);
   const harnessReaped = /--- hard timeout ---/.test(log);
 
   let costUsd: number | null = null;
@@ -133,14 +134,21 @@ export function parseRunLog(log: string): RunStats {
   // both markers are present and NO accounting is, the banner is unsupported
   // and the reap stands. Not a new mechanism — the same text, read for what it
   // implies. The receipt designed 2026-08-23 stays unbuilt (COOLING-OFF).
-  const bannerUnsupported = completed && harnessReaped && costUsd === null && llmCalls === null;
+  const bannerUnsupported = (completed || landedOnBudget) && harnessReaped && costUsd === null && llmCalls === null;
+  // A LANDING is a success-side outcome, and this reader could not say the
+  // word before 2026-09-24: a landed run whose epilogue never made it to the
+  // log read as `error`, which is the one thing it certainly was not. Ranked
+  // BELOW `delivered` because the two banners are mutually exclusive in the
+  // runner and a log carrying both is a goal echoing one of them.
   const outcome: RunStats['outcome'] = runnerFailed
     ? 'failed'
     : completed && !bannerUnsupported
       ? 'delivered'
-      : harnessReaped
-        ? 'failed'
-        : 'error';
+      : landedOnBudget && !bannerUnsupported
+        ? 'partial'
+        : harnessReaped
+          ? 'failed'
+          : 'error';
 
   const opusCalls = modelCalls(log, /claude-opus/);
   const sonnetCalls = modelCalls(log, /claude-sonnet/);
@@ -280,8 +288,10 @@ export function looksLikeConfigFailure(stats: RunStats, durationS: number | null
  */
 export function looksLikeProviderLimitFailure(log: string): boolean {
   // Model-authored artefacts can print arbitrary text, including "upgrade for
-  // access". A delivered marker is authoritative and must win over content.
-  if (/✓ build finished/.test(log)) return false;
+  // access". A delivered marker is authoritative and must win over content —
+  // and so is a LANDING, which is a run that produced and reported real work,
+  // not one a provider limit stopped.
+  if (DELIVERED_BANNER.test(log) || LANDED_BANNER.test(log)) return false;
   return [
     /you(?:'|’)ve hit your (?:weekly|monthly|usage) limit\b/i,
     /\b(?:weekly|monthly|usage) limit\b[^\n]{0,120}\bresets?\b/i,
@@ -450,6 +460,29 @@ async function waitForRunProcessGroupGone(pid: number, timeoutMs: number): Promi
   }
   return true;
 }
+
+/**
+ * THE TWO BANNERS A RUN PARKS BEHIND, and the one thing every reader of this
+ * file must agree on.
+ *
+ * `runTask` parks forever on any success-side outcome so the sandbox stays
+ * reachable, and prints ONE of these two lines before it does: `✓ build
+ * finished` for a delivery, `◐ build LANDED` for a run that reached its budget
+ * with phases already accepted (`src/run/runner.ts`). Three readers here key
+ * on them — the prose fallback parser, the provider-limit screen, and the
+ * reaper that arms `spawnRun`'s kill timer — and until 2026-09-24 all three
+ * knew only the first.
+ *
+ * The reaper is the one that mattered. A landed child armed nothing, so it
+ * parked until the hard timer (`timeoutMs + DEFAULT_HARD_KILL_MARGIN_MS`),
+ * holding the machine-global run lease and its container the whole time while
+ * the project row stayed `running`. It never bit only because a landing
+ * arrives AT the deadline, where the hard timer is 180 s away — and because no
+ * project run had ever landed in production. Any future success-side outcome
+ * that parks must be added HERE, not to one call site.
+ */
+export const DELIVERED_BANNER = /✓ build finished/;
+export const LANDED_BANNER = /◐ build LANDED/;
 
 export const DEFAULT_HARD_KILL_MARGIN_MS = 180_000;
 export const UNKILLABLE_BACKSTOP_EXTRA_MS = 60_000;
@@ -645,7 +678,7 @@ export function spawnRun(opts: {
       opts.onChunk?.(text);
       // A delivered run that started a server idles forever by design —
       // terminate once the completion banner is in (metrics print before it).
-      if (/✓ build finished/.test(log) && !killTimer) {
+      if ((DELIVERED_BANNER.test(log) || LANDED_BANNER.test(log)) && !killTimer) {
         killTimer = setTimeout(() => void requestTermination(), 1500);
       }
     };
