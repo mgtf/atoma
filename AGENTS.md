@@ -454,6 +454,7 @@ The frozen record contains the full dated reasoning behind these rules:
 - [one registry, one trust: a run is a run — owner decision 2026-09-15](docs/platform-trust-2026-09-15.md)
 - [recoverable atom trust and equivalent creation — 2026-09-15](docs/recoverable-trust-2026-09-15.md)
 - [the production catalogue, measured — 2026-09-16](docs/incidents/registry-catalogue-2026-09-16.md)
+- [run → fix → run on the local corpus: same goals, $0.25 deliveries, every publication blocked by GitHub configuration — 2026-09-24](docs/incidents/run-fix-loop-2026-09-24.md)
 - [external code review](docs/code-review-2026-08-14.md)
 - [code review 2026-08-18](docs/code-review-2026-08-18.md)
 - [supervisor-held proof attestation (A1) design review 2026-08-22](docs/supervisor-attestation-a1-review-2026-08-22.md)
