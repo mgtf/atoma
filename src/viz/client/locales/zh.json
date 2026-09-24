@@ -585,7 +585,7 @@
   "detail.enum.contextSource.event-skill": "事件skill",
   "detail.enum.contextSource.coaching": "指导",
   "detail.enum.contextSource.fallback-trace": "fallback追踪",
-  "detail.field.l1Name": "",
+  "detail.field.l1Name": "配方所有者",
   "detail.field.whenToUse": "使用时机",
   "detail.field.updatedAt": "更新时间",
   "detail.field.recipe": "配方",
@@ -1161,5 +1161,7 @@
   "detail.llmStart.interruptedExplain": "run 在此调用返回前已结束。该调用没有响应、用量或回执。",
   "detail.llmStart.elements": "此调用中使用的元素",
   "detail.llmStart.identifiers": "标识符",
-  "projects.actionsHint.readyImported": "从 GitHub 的默认分支开始。部分更改不会被复用。"
+  "projects.actionsHint.readyImported": "从 GitHub 的默认分支开始。部分更改不会被复用。",
+  "pane.skillUnavailable": "无法读取此配方——它可能已被删除、合并，或其学习时使用的身份此后已迁移。",
+  "detail.field.executorName": "执行者"
 }

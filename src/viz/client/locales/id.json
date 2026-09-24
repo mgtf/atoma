@@ -585,7 +585,7 @@
   "detail.enum.contextSource.event-skill": "Skill peristiwa",
   "detail.enum.contextSource.coaching": "Pembinaan",
   "detail.enum.contextSource.fallback-trace": "Jejak fallback",
-  "detail.field.l1Name": "",
+  "detail.field.l1Name": "Pemilik resep",
   "detail.field.whenToUse": "Kapan digunakan",
   "detail.field.updatedAt": "Diperbarui pada",
   "detail.field.recipe": "Resep",
@@ -1161,5 +1161,7 @@
   "detail.llmStart.interruptedExplain": "run berakhir sebelum panggilan ini kembali. Tidak ada respons, penggunaan, maupun tanda terima untuk panggilan ini.",
   "detail.llmStart.elements": "Elemen yang dipanggil dalam panggilan ini",
   "detail.llmStart.identifiers": "Pengidentifikasi",
-  "projects.actionsHint.readyImported": "Dimulai dari branch default GitHub. Perubahan parsial tidak digunakan kembali."
+  "projects.actionsHint.readyImported": "Dimulai dari branch default GitHub. Perubahan parsial tidak digunakan kembali.",
+  "pane.skillUnavailable": "Resep ini tidak dapat dibaca — mungkin telah dihapus, digabungkan, atau dipelajari dengan identitas yang kemudian berpindah.",
+  "detail.field.executorName": "Dijalankan oleh"
 }

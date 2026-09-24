@@ -585,7 +585,7 @@
   "detail.enum.contextSource.event-skill": "इवेंट skill",
   "detail.enum.contextSource.coaching": "प्रशिक्षण",
   "detail.enum.contextSource.fallback-trace": "fallback ट्रेस",
-  "detail.field.l1Name": "",
+  "detail.field.l1Name": "Recipe का स्वामी",
   "detail.field.whenToUse": "कब उपयोग करें",
   "detail.field.updatedAt": "अपडेट का समय",
   "detail.field.recipe": "रेसिपी",
@@ -1161,5 +1161,7 @@
   "detail.llmStart.interruptedExplain": "इस कॉल के वापस आने से पहले run समाप्त हो गया। इसके लिए कोई प्रतिक्रिया, उपयोग का विवरण या रसीद नहीं है।",
   "detail.llmStart.elements": "इस कॉल में इनवोक किए गए एलिमेंट",
   "detail.llmStart.identifiers": "पहचानकर्ता",
-  "projects.actionsHint.readyImported": "GitHub की डिफ़ॉल्ट ब्रांच से शुरू करता है। आंशिक बदलावों का दोबारा इस्तेमाल नहीं किया जाता।"
+  "projects.actionsHint.readyImported": "GitHub की डिफ़ॉल्ट ब्रांच से शुरू करता है। आंशिक बदलावों का दोबारा इस्तेमाल नहीं किया जाता।",
+  "pane.skillUnavailable": "यह recipe पढ़ी नहीं जा सकी — हो सकता है कि इसे हटा दिया गया हो, मर्ज कर दिया गया हो, या किसी ऐसी पहचान के तहत सीखा गया हो जो अब स्थानांतरित हो चुकी है।",
+  "detail.field.executorName": "इसके द्वारा निष्पादित"
 }

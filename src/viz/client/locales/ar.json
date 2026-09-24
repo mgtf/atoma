@@ -585,7 +585,7 @@
   "detail.enum.contextSource.event-skill": "skill الحدث",
   "detail.enum.contextSource.coaching": "التوجيه",
   "detail.enum.contextSource.fallback-trace": "تتبّع fallback",
-  "detail.field.l1Name": "",
+  "detail.field.l1Name": "مالك الوصفة",
   "detail.field.whenToUse": "متى يُستخدم",
   "detail.field.updatedAt": "تاريخ التحديث",
   "detail.field.recipe": "الوصفة",
@@ -1161,5 +1161,7 @@
   "detail.llmStart.interruptedExplain": "انتهى run قبل أن يعود هذا الاستدعاء. لا توجد له استجابة ولا بيانات استخدام ولا إيصال.",
   "detail.llmStart.elements": "العناصر المستدعاة في هذا الاستدعاء",
   "detail.llmStart.identifiers": "المعرّفات",
-  "projects.actionsHint.readyImported": "يبدأ من الفرع الافتراضي في GitHub. لا يُعاد استخدام التغييرات الجزئية."
+  "projects.actionsHint.readyImported": "يبدأ من الفرع الافتراضي في GitHub. لا يُعاد استخدام التغييرات الجزئية.",
+  "pane.skillUnavailable": "تعذّرت قراءة هذه الوصفة — ربما أُسقطت أو دُمجت أو جرى تعلّمها بهوية انتقلت منذ ذلك الحين.",
+  "detail.field.executorName": "نُفّذت بواسطة"
 }

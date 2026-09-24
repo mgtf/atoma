@@ -585,7 +585,7 @@
   "detail.enum.contextSource.event-skill": "ইভেন্ট skill",
   "detail.enum.contextSource.coaching": "প্রশিক্ষণ",
   "detail.enum.contextSource.fallback-trace": "Fallback ট্রেস",
-  "detail.field.l1Name": "",
+  "detail.field.l1Name": "রেসিপির মালিক",
   "detail.field.whenToUse": "কখন ব্যবহার করবেন",
   "detail.field.updatedAt": "আপডেটের সময়",
   "detail.field.recipe": "রেসিপি",
@@ -1161,5 +1161,7 @@
   "detail.llmStart.interruptedExplain": "এই কলটি ফেরার আগেই run শেষ হয়েছে। এর জন্য কোনো প্রতিক্রিয়া, ব্যবহারসংক্রান্ত তথ্য বা রসিদ নেই।",
   "detail.llmStart.elements": "এই কলে আহ্বান করা এলিমেন্টসমূহ",
   "detail.llmStart.identifiers": "শনাক্তকারী",
-  "projects.actionsHint.readyImported": "GitHub-এর default branch থেকে শুরু করে। আংশিক পরিবর্তন পুনরায় ব্যবহার করা হয় না।"
+  "projects.actionsHint.readyImported": "GitHub-এর default branch থেকে শুরু করে। আংশিক পরিবর্তন পুনরায় ব্যবহার করা হয় না।",
+  "pane.skillUnavailable": "এই রেসিপিটি পড়া যায়নি—এটি হয়তো বাদ দেওয়া হয়েছে, একীভূত করা হয়েছে, অথবা এমন কোনো পরিচয়ের অধীনে শেখা হয়েছিল যা পরে স্থানান্তরিত হয়েছে।",
+  "detail.field.executorName": "নির্বাহ করেছেন"
 }

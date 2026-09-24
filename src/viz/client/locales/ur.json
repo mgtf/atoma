@@ -608,7 +608,7 @@
   "detail.enum.contextSource.event-skill": "ایونٹ skill",
   "detail.enum.contextSource.coaching": "رہنمائی",
   "detail.enum.contextSource.fallback-trace": "Fallback ٹریس",
-  "detail.field.l1Name": "",
+  "detail.field.l1Name": "ترکیب کا مالک",
   "detail.field.whenToUse": "کب استعمال کریں",
   "detail.field.updatedAt": "اپ ڈیٹ کا وقت",
   "detail.field.recipe": "ترکیب",
@@ -1161,5 +1161,7 @@
   "detail.llmStart.interruptedExplain": "اس کال کا جواب آنے سے پہلے run ختم ہو گیا۔ اس کے لیے کوئی جواب، استعمال کی تفصیل یا رسید موجود نہیں ہے۔",
   "detail.llmStart.elements": "اس کال میں طلب کیے گئے عناصر",
   "detail.llmStart.identifiers": "شناخت کنندگان",
-  "projects.actionsHint.readyImported": "GitHub کی ڈیفالٹ برانچ سے شروع ہوتا ہے۔ جزوی تبدیلیاں دوبارہ استعمال نہیں کی جاتیں۔"
+  "projects.actionsHint.readyImported": "GitHub کی ڈیفالٹ برانچ سے شروع ہوتا ہے۔ جزوی تبدیلیاں دوبارہ استعمال نہیں کی جاتیں۔",
+  "pane.skillUnavailable": "یہ ترکیب پڑھی نہیں جا سکی — ممکن ہے اسے حذف یا ضم کر دیا گیا ہو، یا اسے ایسی شناخت کے تحت سیکھا گیا ہو جو بعد میں منتقل ہو گئی۔",
+  "detail.field.executorName": "کے ذریعے عمل درآمد"
 }

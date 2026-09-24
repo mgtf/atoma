@@ -585,7 +585,7 @@
   "detail.enum.contextSource.event-skill": "Ereignis-Skill",
   "detail.enum.contextSource.coaching": "Coaching",
   "detail.enum.contextSource.fallback-trace": "Fallback-Ablaufverfolgung",
-  "detail.field.l1Name": "",
+  "detail.field.l1Name": "Rezeptinhaber",
   "detail.field.whenToUse": "Verwendungszweck",
   "detail.field.updatedAt": "Aktualisiert am",
   "detail.field.recipe": "Rezept",
@@ -1161,5 +1161,7 @@
   "detail.llmStart.interruptedExplain": "Der run wurde beendet, bevor dieser Aufruf zurückgegeben wurde. Dafür gibt es keine Antwort, keine Nutzungsdaten und keinen Beleg.",
   "detail.llmStart.elements": "In diesem Aufruf aufgerufene Elemente",
   "detail.llmStart.identifiers": "Kennungen",
-  "projects.actionsHint.readyImported": "Startet vom Standard-Branch auf GitHub. Unvollständige Änderungen werden nicht wiederverwendet."
+  "projects.actionsHint.readyImported": "Startet vom Standard-Branch auf GitHub. Unvollständige Änderungen werden nicht wiederverwendet.",
+  "pane.skillUnavailable": "Dieses Rezept konnte nicht gelesen werden – möglicherweise wurde es verworfen, zusammengeführt oder unter einer Identität gelernt, die inzwischen verschoben wurde.",
+  "detail.field.executorName": "Ausgeführt von"
 }

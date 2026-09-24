@@ -585,7 +585,7 @@
   "detail.enum.contextSource.event-skill": "Skill события",
   "detail.enum.contextSource.coaching": "Наставничество",
   "detail.enum.contextSource.fallback-trace": "Трассировка fallback",
-  "detail.field.l1Name": "",
+  "detail.field.l1Name": "Владелец рецепта",
   "detail.field.whenToUse": "Когда использовать",
   "detail.field.updatedAt": "Время обновления",
   "detail.field.recipe": "Рецепт",
@@ -1161,5 +1161,7 @@
   "detail.llmStart.interruptedExplain": "run завершился до получения ответа на этот вызов. Для него нет ответа, данных об использовании и квитанции.",
   "detail.llmStart.elements": "Элементы, вызванные в этом вызове",
   "detail.llmStart.identifiers": "Идентификаторы",
-  "projects.actionsHint.readyImported": "Начинает работу с ветки GitHub по умолчанию. Частичные изменения не используются повторно."
+  "projects.actionsHint.readyImported": "Начинает работу с ветки GitHub по умолчанию. Частичные изменения не используются повторно.",
+  "pane.skillUnavailable": "Этот рецепт не удалось прочитать — возможно, он был удалён, объединён или изучен под идентификатором, который впоследствии был перемещён.",
+  "detail.field.executorName": "Исполнитель"
 }

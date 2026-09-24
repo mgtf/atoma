@@ -585,7 +585,7 @@
   "detail.enum.contextSource.event-skill": "Skill de evento",
   "detail.enum.contextSource.coaching": "Orientação",
   "detail.enum.contextSource.fallback-trace": "Rastreio de fallback",
-  "detail.field.l1Name": "",
+  "detail.field.l1Name": "Proprietário da receita",
   "detail.field.whenToUse": "Quando utilizar",
   "detail.field.updatedAt": "Atualizado em",
   "detail.field.recipe": "Receita",
@@ -1161,5 +1161,7 @@
   "detail.llmStart.interruptedExplain": "A run terminou antes de esta chamada devolver uma resposta. Não há resposta, dados de utilização nem recibo para esta chamada.",
   "detail.llmStart.elements": "Elementos invocados nesta chamada",
   "detail.llmStart.identifiers": "Identificadores",
-  "projects.actionsHint.readyImported": "Começa no branch predefinido do GitHub. As alterações parciais não são reutilizadas."
+  "projects.actionsHint.readyImported": "Começa no branch predefinido do GitHub. As alterações parciais não são reutilizadas.",
+  "pane.skillUnavailable": "Não foi possível ler esta receita — pode ter sido removida, integrada ou aprendida sob uma identidade que entretanto foi movida.",
+  "detail.field.executorName": "Executado por"
 }

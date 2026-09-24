@@ -585,7 +585,7 @@
   "detail.enum.contextSource.event-skill": "イベントskill",
   "detail.enum.contextSource.coaching": "コーチング",
   "detail.enum.contextSource.fallback-trace": "fallbackトレース",
-  "detail.field.l1Name": "",
+  "detail.field.l1Name": "レシピの所有者",
   "detail.field.whenToUse": "使用条件",
   "detail.field.updatedAt": "更新日時",
   "detail.field.recipe": "レシピ",
@@ -1161,5 +1161,7 @@
   "detail.llmStart.interruptedExplain": "この呼び出しが応答を返す前にrunが終了しました。応答、使用量、レシートはいずれもありません。",
   "detail.llmStart.elements": "この呼び出しで実行された要素",
   "detail.llmStart.identifiers": "識別子",
-  "projects.actionsHint.readyImported": "GitHubのデフォルトブランチから開始します。部分的な変更は再利用されません。"
+  "projects.actionsHint.readyImported": "GitHubのデフォルトブランチから開始します。部分的な変更は再利用されません。",
+  "pane.skillUnavailable": "このレシピを読み取れませんでした。削除または統合されたか、その後移動されたIDで学習された可能性があります。",
+  "detail.field.executorName": "実行者"
 }
