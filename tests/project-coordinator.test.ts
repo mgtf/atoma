@@ -1665,12 +1665,12 @@ describe('ProjectRunCoordinator — a large trace is evidence, not a refusal', (
     [
       'a result carrying an error',
       (r) => void r.endRun({ result: deliveredResult, error: '401 API key is invalid.' }),
-      /failed, cancelled or degraded traces are not publishable/,
+      /failed or cancelled traces are not recordable/,
     ],
     [
       'a result cancelled mid-flight',
       (r) => void r.endRun({ result: deliveredResult, cancelled: true }),
-      /failed, cancelled or degraded traces are not publishable/,
+      /failed or cancelled traces are not recordable/,
     ],
     [
       'a degraded trace',
@@ -1678,7 +1678,10 @@ describe('ProjectRunCoordinator — a large trace is evidence, not a refusal', (
         void r.endRun({
           result: { ...deliveredResult, producedBy: { tier: 3, name: 'Meristem', viaFallback: true } },
         }),
-      /failed, cancelled or degraded traces are not publishable/,
+      // Since 2026-09-24 this is a PUBLICATION rule rather than an integrity
+      // one. A delivered run would publish, so it still refuses here; a LANDED
+      // run never publishes, and the case below proves it is now recorded.
+      /degraded traces are not publishable/,
     ],
     [
       'a trace that never completed',

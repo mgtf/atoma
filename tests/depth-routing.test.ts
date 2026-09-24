@@ -11,7 +11,8 @@ import { dispatchWithAggregation } from '../src/atoms/dispatch.js';
 import { NON_JSON_PAYLOAD_SUMMARY_PREFIX } from '../src/atoms/json.js';
 import { buildResultGateEnv, runResultGates } from '../src/atoms/resultGates.js';
 import { PROBE_MANIFEST_FILENAME } from '../src/contracts/probeManifest.js';
-import { runDepthTask, RootAcceptanceError, MAX_ROOT_REMEDIATIONS } from '../src/run/depth.js';
+import { runDepthTask, MAX_ROOT_REMEDIATIONS } from '../src/run/depth.js';
+import { landingReasons } from '../src/contracts/runLanding.js';
 import { acceptanceSchema, type AcceptanceInfo, type PhaseCoverageRecord, type TopologyInfo } from '../src/contracts/depthRouting.js';
 import { makeCtx, jsonText } from './helpers.js';
 import { makePlan, makeTools } from './helpers/factories.js';
@@ -261,7 +262,7 @@ describe('depth transition through the production supervision loop', () => {
     const stats = vi.fn();
     const restart = vi.fn(async () => { order.push('restart'); return new Executor(); });
     const originalTask: Task = { ...task, constraints: ['immutable original'] };
-    await expect(runDepthTask({ mode: 'short', task: originalTask, ctx: { ...ctx, recordRunStat: stats }, floor,
+    const landedOut = await runDepthTask({ mode: 'short', task: originalTask, ctx: { ...ctx, recordRunStat: stats }, floor,
       restart, onTopology: (item) => topologies.push(item), onAcceptance: (item) => acceptances.push(item),
       createExecutor: (mode) => {
         const actor = mode === 'short' ? short : deep;
@@ -295,7 +296,12 @@ describe('depth transition through the production supervision loop', () => {
           return siblings.results[0]!;
         } };
       },
-    })).rejects.toBeInstanceOf(RootAcceptanceError);
+    });
+    // LANDS since 2026-09-24. What this test pins is unchanged: the branch
+    // retry drains, the deepening happens exactly once, and the workspace is
+    // restarted for it — only the shape of "the root said no" moved from a
+    // throw to a returned, refused result.
+    expect(landedOut.refusal).toBe('Still missing final proof');
     expect(short.fallbackExecutions).toBe(0);
     // Two, since 2026-09-23: the deepened attempt runs once, is refused, and
     // runs once more with the acceptor's reasons.
@@ -383,12 +389,13 @@ describe('depth transition through the production supervision loop', () => {
     expect(plainPrompt).toContain('a visually-incomplete artefact is a failed deliverable');
   });
 
-  it('turns a refused landing into a failure, losing the phases that did run', async () => {
-    // The consequence, stated as behaviour: the same landed result, refused,
-    // leaves through RootAcceptanceError. The runner's catch path records
-    // `failed`, `previousSeedRun` skips a failed run on its status filter, and
-    // the accepted phases on disk seed nothing. This is what the run
-    // continuation design of 2026-09-24 proposes to change.
+  it('keeps BOTH reasons when a landed result is then refused', async () => {
+    // This test was written on 2026-09-24 to pin the defect: a landed result
+    // that the root refused left as a thrown error, the runner
+    // recorded `failed`, and the phases that genuinely ran seeded nothing.
+    // It now pins the fix, and the case it covers is the one the design nearly
+    // missed — the two reasons COMPOSE, and a reader that reports only the
+    // phases drops the half that says the work was judged.
     const ctx = context();
     const landed: Result = {
       ...result,
@@ -397,10 +404,18 @@ describe('depth transition through the production supervision loop', () => {
     };
     ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'The README was never written' }));
     ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'Still no README' }));
-    await expect(runDepthTask({
+    const out = await runDepthTask({
       mode: 'short', task, ctx, floor, restart: vi.fn(), onTopology: vi.fn(), onAcceptance: vi.fn(),
       createExecutor: () => ({ actor: new Actor(), handle: async () => landed }),
-    })).rejects.toBeInstanceOf(RootAcceptanceError);
+    });
+    expect(out.unfinishedPhases).toEqual(['write the README']);
+    expect(out.refusal).toBe('Still no README');
+    expect(landingReasons(out)).toEqual([
+      'reached its budget with 1 phase(s) never run: write the README',
+      'refused at delivery: Still no README',
+    ]);
+    expect(out.summary).toContain('REFUSED AT DELIVERY');
+    expect(out.summary).toContain('INCOMPLETE');
   });
 
   it('hands a refusal back for ONE more pass, in the same attempt and workspace', async () => {
@@ -445,11 +460,13 @@ describe('depth transition through the production supervision loop', () => {
     let passes = 0;
     ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'first refusal' }));
     ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'second refusal' }));
-    await expect(runDepthTask({
+    const out = await runDepthTask({
       mode: 'short', task, floor, restart: vi.fn(), onTopology: vi.fn(), onAcceptance: vi.fn(),
       ctx: { ...ctx, recordRunStat: stats },
       createExecutor: () => ({ actor: new Actor(), handle: async () => { passes++; return result; } }),
-    })).rejects.toBeInstanceOf(RootAcceptanceError);
+    });
+    // LANDS rather than throws since 2026-09-24: the work is real and is kept.
+    expect(out.refusal).toBe('second refusal');
     expect(passes).toBe(1 + MAX_ROOT_REMEDIATIONS);
     expect(stats.mock.calls.filter(([signal]) => signal === 'root-remediation')).toHaveLength(MAX_ROOT_REMEDIATIONS);
   });
@@ -461,11 +478,12 @@ describe('depth transition through the production supervision loop', () => {
     const stats = vi.fn();
     let passes = 0;
     ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'unverified' }));
-    await expect(runDepthTask({
+    const out = await runDepthTask({
       mode: 'short', task, floor, restart: vi.fn(), onTopology: vi.fn(), onAcceptance: vi.fn(),
       ctx: { ...ctx, recordRunStat: stats, deadlineAt: Date.now() + 5_000 },
       createExecutor: () => ({ actor: new Actor(), handle: async () => { passes++; return result; } }),
-    })).rejects.toBeInstanceOf(RootAcceptanceError);
+    });
+    expect(out.refusal).toBe('unverified');
     expect(passes).toBe(1);
     expect(stats.mock.calls.filter(([signal]) => signal === 'root-remediation')).toHaveLength(0);
   });
@@ -480,12 +498,13 @@ describe('depth transition through the production supervision loop', () => {
     // test pins is unchanged — an L3 fallback never restarts the workspace.
     ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'Reject root' }));
     ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'Reject root again' }));
-    await expect(runDepthTask({ mode: 'deep', task, ctx: { ...ctx, limits: { ...ctx.limits, maxPlanIterations: 1 } }, floor,
+    const out = await runDepthTask({ mode: 'deep', task, ctx: { ...ctx, limits: { ...ctx.limits, maxPlanIterations: 1 } }, floor,
       restart, onTopology: vi.fn(), onAcceptance: accepted,
       createExecutor: () => ({ actor, handle: (t, c) => superviseLoop(actor, new Actor(2), t, c, {
         applyByScope: async (same) => same, branchOnEscalation: async () => {},
       }) }),
-    })).rejects.toBeInstanceOf(RootAcceptanceError);
+    });
+    expect(out.refusal).toBe('Reject root again');
     expect(accepted).toHaveBeenCalledWith(expect.objectContaining({ executor: { name: actor.name, tier: 3, viaFallback: true } }));
     expect(restart).not.toHaveBeenCalled();
   });

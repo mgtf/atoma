@@ -21,7 +21,10 @@ export const runStatsSchema = z.object({
   // the same run's cost (both overnight 2026-08-14 'error' rows were this).
   // 'partial' is first-class for the same reason 'cancelled' is, and was added
   // 2026-09-22: a run that reaches its deadline with phases already accepted
-  // now LANDS on them (`dispatchWithAggregation`) instead of discarding them,
+  // now LANDS on them (`dispatchWithAggregation`) instead of discarding them.
+  // Since 2026-09-24 it carries a SECOND reason — a delivery the root acceptor
+  // refused (`Result.refusal`) — and the two compose; `isLanded`
+  // (src/contracts/runLanding.ts) is the one derivation every reader shares,
   // and neither neighbour could describe that. 'delivered' would claim a
   // complete deliverable — the false delivery the 2026-09-21 post-mortem
   // credited the system for refusing — and 'failed' is what threw the work

@@ -742,7 +742,11 @@ const TRACE_VALUE_KEYS = ['id', 'endedAt', 'cancelled', 'degraded'] as const sat
  */
 const TRACE_SHAPE_KEYS = ['result', 'error'] as const satisfies readonly (keyof VizRun)[];
 
-function verifiedTrace(pathname: string, expectedRunId: string): void {
+function verifiedTrace(
+  pathname: string,
+  expectedRunId: string,
+  opts: { readonly forPublication: boolean } = { forPublication: true }
+): void {
   const trace = readTraceTopLevelFields(pathname, {
     values: TRACE_VALUE_KEYS,
     shapes: TRACE_SHAPE_KEYS,
@@ -756,12 +760,19 @@ function verifiedTrace(pathname: string, expectedRunId: string): void {
   // PRESENCE, not truthiness: `error: ''` now refuses where it used to pass.
   // `endRun` assigns `error` only from a real message, so no writer produces
   // the empty string, and the tightening only ever refuses.
-  if (
-    trace.shapes['error'] !== undefined ||
-    trace.values['cancelled'] === true ||
-    trace.values['degraded'] === true
-  ) {
-    throw new Error('failed, cancelled or degraded traces are not publishable');
+  if (trace.shapes['error'] !== undefined || trace.values['cancelled'] === true) {
+    throw new Error('failed or cancelled traces are not recordable');
+  }
+  // DEGRADED IS A PUBLICATION RULE, not an integrity one, and separating the
+  // two is what lets a landed run be recorded at all. A run that reached its
+  // executor of last resort must not reach a customer's repository — but a
+  // LANDED run never publishes anyway, and refusing its trace here would have
+  // coerced it back to `failed` through the caller's catch. That is one of the
+  // two production shapes a refusal takes (a refusal after a deepening, which
+  // sets `viaFallback`), so the feature would have been inert on half its
+  // cases while appearing to work.
+  if (opts.forPublication && trace.values['degraded'] === true) {
+    throw new Error('degraded traces are not publishable');
   }
 }
 
@@ -836,10 +847,19 @@ export function landedRunDetail(log: string): string {
     const notRun = /^not run:\s+(\S.*)$/.exec(line);
     if (notRun?.[1]) phases.push(notRun[1].trim());
   }
-  const detail =
-    phases.length > 0
-      ? `run landed on its budget; phases never run: ${phases.join(' | ')}`
-      : headline || 'run landed on its budget before completing every planned phase';
+  // BOTH REASONS, when both apply. A run can land on its budget and then be
+  // refused on what it did report, and this string is the only slot a customer
+  // ever sees for "why". Reporting the phases alone — which is what this did
+  // until 2026-09-24 — drops the half that says the work was JUDGED and found
+  // wanting, rather than merely cut short.
+  const refused = /^refused at delivery:\s*(\S.*)$/i;
+  const refusal = lines.map((l) => refused.exec(l.trim())?.[1]).find(Boolean);
+  const parts: string[] = [];
+  if (phases.length > 0) parts.push(`phases never run: ${phases.join(' | ')}`);
+  if (refusal) parts.push(`refused at delivery: ${refusal.trim()}`);
+  const detail = parts.length > 0
+    ? `run landed and was not delivered; ${parts.join('; ')}`
+    : headline || 'run landed before delivering';
   return detail.slice(0, 2_000);
 }
 
@@ -1391,7 +1411,7 @@ export class ProjectRunCoordinator {
         throw new Error(runnerFailureDetail(log, stats.outcome));
       }
       const tracePath = path.join(reservedRun.hostPaths.runsPath, `${reservedRun.projectRunId}.json`);
-      verifiedTrace(tracePath, reservedRun.projectRunId);
+      verifiedTrace(tracePath, reservedRun.projectRunId, { forPublication: !landed });
       const declarations = declaredArtifactManifestSchema.parse(
         boundedOwnJson(artifactManifestPath)
       );
@@ -1423,7 +1443,14 @@ export class ProjectRunCoordinator {
       // `running`, so a throw from here would be swallowed silently and the
       // run would stay delivered with no preview and no explanation; the
       // explicit stderr line is that explanation.
-      if (this.describeDeliveredPreview) {
+      // NOT on a landed run, and this is a deliberate refusal rather than an
+      // inheritance from the delivered case. The preview runtime EXECUTES the
+      // workspace and serves it to the customer; doing that for a deliverable
+      // root acceptance explicitly refused would hand them, running, the very
+      // artefact the judge said was unproven. A landed run is still readable
+      // (its manifest and its bytes are kept and seeded) — it is just not
+      // offered as something to click.
+      if (this.describeDeliveredPreview && !landed) {
         try {
           this.describeDeliveredPreview({
             orgId: reservedRun.orgId,

@@ -319,6 +319,139 @@ function landedDriver() {
   });
 }
 
+/**
+ * A child REFUSED AT DELIVERY: every planned phase ran, the root acceptor did
+ * not accept the result, and the run reached its executor of last resort on the
+ * way (`viaFallback`, which the trace persists as `degraded`).
+ *
+ * Both details matter. `unfinishedPhases` is empty by construction — a refusal
+ * happens after the plan completed — so the status cannot come from the phase
+ * list. And `degraded` is the shape a refusal takes after a deepening, one of
+ * its two production forms; until the trace check separated integrity from
+ * publishability, it was coerced straight back to `failed`.
+ */
+function refusedDriver() {
+  return vi.fn(async (options: { env?: Record<string, string | undefined>; onSpawn?: (pid: number) => void; extraArgs?: readonly string[] }) => {
+    const env = options.env ?? {};
+    const workspace = env['ATOMA_BUILD_WORKSPACE']!;
+    const runs = env['ATOMA_RUNS_DIR']!;
+    const runId = env['ATOMA_RUN_ID']!;
+    const declarations = env['ATOMA_ARTIFACT_MANIFEST_PATH']!;
+    mkdirSync(workspace, { recursive: true });
+    mkdirSync(runs, { recursive: true });
+    mkdirSync(join(declarations, '..'), { recursive: true });
+    writeFileSync(join(workspace, 'flags.mjs'), 'export const ok = true;\n', 'utf8');
+    writeFileSync(
+      declarations,
+      JSON.stringify({ version: 1, runId, generatedAt: new Date().toISOString(), outputs: ['flags.mjs'] }),
+      'utf8'
+    );
+    writeFileSync(
+      join(runs, `${runId}.json`),
+      JSON.stringify({
+        id: runId,
+        endedAt: new Date().toISOString(),
+        degraded: true,
+        result: {
+          summary: 'REFUSED AT DELIVERY — …',
+          refusal: 'DELETE and restart persistence remain unverified',
+          producedBy: { tier: 3, name: 'Meristem', viaFallback: true },
+        },
+      }),
+      'utf8'
+    );
+    options.onSpawn?.(4242);
+    return (
+      formatRunStatsEpilogue(PARTIAL_STATS) +
+      '\n◐ build LANDED — the work is in the workspace and was NOT delivered.\n' +
+      '  refused at delivery: DELETE and restart persistence remain unverified\n'
+    );
+  });
+}
+
+describe('a run refused at delivery, across the coordinator boundary', () => {
+  function coordinatorFor(f: ReturnType<typeof fixture>, driver: ReturnType<typeof refusedDriver>, extras = {}) {
+    return new ProjectRunCoordinator({
+      store: f.store,
+      dbPath: f.dbPath,
+      projectsRoot: f.root,
+      hostEnv: {
+        ...haystackTestEnvironment(f.root),
+        PATH: process.env['PATH'],
+        ATOMA_MODEL_L3: 'api:anthropic:claude-opus-5',
+        ATOMA_MODEL_L2: 'api:anthropic:claude-sonnet-5',
+        ATOMA_MODEL_L1: 'api:anthropic:claude-haiku-4-5',
+        ANTHROPIC_API_KEY: 'model-key',
+      },
+      driver,
+      acquireLease: async () => ({ path: '/test/lease', attachChild: vi.fn(), release: vi.fn() }),
+      ...extras,
+    });
+  }
+
+  it('records partial, keeps the work, never publishes and offers no preview', async () => {
+    // Production run 6ab0ae3b spent thirty minutes and 0.42 USD writing real
+    // files, was refused, and recorded `failed` — so previousSeedRun skipped it
+    // on its status filter and every byte seeded nothing.
+    const f = fixture();
+    const publisher = { publish: vi.fn().mockResolvedValue(undefined) };
+    const describeDeliveredPreview = vi.fn();
+    const coordinator = coordinatorFor(f, refusedDriver(), { publisher, describeDeliveredPreview });
+
+    const started = await coordinator.start({
+      orgId: f.viewer.orgId,
+      principalId: f.viewer.principalId,
+      projectId: f.project.projectId,
+      request: { idempotencyKey: 'refused-1', goal: 'Build a feature-flag service.' },
+    });
+    await coordinator.waitForIdle();
+
+    const finished = f.store.getProjectRun(f.viewer.orgId, started.projectRunId)!;
+    expect(finished.status).toBe('partial');
+    // The bytes the run did write are kept and inventoried.
+    expect(finished.artifactManifest?.files.map((file) => file.path)).toEqual(['flags.mjs']);
+    // The customer-visible "why" names the refusal, not just "it landed".
+    expect(finished.error).toContain('refused at delivery');
+    expect(finished.error).toContain('DELETE and restart persistence');
+    // Never published — a refused deliverable must not reach the repository.
+    expect(publisher.publish).not.toHaveBeenCalled();
+    // And never offered as a running preview: the preview runtime EXECUTES the
+    // workspace and serves it, which for refused work would hand the customer
+    // the very artefact the judge called unproven.
+    expect(describeDeliveredPreview).not.toHaveBeenCalled();
+  });
+
+  it('seeds the next run from the refused workspace', async () => {
+    const f = fixture();
+    const first = coordinatorFor(f, refusedDriver());
+    const started = await first.start({
+      orgId: f.viewer.orgId,
+      principalId: f.viewer.principalId,
+      projectId: f.project.projectId,
+      request: { idempotencyKey: 'refused-seed-1', goal: 'Build a feature-flag service.' },
+    });
+    await first.waitForIdle();
+    const refused = f.store.getProjectRun(f.viewer.orgId, started.projectRunId)!;
+    expect(refused.status).toBe('partial');
+
+    const driver = refusedDriver();
+    const second = coordinatorFor(f, driver);
+    await second.start({
+      orgId: f.viewer.orgId,
+      principalId: f.viewer.principalId,
+      projectId: f.project.projectId,
+      request: { idempotencyKey: 'refused-seed-2', goal: 'Finish the feature-flag service.' },
+    });
+    await second.waitForIdle();
+    // THE HALF THAT RECOVERS THE SPEND. The refused work is real, so the next
+    // run continues from it instead of rebuilding it.
+    const extraArgs = driver.mock.calls[0]?.[0].extraArgs ?? [];
+    const seedAt = extraArgs.indexOf('--seed');
+    expect(seedAt).toBeGreaterThanOrEqual(0);
+    expect(extraArgs[seedAt + 1]).toBe(refused.hostPaths.workspacePath);
+  });
+});
+
 describe('a landed run, across the coordinator boundary', () => {
   it('records partial with its real manifest, and never publishes it', async () => {
     const f = fixture();

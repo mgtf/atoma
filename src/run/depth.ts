@@ -9,8 +9,24 @@ import type { AcceptanceInfo, DepthMode, PhaseCoverageRecord, ProofFloor, Topolo
 export class DeepeningSignal extends Error {
   constructor() { super('Entry cell exhausted supervision; deepen once.'); this.name = 'DeepeningSignal'; }
 }
-export class RootAcceptanceError extends Error {
-  constructor(readonly acceptance: AcceptanceInfo) { super(`Root acceptance rejected: ${acceptance.reasoning}`); }
+/**
+ * Stamp a refused result so no reader downstream can mistake it for a
+ * delivery — the same job `markLanded` does for a deadline landing, and
+ * deliberately the same shape.
+ *
+ * The summary is prefixed because three readers explain a run to a person from
+ * prose alone, and one typed field they do not read would leave them saying
+ * the run delivered. The two reasons COMPOSE: a result that already landed on
+ * its budget keeps its `INCOMPLETE —` prefix and its phase list, and gains
+ * this one, because a reader that reports only the phases drops the refusal.
+ */
+export function markRefused(result: Result, acceptance: AcceptanceInfo): Result {
+  const reasoning = acceptance.reasoning.trim() || 'the root acceptor gave no reason';
+  return {
+    ...result,
+    summary: `REFUSED AT DELIVERY — the run completed its plan and the root acceptor did not accept it: ${reasoning}. Reported so far: ${result.summary}`,
+    refusal: reasoning,
+  };
 }
 
 /**
@@ -115,12 +131,17 @@ export async function runDepthTask(args: {
         attemptCtx.signal.throwIfAborted();
         args.onAcceptance(acceptance);
         if (acceptance.approved) return result;
-        // A refusal ends the run when there is no pass left to spend, or when
-        // the wall clock cannot pay for one. `outOfPhaseBudget` is the floor
+        // A refusal LANDS when there is no pass left to spend, or when the
+        // wall clock cannot pay for one. `outOfPhaseBudget` is the floor
         // landing already uses: opening work the deadline will truncate buys
         // nothing, and here it would also cost the refusal's own diagnosis.
+        //
+        // It used to throw. The run then recorded `failed`, and every byte the
+        // molecule had written seeded nothing, because `previousSeedRun` skips
+        // a failed run on its status filter — thirty minutes and 0.42 USD of
+        // real work discarded on production run `6ab0ae3b`.
         if (remediations >= MAX_ROOT_REMEDIATIONS || outOfPhaseBudget(ctx.deadlineAt)) {
-          throw new RootAcceptanceError(acceptance);
+          return markRefused(result, acceptance);
         }
         remediations += 1;
         ctx.recordRunStat?.('root-remediation');

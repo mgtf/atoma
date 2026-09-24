@@ -1,5 +1,6 @@
 import type { RegistryType, RunIndexEntry, VizEvent, VizRun } from './types.js';
 import { taxonomyForTier } from '../../core/taxonomy.js';
+import { isLanded } from '../../contracts/runLanding.js';
 
 /**
  * The live predicates are DEFINED in `../liveness.ts` and re-exported here:
@@ -66,10 +67,12 @@ export function runStatus(run: VizRun, now = Date.now()): RunStatus {
   if (!run.endedAt) return isAbandoned(run, now) ? 'abandoned' : 'live';
   if (run.error) return 'failed';
   // A landed run has a result and no error, so it read as 'delivered' until
-  // the trace carried this field: it reached its budget with phases already
-  // accepted and reported those. The list of phases it never ran is what says
-  // so — never the summary text, which continues into model-authored prose.
-  return (run.result?.unfinishedPhases?.length ?? 0) > 0 ? 'partial' : 'delivered';
+  // the trace carried the typed reasons — never the summary text, which
+  // continues into model-authored prose. There are TWO reasons and they
+  // compose; `isLanded` is the one derivation this shares with the runner and
+  // the supervisor digest, because these were three unlinked copies of one
+  // expression until 2026-09-24 and a second reason would have reached one.
+  return isLanded(run.result) ? 'partial' : 'delivered';
 }
 
 /**

@@ -100,7 +100,11 @@ Neighbours:
   Deep enters through L3; short plans and executes
   through the canonical L2, including its peers. Every result goes through
   the same root acceptance; a refusal is handed BACK ONCE
-  (`MAX_ROOT_REMEDIATIONS`) and fails delivery on the second. The refusal
+  (`MAX_ROOT_REMEDIATIONS`) and LANDS on the second — it does not fail. The run
+  keeps its workspace, records `partial`, seeds the next run, and never
+  publishes; measured on production run `6ab0ae3b`, which spent thirty minutes
+  and 0.42 USD writing real files and recorded `failed`, so `previousSeedRun`
+  skipped it on its status filter and every byte was lost. The refusal
   rides in the task's `inputs` as `rootAcceptanceRefusal` — never appended to
   the description, which planning and skill matching key on — and the pass
   runs in the SAME attempt and workspace, so the attestations already earned
@@ -126,10 +130,19 @@ Neighbours:
 - Design and remaining measurement protocol:
   [depth experiment](../../docs/depth-routing-experiment-2026-09-13.md).
 
-- A run has THREE success-side outcomes, not two. `partial` is a run that
-  LANDED on its budget: its result names the phases that never ran
-  (`Result.unfinishedPhases`, [src/atoms](../atoms/AGENTS.md)), and that typed
-  list — never the summary text — is what separates it from a delivery. The
+- A run has THREE success-side outcomes, not two. `partial` is a run that ended
+  with real work and did NOT deliver, for either of TWO typed reasons, and they
+  COMPOSE: `Result.unfinishedPhases` (the deadline landed the dispatch before
+  some phases ran) and `Result.refusal` (root delivery acceptance did not
+  accept the result). `isLanded` in
+  [src/contracts/runLanding.ts](../contracts/runLanding.ts) is the ONE
+  derivation — the runner, the viz client and the supervisor digest each read a
+  different type carrying the same two fields, and were three unlinked copies
+  of one expression until 2026-09-24. Typed fields, never the summary text,
+  which continues into model-authored prose. Every reader that explains a run
+  to a person reports BOTH reasons (`landingReasons`): a run cut short and then
+  refused would otherwise show only its phases, dropping the half that says the
+  work was judged. The
   trace records it, `machineRunStats` reports it, and `runTask` treats it like a
   delivery for process purposes: exit 0 and park, because there IS something to
   look at. A landed run is not a failure and must not be scripted as one.

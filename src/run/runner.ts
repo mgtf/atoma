@@ -27,6 +27,7 @@ import { skillsDirPath } from '../core/stores.js';
 import { L3Atom } from '../atoms/L3Atom.js';
 import { L2Atom } from '../atoms/L2Atom.js';
 import { depthModeSchema, type DepthMode } from '../contracts/depthRouting.js';
+import { isLanded, landingReasons } from '../contracts/runLanding.js';
 import { runDepthTask } from './depth.js';
 import { SkillRegistry } from '../skills/registry.js';
 import { reconcilePlatformSkills } from '../skills/migratePlatform.js';
@@ -379,7 +380,10 @@ export interface RunHandle {
 
 export interface RunOutcome {
   /**
-   * 'partial' is a landed run: it reached its budget with phases already
+   * 'partial' is a landed run: it produced real work and did NOT deliver it,
+   * for either of two typed reasons that compose (`Result.unfinishedPhases`,
+   * `Result.refusal` — `isLanded`). Historically only the first: it reached
+   * its budget with phases already
    * accepted and reported those instead of discarding them. Its deliverable
    * is real and incomplete, and `runTask` treats it like a delivery for
    * process purposes (exit 0, park so any server it started stays reachable)
@@ -1057,18 +1061,23 @@ export async function startTask(
       retrievalPrepared = true;
       const result = await handle(task, ctx);
       clearTimeout(watchdog);
-      // A landed run names the phases it never ran (`Result.unfinishedPhases`,
-      // stamped by `markLanded`). That list is the ONLY thing separating a
-      // partial from a delivery here, which is why it is a typed field and not
-      // a substring of the summary.
+      // A run lands for either of TWO typed reasons, and they compose: the
+      // deadline left phases unrun (`markLanded`), or root delivery acceptance
+      // refused the result (`markRefused`). `isLanded` is the one derivation
+      // three unlinked readers share — this one, the viz client's and the
+      // supervisor digest's — because before 2026-09-24 they were three copies
+      // of the same expression and a second reason would have reached only one.
+      // Typed fields, never a substring of the summary, which continues into
+      // model-authored prose.
       const unfinishedPhases = result.unfinishedPhases ?? [];
-      const landed = unfinishedPhases.length > 0;
+      const landed = isLanded(result);
       const persistedRun = recorder.endRun({
         result: {
           summary: result.summary,
           output: result.output,
           producedBy: result.producedBy,
-          ...(landed ? { unfinishedPhases } : {}),
+          ...(unfinishedPhases.length > 0 ? { unfinishedPhases } : {}),
+          ...(result.refusal ? { refusal: result.refusal } : {}),
         },
       });
 
@@ -1106,10 +1115,13 @@ export async function startTask(
       );
       console.log(formatRunStatsEpilogue(machineRunStats(landed ? 'partial' : 'delivered', metrics, runSignals)));
       if (landed) {
+        // Both reasons, always. A run refused at delivery has no unrun phase to
+        // list, and a run that is both would otherwise print only the phases —
+        // dropping the half that says the work was judged, not merely cut off.
         console.log(
-          `\n◐ build LANDED on its budget: ${unfinishedPhases.length} phase(s) were never run, and what the earlier phases produced is in the workspace.`
+          `\n◐ build LANDED — the work is in the workspace and was NOT delivered.`
         );
-        for (const phase of unfinishedPhases) console.log(`  not run: ${phase}`);
+        for (const reason of landingReasons(result)) console.log(`  ${reason}`);
         console.log('  Any server the run started is still reachable inside the sandbox.');
       } else {
         console.log(

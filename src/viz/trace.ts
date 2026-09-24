@@ -447,6 +447,14 @@ export interface VizRun {
      * continues into model-authored prose and is not a contract.
      */
     unfinishedPhases?: readonly string[];
+    /**
+     * Why root delivery acceptance refused this result (`Result.refusal`).
+     * The SECOND reason a trace is partial rather than delivered, and it
+     * composes with the first — a run can land on its budget and then be
+     * refused on what it did report. `isLanded` in `src/contracts/runLanding.ts`
+     * is the one derivation every reader shares.
+     */
+    refusal?: string;
   };
   /**
    * Mirrors `VizRunIndexEntry.degraded`. Computed from

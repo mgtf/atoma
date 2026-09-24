@@ -177,11 +177,35 @@ export interface Result {
    * 2026-09-21 production runs discarded three completed phases each rather
    * than report them, and the post-mortem credited the system for recording
    * `failed` instead of falsely delivering — correctly, because there was no
-   * way to say the third thing. This field is that third thing, and the
-   * runner turns it into the `partial` outcome. Absence means complete, never
-   * "unknown".
+   * way to say the third thing. This field is that third thing. Absence means
+   * every planned phase ran, never "unknown".
+   *
+   * It is no longer the ONLY route to `partial`: see `refusal` below, and
+   * `landedResult()` in `src/run/runner.ts` for the one derivation both feed.
    */
   readonly unfinishedPhases?: readonly string[];
+  /**
+   * Why ROOT DELIVERY ACCEPTANCE refused this result, when it did.
+   *
+   * A refused run completed every phase it planned — `unfinishedPhases` is
+   * empty BY CONSTRUCTION — and was then judged not to have proven what it
+   * claimed. Until 2026-09-24 that threw out of `runDepthTask`, the runner
+   * recorded `failed`, and `previousSeedRun` skipped the run on its status
+   * filter, so a workspace full of real work seeded nothing. Measured on
+   * production run `6ab0ae3b`: thirty minutes and 0.42 USD, nothing kept.
+   *
+   * THE TWO REASONS COMPOSE. A run can land on its budget AND be refused —
+   * the deadline stops it mid-plan, and the root then judges what it did
+   * report. Both fields are then set, and every reader that explains a run to
+   * a person must say both; reporting only the phases silently drops the
+   * refusal, which is the customer-visible half.
+   *
+   * A result carrying this is NOT a delivery and never publishes: the run is
+   * `partial`, and `partial` is excluded from publication at three gates.
+   * It does seed the next run, deliberately — the work is real, and the
+   * refusal travels with it so the next run knows what was unproven.
+   */
+  readonly refusal?: string;
 }
 
 export type MutationScope = 'ephemeral' | 'branch' | 'patch';

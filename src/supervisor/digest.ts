@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import type { VerdictRunStatus } from '../contracts/supervisorVerdict.js';
 import type { VizEvent, VizRun } from '../viz/trace.js';
 import { collapseTrajectory, deriveTrajectorySignatures } from '../contracts/trajectory.js';
+import { isLanded } from '../contracts/runLanding.js';
 
 /**
  * THE MECHANICAL PRE-DIGEST the analyst reads before the trace.
@@ -97,7 +98,9 @@ export function runStatusOf(
   if (run.cancelled) return 'cancelled';
   if (!run.endedAt) return 'unknown';
   if (run.error) return 'failed';
-  return (run.result?.unfinishedPhases?.length ?? 0) > 0 ? 'partial' : 'delivered';
+  // Two typed reasons, one shared derivation (`src/contracts/runLanding.ts`):
+  // the deadline left phases unrun, or root acceptance refused the result.
+  return isLanded(run.result) ? 'partial' : 'delivered';
 }
 
 export interface RunDigest {

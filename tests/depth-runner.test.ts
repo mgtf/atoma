@@ -96,7 +96,12 @@ describe('runner supervision depth, concrete L3/L2/L1 and real backend', () => {
         cellName = ensureCanonicalFullStack(seed.registry, seed.toolDecls, 2)!.name;
         if (matched) skills.save(leafId, recipe);
       } }, [...(mode === 'default' ? [] : ['--depth', mode]), '--clean-workspace', 'Build a page backed by server.js']);
-      expect(await handle.settled).toEqual({ outcome: rootApproved ? 'delivered' : 'failed' });
+      // A refused delivery LANDS since 2026-09-24: the run kept every byte it
+      // wrote and seeds the next run, so the outcome is `partial`, not
+      // `failed`. What this test is about is unchanged and is asserted below —
+      // phase trust and skill credit survive a root refusal, because the root
+      // judges the DELIVERY and never the method.
+      expect(await handle.settled).toEqual({ outcome: rootApproved ? 'delivered' : 'partial' });
       const path = readdirSync(runs).find((name) => name.endsWith('.json') && name !== 'index.json')!;
       const trace = JSON.parse(readFileSync(join(runs, path), 'utf8')) as VizRun;
       expect(trace.events.filter((event) => event.kind === 'topology')).toMatchObject([
@@ -184,7 +189,12 @@ describe('runner supervision depth, concrete L3/L2/L1 and real backend', () => {
     let handle: Awaited<ReturnType<typeof startTask>> | undefined;
     try {
       handle = await startTask(buildProfile, ['--clean-workspace', '--no-learn-skills', '--no-direct-skills', 'Build index.html']);
-      expect(await handle.settled).toEqual({ outcome: 'failed' });
+      // `partial` since 2026-09-24: this run deepened, was refused at delivery,
+      // and its second attempt's workspace holds real files. What the test is
+      // about is below and unchanged — the abandoned server is reaped, the
+      // first attempt's workspace is archived, tools are recreated, and BOTH
+      // attempts are accounted for in one run.
+      expect(await handle.settled).toEqual({ outcome: 'partial' });
       const files = readdirSync(runs).filter((name) => name.endsWith('.json') && name !== 'index.json');
       expect(files).toHaveLength(1);
       const trace = JSON.parse(readFileSync(join(runs, files[0]!), 'utf8')) as VizRun;
@@ -201,7 +211,7 @@ describe('runner supervision depth, concrete L3/L2/L1 and real backend', () => {
       expect(calls.find((req) => req.actor?.name === 'run-root')!.userContent).toContain('DIRECT — the child IS the executor');
       expect(trace.totals!.calls).toBe(calls.length);
       const stats = parseRunLog(logs.join('\n'));
-      expect(stats).toMatchObject({ outcome: 'failed', deepenings: 1, llmCalls: calls.length });
+      expect(stats).toMatchObject({ outcome: 'partial', deepenings: 1, llmCalls: calls.length });
       expect(stats.costUsd).toBeGreaterThan(0);
       expect(stats.costUsd).toBeCloseTo(trace.totals!.costUsd, 4);
     } finally {

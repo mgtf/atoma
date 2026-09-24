@@ -390,6 +390,27 @@ Per-org admission defaults to one (zero suspends), with the global lease still
 limiting the host to one run. Recheck inside reservation after idempotency.
 The operator commands and offline prerequisites live in
 [W9/W10](../../docs/project-maintenance.md).
+## A landed run, from the tenant's side
+
+- `partial` is a run that produced real work and did not deliver it, for either
+  of two reasons that compose: the deadline left phases unrun, or root delivery
+  acceptance refused the result. `landedRunDetail` reports BOTH — reporting only
+  the phases drops the half a customer needs, which is that the work was judged
+  and found wanting rather than merely cut short.
+- It NEVER publishes (three gates, all keyed on the row status) and is NEVER
+  offered as a preview. The second is a deliberate refusal rather than an
+  inheritance from the delivered case: the preview runtime EXECUTES the
+  workspace and serves it, so previewing a refused deliverable would hand the
+  customer, running, the artefact the judge called unproven.
+- It DOES seed the next run (`previousSeedRun`), and that is the half that
+  recovers the spend.
+- `verifiedTrace` separates INTEGRITY from PUBLISHABILITY. A failed or
+  cancelled trace is never recordable; `degraded` refuses only a run that would
+  publish. A refusal reached after a deepening is degraded by construction
+  (`viaFallback`), so checking it on the landed path coerced the run straight
+  back to `failed` — the feature would have been inert on one of its two
+  production shapes while appearing to work.
+
 ## Intentional choices and rejected shortcuts
 
 - Reading egress settings, or an ollama destination, from a tenant prompt:
