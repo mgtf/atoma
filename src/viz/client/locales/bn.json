@@ -1163,5 +1163,6 @@
   "detail.llmStart.identifiers": "শনাক্তকারী",
   "projects.actionsHint.readyImported": "GitHub-এর default branch থেকে শুরু করে। আংশিক পরিবর্তন পুনরায় ব্যবহার করা হয় না।",
   "pane.skillUnavailable": "এই রেসিপিটি পড়া যায়নি—এটি হয়তো বাদ দেওয়া হয়েছে, একীভূত করা হয়েছে, অথবা এমন কোনো পরিচয়ের অধীনে শেখা হয়েছিল যা পরে স্থানান্তরিত হয়েছে।",
-  "detail.field.executorName": "নির্বাহ করেছেন"
+  "detail.field.executorName": "নির্বাহ করেছেন",
+  "now.doing.draftChecklist": "run লক্ষ্য থেকে তার ডেলিভারিতে অবশ্যই দেখাতে হবে এমন আচরণগুলোর তালিকা করছে।"
 }

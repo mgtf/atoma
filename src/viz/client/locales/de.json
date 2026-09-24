@@ -1163,5 +1163,6 @@
   "detail.llmStart.identifiers": "Kennungen",
   "projects.actionsHint.readyImported": "Startet vom Standard-Branch auf GitHub. Unvollständige Änderungen werden nicht wiederverwendet.",
   "pane.skillUnavailable": "Dieses Rezept konnte nicht gelesen werden – möglicherweise wurde es verworfen, zusammengeführt oder unter einer Identität gelernt, die inzwischen verschoben wurde.",
-  "detail.field.executorName": "Ausgeführt von"
+  "detail.field.executorName": "Ausgeführt von",
+  "now.doing.draftChecklist": "Der run listet ausgehend vom Ziel die Verhaltensweisen auf, die sein Ergebnis zeigen muss."
 }

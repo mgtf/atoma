@@ -1163,5 +1163,6 @@
   "detail.llmStart.identifiers": "标识符",
   "projects.actionsHint.readyImported": "从 GitHub 的默认分支开始。部分更改不会被复用。",
   "pane.skillUnavailable": "无法读取此配方——它可能已被删除、合并，或其学习时使用的身份此后已迁移。",
-  "detail.field.executorName": "执行者"
+  "detail.field.executorName": "执行者",
+  "now.doing.draftChecklist": "该 run 正在根据目标列出其交付结果必须展现的行为。"
 }

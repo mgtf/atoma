@@ -1163,5 +1163,6 @@
   "detail.llmStart.identifiers": "Identificadores",
   "projects.actionsHint.readyImported": "Parte de la rama predeterminada de GitHub. Los cambios parciales no se reutilizan.",
   "pane.skillUnavailable": "No se pudo leer esta receta; puede que se haya descartado, fusionado o aprendido con una identidad que se haya trasladado desde entonces.",
-  "detail.field.executorName": "Ejecutado por"
+  "detail.field.executorName": "Ejecutado por",
+  "now.doing.draftChecklist": "El run está enumerando, a partir del objetivo, los comportamientos que debe mostrar su entrega."
 }

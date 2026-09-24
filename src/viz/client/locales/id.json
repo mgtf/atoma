@@ -1163,5 +1163,6 @@
   "detail.llmStart.identifiers": "Pengidentifikasi",
   "projects.actionsHint.readyImported": "Dimulai dari branch default GitHub. Perubahan parsial tidak digunakan kembali.",
   "pane.skillUnavailable": "Resep ini tidak dapat dibaca — mungkin telah dihapus, digabungkan, atau dipelajari dengan identitas yang kemudian berpindah.",
-  "detail.field.executorName": "Dijalankan oleh"
+  "detail.field.executorName": "Dijalankan oleh",
+  "now.doing.draftChecklist": "Run sedang menyusun daftar perilaku yang harus ditunjukkan oleh hasilnya berdasarkan sasaran."
 }

@@ -1163,5 +1163,6 @@
   "detail.llmStart.identifiers": "पहचानकर्ता",
   "projects.actionsHint.readyImported": "GitHub की डिफ़ॉल्ट ब्रांच से शुरू करता है। आंशिक बदलावों का दोबारा इस्तेमाल नहीं किया जाता।",
   "pane.skillUnavailable": "यह recipe पढ़ी नहीं जा सकी — हो सकता है कि इसे हटा दिया गया हो, मर्ज कर दिया गया हो, या किसी ऐसी पहचान के तहत सीखा गया हो जो अब स्थानांतरित हो चुकी है।",
-  "detail.field.executorName": "इसके द्वारा निष्पादित"
+  "detail.field.executorName": "इसके द्वारा निष्पादित",
+  "now.doing.draftChecklist": "run, लक्ष्य के आधार पर, उन व्यवहारों की सूची बना रहा है जो उसकी डिलीवरी में दिखाई देने चाहिए।"
 }

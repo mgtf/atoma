@@ -1163,5 +1163,6 @@
   "detail.llmStart.identifiers": "شناخت کنندگان",
   "projects.actionsHint.readyImported": "GitHub کی ڈیفالٹ برانچ سے شروع ہوتا ہے۔ جزوی تبدیلیاں دوبارہ استعمال نہیں کی جاتیں۔",
   "pane.skillUnavailable": "یہ ترکیب پڑھی نہیں جا سکی — ممکن ہے اسے حذف یا ضم کر دیا گیا ہو، یا اسے ایسی شناخت کے تحت سیکھا گیا ہو جو بعد میں منتقل ہو گئی۔",
-  "detail.field.executorName": "کے ذریعے عمل درآمد"
+  "detail.field.executorName": "کے ذریعے عمل درآمد",
+  "now.doing.draftChecklist": "run ہدف کی بنیاد پر ان رویّوں کی فہرست بنا رہا ہے جن کا اظہار اس کی فراہمی میں ہونا ضروری ہے۔"
 }

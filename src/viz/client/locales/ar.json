@@ -1163,5 +1163,6 @@
   "detail.llmStart.identifiers": "المعرّفات",
   "projects.actionsHint.readyImported": "يبدأ من الفرع الافتراضي في GitHub. لا يُعاد استخدام التغييرات الجزئية.",
   "pane.skillUnavailable": "تعذّرت قراءة هذه الوصفة — ربما أُسقطت أو دُمجت أو جرى تعلّمها بهوية انتقلت منذ ذلك الحين.",
-  "detail.field.executorName": "نُفّذت بواسطة"
+  "detail.field.executorName": "نُفّذت بواسطة",
+  "now.doing.draftChecklist": "يقوم run، انطلاقًا من الهدف، بسرد السلوكيات التي يجب أن يُظهرها ناتجه."
 }

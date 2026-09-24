@@ -1163,5 +1163,6 @@
   "detail.llmStart.identifiers": "識別子",
   "projects.actionsHint.readyImported": "GitHubのデフォルトブランチから開始します。部分的な変更は再利用されません。",
   "pane.skillUnavailable": "このレシピを読み取れませんでした。削除または統合されたか、その後移動されたIDで学習された可能性があります。",
-  "detail.field.executorName": "実行者"
+  "detail.field.executorName": "実行者",
+  "now.doing.draftChecklist": "runは目標に基づき、成果物が示すべき振る舞いをリストアップしています。"
 }
