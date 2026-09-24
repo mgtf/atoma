@@ -51,6 +51,7 @@ import {
   type DetailMeasure,
 } from '../detail-layout.js';
 import {
+  buildLlmStartDetail,
   detailToneColor,
   eventAccent,
   gpuEventCardCopy,
@@ -1194,6 +1195,7 @@ export function drawRuns(
       drawEventDetail(
         ctx,
         snapshot,
+        run,
         event,
         rightX,
         detailTop,
@@ -1527,6 +1529,7 @@ function drawRunPreviewControl(
 function drawEventDetail(
   ctx: RendererCtx,
   snapshot: GpuRenderSnapshot,
+  run: VizRun,
   event: VizEvent,
   x: number,
   y: number,
@@ -1596,7 +1599,9 @@ function drawEventDetail(
   }
   ctx.text(
     ctx.root,
-    event.kind === 'llm' ? eventRoleLabel(event.role, snapshot.t) : event.kind,
+    event.kind === 'llm' || event.kind === 'llm-start'
+      ? eventRoleLabel(event.role, snapshot.t)
+      : event.kind,
     x + 18,
     y + 16,
     {
@@ -1610,6 +1615,46 @@ function drawEventDetail(
     color: GPU_COLORS.muted,
     width: width - 36,
   });
+  if (event.kind === 'llm-start') {
+    // The marker's own fields are identifiers; what the step IS lives in the
+    // run around it. `buildLlmStartDetail` makes the joins, this only draws.
+    const start = buildLlmStartDetail(event, run, snapshot.t);
+    const description = ctx.text(ctx.root, start.description, x + 18, y + 72, {
+      size: 12,
+      weight: '700',
+      color: GPU_COLORS.text,
+      width: width - 36,
+    });
+    const detailTop = y + 84 + description.height;
+    const detailBottom = y + height - 14;
+    const detailHeight = Math.max(40, detailBottom - detailTop);
+    ctx.detailBounds = new Rectangle(x + 12, detailTop - 6, width - 24, detailHeight + 6);
+    const startLayer = new Container();
+    startLayer.label = `event-detail:${event.id}`;
+    startLayer.position.y = -ctx.detailScrollY;
+    ctx.root.addChild(startLayer);
+    startLayer.mask = ctx.detailMask(x + 12, detailTop - 6, width - 24, detailHeight + 6);
+    const contentBottom = drawStructuredDetailNodes(
+      ctx,
+      startLayer,
+      start.nodes,
+      x + 18,
+      detailTop,
+      width - 42
+    );
+    ctx.detailScrollMax = Math.max(0, contentBottom - detailBottom + 8);
+    ctx.detailScrollY = Math.min(ctx.detailScrollY, ctx.detailScrollMax);
+    startLayer.position.y = -ctx.detailScrollY;
+    drawScrollbarThumb(ctx.root, {
+      x,
+      y: detailTop,
+      width,
+      height: detailHeight,
+      scrollY: ctx.detailScrollY,
+      maxScroll: ctx.detailScrollMax,
+    });
+    return;
+  }
   if (event.kind === 'cache') {
     ctx.text(ctx.root, snapshot.t('detail.cache.title'), x + 18, y + 72, {
       size: 13,

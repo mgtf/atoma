@@ -1,8 +1,19 @@
 import { elementForTool } from '../../../contracts/toolTaxonomy.js';
-import { fmtCost, fmtMs, toolArgSummary, tryParseJson } from '../../client/run-utils.js';
+import {
+  fmtCost,
+  fmtMs,
+  isRunLive,
+  toolArgSummary,
+  tryParseJson,
+} from '../../client/run-utils.js';
 import { timelineBranchHeading, type TimelineBranch } from '../../client/timeline-layout.js';
-import type { VizEvent } from '../../client/types.js';
-import { skillEventTitle, skillEventReasoning, type DetailTone } from '../../client/structured-detail.js';
+import type { VizEvent, VizRun } from '../../client/types.js';
+import {
+  skillEventTitle,
+  skillEventReasoning,
+  type DetailTone,
+  type StructuredDetailNode,
+} from '../../client/structured-detail.js';
 import { GPU_COLORS } from '../theme.js';
 import { eventKindColor, llmRoleColor } from './event-palette.js';
 
@@ -205,7 +216,9 @@ export function gpuEventCardCopy(event: VizEvent, t: GpuTranslate): GpuEventCard
     ? elementForTool(event.name)
     : undefined;
   const title =
-    event.kind === 'llm'
+    // The start marker is the same call as its completion, so it carries the
+    // same title; `llm-start` on the card named the schema, not the step.
+    event.kind === 'llm' || event.kind === 'llm-start'
       ? event.role ?? 'llm'
       : event.kind === 'tool'
         ? toolElement
@@ -245,6 +258,10 @@ export function gpuEventCardCopy(event: VizEvent, t: GpuTranslate): GpuEventCard
     body = event.context
       .map((block) => t(`detail.enum.contextSource.${block.source}`))
       .join(' · ');
+  } else if (event.kind === 'llm-start' && !body) {
+    // True whether the call is still out or the run died around it: the
+    // detail pane, which knows the run, says which.
+    body = t('card.llmStart.issued');
   } else if (event.kind === 'context') {
     // The INJECT itself, and nothing else. The source and the skill id are
     // already the first two members of this kind's footer, and on the
@@ -320,4 +337,205 @@ export function nowDescription(t: GpuTranslate, event: VizEvent): string {
     default:
       return t('now.doing.unknown', vars);
   }
+}
+
+export interface LlmStartDetailCopy {
+  /** One sentence saying what the actor is doing, or why nothing more exists. */
+  readonly description: string;
+  readonly nodes: readonly StructuredDetailNode[];
+}
+
+const LLM_START_RECENT_ELEMENTS = 5;
+
+/**
+ * What an `llm-start` marker MEANS, assembled from the rest of the run.
+ *
+ * The event itself is deliberately tiny (no prompt, no usage: `trace.ts`), so
+ * dumping its fields showed Event ID, Llm Event Id, Branch Id and Timestamp
+ * and said nothing about the step (owner report, 2026-09-24). Everything a
+ * reader wants is already in the trace, one join away: the branch start
+ * carrying the subtask the actor was given, the tool events streaming out of
+ * this very call, and the paired completion when it has landed. Identifiers
+ * stay, at the end, because they are how the reader follows those joins.
+ */
+export function buildLlmStartDetail(
+  event: VizEvent,
+  run: VizRun,
+  t: GpuTranslate,
+  now = Date.now()
+): LlmStartDetailCopy {
+  const completion = run.events.find(
+    (candidate) => candidate.kind === 'llm' && candidate.id === event.llmEventId
+  );
+  const live = isRunLive(run, now);
+  const status = completion ? 'completed' : live ? 'inFlight' : 'interrupted';
+  const description =
+    status === 'inFlight'
+      ? nowDescription(t, event)
+      : status === 'completed'
+        ? t('detail.llmStart.completedExplain')
+        : t('detail.llmStart.interruptedExplain');
+
+  const elapsedMs = completion
+    ? completion.durationMs
+    : live
+      ? Math.max(0, now - event.ts)
+      : undefined;
+  const nodes: StructuredDetailNode[] = [
+    {
+      kind: 'field',
+      key: 'status',
+      label: t('detail.field.status'),
+      value:
+        status === 'completed'
+          ? t('detail.llmStart.status.completed')
+          : status === 'inFlight'
+            ? t('detail.llmStart.status.inFlight')
+            : t('event.interrupted'),
+      tone: status === 'completed' ? 'success' : status === 'inFlight' ? 'info' : 'error',
+      presentation: 'badge',
+    },
+  ];
+  if (typeof elapsedMs === 'number') {
+    nodes.push({
+      kind: 'field',
+      key: 'elapsed',
+      label: t('detail.field.elapsed'),
+      value: fmtMs(elapsedMs),
+      tone: 'neutral',
+      presentation: 'badge',
+    });
+  }
+
+  const branch = event.branchId
+    ? run.events.find(
+        (candidate) =>
+          candidate.kind === 'branch' &&
+          candidate.op === 'start' &&
+          candidate.branchId === event.branchId
+      )
+    : undefined;
+  const subtask = branch && typeof branch.label === 'string' ? branch.label.trim() : '';
+  const subtaskChildren: StructuredDetailNode[] = [];
+  if (event.child?.name) {
+    subtaskChildren.push({
+      kind: 'field',
+      key: 'child',
+      label: t('detail.field.child'),
+      value: event.child.name,
+      tone: 'info',
+      presentation: 'badge',
+    });
+  }
+  if (subtask) {
+    subtaskChildren.push({
+      kind: 'field',
+      key: 'instruction',
+      label: t('detail.field.instruction'),
+      value: subtask,
+      tone: 'neutral',
+      presentation: 'text',
+    });
+  }
+  if (subtaskChildren.length) {
+    nodes.push({
+      kind: 'section',
+      key: 'subtask',
+      label: t('detail.field.subtask'),
+      children: subtaskChildren,
+    });
+  }
+
+  const tools = run.events.filter(
+    (candidate) => candidate.kind === 'tool' && candidate.llmEventId === event.llmEventId
+  );
+  const failed = tools.filter((tool) => typeof tool.error === 'string').length;
+  const recent = tools
+    .slice(-LLM_START_RECENT_ELEMENTS)
+    .reverse()
+    .map((tool) => {
+      const name = tool.name ?? 'tool';
+      const element = elementForTool(name);
+      const summary = toolArgSummary(tool.args);
+      const head = element ? `${element.symbol} · ${name}` : name;
+      return [head, summary, tool.error ? '✕' : ''].filter(Boolean).join(' · ');
+    });
+  nodes.push({
+    kind: 'section',
+    key: 'elements',
+    label: t('detail.llmStart.elements'),
+    count: tools.length,
+    children: tools.length
+      ? [
+          {
+            kind: 'field',
+            key: 'lastElements',
+            label: t('detail.field.lastElements'),
+            value: recent.join('\n'),
+            tone: failed ? 'warning' : 'neutral',
+            presentation: 'code',
+          },
+          ...(failed
+            ? [
+                {
+                  kind: 'field' as const,
+                  key: 'elementErrors',
+                  label: t('detail.field.elementErrors'),
+                  value: String(failed),
+                  tone: 'error' as const,
+                  presentation: 'badge' as const,
+                },
+              ]
+            : []),
+        ]
+      : [
+          {
+            kind: 'field',
+            key: 'noElements',
+            label: t('detail.field.lastElements'),
+            value: t('now.activity.none'),
+            tone: 'neutral',
+            presentation: 'text',
+          },
+        ],
+  });
+
+  const identifiers: StructuredDetailNode[] = [
+    {
+      kind: 'field',
+      key: 'llmEventId',
+      label: t('detail.field.llmEventId'),
+      value: String(event.llmEventId ?? ''),
+      tone: 'neutral',
+      presentation: 'code',
+    },
+    ...(event.branchId
+      ? [
+          {
+            kind: 'field' as const,
+            key: 'branchId',
+            label: t('detail.field.branchId'),
+            value: event.branchId,
+            tone: 'neutral' as const,
+            presentation: 'code' as const,
+          },
+        ]
+      : []),
+    {
+      kind: 'field',
+      key: 'id',
+      label: t('detail.field.id'),
+      value: event.id,
+      tone: 'neutral',
+      presentation: 'code',
+    },
+  ];
+  nodes.push({
+    kind: 'section',
+    key: 'identifiers',
+    label: t('detail.llmStart.identifiers'),
+    children: identifiers,
+  });
+
+  return { description, nodes };
 }

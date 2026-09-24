@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildLlmStartDetail,
   compactModelName,
   fmtTokenCount,
   gpuEventCardCopy,
@@ -9,7 +10,7 @@ import {
 } from '../src/viz/client-gl/renderer/copy.js';
 import { buildSkillEventDetail } from '../src/viz/client/structured-detail.js';
 import { translate } from '../src/viz/client/i18n-catalog.js';
-import type { VizEvent } from '../src/viz/client/types.js';
+import type { VizEvent, VizRun } from '../src/viz/client/types.js';
 
 const t = (key: string, vars?: Record<string, unknown>) => translate('en', key, vars);
 
@@ -233,5 +234,123 @@ describe('skill card locale', () => {
     expect(gpuEventCardCopy(failure, t).body).toBe(t('skillReason.failureNotFollowed'));
     const custom = { ...event, reasoning: 'Une observation libre du modèle' };
     expect(gpuEventCardCopy(custom, t).body).toBe(custom.reasoning);
+  });
+});
+
+describe('buildLlmStartDetail', () => {
+  const NOW = Date.parse('2026-09-24T10:00:30.000Z');
+  const started = NOW - 12_000;
+  const start: VizEvent = {
+    id: 'start-1',
+    ts: started,
+    kind: 'llm-start',
+    llmEventId: 'call-1',
+    role: 'execute',
+    model: 'own:openai:gpt-5.6-luna',
+    actor: { tier: 1, name: 'CarbonDioxide' },
+    branchId: 'branch-1',
+  };
+  const branch: VizEvent = {
+    id: 'branch-1-start',
+    ts: started - 10,
+    kind: 'branch',
+    op: 'start',
+    branchId: 'branch-1',
+    label: 'Write flags.mjs: a Node HTTP JSON feature-flag service using only built-in modules.',
+  };
+  const tool = (id: string, name: string, args: Record<string, unknown>, error?: string): VizEvent => ({
+    id,
+    ts: started + 1_000,
+    kind: 'tool',
+    llmEventId: 'call-1',
+    name,
+    args,
+    durationMs: 40,
+    ...(error ? { error } : {}),
+  });
+  const run = (events: VizEvent[], overrides: Partial<VizRun> = {}): VizRun => ({
+    id: 'run-1',
+    label: 'build-app: flags',
+    task: { description: 'Build a feature-flag service' },
+    startedAt: new Date(started - 60_000).toISOString(),
+    endedAt: undefined,
+    durationMs: undefined,
+    events,
+    totals: { calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 },
+    ...overrides,
+  });
+  const fields = (nodes: ReturnType<typeof buildLlmStartDetail>['nodes']) => {
+    const out = new Map<string, string>();
+    const walk = (list: typeof nodes) => {
+      for (const node of list) {
+        if (node.kind === 'field') out.set(node.key, node.value);
+        else walk(node.children);
+      }
+    };
+    walk(nodes);
+    return out;
+  };
+
+  it('says what the step is doing, what it was asked, and what it has done so far', () => {
+    const detail = buildLlmStartDetail(
+      start,
+      run([branch, start, tool('t1', 'write_file', { path: 'flags.mjs' }), tool('t2', 'run_shell', { cmd: 'node flags.mjs --check' })]),
+      t,
+      NOW
+    );
+    expect(detail.description).toBe(t('now.doing.execute', { actor: 'CarbonDioxide', child: '?' }));
+    const value = fields(detail.nodes);
+    expect(value.get('status')).toBe('In flight — no response yet');
+    expect(value.get('elapsed')).toBe('12.00s');
+    expect(value.get('instruction')).toContain('Write flags.mjs');
+    // Newest first, so the reader sees the latest element without scrolling.
+    expect(value.get('lastElements')).toBe('B · run_shell · node flags.mjs --check\nH · write_file · flags.mjs');
+    expect(value.has('elementErrors')).toBe(false);
+    const elements = detail.nodes.find((node) => node.kind === 'section' && node.key === 'elements');
+    expect(elements).toMatchObject({ count: 2 });
+    // The identifiers are the joins, so they stay — last.
+    expect(detail.nodes.at(-1)).toMatchObject({ kind: 'section', key: 'identifiers' });
+    expect(value.get('llmEventId')).toBe('call-1');
+    expect(value.get('branchId')).toBe('branch-1');
+  });
+
+  it('states the absence when nothing has streamed out yet', () => {
+    const value = fields(buildLlmStartDetail(start, run([start]), t, NOW).nodes);
+    expect(value.get('noElements')).toBe(t('now.activity.none'));
+    expect(value.has('instruction')).toBe(false);
+  });
+
+  it('counts failed element calls and marks them', () => {
+    const value = fields(
+      buildLlmStartDetail(start, run([start, tool('t1', 'run_shell', { cmd: 'npm test' }, 'exit 1')]), t, NOW).nodes
+    );
+    expect(value.get('elementErrors')).toBe('1');
+    expect(value.get('lastElements')).toContain('✕');
+  });
+
+  it('reads as interrupted once the run has ended without the paired call', () => {
+    const ended = run([start], { endedAt: new Date(NOW).toISOString(), durationMs: 90_000 });
+    const detail = buildLlmStartDetail(start, ended, t, NOW);
+    expect(detail.description).toBe(t('detail.llmStart.interruptedExplain'));
+    const value = fields(detail.nodes);
+    expect(value.get('status')).toBe(t('event.interrupted'));
+    expect(value.has('elapsed')).toBe(false);
+  });
+
+  it('points at the paired call once it has returned', () => {
+    const completion: VizEvent = {
+      id: 'call-1',
+      ts: started + 8_000,
+      kind: 'llm',
+      role: 'execute',
+      model: 'own:openai:gpt-5.6-luna',
+      durationMs: 8_000,
+      response: 'done',
+    };
+    const detail = buildLlmStartDetail(start, run([start, completion]), t, NOW);
+    expect(detail.description).toBe(t('detail.llmStart.completedExplain'));
+    const value = fields(detail.nodes);
+    expect(value.get('status')).toBe(t('detail.llmStart.status.completed'));
+    expect(value.get('elapsed')).toBe('8.00s');
   });
 });

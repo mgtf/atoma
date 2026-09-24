@@ -4945,6 +4945,44 @@ describe('drawRuns behavior', () => {
     }
   });
 
+  it('explains a selected llm-start marker instead of dumping its identifiers', () => {
+    const started = Date.now() - 5_000;
+    const events: VizEvent[] = [
+      {
+        id: 'b1', ts: started - 10, kind: 'branch', op: 'start', branchId: 'lane-1',
+        label: 'Write the README with the run instructions.',
+      },
+      {
+        id: 'start', kind: 'llm-start', ts: started, llmEventId: 'call', role: 'execute',
+        model: 'own:openai:gpt-5.6-luna', actor: { tier: 1, name: 'CarbonDioxide' }, branchId: 'lane-1',
+      },
+      {
+        id: 't1', ts: started + 1_000, kind: 'tool', llmEventId: 'call', name: 'write_file',
+        args: { path: 'README.md' }, durationMs: 12,
+      },
+    ];
+    const run = makeRun(events, {
+      startedAt: new Date(started - 60_000).toISOString(), endedAt: undefined, durationMs: undefined,
+    });
+    const ctx = createRecordingCtx();
+    drawRuns(ctx, makeSnapshot({ selectedEventId: 'start' }, { run }), WIDTH, HEIGHT);
+    const texts = ctx.texts.map((text) => text.value);
+    // The pane title is the role, as it is for the paired call — not the raw kind.
+    expect(texts).toContain('Execution');
+    expect(texts).not.toContain('llm-start');
+    expect(texts).toContain(t('now.doing.execute', { actor: 'CarbonDioxide', child: '?' }));
+    expect(texts).toContain('Write the README with the run instructions.');
+    expect(texts.some((value) => value.includes('write_file') && value.includes('README.md'))).toBe(true);
+    // The identifiers are still reachable, under their own heading, after the story.
+    const expectedHeadings = [
+      t('detail.field.subtask'),
+      `${t('detail.llmStart.elements')} · 1`,
+      t('detail.llmStart.identifiers'),
+    ];
+    expect(texts.filter((value) => expectedHeadings.includes(value))).toEqual(expectedHeadings);
+    expect(ctx.detailBounds).not.toBeNull();
+  });
+
   it('keeps the historical 1050px window threshold for the detail pane', () => {
     const event = makeLlmEvent('selected', { role: 'execute' });
     const visible = createRecordingCtx();
