@@ -1,5 +1,6 @@
 import { dirname, basename, join } from 'node:path';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { inheritProbeManifest, PROBE_MANIFEST_FILENAME } from '../contracts/probeManifest.js';
 
 /**
  * Stale artefacts from PREVIOUS runs pollute the current one. They land in
@@ -95,3 +96,70 @@ export function prepareWorkspace(root: string, clean: boolean): void {
   console.log(`workspace archived: ${archived} (${stale.length} entries) — starting clean`);
 }
 
+
+/** What `seedWorkspace` copied, for the launch log. */
+export interface SeedReport {
+  /** Top-level entries of the seeded workspace. */
+  readonly entries: number;
+  /**
+   * What happened to the inherited probe manifest: `absent` (the seed had
+   * none), `kept` (byte-identical), `filtered` (unreplayable entries dropped),
+   * `removed` (nothing replayable left, or not a regular file).
+   */
+  readonly manifest: 'absent' | 'kept' | 'filtered' | 'removed';
+  readonly kept: number;
+  readonly dropped: number;
+  readonly problems: readonly string[];
+}
+
+/**
+ * The ONE seed copy, used at launch and again when a seeded run deepens.
+ *
+ * A seed is the state a run starts from. Depth routing restarts a deepening
+ * attempt "fresh" (decided 2026-09-13 for runs that carried no seed); since
+ * 2026-09-23 every project run is seeded AND depth-routed, and a restart over
+ * an empty directory rebuilt the project's whole corpus from nothing — then
+ * seeded the next run from that. Fresh, for a seeded run, means the seed.
+ *
+ * The inherited `.atoma-probes.json` is filtered through
+ * `inheritProbeManifest`: kept as a replay baseline, minus every entry no
+ * reader can replay. The seed source is never modified.
+ */
+export function seedWorkspace(seedRoot: string, workspaceRoot: string): SeedReport {
+  mkdirSync(workspaceRoot, { recursive: true });
+  cpSync(seedRoot, workspaceRoot, { recursive: true });
+  const entries = readdirSync(workspaceRoot).length;
+  const manifestPath = join(workspaceRoot, PROBE_MANIFEST_FILENAME);
+  let stat;
+  try {
+    stat = lstatSync(manifestPath);
+  } catch {
+    return { entries, manifest: 'absent', kept: 0, dropped: 0, problems: [] };
+  }
+  if (!stat.isFile()) {
+    // A symlinked or special manifest is never followed: rewriting it would
+    // write wherever the link points.
+    rmSync(manifestPath, { recursive: true, force: true });
+    return { entries, manifest: 'removed', kept: 0, dropped: 0, problems: ['not a regular file'] };
+  }
+  const inherited = inheritProbeManifest(readFileSync(manifestPath, 'utf8'));
+  const problems = inherited.unreadable ? ['not a readable version-1 manifest'] : inherited.problems;
+  if (inherited.text === null) {
+    rmSync(manifestPath, { force: true });
+    return { entries, manifest: 'removed', kept: 0, dropped: inherited.dropped, problems };
+  }
+  if (inherited.dropped === 0) {
+    return { entries, manifest: 'kept', kept: inherited.kept, dropped: 0, problems: [] };
+  }
+  writeFileSync(manifestPath, inherited.text);
+  return { entries, manifest: 'filtered', kept: inherited.kept, dropped: inherited.dropped, problems };
+}
+
+/** The launch-log line for a seed manifest that changed, or null when none did. */
+export function describeSeedManifest(report: SeedReport): string | null {
+  if (report.manifest === 'absent' || report.manifest === 'kept') return null;
+  const detail = report.problems.length > 0 ? ` — ${report.problems.join('; ')}` : '';
+  return report.manifest === 'removed'
+    ? `seed ${PROBE_MANIFEST_FILENAME}: not inherited, nothing replayable (${report.dropped} entries dropped)${detail}`
+    : `seed ${PROBE_MANIFEST_FILENAME}: kept ${report.kept} entries, dropped ${report.dropped} unreplayable${detail}`;
+}

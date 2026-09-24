@@ -1,4 +1,4 @@
-import { mkdtempSync, existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -240,6 +240,90 @@ describe('runner supervision depth, concrete L3/L2/L1 and real backend', () => {
     } finally {
       await handle?.shutdown();
       forceKillTestProcessTree(serverPid);
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 20000);
+
+  // docs/seed-inheritance-2026-09-25.md, incident 3. A seeded run that deepens
+  // restarts from its SEED — it used to restart over an empty directory,
+  // rebuilding the project's corpus from nothing and seeding the next run
+  // from that. A seed that cannot be copied at restart fails the run and
+  // leaves the first attempt intact in its archive.
+  it.each([{ seedSurvives: true }, { seedSurvives: false }])('a seeded run that deepens restarts from its seed (seed survives=$seedSurvives)', async ({ seedSurvives }) => {
+    const root = mkdtempSync(join(tmpdir(), 'atoma-depth-seeded-'));
+    const workspace = join(root, 'workspace');
+    const runs = join(root, 'runs');
+    const seedDir = join(root, 'seed');
+    mkdirSync(seedDir);
+    writeFileSync(join(seedDir, 'corpus.txt'), 'the previous delivery');
+    writeFileSync(join(seedDir, '.atoma-probes.json'), JSON.stringify({ version: 1, entries: [
+      { cmd: 'node corpus-check.js', exitCode: 0 },
+      { cmd: 'Code Review - app.js', result: 'PASS' },
+    ] }));
+    for (const [key, value] of Object.entries({ ...OLLAMA_PINS,
+      ATOMA_DB_PATH: join(root, 'store.db'), ATOMA_SKILLS_DIR: join(root, 'skills'), ATOMA_RUNS_DIR: runs,
+      ATOMA_BUILD_WORKSPACE: workspace, ATOMA_BUILD_TIMEOUT_MS: '60000', ATOMA_CONTAINER: '0',
+      ATOMA_REQUIRE_ISOLATION: '0', ATOMA_PREFILTER_CACHE: '0',
+    })) vi.stubEnv(key, value);
+    resetHostLifecycleSnapshotForTests();
+    const logs: string[] = [];
+    for (const method of ['log', 'warn', 'error'] as const) {
+      vi.spyOn(console, method).mockImplementation((...parts: unknown[]) => logs.push(parts.map(String).join(' ')));
+    }
+    let enteredDeep = false;
+    let deepSawSeed = false;
+    let wroteAbandoned = false;
+    vi.mocked(buildTierClients).mockReturnValue({ ollama: { complete: async (req) => {
+      let reply: unknown;
+      const role = req.role;
+      if (req.actor?.tier === 3 && req.actor.name !== 'run-root' && !enteredDeep) {
+        enteredDeep = true;
+        expect(existsSync(join(workspace, 'abandoned.txt'))).toBe(false);
+        expect(readFileSync(join(workspace, 'corpus.txt'), 'utf8')).toBe('the previous delivery');
+        const manifest = JSON.parse(readFileSync(join(workspace, '.atoma-probes.json'), 'utf8')) as { entries: unknown[] };
+        expect(manifest.entries).toEqual([{ cmd: 'node corpus-check.js', exitCode: 0 }]);
+        deepSawSeed = true;
+      }
+      if (role === 'prefilter') reply = { outcome: 'escalate', reasoning: 'Exercise decomposition' };
+      else if (role === 'validate-plan') reply = { approved: true, reasoning: 'Plan approved' };
+      else if (role === 'validate-result') reply = { approved: false, reasoning: 'Fixture rejects output', scope: 'ephemeral', modifications: {} };
+      else if (role === 'plan' && req.actor?.tier !== 1) reply = [
+        { strategy: 'create', reasoning: 'One phase' },
+        makePlan({ subtasks: [{ description: 'Write index.html', outputs: ['index.html'] }], aggregation: { mode: 'sequential' } }),
+      ];
+      else if (role === 'plan' || role === 'fallback-plan') reply = { reasoning: 'Write the page', proposedAction: 'Write index.html and report it', expectedOutput: 'Page on disk' };
+      else if (role === 'execute' || role === 'fallback-execute') {
+        if (!wroteAbandoned) {
+          wroteAbandoned = true;
+          // The first attempt starts from the seed too.
+          expect(existsSync(join(workspace, 'corpus.txt'))).toBe(true);
+          await req.executor!.execute('write_file', { path: 'abandoned.txt', content: 'attempt one' });
+          if (!seedSurvives) rmSync(seedDir, { recursive: true, force: true });
+        }
+        await req.executor!.execute('write_file', { path: 'index.html', content: '<button>Fixture page</button>' });
+        reply = { output: { files: ['index.html'] }, summary: 'Page written' };
+      } else throw new Error(`Unexpected mock request: ${role}`);
+      return { text: JSON.stringify(reply), stopReason: 'end_turn', usage: { inputTokens: 100, outputTokens: 50 }, servedModel: 'claude-haiku-4-5-20251001' };
+    } } });
+    let handle: Awaited<ReturnType<typeof startTask>> | undefined;
+    try {
+      handle = await startTask(buildProfile, ['--seed', seedDir, '--no-learn-skills', '--no-direct-skills', 'Build index.html']);
+      const settled = await handle.settled;
+      const archive = join(root, 'workspace.prev1');
+      expect(existsSync(join(archive, 'abandoned.txt'))).toBe(true);
+      expect(logs.some((line) => line.startsWith('seed .atoma-probes.json: kept 1 entries, dropped 1 unreplayable'))).toBe(true);
+      if (seedSurvives) {
+        expect(settled).toEqual({ outcome: 'partial' });
+        expect(deepSawSeed).toBe(true);
+        expect(parseRunLog(logs.join('\n'))).toMatchObject({ outcome: 'partial', deepenings: 1 });
+      } else {
+        expect(settled.outcome).toBe('failed');
+        expect(enteredDeep).toBe(false);
+        expect(logs.join('\n')).toMatch(/ENOENT/);
+      }
+    } finally {
+      await handle?.shutdown();
+      closeStoreHandles();
       rmSync(root, { recursive: true, force: true });
     }
   }, 20000);

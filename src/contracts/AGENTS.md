@@ -27,6 +27,15 @@ Neighbours:
   owns entry identity per shape (shell by `cmd`, web by `file`+`smoke`, http =
   ordered append) and documents the three writers' corrupt-input policies side
   by side. Never re-implement a merge in a tool.
+- A SEEDED workspace inherits the manifest as a replay baseline, filtered by
+  `inheritProbeManifest`: an entry `probeEntryProblems` rejects is dropped, one
+  by one (HTTP included — a seeded HTTP list is several runs' appends, not one
+  sequence), and a clean manifest is copied byte for byte. That per-entry
+  function is the one definition of a well-formed entry; `validateProbeManifest`
+  is built on it. Do not stamp provenance into entries: web entries and
+  compiled verifiers rewrite them whole, so a stamp depends on its writers.
+  Attempt-scoped observation is the witness channel
+  ([seed inheritance](../../docs/seed-inheritance-2026-09-25.md)).
 - The browser-probe discriminant has ONE taught literal
   (`WEB_PROBE_DISCRIMINANT`), and both the manifest writer block and the web
   canonical prompt's `output.probes` example are generated from it. Aliases

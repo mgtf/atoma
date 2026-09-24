@@ -135,6 +135,13 @@ Neighbours:
   teardown. An unavailable engine or remaining worker prevents replacement.
 - Design and remaining measurement protocol:
   [depth experiment](../../docs/depth-routing-experiment-2026-09-13.md).
+- `seedWorkspace` is the ONE seed copy, at launch and at the deepening
+  restart: a seeded run's "fresh" state is its seed, not an empty directory.
+  The 2026-09-13 decision to restart empty predates seeded runs being
+  depth-routed (`2102979`); after it, a project run that deepened rebuilt its
+  corpus from nothing and seeded the next run from that. A seed that cannot be
+  copied at restart fails the run with the first attempt in `.prevN`. The copy
+  filters the inherited probe manifest ([src/contracts](../contracts/AGENTS.md)).
 
 - A run has THREE success-side outcomes, not two. `partial` is a run that ended
   with real work and did NOT deliver, for either of TWO typed reasons, and they

@@ -1,7 +1,7 @@
 import { assertProjectRunAuthority } from '../projects/runAuthority.js';
 import { ledgerDbPath, setLedgerScope, type LedgerScope } from '../core/ledger.js';
 import { dirname, resolve } from 'node:path';
-import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { setMaxListeners } from 'node:events';
 import { RunnerConfigError } from '../core/errors.js';
 import { containerImageDigestSchema } from '../contracts/containerImage.js';
@@ -55,6 +55,7 @@ import {
 import { declaredArtifactManifestSchema } from '../contracts/artifactManifest.js';
 import type { Logger, Plan, Result, RunContext, Task } from '../core/types.js';
 import type { TaskProfile } from './profile.js';
+import { describeSeedManifest, seedWorkspace } from './workspace.js';
 
 export const consoleLogger: Logger = {
   debug: (m, meta) => console.debug(m, meta ?? ''),
@@ -799,11 +800,14 @@ export async function startTask(
   profile.prepareWorkspace(workspaceRoot, args.cleanWorkspace);
   // Seed AFTER preparation — prepareWorkspace archives the whole directory, so
   // copying first would archive the fixture along with the previous run.
-  if (seedRoot) {
-    mkdirSync(workspaceRoot, { recursive: true });
-    cpSync(seedRoot, workspaceRoot, { recursive: true });
-    console.log(`workspace seeded from ${seedRoot} (${readdirSync(workspaceRoot).length} entries)`);
-  }
+  const seed = (): void => {
+    if (!seedRoot) return;
+    const report = seedWorkspace(seedRoot, workspaceRoot);
+    console.log(`workspace seeded from ${seedRoot} (${report.entries} entries)`);
+    const manifestLine = describeSeedManifest(report);
+    if (manifestLine) console.log(manifestLine);
+  };
+  seed();
 
   // Local by default; `--container` moves the tool layer into a container
   // with only the workspace mounted and no route out. The swap is possible
@@ -898,6 +902,10 @@ export async function startTask(
           await backend.drain();
           signal.throwIfAborted();
           profile.prepareWorkspace(workspaceRoot, true);
+          // A seeded run restarts from its SEED, not from nothing: see
+          // `seedWorkspace`. A failed copy throws and fails the run, with the
+          // first attempt still intact in its `.prevN` archive.
+          seed();
           const replacement = await makeBackend();
           if (signal.aborted) {
             await replacement.cleanup();

@@ -370,154 +370,234 @@ export function validateProbeManifest(raw: string): string[] {
     );
   }
   entries.forEach((e, i) => {
-    if (!e || typeof e !== 'object' || Array.isArray(e)) {
-      problems.push(`${PROBE_MANIFEST_FILENAME}: entry #${i} is not an object`);
-      return;
-    }
-    const en = e as Record<string, unknown>;
-    if (
-      Object.prototype.hasOwnProperty.call(en, 'probe') &&
-      en['probe'] !== 'http' &&
-      en['probe'] !== WEB_PROBE_DISCRIMINANT
-    ) {
-      problems.push(
-        `entry #${i}: "probe" must be the literal "http" or "web", got ${JSON.stringify(en['probe'])} — scenario labels belong in the smoke/note, not in the discriminator`
-      );
-    }
-    const kind =
-      en['probe'] === 'http'
-        ? 'http'
-        : en['probe'] === 'web'
-          ? 'web'
-          : typeof en['cmd'] === 'string'
-            ? 'shell'
-            : typeof en['path'] === 'string'
-              ? 'http'
-              : typeof en['smoke'] === 'string'
-                ? 'web'
-                : null;
-    if (kind === 'http') {
-      if (typeof en['method'] !== 'string') problems.push(`entry #${i} (http): missing string "method"`);
-      if (typeof en['path'] !== 'string') problems.push(`entry #${i} (http): missing string "path"`);
-      if (typeof en['status'] !== 'number') {
-        problems.push(`entry #${i} (http): missing numeric "status"${renameHint(en, 'status')}`);
-      }
-    } else if (kind === 'web') {
-      if (typeof en['file'] !== 'string') problems.push(`entry #${i} (web): missing string "file"`);
-      if (typeof en['smoke'] !== 'string') problems.push(`entry #${i} (web): missing string "smoke"`);
-      if (
-        typeof en['file'] === 'string' &&
-        /(?:^|\/)(?:test|probe|verify|check|harness)[^/]*\.(?:[cm]?js|ts)$/i.test(en['file'])
-      ) {
-        problems.push(
-          `entry #${i} (web): "file" names a test/probe script (${JSON.stringify(en['file'])}), not the rendered artefact source`
-        );
-      }
-      if (typeof en['smoke'] === 'string') {
-        try {
-          // Parse only; never execute model-authored manifest content.
-          new Script(`(${en['smoke']})`);
-        } catch {
-          problems.push(
-            `entry #${i} (web): "smoke" is not a replayable JavaScript expression`
-          );
-        }
-      }
-      if (!('expected' in en)) {
-        problems.push(
-          `entry #${i} (web): missing JSON-encoded "expected" result — the smoke has no replay comparison target`
-        );
-      }
-      if ('expected' in en && typeof en['expected'] !== 'string') {
-        problems.push(
-          `entry #${i} (web): "expected" must be a JSON-encoded string, got ${typeof en['expected']}`
-        );
-      }
-      const inter = en['interactions'];
-      if (Array.isArray(inter)) {
-        const allowedTypes = new Set([
-          'click',
-          'rightclick',
-          'type',
-          'keydown',
-          'keyup',
-          'keypress',
-        ]);
-        inter.forEach((action, actionIndex) => {
-          if (!action || typeof action !== 'object' || Array.isArray(action)) {
-            problems.push(`entry #${i} (web): interaction #${actionIndex} is not an object`);
-            return;
-          }
-          const a = action as Record<string, unknown>;
-          if (typeof a['type'] !== 'string' || !allowedTypes.has(a['type'])) {
-            problems.push(
-              `entry #${i} (web): interaction #${actionIndex} has unsupported type ${JSON.stringify(a['type'])}`
-            );
-          } else if (
-            (a['type'] === 'click' || a['type'] === 'rightclick') &&
-            typeof a['selector'] !== 'string' &&
-            typeof a['x'] !== 'number' &&
-            typeof a['y'] !== 'number'
-          ) {
-            problems.push(
-              `entry #${i} (web): interaction #${actionIndex} ${a['type']} is missing a selector`
-            );
-          } else if (
-            a['type'] === 'type' &&
-            (typeof a['selector'] !== 'string' || typeof a['text'] !== 'string')
-          ) {
-            problems.push(
-              `entry #${i} (web): interaction #${actionIndex} type requires string selector and text`
-            );
-          } else if (
-            (a['type'] === 'keydown' || a['type'] === 'keyup' || a['type'] === 'keypress') &&
-            typeof a['key'] !== 'string'
-          ) {
-            problems.push(
-              `entry #${i} (web): interaction #${actionIndex} ${a['type']} is missing a key`
-            );
-          }
-        });
-        const coordOnly = inter.filter(
-          (a) =>
-            a &&
-            typeof a === 'object' &&
-            typeof (a as Record<string, unknown>)['selector'] !== 'string' &&
-            (typeof (a as Record<string, unknown>)['x'] === 'number' ||
-              typeof (a as Record<string, unknown>)['y'] === 'number')
-        ).length;
-        if (coordOnly > 0) {
-          problems.push(
-            `entry #${i} (web): ${coordOnly} interaction(s) use pixel coordinates instead of a "selector" — not replayable after a re-render`
-          );
-        }
-      }
-    } else if (kind === 'shell') {
-      if (typeof en['exitCode'] !== 'number') {
-        problems.push(`entry #${i} (shell): missing numeric "exitCode"${renameHint(en, 'exitCode')}`);
-      }
-      // Semantic corruption, same class as pixel-coordinate interactions:
-      // a cmd decorated with an echo of $? records echo's exit code (always
-      // 0) and a stdout no clean replay reproduces. Observed 2026-08-06:
-      // such a manifest phantom-failed two deterministic dispatches and
-      // auto-demoted a 30-success compiled verifier.
-      if (typeof en['cmd'] === 'string' && DECORATED_CMD_RE.test(en['cmd'])) {
-        problems.push(
-          `entry #${i} (shell): cmd ends with an echo of $? — record the bare command; the exit code belongs in "exitCode" (a decorated cmd records echo's exit code and an unreplayable stdout)`
-        );
-      }
-      if (typeof en['stdout'] === 'string' && PORT_BEARING_STDOUT_RE.test(en['stdout'])) {
-        problems.push(
-          `entry #${i} (shell): recorded stdout embeds a run-varying bound port (LISTENING_ON_PORT=…) — record {"cmd","exitCode"} and OMIT stdout for this entry, or every later replay diffs a fresh port against a stale one and fails a healthy artefact`
-        );
-      }
-    } else {
-      problems.push(
-        `entry #${i}: matches no known shape — shell ("cmd" + "exitCode"), http ("method" + "path" + "status") or web ("file" + "smoke")`
-      );
-    }
+    problems.push(...probeEntryProblems(e, i));
   });
   return problems;
+}
+
+/**
+ * The per-entry half of `validateProbeManifest`, exported so the seed copy
+ * (`inheritProbeManifest`) judges an inherited entry by the SAME rules the
+ * health check reports — one definition of a well-formed entry, not two.
+ * `i` only labels the messages.
+ */
+export function probeEntryProblems(e: unknown, i: number): string[] {
+  const problems: string[] = [];
+  if (!e || typeof e !== 'object' || Array.isArray(e)) {
+    problems.push(`${PROBE_MANIFEST_FILENAME}: entry #${i} is not an object`);
+    return problems;
+  }
+  const en = e as Record<string, unknown>;
+  if (
+    Object.prototype.hasOwnProperty.call(en, 'probe') &&
+    en['probe'] !== 'http' &&
+    en['probe'] !== WEB_PROBE_DISCRIMINANT
+  ) {
+    problems.push(
+      `entry #${i}: "probe" must be the literal "http" or "web", got ${JSON.stringify(en['probe'])} — scenario labels belong in the smoke/note, not in the discriminator`
+    );
+  }
+  const kind =
+    en['probe'] === 'http'
+      ? 'http'
+      : en['probe'] === 'web'
+        ? 'web'
+        : typeof en['cmd'] === 'string'
+          ? 'shell'
+          : typeof en['path'] === 'string'
+            ? 'http'
+            : typeof en['smoke'] === 'string'
+              ? 'web'
+              : null;
+  if (kind === 'http') {
+    if (typeof en['method'] !== 'string') problems.push(`entry #${i} (http): missing string "method"`);
+    if (typeof en['path'] !== 'string') problems.push(`entry #${i} (http): missing string "path"`);
+    if (typeof en['status'] !== 'number') {
+      problems.push(`entry #${i} (http): missing numeric "status"${renameHint(en, 'status')}`);
+    }
+  } else if (kind === 'web') {
+    if (typeof en['file'] !== 'string') problems.push(`entry #${i} (web): missing string "file"`);
+    if (typeof en['smoke'] !== 'string') problems.push(`entry #${i} (web): missing string "smoke"`);
+    if (
+      typeof en['file'] === 'string' &&
+      /(?:^|\/)(?:test|probe|verify|check|harness)[^/]*\.(?:[cm]?js|ts)$/i.test(en['file'])
+    ) {
+      problems.push(
+        `entry #${i} (web): "file" names a test/probe script (${JSON.stringify(en['file'])}), not the rendered artefact source`
+      );
+    }
+    if (typeof en['smoke'] === 'string') {
+      try {
+        // Parse only; never execute model-authored manifest content.
+        new Script(`(${en['smoke']})`);
+      } catch {
+        problems.push(
+          `entry #${i} (web): "smoke" is not a replayable JavaScript expression`
+        );
+      }
+    }
+    if (!('expected' in en)) {
+      problems.push(
+        `entry #${i} (web): missing JSON-encoded "expected" result — the smoke has no replay comparison target`
+      );
+    }
+    if ('expected' in en && typeof en['expected'] !== 'string') {
+      problems.push(
+        `entry #${i} (web): "expected" must be a JSON-encoded string, got ${typeof en['expected']}`
+      );
+    }
+    const inter = en['interactions'];
+    if (Array.isArray(inter)) {
+      const allowedTypes = new Set([
+        'click',
+        'rightclick',
+        'type',
+        'keydown',
+        'keyup',
+        'keypress',
+      ]);
+      inter.forEach((action, actionIndex) => {
+        if (!action || typeof action !== 'object' || Array.isArray(action)) {
+          problems.push(`entry #${i} (web): interaction #${actionIndex} is not an object`);
+          return;
+        }
+        const a = action as Record<string, unknown>;
+        if (typeof a['type'] !== 'string' || !allowedTypes.has(a['type'])) {
+          problems.push(
+            `entry #${i} (web): interaction #${actionIndex} has unsupported type ${JSON.stringify(a['type'])}`
+          );
+        } else if (
+          (a['type'] === 'click' || a['type'] === 'rightclick') &&
+          typeof a['selector'] !== 'string' &&
+          typeof a['x'] !== 'number' &&
+          typeof a['y'] !== 'number'
+        ) {
+          problems.push(
+            `entry #${i} (web): interaction #${actionIndex} ${a['type']} is missing a selector`
+          );
+        } else if (
+          a['type'] === 'type' &&
+          (typeof a['selector'] !== 'string' || typeof a['text'] !== 'string')
+        ) {
+          problems.push(
+            `entry #${i} (web): interaction #${actionIndex} type requires string selector and text`
+          );
+        } else if (
+          (a['type'] === 'keydown' || a['type'] === 'keyup' || a['type'] === 'keypress') &&
+          typeof a['key'] !== 'string'
+        ) {
+          problems.push(
+            `entry #${i} (web): interaction #${actionIndex} ${a['type']} is missing a key`
+          );
+        }
+      });
+      const coordOnly = inter.filter(
+        (a) =>
+          a &&
+          typeof a === 'object' &&
+          typeof (a as Record<string, unknown>)['selector'] !== 'string' &&
+          (typeof (a as Record<string, unknown>)['x'] === 'number' ||
+            typeof (a as Record<string, unknown>)['y'] === 'number')
+      ).length;
+      if (coordOnly > 0) {
+        problems.push(
+          `entry #${i} (web): ${coordOnly} interaction(s) use pixel coordinates instead of a "selector" — not replayable after a re-render`
+        );
+      }
+    }
+  } else if (kind === 'shell') {
+    if (typeof en['exitCode'] !== 'number') {
+      problems.push(`entry #${i} (shell): missing numeric "exitCode"${renameHint(en, 'exitCode')}`);
+    }
+    // Semantic corruption, same class as pixel-coordinate interactions:
+    // a cmd decorated with an echo of $? records echo's exit code (always
+    // 0) and a stdout no clean replay reproduces. Observed 2026-08-06:
+    // such a manifest phantom-failed two deterministic dispatches and
+    // auto-demoted a 30-success compiled verifier.
+    if (typeof en['cmd'] === 'string' && DECORATED_CMD_RE.test(en['cmd'])) {
+      problems.push(
+        `entry #${i} (shell): cmd ends with an echo of $? — record the bare command; the exit code belongs in "exitCode" (a decorated cmd records echo's exit code and an unreplayable stdout)`
+      );
+    }
+    if (typeof en['stdout'] === 'string' && PORT_BEARING_STDOUT_RE.test(en['stdout'])) {
+      problems.push(
+        `entry #${i} (shell): recorded stdout embeds a run-varying bound port (LISTENING_ON_PORT=…) — record {"cmd","exitCode"} and OMIT stdout for this entry, or every later replay diffs a fresh port against a stale one and fails a healthy artefact`
+      );
+    }
+  } else {
+    problems.push(
+      `entry #${i}: matches no known shape — shell ("cmd" + "exitCode"), http ("method" + "path" + "status") or web ("file" + "smoke")`
+    );
+  }
+  return problems;
+}
+
+/** What `inheritProbeManifest` did to a seed's manifest. */
+export interface InheritedProbeManifest {
+  /**
+   * The manifest the seeded workspace should carry: the input BYTES when
+   * nothing was dropped, a rewritten document when some entries were, and
+   * `null` when nothing replayable is left (the file must not exist).
+   */
+  readonly text: string | null;
+  readonly kept: number;
+  readonly dropped: number;
+  /** The first problems of the dropped entries, for the launch log. */
+  readonly problems: readonly string[];
+  /** The document itself did not parse as a version-1 manifest. */
+  readonly unreadable: boolean;
+}
+
+/**
+ * The seed-copy transform: a run seeded from an earlier workspace inherits
+ * that workspace's manifest as a REPLAY BASELINE (compiled verification and
+ * the preview classifier read it), minus every entry `probeEntryProblems`
+ * rejects.
+ *
+ * Why at the seed: an unreplayable entry is evidence for no reader, yet the
+ * health check reports it as MALFORMED on every later run of the project —
+ * measured on run `d677d824` (2026-09-24), refused at root acceptance over six
+ * prose entries a run wrote on 2026-08-23, four runs earlier, before
+ * `write_file` refused manifest edits. The SOURCE workspace keeps its bytes;
+ * this only decides what the new run starts with.
+ *
+ * Entries are judged ONE BY ONE, HTTP included: a seeded HTTP list is the
+ * concatenation of several runs' appends, and replay already skips an entry
+ * whose shape it does not recognise, so dropping only the malformed one
+ * changes nothing a replayer would have done.
+ */
+export function inheritProbeManifest(raw: string): InheritedProbeManifest {
+  const none = (unreadable: boolean): InheritedProbeManifest => ({
+    text: null, kept: 0, dropped: 0, problems: [], unreadable,
+  });
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return none(true);
+  }
+  if (!isPlainRecord(parsed) || parsed['version'] !== 1 || !Array.isArray(parsed['entries'])) {
+    return none(true);
+  }
+  const entries = parsed['entries'] as unknown[];
+  const kept: unknown[] = [];
+  const problems: string[] = [];
+  entries.forEach((entry, i) => {
+    const found = probeEntryProblems(entry, i);
+    if (found.length === 0) kept.push(entry);
+    else problems.push(...found);
+  });
+  const dropped = entries.length - kept.length;
+  if (kept.length === 0) {
+    return { text: null, kept: 0, dropped, problems: problems.slice(0, 4), unreadable: false };
+  }
+  return {
+    text: dropped === 0 ? raw : `${JSON.stringify({ ...parsed, version: 1, entries: kept }, null, 2)}\n`,
+    kept: kept.length,
+    dropped,
+    problems: problems.slice(0, 4),
+    unreadable: false,
+  };
 }
 
 /* ────────────────── prompt-block generation ────────────────── */
