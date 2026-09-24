@@ -456,6 +456,7 @@ The frozen record contains the full dated reasoning behind these rules:
 - [the production catalogue, measured — 2026-09-16](docs/incidents/registry-catalogue-2026-09-16.md)
 - [run → fix → run on the local corpus: same goals, $0.25 deliveries, every publication blocked by GitHub configuration — 2026-09-24](docs/incidents/run-fix-loop-2026-09-24.md)
 - [what a seeded run inherits: the probe manifest and the deepening restart — 2026-09-25](docs/seed-inheritance-2026-09-25.md)
+- [the acceptance checklist: a run says what it will prove — 2026-09-25](docs/acceptance-checklist-2026-09-25.md)
 - [external code review](docs/code-review-2026-08-14.md)
 - [code review 2026-08-18](docs/code-review-2026-08-18.md)
 - [supervisor-held proof attestation (A1) design review 2026-08-22](docs/supervisor-attestation-a1-review-2026-08-22.md)

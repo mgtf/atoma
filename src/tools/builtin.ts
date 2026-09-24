@@ -1175,11 +1175,29 @@ export function fetchUrlTool(opts: BuiltinToolOptions): BuiltinTool {
         res.headers.forEach((value, key) => {
           respHeaders[key] = value;
         });
+        // WHICH SERVER ANSWERED, when it is one this tool set started and
+        // whose process still holds the port — the kernel is asked, not the
+        // registry alone. It is what lets the host attribute an HTTP
+        // observation to THIS run's server (the acceptance checklist,
+        // docs/acceptance-checklist-2026-09-25.md): an explicit unregistered
+        // port stays probeable, but is nobody's evidence. A redirected
+        // response is not an observation of the requested route.
+        let servedBy: { kind: 'static' | 'node'; entry?: string } | undefined;
+        try {
+          const target = new URL(url);
+          if (LOOPBACK_HOSTNAMES.has(target.hostname) && target.port && !res.redirected) {
+            const origin = await servedOriginHoldsPort(opts.servedOrigins, Number(target.port));
+            if (origin) servedBy = { kind: origin.kind, ...(origin.entry ? { entry: origin.entry } : {}) };
+          }
+        } catch {
+          servedBy = undefined;
+        }
         const result = {
           ok: res.ok,
           status: res.status,
           headers: respHeaders,
           body: text,
+          ...(servedBy ? { servedBy } : {}),
         };
         if (args['record'] === true) {
           const parsedUrl = new URL(url);

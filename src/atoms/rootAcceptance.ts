@@ -8,6 +8,25 @@ import { buildResultGateEnv, renderResultGateFindings, runResultGates } from './
 import { checkGroundTruth } from './groundTruth.js';
 import { llmVerdict } from './verdict.js';
 import { LANDED_RESULT_GUIDANCE } from './prompts.js';
+import {
+  coverAcceptanceChecklist,
+  renderChecklistCoverage,
+  type AcceptanceChecklist,
+  type ChecklistCoverage,
+} from '../contracts/acceptanceChecklist.js';
+
+/**
+ * Cover the checklist from the attempt's HTTP observations, taken BEFORE the
+ * acceptor's own ground-truth probe runs: that probe fetches through the same
+ * attesting executor, and the root must not cover a behaviour by looking.
+ */
+function checklistCoverage(ctx: RunContext, checklist: AcceptanceChecklist): ChecklistCoverage[] {
+  const observations = (ctx.attestations?.forAttempt(ctx.attempt ?? 1) ?? []).flatMap((record) =>
+    record.observation.kind === 'execution' && record.observation.http
+      ? [{ eventId: record.eventId, http: record.observation.http }]
+      : []);
+  return coverAcceptanceChecklist(checklist, observations);
+}
 
 /** Root proof is stricter than phase proof: no binding or unreadable bytes never cover. */
 export async function rootProofCoverage(ctx: RunContext, floor: ProofFloor): Promise<AcceptanceInfo['floorCoverage']> {
@@ -39,8 +58,13 @@ export async function rootProofCoverage(ctx: RunContext, floor: ProofFloor): Pro
 export async function acceptRootResult(args: {
   actor: Atom; task: Task; result: Result; ctx: RunContext; floor: ProofFloor;
   phaseCoverage: readonly PhaseCoverageRecord[];
+  checklist?: AcceptanceChecklist;
 }): Promise<AcceptanceInfo> {
   const { actor, task, result, ctx, floor } = args;
+  const checklist = args.checklist ?? [];
+  const coverage = checklistCoverage(ctx, checklist);
+  const checklistBlock = renderChecklistCoverage(checklist, coverage,
+    { landed: Boolean(result.unfinishedPhases?.length) });
   const gates = await runResultGates(buildResultGateEnv({ task, result, ctx,
     childName: actor.name, childToolNames: actor.toolNames() }), ctx.mechanicalResultRejections, 'delegated');
   const probe = await checkGroundTruth({ ctx, subject: 'RESULT',
@@ -58,7 +82,8 @@ export async function acceptRootResult(args: {
       ...(result.evidence ? { evidence: result.evidence } : {}),
       groundTruthBlock: probe.block,
       mechanicalFindingsBlock: renderResultGateFindings(gates.reviewFindings),
-      proofCoverageBlock: 'ROOT DELIVERY PROOF (no effect on phase credits):\n' + JSON.stringify(floorCoverage),
+      proofCoverageBlock: 'ROOT DELIVERY PROOF (no effect on phase credits):\n' + JSON.stringify(floorCoverage) +
+        (checklistBlock ? `\n\n${checklistBlock}` : ''),
       // A landed run always reaches here through a validation call, because it
       // stopped before it could prove the floor. Saying what a landing IS costs
       // one block and decides whether the phases it did complete survive.
@@ -74,6 +99,7 @@ export async function acceptRootResult(args: {
       .map((finding) => ({ id: finding.gateId, disposition: finding.disposition })),
     probe: { requiresReview: probe.requiresReview, contradiction: probe.contradiction },
     floorCoverage, phaseCoverage: [...args.phaseCoverage],
+    ...(coverage.length > 0 ? { checklist: coverage } : {}),
     basis: review && !gates.rejection ? 'validation-call' : 'mechanical',
   };
 }

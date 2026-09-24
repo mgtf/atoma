@@ -807,6 +807,7 @@
   "now.doing.validateResult": "{{actor}} is checking what {{child}} produced.",
   "now.doing.fallback": "{{actor}} took over and is doing the work itself (fallback).",
   "now.doing.skill": "A skill recipe is being distilled, compiled or revised (supervisor-tier call).",
+  "now.doing.draftChecklist": "The run is listing, from the goal, the behaviours its delivery must show.",
   "now.doing.unknown": "{{actor}} has a call in flight.",
   "now.activity_one": "{{count}} element call so far · last: {{tool}} ({{ago}}s ago)",
   "now.activity_other": "{{count}} element calls so far · last: {{tool}} ({{ago}}s ago)",

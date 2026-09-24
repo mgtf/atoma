@@ -334,6 +334,8 @@ export function nowDescription(t: GpuTranslate, event: VizEvent): string {
       return t('now.doing.fallback', vars);
     case 'skill':
       return t('now.doing.skill', vars);
+    case 'draft-checklist':
+      return t('now.doing.draftChecklist', vars);
     default:
       return t('now.doing.unknown', vars);
   }

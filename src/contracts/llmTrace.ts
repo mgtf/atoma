@@ -21,6 +21,8 @@ export const LLM_CALL_ROLES = [
   'validate-result',
   'fallback-plan',
   'fallback-execute',
+  /** The run's acceptance checklist, drafted once before planning. */
+  'draft-checklist',
 ] as const;
 
 export type LlmCallRole = (typeof LLM_CALL_ROLES)[number];

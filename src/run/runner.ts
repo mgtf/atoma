@@ -56,6 +56,7 @@ import { declaredArtifactManifestSchema } from '../contracts/artifactManifest.js
 import type { Logger, Plan, Result, RunContext, Task } from '../core/types.js';
 import type { TaskProfile } from './profile.js';
 import { describeSeedManifest, seedWorkspace } from './workspace.js';
+import { draftAcceptanceChecklist } from '../atoms/acceptanceChecklist.js';
 
 export const consoleLogger: Logger = {
   debug: (m, meta) => console.debug(m, meta ?? ''),
@@ -879,7 +880,10 @@ export async function startTask(
 
     if (args.depth) {
       const experiment = profile.depthExperiment!;
-      handle = (t, c) => runDepthTask({
+      // The acceptance checklist is drafted ONCE, here, before the attempt
+      // loop: a deepening keeps it (docs/acceptance-checklist-2026-09-25.md).
+      handle = async (t, c) => runDepthTask({
+        checklist: await draftAcceptanceChecklist(c, t.description),
         mode: args.depth!, task: t, ctx: c, floor: t.proofFloor!,
         createExecutor: (mode) => {
           const currentSeed = { ...seedCtx, toolDecls: backend.toolDecls };

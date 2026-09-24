@@ -63,6 +63,12 @@ Neighbours:
 - HTTP, shell, file-read and server-start observations are bounded historical
   evidence in the same attestation log. They do not establish DOM interaction
   or introduce automatic approval, and their scripts/content remain untrusted.
+- A `fetch_url` observation carries a structured `http` `{method, path,
+  status}` ONLY when the tool reported `servedBy`: the port belongs to a
+  server this tool set started and its process holds it, and the response was
+  not redirected. That is the only input the acceptance checklist
+  (`acceptanceChecklist.ts`) covers from; it is a projection over this log,
+  not an obligation.
 - The obligation vocabulary is CLOSED and has one member. Adding a second is a
   design review with its own evidence, not a schema edit.
 - A `validate_html` PRE-FLIGHT refusal is a statement about the request, not

@@ -132,12 +132,36 @@ export function isPreflightRefusal(raw: unknown): boolean {
   );
 }
 
+/**
+ * The structured half of a `fetch_url` observation, present ONLY when the
+ * tool reported that a server this tool set started answered on that port
+ * (`servedBy`), without a redirect. Same three fields as a manifest HTTP
+ * entry. It is what the acceptance checklist is a projection over.
+ */
+export const httpObservationSchema = z.object({
+  method: z.string(),
+  path: z.string(),
+  status: z.number().int(),
+});
+
 /** Bounded historical execution evidence, not a new proof obligation. */
 export const executionObservationSchema = z.object({
   kind: z.literal('execution'),
   request: z.string(),
   response: z.string(),
+  http: httpObservationSchema.optional(),
 });
+
+function servedHttpObservation(args: Record<string, unknown>, raw: unknown): z.infer<typeof httpObservationSchema> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const r = raw as Record<string, unknown>;
+  if (!r['servedBy'] || typeof r['servedBy'] !== 'object' || typeof r['status'] !== 'number') return undefined;
+  if (typeof args['url'] !== 'string') return undefined;
+  let url: URL;
+  try { url = new URL(args['url']); } catch { return undefined; }
+  const method = typeof args['method'] === 'string' ? args['method'].toUpperCase() : 'GET';
+  return { method, path: `${url.pathname}${url.search}` || '/', status: r['status'] };
+}
 export type ToolObservation = BrowserObservation | z.infer<typeof executionObservationSchema>;
 
 /** Preserve request/result association and mark every omitted byte explicitly. */
@@ -150,8 +174,9 @@ function evidenceExcerpt(value: unknown, limit: number): string {
 
 export function parseExecutionObservation(tool: string, args: Record<string, unknown>, raw: unknown): ToolObservation | null {
   if (!['fetch_url', 'run_shell', 'read_file', 'start_node_server'].includes(tool)) return null;
+  const http = tool === 'fetch_url' ? servedHttpObservation(args, raw) : undefined;
   return executionObservationSchema.parse({ kind: 'execution',
-    request: evidenceExcerpt(args, 800), response: evidenceExcerpt(raw, 1600) });
+    request: evidenceExcerpt(args, 800), response: evidenceExcerpt(raw, 1600), ...(http ? { http } : {}) });
 }
 
 /**

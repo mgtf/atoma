@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { PROOF_OBLIGATIONS } from './attestation.js';
+import { checklistCoverageSchema } from './acceptanceChecklist.js';
 
 /** Runtime-owned experiment inputs and evidence. Never parsed from model prose. */
 export const depthModeSchema = z.enum(['deep', 'short']);
@@ -36,6 +37,8 @@ export const acceptanceSchema = z.object({
     status: z.enum(['covered', 'uncovered']), observationRefs: z.array(z.string()),
   })),
   phaseCoverage: z.array(phaseCoverageSchema),
+  /** The run's acceptance checklist, covered from this attempt (docs/acceptance-checklist-2026-09-25.md). */
+  checklist: z.array(checklistCoverageSchema).optional(),
   basis: z.enum(['mechanical', 'validation-call']),
 });
 export type AcceptanceInfo = z.infer<typeof acceptanceSchema>;

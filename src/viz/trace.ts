@@ -34,6 +34,7 @@ export interface VizLlmEvent {
     | 'skill'
     | 'fallback-plan'
     | 'fallback-execute'
+    | 'draft-checklist'
     | 'unknown';
   model: string;
   /**

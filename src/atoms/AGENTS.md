@@ -64,6 +64,16 @@ Neighbours:
   to both judges. A phase supervisor never receives it — landing is a property
   of the whole run.
 
+- THE ACCEPTANCE CHECKLIST ([design](../../docs/acceptance-checklist-2026-09-25.md))
+  is drafted once per depth-routed run by `draftAcceptanceChecklist`
+  (cheapest tier, role `draft-checklist`, actor `run-checklist`), reaches the
+  root planner through `inputs.acceptanceChecklist`, and is covered at the
+  root from attempt-scoped host `http` observations taken BEFORE the root's
+  own probe. It informs the validation call and decides nothing: a
+  model-drafted list may only add what the acceptor looks for. Rendered only
+  when it holds an http item; a landed result is told NOT OBSERVED is
+  expected for its unfinished phases.
+
 ## Planning, prefilter, and trust
 
 Read this section before changing any LLM call site here; the cost rules are

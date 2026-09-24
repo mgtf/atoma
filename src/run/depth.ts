@@ -6,6 +6,7 @@ import { landingSignal } from '../atoms/cost.js';
 import { acceptRootResult } from '../atoms/rootAcceptance.js';
 import { outOfPhaseBudget } from '../core/limits.js';
 import type { AcceptanceInfo, DepthMode, PhaseCoverageRecord, ProofFloor, TopologyInfo } from '../contracts/depthRouting.js';
+import { checklistPlanningLines, type AcceptanceChecklist } from '../contracts/acceptanceChecklist.js';
 
 export class DeepeningSignal extends Error {
   constructor() { super('Entry cell exhausted supervision; deepen once.'); this.name = 'DeepeningSignal'; }
@@ -66,6 +67,28 @@ export function remediationTask(task: Task, acceptance: AcceptanceInfo): Task {
   };
 }
 
+/**
+ * The root task with the run's acceptance checklist in its `inputs` — the
+ * channel `rootAcceptanceRefusal` uses, never the description, which planning
+ * and skill matching key on. The note says what the list is for, because
+ * planners receive `inputs` as raw JSON with no other guidance.
+ */
+export function withAcceptanceChecklist(task: Task, checklist: AcceptanceChecklist): Task {
+  if (checklist.length === 0) return task;
+  return {
+    ...task,
+    inputs: {
+      ...(task.inputs ?? {}),
+      acceptanceChecklist: {
+        note: 'Drafted from the goal: the root acceptor will look for evidence of each behaviour. Plan work that ' +
+          'exercises every HTTP item with fetch_url against the server this run starts; it adds no requirement ' +
+          'the goal did not state.',
+        items: checklistPlanningLines(checklist),
+      },
+    },
+  };
+}
+
 /** The finalization ceiling also bounds a collaborator that ignores abort. */
 async function withinSignal<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   let abort: () => void = () => {};
@@ -85,8 +108,11 @@ export async function runDepthTask(args: {
   restart: () => Promise<ToolExecutor>;
   onTopology: (info: TopologyInfo) => void;
   onAcceptance: (info: AcceptanceInfo) => void;
+  /** Drafted once by the caller, before the attempt loop; a deepening keeps it. */
+  checklist?: AcceptanceChecklist;
 }): Promise<Result> {
-  const { ctx, task } = args;
+  const { ctx } = args;
+  const task = withAcceptanceChecklist(args.task, args.checklist ?? []);
   const attestations = (ctx.attestations ??= createAttestationLog());
   const phaseCoverage: PhaseCoverageRecord[] = [];
   let tools = ctx.tools;
@@ -157,7 +183,7 @@ export async function runDepthTask(args: {
         let acceptance: AcceptanceInfo;
         try {
           acceptance = await withinSignal(acceptRootResult({ actor, task: currentTask, result, ctx: acceptanceCtx,
-            floor: args.floor, phaseCoverage }), acceptanceCtx.signal);
+            floor: args.floor, phaseCoverage, ...(args.checklist ? { checklist: args.checklist } : {}) }), acceptanceCtx.signal);
           acceptanceCtx.signal.throwIfAborted();
         } catch (error) {
           cancellation.signal.throwIfAborted();

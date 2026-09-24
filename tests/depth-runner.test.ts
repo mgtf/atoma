@@ -227,7 +227,11 @@ describe('runner supervision depth, concrete L3/L2/L1 and real backend', () => {
       expect(trace.events.filter((event) => event.kind === 'acceptance')).toMatchObject([
         { approved: false, attempt: 2, executor: { tier: 3, viaFallback: true }, basis: 'validation-call' },
       ]);
-      expect(trace.events.filter((event) => event.kind === 'llm').every((event) => event.attempt === 1 || event.attempt === 2)).toBe(true);
+      // Every call belongs to an attempt, except the acceptance checklist's
+      // draft: it is made ONCE before the attempt loop so a deepening keeps it.
+      expect(trace.events.filter((event) => event.kind === 'llm' && event.actor?.name !== 'run-checklist')
+        .every((event) => event.attempt === 1 || event.attempt === 2)).toBe(true);
+      expect(trace.events.filter((event) => event.kind === 'llm' && event.role === 'draft-checklist')).toHaveLength(1);
       expect(provedFreshBackend).toBe(true);
       expect(calls.some((req) => req.role === 'fallback-execute' && req.actor?.tier === 2)).toBe(true);
       expect(calls.filter((req) => req.actor?.name === 'run-root')).toHaveLength(1);
@@ -240,6 +244,80 @@ describe('runner supervision depth, concrete L3/L2/L1 and real backend', () => {
     } finally {
       await handle?.shutdown();
       forceKillTestProcessTree(serverPid);
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 20000);
+
+  // docs/acceptance-checklist-2026-09-25.md. The checklist is drafted once,
+  // reaches the planner through the root task's inputs, and is covered at the
+  // root from the HOST's observation of a request to the server this run
+  // started — the real tools, the real attesting executor, only the LLM mocked.
+  it.skipIf(process.platform === 'win32')('drafts the acceptance checklist, hands it to the planner and covers it from host observations', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'atoma-depth-checklist-'));
+    const runs = join(root, 'runs');
+    for (const [key, value] of Object.entries({ ...OLLAMA_PINS,
+      ATOMA_DB_PATH: join(root, 'store.db'), ATOMA_SKILLS_DIR: join(root, 'skills'), ATOMA_RUNS_DIR: runs,
+      ATOMA_BUILD_WORKSPACE: join(root, 'workspace'), ATOMA_BUILD_TIMEOUT_MS: '60000', ATOMA_CONTAINER: '0',
+      ATOMA_REQUIRE_ISOLATION: '0', ATOMA_PREFILTER_CACHE: '0',
+    })) vi.stubEnv(key, value);
+    resetHostLifecycleSnapshotForTests();
+    for (const method of ['log', 'warn', 'error'] as const) vi.spyOn(console, method).mockImplementation(() => {});
+    const calls: LlmCompletionRequest[] = [];
+    let serverPid: number | undefined;
+    let leafName = '';
+    const perform = async (req: LlmCompletionRequest, name: string, args: Record<string, unknown>) => {
+      const startedAt = Date.now();
+      const value = await req.executor!.execute(name, args);
+      req.onToolInvocation?.({ name, args, result: value, startedAt, durationMs: Date.now() - startedAt });
+      return value;
+    };
+    vi.mocked(buildTierClients).mockReturnValue({ ollama: { complete: async (req) => {
+      calls.push(req);
+      let reply: unknown;
+      if (req.role === 'draft-checklist') reply = { items: [
+        { behaviour: 'lists notes', check: { kind: 'http', method: 'GET', path: '/api/notes' } },
+        { behaviour: 'unknown note is 404', check: { kind: 'http', method: 'GET', path: '/api/notes/:id', status: 404 } },
+      ] };
+      else if (req.role === 'prefilter') reply = { kind: 'reuse', target: leafName, confidence: 'high', reasoning: 'Reuse the canonical executor' };
+      else if (req.role === 'validate-plan') reply = { approved: true, reasoning: 'Plan approved' };
+      else if (req.role === 'validate-result') reply = { approved: true, reasoning: 'Accepted' };
+      else if (req.role === 'plan' && req.actor?.tier !== 1) reply = [
+        { strategy: 'reuse', target: leafName, reasoning: 'One server phase' },
+        makePlan({ subtasks: [{ description: 'Write and probe server.cjs', outputs: ['server.cjs'] }], aggregation: { mode: 'sequential' } }),
+      ];
+      else if (req.role === 'plan') reply = { reasoning: 'Write the server', proposedAction: 'Write server.cjs, start it, probe it', expectedOutput: 'Server answering' };
+      else if (req.role === 'execute') {
+        await perform(req, 'write_file', { path: 'server.cjs', content: "const http=require('node:http');const s=http.createServer((q,r)=>{r.statusCode=q.url==='/api/notes'?200:404;r.end('[]')});s.listen(0,'127.0.0.1',()=>console.log('LISTENING_ON_PORT='+s.address().port));" });
+        const started = await perform(req, 'start_node_server', { entry: 'server.cjs' }) as { pid: number; url: string };
+        serverPid = started.pid;
+        await perform(req, 'fetch_url', { url: `${started.url}api/notes` });
+        reply = { output: { files: ['server.cjs'] }, summary: 'Server written and probed' };
+      } else throw new Error(`Unexpected request: ${req.role}`);
+      return { text: JSON.stringify(reply), stopReason: 'end_turn', usage: { inputTokens: 10, outputTokens: 10 } };
+    } } });
+    let handle: Awaited<ReturnType<typeof startTask>> | undefined;
+    try {
+      handle = await startTask({ ...buildProfile, seedCatalog(seed) {
+        buildProfile.seedCatalog(seed);
+        leafName = ensureCanonicalFullStack(seed.registry, seed.toolDecls, 1)!.name;
+      } }, ['--clean-workspace', '--no-learn-skills', '--no-direct-skills', 'Node API: GET /api/notes lists notes; GET /api/notes/:id is 404 when unknown']);
+      expect(await handle.settled).toEqual({ outcome: 'delivered' });
+      expect(calls.filter((req) => req.role === 'draft-checklist')).toHaveLength(1);
+      // The high-confidence reuse shortcut makes no L2 plan call and forwards
+      // the root inputs to the molecule, so the molecule's own plan sees it.
+      expect(calls.filter((req) => req.role === 'plan').map((req) => req.userContent).join('\n'))
+        .toContain('c2: unknown note is 404 (GET /api/notes/:id → 404)');
+      const rootVerdict = calls.find((req) => req.actor?.name === 'run-root')!;
+      expect(rootVerdict.userContent).toContain('- [OBSERVED] c1 lists notes (GET /api/notes → 2xx)');
+      expect(rootVerdict.userContent).toContain('- [NOT OBSERVED] c2 unknown note is 404 (GET /api/notes/:id → 404)');
+      const path = readdirSync(runs).find((name) => name.endsWith('.json') && name !== 'index.json')!;
+      const trace = JSON.parse(readFileSync(join(runs, path), 'utf8')) as VizRun;
+      const acceptance = trace.events.find((event) => event.kind === 'acceptance') as { checklist?: Array<{ id: string; status: string }> };
+      expect(acceptance.checklist?.map((item) => [item.id, item.status])).toEqual([['c1', 'covered'], ['c2', 'uncovered']]);
+    } finally {
+      await handle?.shutdown();
+      forceKillTestProcessTree(serverPid);
+      closeStoreHandles();
       rmSync(root, { recursive: true, force: true });
     }
   }, 20000);
