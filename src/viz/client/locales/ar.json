@@ -293,7 +293,7 @@
   "projects.startRun": "بدء run",
   "projects.startRunOn": "بدء run على {{name}}",
   "projects.actionsHint.new": "سمِّ المشروع أولًا. سيكون لكل run موجّه خاص بها بعد ذلك.",
-  "projects.actionsHint.ready": "",
+  "projects.actionsHint.ready": "يستأنف أحدث عمل مُسلَّم أو جزئي لـ {{name}}، عند توفره.",
   "projects.name": "اسم المشروع",
   "projects.prompt": "موجّه run",
   "projects.promptPlaceholder": "ما الذي ينبغي أن تنشئه أو تغيّره هذه run؟",
@@ -803,7 +803,7 @@
   "docs.user.quick.rule.body": "استخدم run واحدًا لنتيجة واحدة يمكن للمراجع قبولها أو رفضها. اطلب التغيير التالي في run للمتابعة؛ إذ يحتفظ المشروع بحالة العمل وسجل الأدلة معًا.",
   "docs.user.projects.eyebrow": "تصميم مسار العمل",
   "docs.user.projects.title": "امنح كل مسار عمل موطنًا دائمًا",
-  "docs.user.projects.lede": "",
+  "docs.user.projects.lede": "ينتمي المشروع إلى المؤسسة النشطة، ويستهدف مستودعًا واحدًا على GitHub، ويجمع كل عملية run نُفّذت ضمن مسار العمل هذا. تستأنف عمليات run اللاحقة أحدث مساحة عمل مُسلَّمة أو جزئية. أما المشاريع المستوردة من GitHub فتبدأ بدلًا من ذلك من الفرع الافتراضي الحالي؛ ولا يُعاد استخدام التغييرات الجزئية غير المنشورة.",
   "docs.user.projects.anatomy.title": "ما الذي يجمعه المشروع معًا",
   "docs.user.projects.anatomy.stream.tag": "مسار العمل",
   "docs.user.projects.anatomy.stream.title": "سياق تسليم مشترك واحد",
@@ -1160,5 +1160,6 @@
   "detail.llmStart.completedExplain": "وصلت الاستجابة. يتضمن حدث الاستدعاء المقترن المطالبة والإجابة والاستخدام.",
   "detail.llmStart.interruptedExplain": "انتهى run قبل أن يعود هذا الاستدعاء. لا توجد له استجابة ولا بيانات استخدام ولا إيصال.",
   "detail.llmStart.elements": "العناصر المستدعاة في هذا الاستدعاء",
-  "detail.llmStart.identifiers": "المعرّفات"
+  "detail.llmStart.identifiers": "المعرّفات",
+  "projects.actionsHint.readyImported": "يبدأ من الفرع الافتراضي في GitHub. لا يُعاد استخدام التغييرات الجزئية."
 }

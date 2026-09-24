@@ -293,7 +293,7 @@
   "projects.startRun": "run শুরু করুন",
   "projects.startRunOn": "{{name}}-এ run শুরু করুন",
   "projects.actionsHint.new": "প্রথমে প্রজেক্টের নাম দিন। এরপর প্রতিটি run-এর নিজস্ব প্রম্পট থাকবে।",
-  "projects.actionsHint.ready": "",
+  "projects.actionsHint.ready": "উপলভ্য থাকলে {{name}}-এর সর্বশেষ সরবরাহ করা বা আংশিক কাজ থেকে আবার শুরু করে।",
   "projects.name": "প্রজেক্টের নাম",
   "projects.prompt": "Run প্রম্পট",
   "projects.promptPlaceholder": "এই run কী তৈরি বা পরিবর্তন করবে?",
@@ -803,7 +803,7 @@
   "docs.user.quick.rule.body": "একজন পর্যালোচক গ্রহণ বা প্রত্যাখ্যান করতে পারেন—এমন একটি ফলাফলের জন্য একটি run ব্যবহার করুন। পরবর্তী পরিবর্তনটি ফলো-আপ run-এ চান; প্রকল্পটি কাজের অবস্থা ও প্রমাণের ইতিহাস একসঙ্গে সংরক্ষণ করে।",
   "docs.user.projects.eyebrow": "কর্মধারা নকশা",
   "docs.user.projects.title": "প্রতিটি কর্মধারাকে একটি স্থায়ী ঠিকানা দিন",
-  "docs.user.projects.lede": "",
+  "docs.user.projects.lede": "একটি project সক্রিয় organisation-এর অন্তর্গত, একটি GitHub repository-কে লক্ষ্য করে এবং সেই workstream-এর জন্য করা প্রতিটি run-কে একত্রে রাখে। পরবর্তী run-গুলো সর্বশেষ সরবরাহ করা বা আংশিক workspace থেকে আবার শুরু হয়। তবে GitHub থেকে import করা project বর্তমান default branch থেকে শুরু হয়; প্রকাশ না করা আংশিক পরিবর্তন পুনরায় ব্যবহার করা হয় না।",
   "docs.user.projects.anatomy.title": "একটি প্রকল্প যা কিছু একসঙ্গে রাখে",
   "docs.user.projects.anatomy.stream.tag": "কর্মধারা",
   "docs.user.projects.anatomy.stream.title": "একটি অভিন্ন ডেলিভারি প্রেক্ষাপট",
@@ -1160,5 +1160,6 @@
   "detail.llmStart.completedExplain": "প্রতিক্রিয়াটি ফিরে এসেছে। জোড়া কল ইভেন্টে প্রম্পট, উত্তর এবং ব্যবহারসংক্রান্ত তথ্য রয়েছে।",
   "detail.llmStart.interruptedExplain": "এই কলটি ফেরার আগেই run শেষ হয়েছে। এর জন্য কোনো প্রতিক্রিয়া, ব্যবহারসংক্রান্ত তথ্য বা রসিদ নেই।",
   "detail.llmStart.elements": "এই কলে আহ্বান করা এলিমেন্টসমূহ",
-  "detail.llmStart.identifiers": "শনাক্তকারী"
+  "detail.llmStart.identifiers": "শনাক্তকারী",
+  "projects.actionsHint.readyImported": "GitHub-এর default branch থেকে শুরু করে। আংশিক পরিবর্তন পুনরায় ব্যবহার করা হয় না।"
 }

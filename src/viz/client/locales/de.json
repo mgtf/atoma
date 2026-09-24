@@ -293,7 +293,7 @@
   "projects.startRun": "Run starten",
   "projects.startRunOn": "Run auf {{name}} starten",
   "projects.actionsHint.new": "Benennen Sie zuerst das Projekt. Anschließend erhält jeder Run einen eigenen Prompt.",
-  "projects.actionsHint.ready": "",
+  "projects.actionsHint.ready": "Setzt die zuletzt ausgelieferte oder unvollständige Arbeit von {{name}} fort, sofern vorhanden.",
   "projects.name": "Projektname",
   "projects.prompt": "Run-Prompt",
   "projects.promptPlaceholder": "Was soll dieser Run erstellen oder ändern?",
@@ -803,7 +803,7 @@
   "docs.user.quick.rule.body": "Verwenden Sie einen run für ein Ergebnis, das ein Prüfer annehmen oder ablehnen kann. Fordern Sie die nächste Änderung in einem Folge-run an; das Projekt hält sowohl den Arbeitsstand als auch den Nachweisverlauf zusammen.",
   "docs.user.projects.eyebrow": "ARBEITSBEREICHE GESTALTEN",
   "docs.user.projects.title": "Jedem Arbeitsbereich ein dauerhaftes Zuhause geben",
-  "docs.user.projects.lede": "",
+  "docs.user.projects.lede": "Ein Projekt gehört zur aktiven Organisation, ist auf ein GitHub-Repository ausgerichtet und bündelt alle Runs in diesem Arbeitsstrang. Spätere Runs setzen den zuletzt ausgelieferten oder unvollständigen Arbeitsbereich fort. Aus GitHub importierte Projekte starten stattdessen vom aktuellen Standard-Branch; unveröffentlichte unvollständige Änderungen werden nicht wiederverwendet.",
   "docs.user.projects.anatomy.title": "Was ein Projekt zusammenhält",
   "docs.user.projects.anatomy.stream.tag": "ARBEITSBEREICH",
   "docs.user.projects.anatomy.stream.title": "Ein gemeinsamer Auslieferungskontext",
@@ -1160,5 +1160,6 @@
   "detail.llmStart.completedExplain": "Die Antwort ist eingegangen. Das Ereignis des zugehörigen Aufrufs enthält den Prompt, die Antwort und die Nutzungsdaten.",
   "detail.llmStart.interruptedExplain": "Der run wurde beendet, bevor dieser Aufruf zurückgegeben wurde. Dafür gibt es keine Antwort, keine Nutzungsdaten und keinen Beleg.",
   "detail.llmStart.elements": "In diesem Aufruf aufgerufene Elemente",
-  "detail.llmStart.identifiers": "Kennungen"
+  "detail.llmStart.identifiers": "Kennungen",
+  "projects.actionsHint.readyImported": "Startet vom Standard-Branch auf GitHub. Unvollständige Änderungen werden nicht wiederverwendet."
 }

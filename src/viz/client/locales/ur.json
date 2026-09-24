@@ -316,7 +316,7 @@
   "projects.startRun": "run شروع کریں",
   "projects.startRunOn": "{{name}} پر run شروع کریں",
   "projects.actionsHint.new": "پہلے پروجیکٹ کا نام دیں۔ اس کے بعد ہر run کا اپنا پرامپٹ ہوتا ہے۔",
-  "projects.actionsHint.ready": "",
+  "projects.actionsHint.ready": "دستیاب ہونے پر، {{name}} کے تازہ ترین فراہم کردہ یا جزوی کام کو جاری رکھتا ہے۔",
   "projects.name": "پروجیکٹ کا نام",
   "projects.prompt": "Run پرامپٹ",
   "projects.promptPlaceholder": "یہ run کیا بنائے یا تبدیل کرے؟",
@@ -803,7 +803,7 @@
   "docs.user.quick.rule.body": "ایک run کو ایک ایسے نتیجے کے لیے استعمال کریں جسے جائزہ لینے والا منظور یا مسترد کر سکے۔ اگلی تبدیلی ایک فالو اپ run میں طلب کریں؛ پروجیکٹ عملی حالت اور شواہد کی تاریخ، دونوں کو یکجا رکھتا ہے۔",
   "docs.user.projects.eyebrow": "کام کے سلسلے کا ڈیزائن",
   "docs.user.projects.title": "کام کے ہر سلسلے کو ایک پائیدار جگہ دیں",
-  "docs.user.projects.lede": "",
+  "docs.user.projects.lede": "ایک پروجیکٹ فعال تنظیم سے وابستہ ہوتا ہے، ایک GitHub ریپوزٹری کو ہدف بناتا ہے، اور اس کام کے سلسلے کے لیے کیے گئے ہر run کو یکجا کرتا ہے۔ بعد کے runs تازہ ترین فراہم کردہ یا جزوی ورک اسپیس سے دوبارہ شروع ہوتے ہیں۔ GitHub سے درآمد کیے گئے پروجیکٹس اس کے بجائے موجودہ ڈیفالٹ برانچ سے شروع ہوتے ہیں؛ غیر شائع شدہ جزوی تبدیلیاں دوبارہ استعمال نہیں کی جاتیں۔",
   "docs.user.projects.anatomy.title": "پروجیکٹ کن چیزوں کو یکجا رکھتا ہے",
   "docs.user.projects.anatomy.stream.tag": "کام کا سلسلہ",
   "docs.user.projects.anatomy.stream.title": "ڈیلیوری کا ایک مشترکہ سیاق",
@@ -1160,5 +1160,6 @@
   "detail.llmStart.completedExplain": "جواب موصول ہو گیا ہے۔ جوڑی والی کال کے ایونٹ میں پرامپٹ، جواب اور استعمال کی تفصیل موجود ہے۔",
   "detail.llmStart.interruptedExplain": "اس کال کا جواب آنے سے پہلے run ختم ہو گیا۔ اس کے لیے کوئی جواب، استعمال کی تفصیل یا رسید موجود نہیں ہے۔",
   "detail.llmStart.elements": "اس کال میں طلب کیے گئے عناصر",
-  "detail.llmStart.identifiers": "شناخت کنندگان"
+  "detail.llmStart.identifiers": "شناخت کنندگان",
+  "projects.actionsHint.readyImported": "GitHub کی ڈیفالٹ برانچ سے شروع ہوتا ہے۔ جزوی تبدیلیاں دوبارہ استعمال نہیں کی جاتیں۔"
 }

@@ -293,7 +293,7 @@
   "projects.startRun": "Run शुरू करें",
   "projects.startRunOn": "{{name}} पर run शुरू करें",
   "projects.actionsHint.new": "पहले प्रोजेक्ट को नाम दें। इसके बाद हर run का अपना प्रॉम्प्ट होगा।",
-  "projects.actionsHint.ready": "",
+  "projects.actionsHint.ready": "उपलब्ध होने पर, {{name}} के हाल में डिलीवर किए गए या आंशिक काम से फिर शुरू करता है।",
   "projects.name": "प्रोजेक्ट का नाम",
   "projects.prompt": "Run प्रॉम्प्ट",
   "projects.promptPlaceholder": "यह run क्या बनाए या बदले?",
@@ -803,7 +803,7 @@
   "docs.user.quick.rule.body": "एक ऐसे परिणाम के लिए एक run का उपयोग करें जिसे समीक्षक स्वीकार या अस्वीकार कर सके। अगला बदलाव किसी अनुवर्ती run में माँगें; प्रोजेक्ट कार्यशील स्थिति और साक्ष्य इतिहास, दोनों को साथ रखता है।",
   "docs.user.projects.eyebrow": "कार्यधारा डिज़ाइन",
   "docs.user.projects.title": "हर कार्यधारा को एक स्थायी स्थान दें",
-  "docs.user.projects.lede": "",
+  "docs.user.projects.lede": "कोई प्रोजेक्ट सक्रिय संगठन का हिस्सा होता है, एक GitHub रिपॉज़िटरी को लक्षित करता है और उस कार्यधारा के लिए किए गए हर run को एक साथ रखता है। बाद के run, हाल में डिलीवर किए गए या आंशिक वर्कस्पेस से फिर शुरू होते हैं। इसके बजाय, GitHub से इम्पोर्ट किए गए प्रोजेक्ट मौजूदा डिफ़ॉल्ट ब्रांच से शुरू होते हैं; अप्रकाशित आंशिक बदलावों का दोबारा इस्तेमाल नहीं किया जाता।",
   "docs.user.projects.anatomy.title": "प्रोजेक्ट किन चीज़ों को साथ रखता है",
   "docs.user.projects.anatomy.stream.tag": "कार्यधारा",
   "docs.user.projects.anatomy.stream.title": "एक साझा डिलीवरी संदर्भ",
@@ -1160,5 +1160,6 @@
   "detail.llmStart.completedExplain": "प्रतिक्रिया वापस आ गई है। युग्मित कॉल इवेंट में प्रॉम्प्ट, उत्तर और उपयोग का विवरण है।",
   "detail.llmStart.interruptedExplain": "इस कॉल के वापस आने से पहले run समाप्त हो गया। इसके लिए कोई प्रतिक्रिया, उपयोग का विवरण या रसीद नहीं है।",
   "detail.llmStart.elements": "इस कॉल में इनवोक किए गए एलिमेंट",
-  "detail.llmStart.identifiers": "पहचानकर्ता"
+  "detail.llmStart.identifiers": "पहचानकर्ता",
+  "projects.actionsHint.readyImported": "GitHub की डिफ़ॉल्ट ब्रांच से शुरू करता है। आंशिक बदलावों का दोबारा इस्तेमाल नहीं किया जाता।"
 }

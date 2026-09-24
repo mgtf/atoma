@@ -293,7 +293,7 @@
   "projects.startRun": "Lancer un run",
   "projects.startRunOn": "Lancer un run sur {{name}}",
   "projects.actionsHint.new": "Nomme d’abord le projet. Chaque run aura son propre prompt ensuite.",
-  "projects.actionsHint.ready": "",
+  "projects.actionsHint.ready": "Reprend le dernier travail livré ou partiel de {{name}}, s’il est disponible.",
   "projects.name": "Nom du projet",
   "projects.prompt": "Prompt du run",
   "projects.promptPlaceholder": "Que doit construire ou modifier ce run ?",
@@ -803,7 +803,7 @@
   "docs.user.quick.rule.body": "Utilise un run pour un résultat qu’un réviseur peut accepter ou refuser. Demande la modification suivante dans un run de suivi ; le projet conserve ensemble l’état de travail et l’historique des preuves.",
   "docs.user.projects.eyebrow": "CONCEPTION DU FLUX DE TRAVAIL",
   "docs.user.projects.title": "Donne à chaque flux de travail un espace durable",
-  "docs.user.projects.lede": "",
+  "docs.user.projects.lede": "Un projet appartient à l’organisation active, cible un dépôt GitHub et regroupe tous les runs réalisés pour ce flux de travail. Les runs suivants reprennent le workspace livré ou partiel le plus récent. Les projets importés depuis GitHub démarrent plutôt à partir de la branche par défaut actuelle ; les modifications partielles non publiées ne sont pas réutilisées.",
   "docs.user.projects.anatomy.title": "Ce qu’un projet conserve ensemble",
   "docs.user.projects.anatomy.stream.tag": "FLUX DE TRAVAIL",
   "docs.user.projects.anatomy.stream.title": "Un contexte de livraison partagé",
@@ -1160,5 +1160,6 @@
   "detail.llmStart.completedExplain": "La réponse est arrivée. L’événement d’appel associé contient le prompt, la réponse et l’utilisation.",
   "detail.llmStart.interruptedExplain": "Le run s’est terminé avant le retour de cet appel. Il n’y a ni réponse, ni utilisation, ni reçu pour cet appel.",
   "detail.llmStart.elements": "Éléments invoqués dans cet appel",
-  "detail.llmStart.identifiers": "Identifiants"
+  "detail.llmStart.identifiers": "Identifiants",
+  "projects.actionsHint.readyImported": "Démarre à partir de la branche par défaut de GitHub. Les modifications partielles ne sont pas réutilisées."
 }

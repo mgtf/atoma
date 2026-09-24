@@ -293,7 +293,7 @@
   "projects.startRun": "Iniciar run",
   "projects.startRunOn": "Iniciar run em {{name}}",
   "projects.actionsHint.new": "Dê primeiro um nome ao projeto. Depois, cada run terá o seu próprio prompt.",
-  "projects.actionsHint.ready": "",
+  "projects.actionsHint.ready": "Retoma o trabalho entregue ou parcial mais recente de {{name}}, quando disponível.",
   "projects.name": "Nome do projeto",
   "projects.prompt": "Prompt do run",
   "projects.promptPlaceholder": "O que deve este run criar ou alterar?",
@@ -803,7 +803,7 @@
   "docs.user.quick.rule.body": "Use um run para um resultado que um revisor possa aceitar ou rejeitar. Peça a alteração seguinte num run posterior; o projeto mantém juntos o estado de trabalho e o histórico de evidências.",
   "docs.user.projects.eyebrow": "ESTRUTURA DO FLUXO DE TRABALHO",
   "docs.user.projects.title": "Dê a cada fluxo de trabalho um espaço permanente",
-  "docs.user.projects.lede": "",
+  "docs.user.projects.lede": "Um projeto pertence à organização ativa, está associado a um repositório GitHub e agrupa todos os run realizados nesse fluxo de trabalho. Os run posteriores retomam o espaço de trabalho entregue ou parcial mais recente. Em vez disso, os projetos importados do GitHub começam no branch predefinido atual; as alterações parciais não publicadas não são reutilizadas.",
   "docs.user.projects.anatomy.title": "O que um projeto mantém reunido",
   "docs.user.projects.anatomy.stream.tag": "FLUXO DE TRABALHO",
   "docs.user.projects.anatomy.stream.title": "Um contexto de entrega partilhado",
@@ -1160,5 +1160,6 @@
   "detail.llmStart.completedExplain": "A resposta foi recebida. O evento da chamada associada contém o prompt, a resposta e os dados de utilização.",
   "detail.llmStart.interruptedExplain": "A run terminou antes de esta chamada devolver uma resposta. Não há resposta, dados de utilização nem recibo para esta chamada.",
   "detail.llmStart.elements": "Elementos invocados nesta chamada",
-  "detail.llmStart.identifiers": "Identificadores"
+  "detail.llmStart.identifiers": "Identificadores",
+  "projects.actionsHint.readyImported": "Começa no branch predefinido do GitHub. As alterações parciais não são reutilizadas."
 }

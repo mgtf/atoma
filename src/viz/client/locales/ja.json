@@ -293,7 +293,7 @@
   "projects.startRun": "runを開始",
   "projects.startRunOn": "{{name}}でrunを開始",
   "projects.actionsHint.new": "まずプロジェクト名を入力してください。その後、runごとに個別のプロンプトを指定します。",
-  "projects.actionsHint.ready": "",
+  "projects.actionsHint.ready": "利用可能な場合、{{name}}の最後に提供された作業または部分的な作業から再開します。",
   "projects.name": "プロジェクト名",
   "projects.prompt": "Runプロンプト",
   "projects.promptPlaceholder": "このrunで何を構築または変更しますか？",
@@ -803,7 +803,7 @@
   "docs.user.quick.rule.body": "レビュー担当者が承認または却下できる1つの成果につき、1つのrunを使用します。次の変更は後続のrunで依頼してください。プロジェクトには、作業状態とエビデンス履歴の両方がまとめて保持されます。",
   "docs.user.projects.eyebrow": "ワークストリーム設計",
   "docs.user.projects.title": "すべての作業ストリームに継続的な基盤を",
-  "docs.user.projects.lede": "",
+  "docs.user.projects.lede": "プロジェクトはアクティブな組織に属し、1つのGitHubリポジトリを対象として、その作業ストリームに対して実行されたすべてのrunをまとめます。以降のrunは、最後に提供されたワークスペースまたは部分的なワークスペースから再開します。一方、GitHubからインポートしたプロジェクトは、現在のデフォルトブランチから開始し、未公開の部分的な変更は再利用されません。",
   "docs.user.projects.anatomy.title": "プロジェクトがまとめて保持するもの",
   "docs.user.projects.anatomy.stream.tag": "ワークストリーム",
   "docs.user.projects.anatomy.stream.title": "1つの共有デリバリーコンテキスト",
@@ -1160,5 +1160,6 @@
   "detail.llmStart.completedExplain": "応答が返されました。対応する呼び出しイベントには、プロンプト、回答、使用量が含まれます。",
   "detail.llmStart.interruptedExplain": "この呼び出しが応答を返す前にrunが終了しました。応答、使用量、レシートはいずれもありません。",
   "detail.llmStart.elements": "この呼び出しで実行された要素",
-  "detail.llmStart.identifiers": "識別子"
+  "detail.llmStart.identifiers": "識別子",
+  "projects.actionsHint.readyImported": "GitHubのデフォルトブランチから開始します。部分的な変更は再利用されません。"
 }

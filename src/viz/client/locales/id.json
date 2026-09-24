@@ -293,7 +293,7 @@
   "projects.startRun": "Mulai run",
   "projects.startRunOn": "Mulai run di {{name}}",
   "projects.actionsHint.new": "Beri nama proyek terlebih dahulu. Setelah itu, setiap run memiliki prompt tersendiri.",
-  "projects.actionsHint.ready": "",
+  "projects.actionsHint.ready": "Melanjutkan pekerjaan terbaru {{name}} yang telah diserahkan atau masih parsial, jika tersedia.",
   "projects.name": "Nama proyek",
   "projects.prompt": "Prompt run",
   "projects.promptPlaceholder": "Apa yang harus dibuat atau diubah oleh run ini?",
@@ -803,7 +803,7 @@
   "docs.user.quick.rule.body": "Gunakan satu run untuk satu hasil yang dapat diterima atau ditolak peninjau. Minta perubahan berikutnya dalam run lanjutan; proyek menyimpan status kerja dan riwayat bukti secara bersamaan.",
   "docs.user.projects.eyebrow": "DESAIN ALUR KERJA",
   "docs.user.projects.title": "Berikan tempat tetap bagi setiap alur kerja",
-  "docs.user.projects.lede": "",
+  "docs.user.projects.lede": "Proyek dimiliki oleh organisasi aktif, menargetkan satu repositori GitHub, dan mengelompokkan setiap run untuk alur kerja tersebut. Run berikutnya melanjutkan ruang kerja terbaru yang telah diserahkan atau masih parsial. Sebaliknya, proyek yang diimpor dari GitHub dimulai dari branch default saat ini; perubahan parsial yang belum dipublikasikan tidak digunakan kembali.",
   "docs.user.projects.anatomy.title": "Hal-hal yang disatukan dalam proyek",
   "docs.user.projects.anatomy.stream.tag": "ALUR KERJA",
   "docs.user.projects.anatomy.stream.title": "Satu konteks delivery bersama",
@@ -1160,5 +1160,6 @@
   "detail.llmStart.completedExplain": "Respons telah diterima. Peristiwa panggilan pasangan memuat prompt, jawaban, dan penggunaan.",
   "detail.llmStart.interruptedExplain": "run berakhir sebelum panggilan ini kembali. Tidak ada respons, penggunaan, maupun tanda terima untuk panggilan ini.",
   "detail.llmStart.elements": "Elemen yang dipanggil dalam panggilan ini",
-  "detail.llmStart.identifiers": "Pengidentifikasi"
+  "detail.llmStart.identifiers": "Pengidentifikasi",
+  "projects.actionsHint.readyImported": "Dimulai dari branch default GitHub. Perubahan parsial tidak digunakan kembali."
 }

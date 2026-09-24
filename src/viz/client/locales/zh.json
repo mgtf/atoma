@@ -293,7 +293,7 @@
   "projects.startRun": "启动 run",
   "projects.startRunOn": "在 {{name}} 上启动 run",
   "projects.actionsHint.new": "请先为项目命名。之后每个 run 都有自己的提示词。",
-  "projects.actionsHint.ready": "",
+  "projects.actionsHint.ready": "如有可用内容，则从 {{name}} 最近已交付或部分完成的工作继续。",
   "projects.name": "项目名称",
   "projects.prompt": "Run 提示词",
   "projects.promptPlaceholder": "此 run 应构建或更改什么？",
@@ -803,7 +803,7 @@
   "docs.user.quick.rule.body": "每个 run 只处理一个可由审核者接受或拒绝的成果。在后续 run 中请求下一项变更；项目会将工作状态和证据历史集中保存。",
   "docs.user.projects.eyebrow": "工作流设计",
   "docs.user.projects.title": "为每项工作提供持久归属",
-  "docs.user.projects.lede": "",
+  "docs.user.projects.lede": "项目属于当前组织，面向一个 GitHub 仓库，并归集该工作流的所有 run。后续 run 会从最近已交付或部分完成的工作区继续。从 GitHub 导入的项目则从当前默认分支开始；未发布的部分更改不会被复用。",
   "docs.user.projects.anatomy.title": "项目集中保存的内容",
   "docs.user.projects.anatomy.stream.tag": "工作流",
   "docs.user.projects.anatomy.stream.title": "一个共享的交付上下文",
@@ -1160,5 +1160,6 @@
   "detail.llmStart.completedExplain": "响应已返回。配对调用事件包含提示词、回答和用量。",
   "detail.llmStart.interruptedExplain": "run 在此调用返回前已结束。该调用没有响应、用量或回执。",
   "detail.llmStart.elements": "此调用中使用的元素",
-  "detail.llmStart.identifiers": "标识符"
+  "detail.llmStart.identifiers": "标识符",
+  "projects.actionsHint.readyImported": "从 GitHub 的默认分支开始。部分更改不会被复用。"
 }
