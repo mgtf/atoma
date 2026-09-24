@@ -103,12 +103,15 @@ planning tier can take over if supervision exhausts its retries.
 
 - **Workers build.** They read and write files, run commands and use tools.
 - **Supervisors check.** They review results and use artifact evidence and fixed
-  probes where applicable. A run also receives independent final acceptance.
+  probes where applicable. Before delivery, a separate check reviews the final
+  result; a refused result gets one more attempt, then is delivered marked as
+  refused.
 - **Trust is earned.** Successful components can skip some model reviews while
   retaining mechanical checks. A failure revokes that trust.
-- **Skills carry forward.** Verified work can become reusable recipes. Eligible
-  recipes can be compiled into scripts, though historical benchmarks have not
-  established a cost benefit from compilation.
+- **Skills carry forward.** Verified work can become reusable recipes. Recipes
+  are compiled into scripts only when a run continues existing work, such as a
+  project's later runs; historical benchmarks have not established a cost
+  benefit from compilation.
 
 The composition model is **Element → Molecule → Cell → Tissue**: tools, workers,
 supervisors and planners. Model selection is configurable per tier.
