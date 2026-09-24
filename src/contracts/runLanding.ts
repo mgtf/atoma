@@ -60,3 +60,50 @@ export function landingReasons(result: LandingSignals | null | undefined): strin
   if (result.refusal) reasons.push(`refused at delivery: ${result.refusal}`);
   return reasons;
 }
+
+/**
+ * HOW A LANDING REACHES THE NEXT RUN OF THE SAME PROJECT.
+ *
+ * A project run already continues from the previous run's workspace
+ * (`previousSeedRun`). Until 2026-09-24 it inherited the bytes and nothing
+ * else: a run could start from a workspace root delivery acceptance had
+ * explicitly refused, with no record that it had been.
+ *
+ * ENV, NOT ARGV, and the repo says why three times over: `parseRunnerArgs`
+ * DISCARDS an undeclared flag with only a warning, so a version-skewed child
+ * would lose this silently; the MCP keeps a closed flag set a source-grep test
+ * enforces; and argv is the E2BIG surface the 4 000-char goal already fills,
+ * besides being world-readable in `ps`. Every other host→child input on this
+ * launch already rides the environment, including two that carry JSON.
+ *
+ * THE VALUE IS THE TYPED REASONS, never the row's error string. That string is
+ * recovered from a log the tenant's own goal is echoed into, so it was
+ * forgeable — a goal carrying a newline and a plausible line could put the
+ * tenant's words where the next run's planner reads them.
+ */
+export const PREVIOUS_LANDING_ENV = 'ATOMA_PREVIOUS_RUN_LANDING';
+
+/** Serialise for the child. Empty reasons produce no variable at all. */
+export function encodePreviousLanding(reasons: readonly string[] | undefined): string | null {
+  const kept = (reasons ?? []).filter((reason) => reason.trim().length > 0).slice(0, 16);
+  if (kept.length === 0) return null;
+  return JSON.stringify(kept.map((reason) => reason.slice(0, 1_000)));
+}
+
+/**
+ * Read it in the child. BOUNDED AND TOTAL: a malformed value yields nothing
+ * rather than throwing, because a run must not fail to start over a hint.
+ */
+export function decodePreviousLanding(raw: string | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      .slice(0, 16)
+      .map((item) => item.slice(0, 1_000));
+  } catch {
+    return [];
+  }
+}

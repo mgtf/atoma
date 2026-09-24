@@ -31,6 +31,7 @@ const DELIVERED_STATS: RunStats = {
   deterministicPhases: 0,
   deepenings: 0,
   rootRemediations: 0,
+  landingReasons: [],
   escalations: 0,
   learnedSkills: 0,
   learnedEventSkills: 0,

@@ -590,6 +590,7 @@ describe('preview lifecycle audit', () => {
         sonnetCalls: 0, haikuCalls: 0, otherCalls: 0, deterministicPhases: 0,
         deepenings: 0,
         rootRemediations: 0,
+        landingReasons: [],
         escalations: 0, learnedSkills: 0, learnedEventSkills: 0, promotions: 0,
         refusals: 0, compileErrors: 0, demotions: 0, dispatchFallbacks: 0,
         uncoveredObligations: 0,

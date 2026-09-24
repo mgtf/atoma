@@ -27,7 +27,7 @@ import { skillsDirPath } from '../core/stores.js';
 import { L3Atom } from '../atoms/L3Atom.js';
 import { L2Atom } from '../atoms/L2Atom.js';
 import { depthModeSchema, type DepthMode } from '../contracts/depthRouting.js';
-import { isLanded, landingReasons } from '../contracts/runLanding.js';
+import { decodePreviousLanding, isLanded, landingReasons, PREVIOUS_LANDING_ENV } from '../contracts/runLanding.js';
 import { runDepthTask } from './depth.js';
 import { SkillRegistry } from '../skills/registry.js';
 import { reconcilePlatformSkills } from '../skills/migratePlatform.js';
@@ -146,7 +146,14 @@ type RunSignalCounts = Record<RunStatSignal, number>;
 function machineRunStats(
   outcome: RunStats['outcome'],
   metrics: InMemoryMetrics,
-  signals: Readonly<RunSignalCounts>
+  signals: Readonly<RunSignalCounts>,
+  /**
+   * Why a landed run did not deliver, from `landingReasons`. The host reads
+   * THIS rather than regexing the operator banner: the banner changed on
+   * 2026-09-24 and broke the host's parse silently, and the same log carries
+   * the tenant's own goal verbatim, so the explanation was forgeable.
+   */
+  landing: readonly string[] = []
 ): RunStats {
   const summary = metrics.summary();
   const callsMatching = (marker: RegExp): number =>
@@ -190,6 +197,7 @@ function machineRunStats(
     uncoveredObligations: signals['uncovered-obligation'],
     deepenings: signals.deepening,
     rootRemediations: signals['root-remediation'],
+    landingReasons: [...landing],
   };
 }
 
@@ -949,11 +957,25 @@ export async function startTask(
       : {}),
   };
 
+  // WHY THE PREVIOUS RUN OF THIS PROJECT DID NOT DELIVER, when the host said.
+  //
+  // It rides `inputs` and never `description`, the rule `remediationTask`
+  // states for the same text one level down: the description is what planning
+  // and skill matching key on, and rewriting it would make a continued run
+  // look like a different task to everything downstream. `inputs` is what the
+  // planners already render (`Inputs: ${JSON.stringify(task.inputs)}`).
+  //
+  // It is DATA ABOUT A PREVIOUS RUN, never an instruction — the same standing
+  // every validator rejection already has.
+  const previousLanding = decodePreviousLanding(process.env[PREVIOUS_LANDING_ENV]);
   const builtTask = profile.buildTask(goal);
+  const withLanding = previousLanding.length > 0
+    ? { ...builtTask, inputs: { ...(builtTask.inputs ?? {}), previousRunLanding: previousLanding } }
+    : builtTask;
   const task = args.depth ? {
-    ...builtTask,
+    ...withLanding,
     proofFloor: profile.depthExperiment!.floor.map((item) => ({ ...item })),
-  } : builtTask;
+  } : withLanding;
 
   console.log(`\ntask: ${task.description}\n`);
 
@@ -1113,7 +1135,10 @@ export async function startTask(
       console.log(
         `\nrun recorded in ${recorder.runsDir} — start the visualizer: npm run viz`
       );
-      console.log(formatRunStatsEpilogue(machineRunStats(landed ? 'partial' : 'delivered', metrics, runSignals)));
+      const reasons = landingReasons(result);
+      console.log(formatRunStatsEpilogue(
+        machineRunStats(landed ? 'partial' : 'delivered', metrics, runSignals, reasons)
+      ));
       if (landed) {
         // Both reasons, always. A run refused at delivery has no unrun phase to
         // list, and a run that is both would otherwise print only the phases —
@@ -1121,7 +1146,7 @@ export async function startTask(
         console.log(
           `\n◐ build LANDED — the work is in the workspace and was NOT delivered.`
         );
-        for (const reason of landingReasons(result)) console.log(`  ${reason}`);
+        for (const reason of reasons) console.log(`  ${reason}`);
         console.log('  Any server the run started is still reachable inside the sandbox.');
       } else {
         console.log(

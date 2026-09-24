@@ -168,6 +168,11 @@ export function parseRunLog(log: string): RunStats {
     // exists for runs killed before their epilogue, where the counter is
     // simply unknown. Zero is the same answer `deepenings` gives above.
     rootRemediations: 0,
+    // Deliberately empty rather than scraped from the banner. The reasons are
+    // an EPILOGUE field; a run whose epilogue never reached the log has none
+    // that can be trusted, and parsing them out of prose a tenant goal is
+    // echoed into is the defect this field replaced (2026-09-24).
+    landingReasons: [],
     // Prose fallback only: count the runner-owned escalation marker, never
     // arbitrary model prose or routine prefilter decisions containing the
     // same word.

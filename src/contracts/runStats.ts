@@ -84,6 +84,23 @@ export const runStatsSchema = z.object({
    * been probed.
    */
   rootRemediations: countSchema.default(0),
+  /**
+   * WHY a `partial` run did not deliver, in the words `landingReasons` builds
+   * from the typed fields (`src/contracts/runLanding.ts`). Empty on every other
+   * outcome.
+   *
+   * It rides the EPILOGUE rather than being recovered from the log, and that
+   * is the whole point. The host used to regex the operator banner for `not
+   * run:` lines, which broke silently the moment the banner changed (2026-09-24)
+   * and — worse — read a stream a tenant can write into: the goal is echoed
+   * verbatim into the same log, so `Build a todo app\nrefused at delivery: …`
+   * forged the explanation its own run showed the customer. The epilogue is
+   * written once by the runner, and `parseRunStatsEpilogue` takes the LAST
+   * valid object, so a forged earlier line cannot win.
+   *
+   * Defaulted, like its neighbours, so archived epilogues still parse.
+   */
+  landingReasons: z.array(z.string().max(2_000)).max(64).default([]),
 });
 
 export type RunStats = z.infer<typeof runStatsSchema>;

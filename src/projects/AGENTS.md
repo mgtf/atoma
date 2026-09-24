@@ -403,7 +403,22 @@ The operator commands and offline prerequisites live in
   workspace and serves it, so previewing a refused deliverable would hand the
   customer, running, the artefact the judge called unproven.
 - It DOES seed the next run (`previousSeedRun`), and that is the half that
-  recovers the spend.
+  recovers the spend. WHY it did not deliver travels with the bytes, as
+  `PREVIOUS_LANDING_ENV` in the child's environment and `Task.inputs
+  .previousRunLanding` at the other end — never argv (`parseRunnerArgs`
+  discards an undeclared flag with a warning, argv is the E2BIG surface the
+  goal already fills, and it is world-readable in `ps`), and never on a
+  repository-backed project, where `seedFrom` is replaced by a fresh repo-HEAD
+  snapshot and the refused workspace never reaches the child.
+- THE VALUE IS THE TYPED REASONS (`stats.landingReasons`), never the row's
+  error string. That string is recovered from a log the tenant's own goal is
+  echoed into verbatim, and the recovery took the FIRST matching line while the
+  genuine banner is printed much later — so a goal carrying a newline and a
+  plausible `refused at delivery:` line forged the explanation its own run
+  showed the customer. The epilogue is written once by the runner and
+  `parseRunStatsEpilogue` keeps the LAST valid object, so an earlier forged
+  line cannot win. `landedRunDetail` reads the epilogue and falls back to the
+  banner only to say THAT a run landed, never why.
 - `verifiedTrace` separates INTEGRITY from PUBLISHABILITY. A failed or
   cancelled trace is never recordable; `degraded` refuses only a run that would
   publish. A refusal reached after a deepening is degraded by construction

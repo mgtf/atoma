@@ -6,6 +6,7 @@ import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { parseRunLog, spawnRun, type RunStats } from '../cli/burnin.js';
+import { encodePreviousLanding, PREVIOUS_LANDING_ENV } from '../contracts/runLanding.js';
 import { declaredArtifactManifestSchema } from '../contracts/artifactManifest.js';
 import type {
   ArtifactManifest,
@@ -837,30 +838,28 @@ export function runnerFailureDetail(log: string, outcome: string): string {
  * reason: a tenant goal is echoed into this log and can therefore forge these
  * lines, which changes a detail string and never a status.
  */
-export function landedRunDetail(log: string): string {
-  const lines = log.split(/\r?\n/);
-  const phases: string[] = [];
-  let headline = '';
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (line.startsWith('◐ ')) headline = line.slice(2).trim();
-    const notRun = /^not run:\s+(\S.*)$/.exec(line);
-    if (notRun?.[1]) phases.push(notRun[1].trim());
+export function landedRunDetail(stats: Pick<RunStats, 'landingReasons'>, log: string): string {
+  // THE TYPED REASONS, not a regex over the log — and that is a security
+  // property, not tidiness. The runner echoes the tenant's own goal verbatim
+  // into this log (`task: …`), `landedRunDetail` used to take the FIRST
+  // matching line, and the genuine banner is printed ~170 lines later. So a
+  // goal containing a newline and a forged `refused at delivery: …` line put
+  // the tenant's own text where the customer reads why their run did not
+  // deliver — and this string was about to become an input to the NEXT run's
+  // planner. `result.output` is echoed the same way, which made it reachable
+  // from anything `fetch_url` pulled off the web.
+  //
+  // The epilogue cannot be forged the same way: `parseRunStatsEpilogue` takes
+  // the LAST valid object and the runner writes it after the goal is echoed.
+  const reasons = stats.landingReasons ?? [];
+  if (reasons.length > 0) {
+    return `run landed and was not delivered; ${reasons.join('; ')}`.slice(0, 2_000);
   }
-  // BOTH REASONS, when both apply. A run can land on its budget and then be
-  // refused on what it did report, and this string is the only slot a customer
-  // ever sees for "why". Reporting the phases alone — which is what this did
-  // until 2026-09-24 — drops the half that says the work was JUDGED and found
-  // wanting, rather than merely cut short.
-  const refused = /^refused at delivery:\s*(\S.*)$/i;
-  const refusal = lines.map((l) => refused.exec(l.trim())?.[1]).find(Boolean);
-  const parts: string[] = [];
-  if (phases.length > 0) parts.push(`phases never run: ${phases.join(' | ')}`);
-  if (refusal) parts.push(`refused at delivery: ${refusal.trim()}`);
-  const detail = parts.length > 0
-    ? `run landed and was not delivered; ${parts.join('; ')}`
-    : headline || 'run landed before delivering';
-  return detail.slice(0, 2_000);
+  // An epilogue that carried none (an archived one, or a run killed before it
+  // was written) falls back to the banner — a bounded, unstructured line. It
+  // is NOT parsed for reasons; it only says that the run landed.
+  const banner = log.split(/\r?\n/).map((line) => line.trim()).find((line) => line.startsWith('◐ '));
+  return (banner ? banner.slice(2).trim() : 'run landed before delivering').slice(0, 2_000);
 }
 
 /**
@@ -1365,6 +1364,17 @@ export class ProjectRunCoordinator {
           seedRun?.projectRunId ?? null, { signal: preparationSignal, deadlineAt: preparationDeadlineAt });
         if (preparationSignal.aborted || Date.now() >= preparationDeadlineAt) throw new Error('project document preparation cancelled');
         environment[HAYSTACK_LAUNCH_ENV] = JSON.stringify(retrievalLaunch);
+        // WHY THE PREVIOUS RUN DID NOT DELIVER, handed to this one.
+        //
+        // Written HERE and not beside `previousSeedRun`, because a
+        // repository-backed project replaces `seedFrom` with a fresh repo-HEAD
+        // snapshot just above: the refused workspace never reaches the child,
+        // so telling it about that workspace's refusal would describe files it
+        // does not have. Gated on the seed actually being the previous run's.
+        const landing = seedFrom === seedRun?.hostPaths.workspacePath
+          ? encodePreviousLanding(seedRun?.stats?.landingReasons)
+          : null;
+        if (landing) environment[PREVIOUS_LANDING_ENV] = landing;
         return launch();
       })();
     } catch (error) {
@@ -1433,7 +1443,7 @@ export class ProjectRunCoordinator {
               // The runner prints the phases it never ran; keep the first line
               // of that as the row's own explanation, because 'partial' alone
               // does not tell the customer WHAT is missing.
-              error: landedRunDetail(log),
+              error: landedRunDetail(stats, log),
             }
           : {}),
       });

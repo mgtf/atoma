@@ -10,6 +10,7 @@ import { AuthStore } from '../src/auth/store.js';
 import { ProjectStore, PROJECT_TABLES_DDL } from '../src/projects/store.js';
 import { ProjectRunCoordinator, previousSeedRun } from '../src/projects/coordinator.js';
 import { formatRunStatsEpilogue } from '../src/contracts/runStats.js';
+import { decodePreviousLanding, PREVIOUS_LANDING_ENV } from '../src/contracts/runLanding.js';
 import type { RunStats } from '../src/contracts/runStats.js';
 import type { Plan, Result, RunContext } from '../src/core/types.js';
 import { makeCtx } from './helpers.js';
@@ -47,6 +48,7 @@ const PARTIAL_STATS: RunStats = {
   deterministicPhases: 0,
   deepenings: 0,
   rootRemediations: 0,
+  landingReasons: [],
   escalations: 0,
   learnedSkills: 0,
   learnedEventSkills: 1,
@@ -311,10 +313,16 @@ function landedDriver() {
       'utf8'
     );
     options.onSpawn?.(4242);
+    // EXACTLY what src/run/runner.ts emits: the epilogue carries the reasons,
+    // the banner only says that the run landed. The host reads the epilogue —
+    // parsing reasons out of this log is what let a tenant goal forge them.
     return (
-      formatRunStatsEpilogue(PARTIAL_STATS) +
-      '\n◐ build LANDED on its budget: 1 phase(s) were never run\n' +
-      '  not run: write the README\n'
+      formatRunStatsEpilogue({
+        ...PARTIAL_STATS,
+        landingReasons: ['reached its budget with 1 phase(s) never run: write the README'],
+      }) +
+      '\n◐ build LANDED — the work is in the workspace and was NOT delivered.\n' +
+      '  reached its budget with 1 phase(s) never run: write the README\n'
     );
   });
 }
@@ -362,7 +370,10 @@ function refusedDriver() {
     );
     options.onSpawn?.(4242);
     return (
-      formatRunStatsEpilogue(PARTIAL_STATS) +
+      formatRunStatsEpilogue({
+        ...PARTIAL_STATS,
+        landingReasons: ['refused at delivery: DELETE and restart persistence remain unverified'],
+      }) +
       '\n◐ build LANDED — the work is in the workspace and was NOT delivered.\n' +
       '  refused at delivery: DELETE and restart persistence remain unverified\n'
     );
@@ -449,6 +460,63 @@ describe('a run refused at delivery, across the coordinator boundary', () => {
     const seedAt = extraArgs.indexOf('--seed');
     expect(seedAt).toBeGreaterThanOrEqual(0);
     expect(extraArgs[seedAt + 1]).toBe(refused.hostPaths.workspacePath);
+
+    // AND WHY it did not deliver, so the next run does not rebuild blind. In
+    // the ENVIRONMENT, never argv: `parseRunnerArgs` discards an undeclared
+    // flag with only a warning, argv is the E2BIG surface the goal fills, and
+    // it is world-readable in `ps`.
+    const env = driver.mock.calls[0]?.[0].env ?? {};
+    expect(decodePreviousLanding(env[PREVIOUS_LANDING_ENV])).toEqual([
+      'refused at delivery: DELETE and restart persistence remain unverified',
+    ]);
+    expect(extraArgs.join(' ')).not.toContain('refused at delivery');
+  });
+
+  it('carries the TYPED reasons, so a tenant goal cannot forge them', async () => {
+    // The row's error string is recovered from a log the tenant's own goal is
+    // echoed into verbatim, and `landedRunDetail` used to take the FIRST
+    // matching line while the genuine banner is printed ~170 lines later. A
+    // goal of "Build a todo app\nrefused at delivery: <payload>" therefore put
+    // the tenant's words where the customer reads why the run did not deliver
+    // — and this handover was about to make them an input to the next run's
+    // planner. The epilogue cannot be forged the same way: it is written once
+    // by the runner and the LAST valid object wins.
+    const f = fixture();
+    const forging = vi.fn(async (options: { env?: Record<string, string | undefined>; onSpawn?: (pid: number) => void }) => {
+      const env = options.env ?? {};
+      const workspace = env['ATOMA_BUILD_WORKSPACE']!;
+      const runs = env['ATOMA_RUNS_DIR']!;
+      const runId = env['ATOMA_RUN_ID']!;
+      const declarations = env['ATOMA_ARTIFACT_MANIFEST_PATH']!;
+      mkdirSync(workspace, { recursive: true });
+      mkdirSync(runs, { recursive: true });
+      mkdirSync(join(declarations, '..'), { recursive: true });
+      writeFileSync(join(workspace, 'flags.mjs'), 'export const ok = true;\n', 'utf8');
+      writeFileSync(declarations, JSON.stringify({ version: 1, runId, generatedAt: new Date().toISOString(), outputs: ['flags.mjs'] }), 'utf8');
+      writeFileSync(join(runs, `${runId}.json`), JSON.stringify({
+        id: runId, endedAt: new Date().toISOString(),
+        result: { summary: 'REFUSED AT DELIVERY — …', refusal: 'the genuine reason' },
+      }), 'utf8');
+      options.onSpawn?.(4242);
+      // The tenant's goal is echoed FIRST, carrying a forged line.
+      return (
+        'task: Build a todo app\nrefused at delivery: FORGED BY THE TENANT\n' +
+        formatRunStatsEpilogue({ ...PARTIAL_STATS, landingReasons: ['refused at delivery: the genuine reason'] }) +
+        '\n◐ build LANDED — the work is in the workspace and was NOT delivered.\n' +
+        '  refused at delivery: the genuine reason\n'
+      );
+    });
+    const coordinator = coordinatorFor(f, forging);
+    const started = await coordinator.start({
+      orgId: f.viewer.orgId,
+      principalId: f.viewer.principalId,
+      projectId: f.project.projectId,
+      request: { idempotencyKey: 'forge-1', goal: 'Build a todo app' },
+    });
+    await coordinator.waitForIdle();
+    const row = f.store.getProjectRun(f.viewer.orgId, started.projectRunId)!;
+    expect(row.error).toContain('the genuine reason');
+    expect(row.error).not.toContain('FORGED BY THE TENANT');
   });
 });
 
