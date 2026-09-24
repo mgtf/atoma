@@ -425,6 +425,7 @@ describe('ProjectStore — idempotency and CAS state machines', () => {
       defaultBranch: 'main',
       commitSha: 'c'.repeat(40),
       baseSha: null,
+      git: { branch: 'release', baseBranch: 'release', defaultBranch: 'main', mode: 'direct', publishKind: 'created' },
     } as const;
     const published = store.transitionPublication({
       orgId: alice.orgId,
@@ -433,7 +434,9 @@ describe('ProjectStore — idempotency and CAS state machines', () => {
       to: 'published',
       receipt,
     })!;
-    expect(published).toMatchObject({ status: 'published', commitSha: 'c'.repeat(40) });
+    expect(published).toMatchObject({ status: 'published', commitSha: 'c'.repeat(40), git: receipt.git });
+    expect(() => store.transitionPublication({ orgId: alice.orgId, publicationId: first.publication.publicationId,
+      from: 'publishing', to: 'published', receipt: { ...receipt, git: { ...receipt.git, branch: 'other' } } })).toThrow(ProjectStateConflict);
     expect(
       store.transitionPublication({
         orgId: alice.orgId,

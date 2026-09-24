@@ -720,6 +720,7 @@ describe('two delivered runs of one project both reach the repository', () => {
     });
     expect(one?.status).toBe('published');
     expect(one?.baseSha).toBeNull();
+    expect(one?.git).toEqual({ branch: 'main', baseBranch: 'main', defaultBranch: 'main', mode: 'direct', publishKind: 'created' });
 
     // Run 2 declares ONLY the file it changed, which is what a manifest is:
     // `plan.subtasks.flatMap(s => s.outputs)`, declared at plan time.
@@ -738,6 +739,7 @@ describe('two delivered runs of one project both reach the repository', () => {
     expect(two?.status).toBe('published');
     expect(two?.commitSha).not.toBe(one?.commitSha);
     expect(two?.baseSha).toBe(one?.commitSha);
+    expect(two?.git).toEqual({ branch: 'main', baseBranch: 'main', defaultBranch: 'main', mode: 'direct', publishKind: 'extended' });
 
     const history = fake.historyOf('alice', 'weather-lab', 'main');
     expect(history[0]!.sha).toBe(two!.commitSha);
@@ -887,6 +889,8 @@ describe('two delivered runs of one project both reach the repository', () => {
     // Simulate the pre-change schema by dropping the column from a store that
     // already holds a published row, then re-opening.
     db.exec('ALTER TABLE project_publications DROP COLUMN base_sha');
+    db.exec('ALTER TABLE project_publications DROP COLUMN git_json');
+    expect(new ProjectStore(db, { initialize: false }).getPublicationForRun(owner.orgId, run.projectRunId)?.git).toBeNull();
     const columnsBefore = (
       db.prepare('PRAGMA table_info(project_publications)').all() as { name: string }[]
     ).map((column) => column.name);
@@ -897,6 +901,8 @@ describe('two delivered runs of one project both reach the repository', () => {
       db.prepare('PRAGMA table_info(project_publications)').all() as { name: string }[]
     ).map((column) => column.name);
     expect(columnsAfter).toContain('base_sha');
+    expect(columnsAfter).toContain('git_json');
+    expect(reopened.getPublicationForRun(owner.orgId, run.projectRunId)?.git).toBeNull();
     // NULL is factually true for a pre-existing row: every publication that
     // ever succeeded in this product created the branch.
     expect(reopened.getPublicationForRun(owner.orgId, run.projectRunId)?.baseSha).toBeNull();

@@ -102,7 +102,8 @@ describe('existing GitHub projects through service, coordinator and publication'
     expect(f.fake.refSha('upstream', 'app', 'main')).toBe(original);
     expect(f.fake.filesOn('upstream', 'app', `atoma/run-${run.projectRunId}`).get('keep.txt')?.text).toBe('Unchanged');
     const publication = f.projects.getPublicationForRun(f.viewer.orgId, run.projectRunId)!;
-    expect(publication).toMatchObject({ status: 'published', pullRequestUrl: 'https://github.com/upstream/app/pull/1' });
+    expect(publication).toMatchObject({ status: 'published', pullRequestUrl: 'https://github.com/upstream/app/pull/1',
+      git: { branch: `atoma/run-${run.projectRunId}`, baseBranch: 'main', defaultBranch: 'main', mode: 'pull-request' } });
     await f.coordinator.retryPublication(f.viewer.orgId, run.projectRunId);
     expect(f.fake.pullRequests).toHaveLength(1);
     f.fake.commitOutside('upstream', 'app', 'main', 'index.html', '<h1>Merged externally</h1>');

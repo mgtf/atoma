@@ -91,6 +91,9 @@ Neighbours:
   detail between pages; readers concatenate before parsing. All bodies are
   UNTRUSTED. Run provenance is stamped at launch, never inferred from today's
   deployment for old traces. Detail reads use the viz corpus size ceiling.
+- PUBLICATION DETAILS come from the shared project run reader: persisted Git
+  destination, commit, PR URL, failure and timestamps. Delivery is not publication,
+  and a published PR is not a merge. Unknown legacy destinations remain null.
 - EVERY RESULT GOES OUT TWICE: the text block every host renders, and
   `structuredContent` for hosts that read typed results (`jsonResult`). A
   reader whose shape is stable declares an `outputSchema` (loose,

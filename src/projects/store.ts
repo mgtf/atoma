@@ -413,6 +413,7 @@ interface PublicationRow {
   commit_sha: string | null;
   base_sha: string | null;
   pull_request_url: string | null;
+  git_json: string | null;
   error: string | null;
   created_at: string;
   updated_at: string;
@@ -526,6 +527,7 @@ function publicationFromRow(row: PublicationRow): Publication {
     // migration, so the column may be absent and better-sqlite3 yields
     // undefined. Degrade to null instead of failing the parse on every row.
     baseSha: row.base_sha ?? null,
+    git: row.git_json ? parseJson(row.git_json, 'publication git receipt') : null,
     ...(row.pull_request_url ? { pullRequestUrl: row.pull_request_url } : {}),
     error: row.error,
     createdAt: row.created_at,
@@ -662,6 +664,7 @@ export class ProjectStore {
         ['project_runs', 'bytes_deleted_at'],
         ['project_publications', 'pull_request_url'],
         ['project_publications', 'seed_commit_sha'],
+        ['project_publications', 'git_json'],
       ]) {
         const columns = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
         if (!columns.some(item => item.name === column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`);
@@ -1751,6 +1754,7 @@ export class ProjectStore {
           current.repositoryUrl !== receipt.url ||
           current.commitSha !== receipt.commitSha ||
           current.baseSha !== receipt.baseSha ||
+          JSON.stringify(current.git ?? null) !== JSON.stringify(receipt.git ?? null) ||
           (current.pullRequestUrl ?? null) !== (receipt.pullRequestUrl ?? null))
       ) {
         throw new ProjectStateConflict('publication replay carries a different receipt');
@@ -1771,7 +1775,7 @@ export class ProjectStore {
       .prepare(
         `UPDATE project_publications
          SET status = ?, repository_id = ?, repository_full_name = ?, repository_url = ?,
-             commit_sha = ?, base_sha = ?, pull_request_url = ?, error = ?, published_at = ?, updated_at = ?
+             commit_sha = ?, base_sha = ?, pull_request_url = ?, git_json = ?, error = ?, published_at = ?, updated_at = ?
          WHERE publication_id = ? AND org_id = ? AND status = ?`
       )
       .run(
@@ -1782,6 +1786,7 @@ export class ProjectStore {
         receipt?.commitSha ?? null,
         receipt?.baseSha ?? null,
         receipt?.pullRequestUrl ?? null,
+        receipt?.git ? JSON.stringify(receipt.git) : null,
         error,
         to === 'published' ? now : null,
         now,

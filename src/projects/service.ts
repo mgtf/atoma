@@ -95,7 +95,17 @@ function publicRun(run: ProjectRun, publication: import('../contracts/projects.j
     publication: publication
       ? {
           status: publication.status,
+          repositoryFullName: publication.repositoryFullName,
           repositoryUrl: publication.repositoryUrl,
+          git: publication.git ?? null,
+          // Publication receipts do not establish today's branch head or PR merge state.
+          remoteState: 'not-checked',
+          mergeStatus: publication.pullRequestUrl || publication.git?.mode === 'pull-request'
+            ? 'unknown' : publication.git?.mode === 'direct' ? 'not-applicable' : 'unknown',
+          baseSha: publication.baseSha,
+          error: publication.error,
+          publishedAt: publication.publishedAt,
+          updatedAt: publication.updatedAt,
           commitSha: publication.commitSha,
           ...(publication.pullRequestUrl ? { pullRequestUrl: publication.pullRequestUrl } : {}),
         }
@@ -120,6 +130,7 @@ function publicProject(
     repositoryStatus: project.repositoryStatus,
     repositoryFullName: project.repositoryFullName,
     repositoryUrl: project.repositoryUrl,
+    repositoryDefaultBranch: project.defaultBranch,
     repositoryError: project.repositoryError,
     ...runSummary,
     createdAt: project.createdAt,

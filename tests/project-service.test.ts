@@ -272,6 +272,40 @@ describe('ProjectService — roles, IDOR and slug identity', () => {
     });
   });
 
+  it.each(['direct', 'pull-request', 'legacy', 'failed', 'publishing'] as const)(
+    'exposes an honest %s publication receipt through both run readers', async kind => {
+      linkInstallation(alice, '501', 'alice-org');
+      const { svc } = service();
+      const created = await svc.createProject(jsonReq(payload('501')), alice) as { projectId: string };
+      const runId = randomUUID();
+      projects.createProjectRun({ orgId: alice.orgId, projectId: created.projectId,
+        principalId: alice.principalId, projectRunId: runId,
+        request: { idempotencyKey: 'receipt', goal: 'Read publication receipt' },
+        hostPaths: { workspacePath: '/absent/workspace', runsPath: '/absent/traces', logPath: '/absent/log' } });
+      const published = !['failed', 'publishing'].includes(kind);
+      const git = kind === 'direct' || kind === 'pull-request' ? {
+        branch: kind === 'direct' ? 'release' : 'atoma/run-example',
+        baseBranch: 'release', defaultBranch: 'release', mode: kind, publishKind: 'extended',
+      } : null;
+      const now = new Date().toISOString();
+      db.prepare(`INSERT INTO project_publications
+        (publication_id, project_run_id, org_id, idempotency_key, manifest_hash, status,
+         repository_id, repository_full_name, repository_url, commit_sha, base_sha, git_json,
+         pull_request_url, error, created_at, updated_at, published_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(randomUUID(), runId, alice.orgId, 'receipt', 'a'.repeat(64), published ? 'published' : kind,
+          '777', 'owner/app', 'https://github.com/owner/app', published ? 'b'.repeat(40) : null,
+          null, git ? JSON.stringify(git) : null,
+          kind === 'pull-request' ? 'https://github.com/owner/app/pull/1' : null,
+          kind === 'failed' ? 'Branch diverged' : null, now, now, published ? now : null);
+      const expected = { status: published ? 'published' : kind, repositoryFullName: 'owner/app',
+        git, remoteState: 'not-checked', mergeStatus: kind === 'direct' ? 'not-applicable' : 'unknown',
+        error: kind === 'failed' ? 'Branch diverged' : null, publishedAt: published ? now : null, updatedAt: now };
+      expect(svc.projectRunStatus(alice, created.projectId, runId)).toMatchObject({ publication: expected });
+      expect(svc.listProjectRuns(alice, created.projectId)).toEqual([expect.objectContaining({ publication: expect.objectContaining(expected) })]);
+      expect(() => svc.projectRunStatus(bob, created.projectId, runId)).toThrow(ProjectHttpError);
+    });
+
   it('exposes the project-run id as traceId once the trace file exists', async () => {
     const root = mkdtempSync(join(tmpdir(), 'atoma-project-service-trace-'));
     try {

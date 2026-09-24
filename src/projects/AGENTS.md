@@ -344,6 +344,16 @@ list. These values come from the host snapshot, never a tenant prompt.
   run. The copy is driven by the OLD table's column list so the additive
   migrations below it are not silently dropped.
 
+## Publication read receipts
+
+- The persisted `git` receipt records the actual branch, base branch, default
+  branch, publication kind and direct/PR mode returned by the publisher. Legacy
+  rows stay null; never infer their destination from today's project branch.
+- Public run readers (HTTP, MCP and task results) expose this receipt with the
+  repository, commit, parent, PR URL, error and timestamps. `remoteState` is
+  `not-checked`: these reads do not query GitHub. A PR's `mergeStatus` stays
+  `unknown`; publication never establishes a later merge or current branch head.
+
 ## What a published commit says
 
 - The commit message is a PRODUCT SURFACE: permanent, in the tenant's own

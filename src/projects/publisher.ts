@@ -510,6 +510,13 @@ export class GitHubPublisher {
           defaultBranch: repository.defaultBranch,
           commitSha: commit.commitSha,
           baseSha: commit.baseSha,
+          git: {
+            branch: commit.branch,
+            baseBranch: base?.branch ?? branch,
+            defaultBranch: repository.defaultBranch,
+            publishKind: commit.publishKind,
+            mode: project.repositoryTarget.source?.mode === 'pull-request' ? 'pull-request' : 'direct',
+          },
           ...('pullRequestUrl' in commit ? { pullRequestUrl: commit.pullRequestUrl as string | null } : {}),
         },
       });

@@ -190,6 +190,34 @@ it('reuses a project run across MCP sessions while its real lease is held', asyn
   }
 });
 
+it('exposes the persisted Git destination over MCP without claiming a PR was merged', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'atoma-mcp-publication-')); dirs.push(root);
+  const f = projectRetrievalFixture(root);
+  const { run } = f.makeRun({ 'index.html': '<h1>Published</h1>' });
+  const reserved = f.projects.reservePublication({ orgId: f.viewer.orgId, projectRunId: run.projectRunId, idempotencyKey: 'receipt' })!;
+  const transition = { orgId: f.viewer.orgId, publicationId: reserved.publication.publicationId };
+  f.projects.transitionPublication({ ...transition, from: 'pending', to: 'publishing' });
+  const git = { branch: 'atoma/run-test', baseBranch: 'release', defaultBranch: 'release',
+    mode: 'pull-request', publishKind: 'created' } as const;
+  f.projects.transitionPublication({ ...transition, from: 'publishing', to: 'published', receipt: {
+    repositoryId: '777', fullName: 'owner/docs', url: 'https://github.com/owner/docs', defaultBranch: 'release',
+    commitSha: 'c'.repeat(40), baseSha: 'b'.repeat(40), git, pullRequestUrl: 'https://github.com/owner/docs/pull/1',
+  } });
+  const coordinator = new ProjectRunCoordinator({ store: f.projects, dbPath: f.dbPath, projectsRoot: root });
+  const service = new ProjectService({ store: f.projects, coordinator, github: null });
+  const { url } = await listen(() => ({ kind: 'principal', viewer: f.viewer, tokenId: 'owner' }),
+    { ...NO_TENANT, projects: { store: f.projects, service }, auth: f.auth });
+  const client = await connect(url);
+  try {
+    const result = await client.callTool({ name: 'atoma_run_status', arguments: { projectId: f.project.projectId, runId: run.projectRunId } });
+    expect(result.structuredContent).toMatchObject({ publication: { git, repositoryFullName: 'owner/docs',
+      commitSha: 'c'.repeat(40), mergeStatus: 'unknown', remoteState: 'not-checked', error: null } });
+    expect(JSON.parse((result.content as { type: string; text: string }[])[0]!.text)).toEqual(result.structuredContent);
+    const listed = await client.callTool({ name: 'atoma_project_runs', arguments: { projectId: f.project.projectId } });
+    expect(JSON.parse((listed.content as { type: string; text: string }[])[0]!.text)).toEqual([result.structuredContent]);
+  } finally { await client.close(); }
+});
+
 describe('the catalogue by tier', () => {
   it('shows each caller its ladder and nothing above it', () => {
     const names = (caller: McpCaller, deps: McpToolDeps) => visibleTools(caller, deps).map((t) => t.name);

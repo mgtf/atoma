@@ -350,6 +350,15 @@ export const repositoryReceiptSchema = z
   })
   .strict();
 
+/** Historical Git destination observed at publication, not a live branch/PR lookup. */
+export const publicationGitSchema = z.object({
+  branch: z.string().min(1).max(255),
+  baseBranch: z.string().min(1).max(255),
+  defaultBranch: z.string().min(1).max(255),
+  publishKind: z.enum(['created', 'extended', 'unchanged']),
+  mode: z.enum(['direct', 'pull-request']),
+}).strict();
+
 export const publicationReceiptSchema = repositoryReceiptSchema
   .extend({
     commitSha: commitShaSchema,
@@ -370,6 +379,7 @@ export const publicationReceiptSchema = repositoryReceiptSchema
      */
     baseSha: commitShaSchema.nullable(),
     pullRequestUrl: httpsUrlSchema.nullable().optional(),
+    git: publicationGitSchema.nullable().optional(),
   })
   .strict();
 
@@ -387,6 +397,7 @@ export const publicationSchema = z
     commitSha: commitShaSchema.nullable(),
     baseSha: commitShaSchema.nullable(),
     pullRequestUrl: httpsUrlSchema.nullable().optional(),
+    git: publicationGitSchema.nullable().optional(),
     error: boundedErrorSchema,
     createdAt: instantSchema,
     updatedAt: instantSchema,
