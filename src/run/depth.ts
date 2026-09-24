@@ -2,6 +2,7 @@ import type { Atom } from '../core/atom.js';
 import { setMaxListeners } from 'node:events';
 import type { Result, RunContext, Task, ToolExecutor } from '../core/types.js';
 import { attestingExecutor, createAttestationLog } from '../core/attestation.js';
+import { landingSignal } from '../atoms/cost.js';
 import { acceptRootResult } from '../atoms/rootAcceptance.js';
 import { outOfPhaseBudget } from '../core/limits.js';
 import type { AcceptanceInfo, DepthMode, PhaseCoverageRecord, ProofFloor, TopologyInfo } from '../contracts/depthRouting.js';
@@ -20,7 +21,7 @@ export class DeepeningSignal extends Error {
  * its budget keeps its `INCOMPLETE —` prefix and its phase list, and gains
  * this one, because a reader that reports only the phases drops the refusal.
  */
-export function markRefused(result: Result, acceptance: AcceptanceInfo): Result {
+export function markRefused(result: Result, acceptance: Pick<AcceptanceInfo, 'reasoning'>): Result {
   const reasoning = acceptance.reasoning.trim() || 'the root acceptor gave no reason';
   return {
     ...result,
@@ -63,6 +64,18 @@ export function remediationTask(task: Task, acceptance: AcceptanceInfo): Task {
       rootAcceptanceAttempt: (Number(task.inputs?.['rootAcceptanceAttempt'] ?? 0) || 0) + 1,
     },
   };
+}
+
+/** The finalization ceiling also bounds a collaborator that ignores abort. */
+async function withinSignal<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  let abort: () => void = () => {};
+  const interrupted = new Promise<never>((_resolve, reject) => {
+    abort = () => reject(signal.reason instanceof Error ? signal.reason : new Error('Operation aborted', { cause: signal.reason }));
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+  });
+  try { return await Promise.race([work, interrupted]); }
+  finally { signal.removeEventListener('abort', abort); }
 }
 
 /** The existing atom protocol executes each attempt; this owns only their lifetime. */
@@ -125,10 +138,37 @@ export async function runDepthTask(args: {
       let currentTask = task;
       for (;;) {
         const result = await handle(currentTask, attemptCtx);
-        attemptCtx.signal.throwIfAborted();
-        const acceptance = await acceptRootResult({ actor, task: currentTask, result, ctx: attemptCtx,
-          floor: args.floor, phaseCoverage });
-        attemptCtx.signal.throwIfAborted();
+        // Only a recovered deadline landing may leave the execution clock.
+        // Deepening and explicit cancellation still abort this attempt.
+        cancellation.signal.throwIfAborted();
+        const landed = Boolean(result.unfinishedPhases?.length);
+        const timedOut = ctx.signal.aborted && ctx.signal.reason instanceof Error && ctx.signal.reason.name === 'TimeoutError';
+        if (!landed || !timedOut) attemptCtx.signal.throwIfAborted();
+        const explicitCancellation = new AbortController();
+        const forwardCancellation = () => {
+          if (!(ctx.signal.reason instanceof Error && ctx.signal.reason.name === 'TimeoutError')) {
+            explicitCancellation.abort(ctx.signal.reason);
+          }
+        };
+        if (landed) ctx.signal.addEventListener('abort', forwardCancellation, { once: true });
+        const acceptanceCtx = landed ? { ...attemptCtx,
+          signal: AbortSignal.any([landingSignal(ctx.deadlineAt), cancellation.signal, explicitCancellation.signal]),
+        } : attemptCtx;
+        let acceptance: AcceptanceInfo;
+        try {
+          acceptance = await withinSignal(acceptRootResult({ actor, task: currentTask, result, ctx: acceptanceCtx,
+            floor: args.floor, phaseCoverage }), acceptanceCtx.signal);
+          acceptanceCtx.signal.throwIfAborted();
+        } catch (error) {
+          cancellation.signal.throwIfAborted();
+          explicitCancellation.signal.throwIfAborted();
+          if (!landed || !acceptanceCtx.signal.aborted) throw error;
+          // Unverified is never delivered. Retain accepted phases even when
+          // the bounded final verdict cannot complete, without a new pass.
+          return markRefused(result, { reasoning: 'Root acceptance could not finish within the landing budget' });
+        } finally {
+          ctx.signal.removeEventListener('abort', forwardCancellation);
+        }
         args.onAcceptance(acceptance);
         if (acceptance.approved) return result;
         // A refusal LANDS when there is no pass left to spend, or when the
@@ -140,7 +180,7 @@ export async function runDepthTask(args: {
         // molecule had written seeded nothing, because `previousSeedRun` skips
         // a failed run on its status filter — thirty minutes and 0.42 USD of
         // real work discarded on production run `6ab0ae3b`.
-        if (remediations >= MAX_ROOT_REMEDIATIONS || outOfPhaseBudget(ctx.deadlineAt)) {
+        if (ctx.signal.aborted || remediations >= MAX_ROOT_REMEDIATIONS || outOfPhaseBudget(ctx.deadlineAt)) {
           return markRefused(result, acceptance);
         }
         remediations += 1;

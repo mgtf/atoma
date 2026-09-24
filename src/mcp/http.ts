@@ -58,6 +58,8 @@ export interface McpHttpHostOptions {
   readonly allowedOrigins?: readonly string[];
   readonly resourceMetadataUrl?: string;
   readonly idleMs?: number;
+  /** Hard ceiling for one HTTP POST, including stalled bodies. */
+  readonly maxRequestMs?: number;
   /** Total live sessions on this host. Past it, a new session is refused. */
   readonly maxSessions?: number;
   /** Live sessions one caller may hold. Past it, that caller's stalest session is dropped. */
@@ -74,9 +76,11 @@ interface Session {
   readonly events: SessionEventStore;
   readonly key: string;
   lastSeenMs: number;
+  readonly activePosts: Map<ServerResponse, number>;
 }
 
 export const MCP_SESSION_IDLE_MS = 30 * 60 * 1000;
+export const MCP_MAX_REQUEST_MS = 3 * 60 * 60 * 1000;
 export const MCP_SESSION_HEADER = 'mcp-session-id';
 /** The host's backstop. At 4 MiB of replay ring apiece this bounds the rings at ~512 MiB. */
 export const MCP_MAX_SESSIONS = 128;
@@ -85,6 +89,7 @@ export const MCP_MAX_SESSIONS_PER_CALLER = 8;
 
 export interface McpHttpHealth {
   readonly sessions: number;
+  readonly initializing: number;
   readonly opened: number;
   /** Requests answered 401: no caller, or a caller that does not own the session it presented. */
   readonly refused: number;
@@ -98,6 +103,7 @@ export interface McpHttpHealth {
 
 export class McpHttpHost {
   private readonly sessions = new Map<string, Session>();
+  private readonly pending = new Map<symbol, { key: string; close: () => void }>();
   private readonly options: McpHttpHostOptions;
   private readonly now: () => number;
   private readonly log: (line: string) => void;
@@ -123,7 +129,7 @@ export class McpHttpHost {
   health(): McpHttpHealth {
     let replayEvictions = 0;
     for (const session of this.sessions.values()) replayEvictions += session.events.evictions();
-    return { sessions: this.sessions.size, opened: this.opened, refused: this.refused, evicted: this.evicted, overflowed: this.overflowed, replayEvictions };
+    return { sessions: this.sessions.size, initializing: this.pending.size, opened: this.opened, refused: this.refused, evicted: this.evicted, overflowed: this.overflowed, replayEvictions };
   }
 
   async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -158,6 +164,19 @@ export class McpHttpHost {
         return;
       }
       session.lastSeenMs = this.now();
+      // A POST can await a run for longer than the idle TTL. GET event streams
+      // do not pin the session; an abandoned subscription remains sweepable.
+      if (req.method === 'POST') {
+        session.activePosts.set(res, this.now());
+        const finished = () => {
+          session.activePosts.delete(res);
+          session.lastSeenMs = this.now();
+          res.off('finish', finished);
+          res.off('close', finished);
+        };
+        res.once('finish', finished);
+        res.once('close', finished);
+      }
       await session.transport.handleRequest(req, res);
       return;
     }
@@ -170,54 +189,68 @@ export class McpHttpHost {
     const key = callerKey(caller);
     // This caller's own ceiling first, so a busy client reclaims from itself
     // rather than from the host — and only then the host's backstop.
-    await this.reclaim(key);
-    if (this.sessions.size >= this.maxSessions) {
+    this.reclaim(key);
+    const pendingForCaller = [...this.pending.values()].filter(value => value.key === key).length;
+    const liveForCaller = [...this.sessions.values()].filter(value => value.key === key).length;
+    if (this.sessions.size + this.pending.size >= this.maxSessions || pendingForCaller + liveForCaller >= this.maxPerCaller) {
       this.overflowed += 1;
-      this.log(`session refused for ${describeCaller(caller)}: ${this.sessions.size} sessions is the host ceiling`);
+      this.log(`session refused for ${describeCaller(caller)}: session capacity exhausted (${this.sessions.size} ready, ${this.pending.size} initializing)`);
       res.writeHead(503, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'retry-after': '30' });
       res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32000, message: 'too many active MCP sessions on this host; retry shortly' }, id: null }));
       return;
     }
-    const server = this.options.buildServer(caller);
-    const events = new SessionEventStore();
-    let session: Session | null = null;
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: () => randomUUID(),
-      // SSE responses, NEVER plain JSON. In JSON mode the SDK drops every
-      // notification related to a request — a `notifications/progress` sent
-      // during a `waitMs` long-poll reached nobody (measured 2026-09-07: 0 of 3
-      // delivered, against 3 of 3 over SSE). The stream is also what the event
-      // store replays after a cut connection (`Last-Event-ID`).
-      eventStore: events,
-      enableDnsRebindingProtection: true,
-      allowedHosts: [...this.options.allowedHosts],
-      // Checked only when the request carries an Origin, so a CLI client that
-      // sends none is untouched. Absent here, the SDK skips the check entirely.
-      ...(this.options.allowedOrigins ? { allowedOrigins: [...this.options.allowedOrigins] } : {}),
-      onsessioninitialized: (id) => {
-        session = { id, transport, server, events, key, lastSeenMs: this.now() };
-        this.sessions.set(id, session);
-        this.opened += 1;
-        this.log(`session ${id.slice(0, 8)} opened for ${describeCaller(caller)}`);
-      },
-      onsessionclosed: (id) => {
-        this.sessions.delete(id);
-      },
-    });
-    transport.onclose = () => {
-      if (session) this.sessions.delete(session.id);
-    };
+    // Reserve synchronously before allocating or awaiting a fragmented body.
+    const reservation = Symbol(key);
+    const closePending = () => { req.destroy(); res.destroy(); };
+    this.pending.set(reservation, { key, close: closePending });
+    const initializationTimer = setTimeout(closePending, 30_000);
+    initializationTimer.unref();
     try {
-      await server.connect(transport);
-      await transport.handleRequest(req, res);
-    } finally {
-      // Not an initialize, a refused one, or a throw on the way: the transport
-      // has already answered, and nothing else will ever close this server —
-      // the sweeper only walks `sessions`, which this one never entered.
-      if (!session) {
-        await transport.close().catch(() => {});
-        await server.close().catch(() => {});
+      const server = this.options.buildServer(caller);
+      const events = new SessionEventStore();
+      let session: Session | null = null;
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => randomUUID(),
+        // SSE responses, NEVER plain JSON. In JSON mode the SDK drops every
+        // notification related to a request — a `notifications/progress` sent
+        // during a `waitMs` long-poll reached nobody (measured 2026-09-07: 0 of 3
+        // delivered, against 3 of 3 over SSE). The stream is also what the event
+        // store replays after a cut connection (`Last-Event-ID`).
+        eventStore: events,
+        enableDnsRebindingProtection: true,
+        allowedHosts: [...this.options.allowedHosts],
+        // Checked only when the request carries an Origin, so a CLI client that
+        // sends none is untouched. Absent here, the SDK skips the check entirely.
+        ...(this.options.allowedOrigins ? { allowedOrigins: [...this.options.allowedOrigins] } : {}),
+        onsessioninitialized: (id) => {
+          this.pending.delete(reservation);
+          session = { id, transport, server, events, key, lastSeenMs: this.now(), activePosts: new Map() };
+          this.sessions.set(id, session);
+          this.opened += 1;
+          this.log(`session ${id.slice(0, 8)} opened for ${describeCaller(caller)}`);
+        },
+        onsessionclosed: (id) => {
+          this.sessions.delete(id);
+        },
+      });
+      transport.onclose = () => {
+        if (session) this.sessions.delete(session.id);
+      };
+      try {
+        await server.connect(transport);
+        await transport.handleRequest(req, res);
+      } finally {
+        // Not an initialize, a refused one, or a throw on the way: the transport
+        // has already answered, and nothing else will ever close this server —
+        // the sweeper only walks `sessions`, which this one never entered.
+        if (!session) {
+          await transport.close().catch(() => {});
+          await server.close().catch(() => {});
+        }
       }
+    } finally {
+      clearTimeout(initializationTimer);
+      this.pending.delete(reservation);
     }
   }
 
@@ -225,13 +258,13 @@ export class McpHttpHost {
    * Keep one caller inside its own ceiling by dropping its stalest session.
    * A loop, not an `if`: a lowered ceiling or a burst can leave several over.
    */
-  private async reclaim(key: string): Promise<void> {
+  private reclaim(key: string): void {
     for (;;) {
       const mine = [...this.sessions.values()].filter((session) => session.key === key);
-      if (mine.length < this.maxPerCaller) return;
+      if (mine.length + [...this.pending.values()].filter(value => value.key === key).length < this.maxPerCaller || !mine.length) return;
       const stalest = mine.reduce((oldest, session) => (session.lastSeenMs < oldest.lastSeenMs ? session : oldest));
       this.evicted += 1;
-      await this.drop(stalest, 'caller session ceiling');
+      void this.drop(stalest, 'caller session ceiling');
     }
   }
 
@@ -244,13 +277,20 @@ export class McpHttpHost {
 
   private async sweep(idleMs: number): Promise<void> {
     const cutoff = this.now() - idleMs;
+    const requestCutoff = this.now() - (this.options.maxRequestMs ?? MCP_MAX_REQUEST_MS);
     for (const session of [...this.sessions.values()]) {
-      if (session.lastSeenMs < cutoff) await this.drop(session, 'idle');
+      if ([...session.activePosts.values()].some(started => started < requestCutoff)) {
+        await this.drop(session, 'request deadline');
+        continue;
+      }
+      if (session.activePosts.size === 0 && session.lastSeenMs < cutoff) await this.drop(session, 'idle');
     }
   }
 
   async close(): Promise<void> {
     clearInterval(this.sweeper);
+    for (const pending of this.pending.values()) pending.close();
+    this.pending.clear();
     for (const session of [...this.sessions.values()]) await this.drop(session, 'host closing');
   }
 }

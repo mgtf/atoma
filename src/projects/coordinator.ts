@@ -5,7 +5,7 @@ import { migratePlatformSkills, reconcilePlatformSkills } from '../skills/migrat
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { parseRunLog, spawnRun, type RunStats } from '../cli/burnin.js';
+import { parseRunLog, spawnRun, DEFAULT_HARD_KILL_MARGIN_MS, UNKILLABLE_BACKSTOP_EXTRA_MS, type RunStats } from '../cli/burnin.js';
 import { encodePreviousLanding, PREVIOUS_LANDING_ENV } from '../contracts/runLanding.js';
 import { declaredArtifactManifestSchema } from '../contracts/artifactManifest.js';
 import type {
@@ -1152,6 +1152,11 @@ export class ProjectRunCoordinator {
       );
       return undefined;
     }
+  }
+
+  /** Preparation and the child's hard backstop belong to the task's lifetime too. */
+  runTaskBudgetMs(): number {
+    return PROJECT_RUN_PREPARATION_TIMEOUT_MS + this.timeoutMs + DEFAULT_HARD_KILL_MARGIN_MS + UNKILLABLE_BACKSTOP_EXTRA_MS;
   }
 
   async start(input: {

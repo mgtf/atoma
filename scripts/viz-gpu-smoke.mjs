@@ -2152,7 +2152,9 @@ try {
           }, timeout);
           runner.add(observer);
         }), READY_TIMEOUT_MS);
-        const spot = await accountPage.evaluate((targetId) => {
+        // A rendered Pixi target may still be covered by the departing cube
+        // snapshot. Wait for the actual interactive canvas at the click point.
+        const spotHandle = await accountPage.waitForFunction((targetId) => {
           const handle = globalThis.__ATOMA_GPU__;
           const row = handle?.hitTargets().find((entry) => entry.id === targetId);
           if (!row || !handle.projectRendererPoint) return null;
@@ -2166,7 +2168,7 @@ try {
               projected.y < 1 || projected.y > window.innerHeight - 1
             ) continue;
             const top = document.elementFromPoint(projected.x, projected.y);
-            if (!top) continue;
+            if (!top?.classList.contains('gpu-ui-canvas')) continue;
             return {
               ...projected,
               target: row,
@@ -2175,7 +2177,9 @@ try {
             };
           }
           return null;
-        }, id);
+        }, { timeout: READY_TIMEOUT_MS }, id);
+        const spot = await spotHandle.jsonValue();
+        await spotHandle.dispose();
         if (!spot) throw new Error(`account scenario: hit target ${id} not found`);
         await accountPage.mouse.click(spot.x, spot.y);
         return spot;

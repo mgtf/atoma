@@ -1094,7 +1094,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       this.toLlmRequest('execute', {
         userContent,
         params: this.params,
-        signal: landed ? landingSignal() : ctx.signal,
+        signal: landed ? landingSignal(ctx.deadlineAt) : ctx.signal,
       })
     );
     const { output, summary } = parsePayloadTolerant(resp.text);

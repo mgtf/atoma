@@ -37,6 +37,14 @@ export async function assertMobileProjects(page, projectId) {
       rail.targets.some(t => t.width > 44 || t.x < 0 || t.x + t.width > 56)) {
     throw new Error(`Mobile rail escaped its compact column: ${JSON.stringify(rail)}`);
   }
+  // The admin notification offer can reappear after the update/reload arm.
+  // Dismiss it through its real control before testing the canvas underneath;
+  // otherwise this is a swipe on the permission dialog, not a project row.
+  const dismissPush = await page.$('.gpu-push-prompt-actions button:last-child');
+  if (dismissPush) {
+    await dismissPush.click();
+    await page.waitForSelector('.gpu-push-prompt', { hidden: true });
+  }
   const before = await spot();
   const canvasAtStart = await page.evaluate(({ x, y }) =>
     document.elementFromPoint(x, y)?.classList.contains('gpu-ui-canvas'), before);

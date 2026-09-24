@@ -188,6 +188,7 @@ function seedDeliveredRun(a: Actor, projectId: string, key: string): string {
     },
   })!.run;
   workspaces.set(run.projectRunId, workspace);
+  db.prepare("UPDATE project_runs SET status = 'delivered' WHERE project_run_id = ?").run(run.projectRunId);
   recordDeliveredPreview(previews, {
     orgId: a.orgId,
     projectId,
@@ -697,7 +698,57 @@ describe('a terminal run with an old snapshot', () => {
     const stopped = await service.stop(viewerFor(a), p, r);
     expect(stopped.availability).toBe('unavailable');
     expect(stopped.state).toBe('stopped');
-    expect(service.heartbeat(viewerFor(a), p, r, stopped.generation).availability).toBe('unavailable');
-    await expect(service.open(viewerFor(a), p, r, { inFlight: true })).rejects.toThrow('preview unavailable');
+    expect(() => service.heartbeat(viewerFor(a), p, r, stopped.generation)).toThrow(ProjectHttpError);
+    await expect(service.open(viewerFor(a), p, r, { inFlight: true })).rejects.toThrow('this run is not available for preview');
   });
+});
+
+
+it.each(['partial', 'failed', 'cancelled'] as const)('revokes a live generation on %s and refuses join and heartbeat', async terminal => {
+  const a = actor('terminal-capability');
+  const p = seedProject(a, 'terminal-capability');
+  const r = seedRunningRun(a, p, 'terminal-capability');
+  const opened = await service.open(viewerFor(a), p, r, { inFlight: true });
+  const generation = opened.body.summary.generation;
+  const url = new URL(opened.body.url!);
+  const redeemed = claims.redeem(url.hash.slice(1), url.hostname);
+  expect(redeemed.ok).toBe(true);
+  const token = redeemed.ok ? redeemed.token : '';
+  const route = { orgId: a.orgId, projectRunId: r, generation, host: url.hostname };
+  expect(claims.authorise(token, route)).not.toBeNull();
+  projects.transitionProjectRun({ orgId: a.orgId, projectRunId: r, from: 'running', to: terminal, error: 'not delivered',
+    ...(terminal === 'partial' ? { traceId: r, stats: {
+      outcome: 'partial' as const, costUsd: 0, llmCalls: 0, opusCalls: 0, sonnetCalls: 0, haikuCalls: 0, otherCalls: 0,
+      deterministicPhases: 0, deepenings: 0, rootRemediations: 0, landingReasons: ['unfinished'], escalations: 0,
+      learnedSkills: 0, learnedEventSkills: 0, promotions: 0, refusals: 0, compileErrors: 0, demotions: 0,
+      dispatchFallbacks: 0, uncoveredObligations: 0,
+    } } : {}),
+  });
+  await service.runFinished({ orgId: a.orgId, projectId: p, projectRunId: r });
+  expect(claims.authorise(token, route)).toBeNull();
+  expect(service.status(viewerFor(a), p, r)).toMatchObject({ availability: 'unavailable', state: 'stopped' });
+  await expect(service.open(viewerFor(a), p, r, { generation })).rejects.toMatchObject({ status: 409 });
+  expect(() => service.heartbeat(viewerFor(a), p, r, generation)).toThrow(ProjectHttpError);
+});
+
+it('cannot resurrect a generation when the run finishes during snapshot creation', async () => {
+  const a = actor('racing-finish');
+  const p = seedProject(a, 'racing-finish');
+  const r = seedRunningRun(a, p, 'racing-finish');
+  const launcher = new WorkspaceOnlyLauncher(join(root, 'copies'));
+  let release!: () => void;
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  const create = launcher.createWorkspace.bind(launcher);
+  launcher.createWorkspace = async owner => { await blocked; return create(owner); };
+  const manager = new PreviewManager({ store: previews, launcher, routes: new PreviewRouteTable(), claims, config,
+    workspaceOf: () => workspaces.get(r)!, probe: async () => true });
+  const racing = new PreviewHttpService({ manager, store: previews, projects });
+  const opening = racing.open(viewerFor(a), p, r, { inFlight: true });
+  const rejected = expect(opening).rejects.toMatchObject({ status: 409 });
+  projects.transitionProjectRun({ orgId: a.orgId, projectRunId: r, from: 'running', to: 'failed', error: 'stopped' });
+  await racing.runFinished({ orgId: a.orgId, projectId: p, projectRunId: r });
+  release();
+  await rejected;
+  expect(previews.countLiveInstances(a.orgId).org).toBe(0);
+  expect(existsSync(join(root, 'copies', `preview-${r}-1`))).toBe(false);
 });

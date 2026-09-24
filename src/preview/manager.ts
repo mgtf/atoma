@@ -524,7 +524,7 @@ export class PreviewManager {
     orgId: string,
     projectId: string,
     projectRunId: string,
-    reason: 'manual' | 'idle' | 'hard-expiry' | 'restart' | 'logout' | 'policy-change' | 'crash'
+    reason: 'manual' | 'idle' | 'hard-expiry' | 'restart' | 'logout' | 'policy-change' | 'crash' | 'run-finished'
   ): Promise<PreviewSummary> {
     const instance = this.deps.store.getInstance(orgId, projectRunId);
     if (!instance || instance.state === 'stopped') {

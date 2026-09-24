@@ -328,12 +328,13 @@ list. These values come from the host snapshot, never a tenant prompt.
   same `completeProjectRun` transaction as a delivery — same trace bar, same
   workspace manifest, same atomicity — and differs on exactly three points.
   It may carry an error string, because the phases it never ran are worth
-  naming and no other field says so; it is offered to its customer as a preview
-  and a download; and it NEVER publishes.
+  naming and no other field says so; its files remain downloadable, but it is
+  never offered as an executable preview; and it NEVER publishes.
 - Publication stays `delivered`-only, by the operator's decision of 2026-09-22.
   The customer's repository is the one surface where an incomplete artefact set
   would be indistinguishable from a finished one once it landed.
-- `previousSeedRun` (was `previousDeliveredRun`) takes a landed run too, and
+- For projects without an imported repository, `previousSeedRun` (formerly
+  `previousDeliveredRun`) takes a landed run too, and
   that is the half that actually recovers the spend: the next run continues
   from the phases that did complete instead of rebuilding them. Retention and
   the retrieval source follow it, so a landed seed is held like any other.

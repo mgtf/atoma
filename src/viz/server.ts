@@ -872,19 +872,23 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
     // `run.cancelled` (requested, emitted by the service) and a
     // `run.finished` carrying status `cancelled` are DIFFERENT facts at
     // different times — the ask and the actual end — so both are journaled.
-    onRunFinished: (event) => {
-      emit({
-        kind: 'run.finished',
-        actorType: 'principal',
-        actorId: event.principalId,
-        orgId: event.orgId,
-        projectId: event.projectId,
-        runId: event.projectRunId,
-        summary: `Run ${event.status}: ${eventLabel(event.goal, 120)}`,
-        // `goal` and `status` are what the localised push copy renders from:
-        // `summary` is one English line and could never become French.
-        detail: { status: event.status, goal: eventLabel(event.goal, 120) },
-      });
+    onRunFinished: async (event) => {
+      try {
+        await PREVIEW_RUNTIME?.service.runFinished(event);
+      } finally {
+        emit({
+          kind: 'run.finished',
+          actorType: 'principal',
+          actorId: event.principalId,
+          orgId: event.orgId,
+          projectId: event.projectId,
+          runId: event.projectRunId,
+          summary: `Run ${event.status}: ${eventLabel(event.goal, 120)}`,
+          // `goal` and `status` are what the localised push copy renders from:
+          // `summary` is one English line and could never become French.
+          detail: { status: event.status, goal: eventLabel(event.goal, 120) },
+        });
+      }
     },
   });
   // A previous process that died mid-run left rows only its in-memory

@@ -24,12 +24,13 @@ vi.mock('../src/run/providers.js', async (original) => ({
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); resetHostLifecycleSnapshotForTests(); });
 
 describe('runner supervision depth, concrete L3/L2/L1 and real backend', () => {
-  it.each([
+  it.each<{ mode: string; matched: boolean; rootApproved: boolean; deadline?: boolean }>([
+    { mode: 'short', matched: false, rootApproved: true, deadline: true },
     { mode: 'default', matched: false, rootApproved: false }, { mode: 'default', matched: true, rootApproved: false },
     { mode: 'default', matched: false, rootApproved: true },
     { mode: 'short', matched: false, rootApproved: false }, { mode: 'deep', matched: false, rootApproved: false },
     { mode: 'short', matched: true, rootApproved: false }, { mode: 'deep', matched: true, rootApproved: false },
-  ])('keeps phase trust and learning/credit with $mode supervision (matched=$matched, rootApproved=$rootApproved)', async ({ mode, matched, rootApproved }) => {
+  ])('keeps phase trust and learning/credit with $mode supervision (matched=$matched, rootApproved=$rootApproved)', async ({ mode, matched, rootApproved, deadline }) => {
     const root = mkdtempSync(join(tmpdir(), 'atoma-depth-credit-'));
     const runs = join(root, 'runs');
     const skillRoot = join(root, 'skills');
@@ -37,11 +38,17 @@ describe('runner supervision depth, concrete L3/L2/L1 and real backend', () => {
       // One store for the run's handle and the test's handle-less registry
       // (W4: skill trust is rows in the store the ledger resolves).
       ATOMA_DB_PATH: join(root, 'store.db'), ATOMA_LEDGER_DB: join(root, 'store.db'), ATOMA_SKILLS_DIR: skillRoot, ATOMA_RUNS_DIR: runs,
-      ATOMA_BUILD_WORKSPACE: join(root, 'workspace'), ATOMA_BUILD_TIMEOUT_MS: '60000',
+      ATOMA_BUILD_WORKSPACE: join(root, 'workspace'), ATOMA_BUILD_TIMEOUT_MS: deadline ? '600000' : '60000',
       ATOMA_CONTAINER: '0', ATOMA_REQUIRE_ISOLATION: '0', ATOMA_PREFILTER_CACHE: '0',
       ATOMA_SKILL_LEARN: '1', ATOMA_SKILL_PROMOTE: '0', ATOMA_SKILL_DIRECT: '1',
     })) vi.stubEnv(key, value);
     resetHostLifecycleSnapshotForTests();
+    const deadlineController = new AbortController();
+    if (deadline) {
+      const timeout = AbortSignal.timeout.bind(AbortSignal);
+      vi.spyOn(AbortSignal, 'timeout').mockImplementation(ms => ms === 600000 ? deadlineController.signal : timeout(ms));
+    }
+    let executions = 0;
     const logs: string[] = [];
     for (const method of ['log', 'warn', 'error'] as const) {
       vi.spyOn(console, method).mockImplementation((...parts: unknown[]) => logs.push(parts.map(String).join(' ')));
@@ -61,7 +68,7 @@ describe('runner supervision depth, concrete L3/L2/L1 and real backend', () => {
       if (req.role === 'prefilter' && req.systemPrompt === SKILL_PREFILTER_SYSTEM_PROMPT) reply = {
         kind: 'reuse', target: recipe.id, confidence: 'high', reasoning: 'Match the recipe' };
       else if (req.role === 'prefilter') reply = { kind: 'reuse', target: req.actor?.tier === 3 ? cellName : leafName,
-        confidence: 'high', reasoning: 'Reuse the canonical executor' };
+        confidence: deadline ? 'low' : 'high', reasoning: 'Reuse the canonical executor' };
       else if (req.role === 'validate-plan') reply = { approved: true, reasoning: 'Plan approved' };
       else if (req.role === 'validate-result') {
         if (req.actor?.name === 'run-root') {
@@ -72,11 +79,15 @@ describe('runner supervision depth, concrete L3/L2/L1 and real backend', () => {
           reply = { approved: rootApproved, reasoning: rootApproved ? 'Reviewed delivery accepted' : 'Root DOM proof is missing' };
         } else reply = { approved: true, reasoning: 'Server phase approved', activeSkillFollowed: true };
       } else if (req.role === 'plan' && req.actor?.tier !== 1) reply = [
-        { strategy: 'reuse', target: cellName, reasoning: 'One server phase' },
-        makePlan({ subtasks: [{ description: 'Write server.js', outputs: ['server.js'] }], aggregation: { mode: 'sequential' } }),
+        { strategy: 'reuse', target: req.actor?.tier === 3 ? cellName : leafName, reasoning: 'One server phase' },
+        makePlan({ subtasks: [{ description: 'Write server.js', outputs: ['server.js'] }, ...(deadline ? [{ description: 'Write unfinished.txt', outputs: ['unfinished.txt'] }] : [])], aggregation: { mode: 'sequential' } }),
       ];
       else if (req.role === 'plan') reply = { reasoning: 'Write the server', proposedAction: 'Write server.js', expectedOutput: 'Server on disk' };
       else if (req.role === 'execute') {
+        if (deadline && ++executions === 2) {
+          deadlineController.abort(new DOMException('Execution deadline', 'TimeoutError'));
+          req.signal!.throwIfAborted();
+        }
         const args = { path: 'server.js', content: 'module.exports = { ready: true };' };
         const startedAt = Date.now();
         const value = await req.executor!.execute('write_file', args);
@@ -101,9 +112,14 @@ describe('runner supervision depth, concrete L3/L2/L1 and real backend', () => {
       // `failed`. What this test is about is unchanged and is asserted below —
       // phase trust and skill credit survive a root refusal, because the root
       // judges the DELIVERY and never the method.
-      expect(await handle.settled).toEqual({ outcome: rootApproved ? 'delivered' : 'partial' });
+      expect(await handle.settled).toEqual({ outcome: rootApproved && !deadline ? 'delivered' : 'partial' });
       const path = readdirSync(runs).find((name) => name.endsWith('.json') && name !== 'index.json')!;
       const trace = JSON.parse(readFileSync(join(runs, path), 'utf8')) as VizRun;
+      if (deadline) {
+        expect(deadlineController.signal.aborted).toBe(true);
+        expect(trace.result?.unfinishedPhases).toEqual(['Write unfinished.txt']);
+        expect(existsSync(join(root, 'workspace', 'server.js'))).toBe(true);
+      }
       expect(trace.events.filter((event) => event.kind === 'topology')).toMatchObject([
         { mode: mode === 'default' ? 'short' : mode, attempt: 1 },
       ]);

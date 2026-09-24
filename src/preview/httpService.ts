@@ -82,6 +82,21 @@ export class PreviewHttpService {
     }
   }
 
+  /** Terminal runs retire their snapshots before any further claim can be used. */
+  async runFinished(event: { orgId: string; projectId: string; projectRunId: string }): Promise<void> {
+    const row = this.deps.store.getInstance(event.orgId, event.projectRunId);
+    if (row?.source === 'in-flight') {
+      await this.deps.manager.stop(event.orgId, event.projectId, event.projectRunId, 'run-finished');
+    }
+  }
+
+  private requirePreviewable(viewer: Viewer, projectRunId: string): void {
+    const status = this.deps.projects.getProjectRun(viewer.orgId, projectRunId)?.status;
+    if (status !== 'running' && status !== 'delivered') {
+      throw new ProjectHttpError(409, 'this run is not available for preview');
+    }
+  }
+
   private requireMember(viewer: Viewer, what: string): void {
     if (!roleAtLeast(viewer.role, 'org:member')) {
       throw new ProjectHttpError(403, `org:member role or above is required to ${what}`);
@@ -111,6 +126,7 @@ export class PreviewHttpService {
   ): Promise<{ readonly status: number; readonly body: PreviewOpenResponse }> {
     this.requireMember(viewer, 'open previews');
     this.boundRun(viewer, projectId, projectRunId);
+    this.requirePreviewable(viewer, projectRunId);
     const parsed = previewOpenOptionsSchema.safeParse(options);
     if (!parsed.success) throw new ProjectHttpError(400, 'invalid preview open options');
     // `Viewer` carries no session id; see `PreviewClaimBinding.sessionId`.
@@ -121,11 +137,23 @@ export class PreviewHttpService {
     const inFlight = options.inFlight === true && this.runInFlight(viewer, projectRunId);
     try {
       const input = { orgId: viewer.orgId, projectId, projectRunId, opener };
+      if (options.generation !== undefined && !this.runInFlight(viewer, projectRunId) &&
+          this.deps.store.getInstance(viewer.orgId, projectRunId)?.source === 'in-flight') {
+        await this.runFinished(input);
+        throw new ProjectHttpError(409, 'the run finished; open its delivered preview');
+      }
       const opened = options.generation !== undefined
         ? this.deps.manager.claim(input, options.generation)
         : inFlight
         ? await this.deps.manager.openInFlight({ orgId: viewer.orgId, projectId, projectRunId, opener })
         : await this.deps.manager.open({ orgId: viewer.orgId, projectId, projectRunId, opener });
+      // Starting a snapshot awaits copying/probing. The run can finish in
+      // that interval, including before the instance existed for the hook.
+      if (inFlight && !this.runInFlight(viewer, projectRunId)) {
+        await this.runFinished({ orgId: viewer.orgId, projectId, projectRunId });
+        throw new ProjectHttpError(409, 'run finished while its snapshot was opening; open again');
+      }
+      this.requirePreviewable(viewer, projectRunId);
       if (!opened.url) {
         // Another caller is building this generation; the summary says so and
         // the caller polls rather than queueing behind it.
@@ -149,6 +177,7 @@ export class PreviewHttpService {
   ): PreviewSummary {
     this.requireMember(viewer, 'keep previews alive');
     this.boundRun(viewer, projectId, projectRunId);
+    this.requirePreviewable(viewer, projectRunId);
     // A heartbeat for a generation that has moved on is NOT an error: the
     // browser is a beat behind, and the summary it gets back tells it so.
     this.deps.manager.heartbeat(viewer.orgId, projectRunId, generation, viewer.principalId);

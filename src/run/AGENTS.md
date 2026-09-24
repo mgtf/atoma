@@ -116,6 +116,10 @@ Neighbours:
   Measured 2026-09-23: with one pass only, a goal naming nine verifiable
   behaviours was refused twice while a goal naming six was delivered, and the
   refusals named exactly which behaviours had never been probed.
+- A recovered deadline landing enters bounded root acceptance through the
+  shared landing signal; explicit cancellation and deepening still abort.
+  Expiry during final acceptance retains the partial work with an explicit
+  refusal, never an approval or another execution pass.
 - Only the first short attempt may deepen, at the existing supervision
   fallback moment after its branch retry. Cancel and drain all branches,
   confirm tool processes have exited, archive the workspace, then construct

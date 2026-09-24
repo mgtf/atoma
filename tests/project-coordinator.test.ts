@@ -14,11 +14,13 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve as resolvePath } from 'node:path';
 import { AuthStore } from '../src/auth/store.js';
+import { DEFAULT_HARD_KILL_MARGIN_MS, UNKILLABLE_BACKSTOP_EXTRA_MS } from '../src/cli/burnin.js';
 import { formatRunStatsEpilogue, type RunStats } from '../src/contracts/runStats.js';
 import { closeStoreHandles } from '../src/core/stores.js';
 import { ANTHROPIC_PINS, CLAUDE_CLI_PINS } from './tier-pins.js';
 import {
   DEFAULT_PROJECT_RUN_TIMEOUT_MS,
+  PROJECT_RUN_PREPARATION_TIMEOUT_MS,
   MAX_PROJECT_RUN_TIMEOUT_MS,
   MIN_PROJECT_RUN_TIMEOUT_MS,
   PROJECT_RUN_TIMEOUT_ENV,
@@ -1845,6 +1847,7 @@ describe('a project run has a budget an operator can set', () => {
     await coordinator.waitForIdle();
     // The host's ATOMA_BUILD_TIMEOUT_MS did not win; the project budget did.
     expect(driver.mock.calls[0]?.[0].timeoutMs).toBe(expected);
+    expect(coordinator.runTaskBudgetMs()).toBe(expected + PROJECT_RUN_PREPARATION_TIMEOUT_MS + DEFAULT_HARD_KILL_MARGIN_MS + UNKILLABLE_BACKSTOP_EXTRA_MS);
   });
 
   it('refuses to start at all when the configured budget is nonsense', () => {

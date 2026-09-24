@@ -215,6 +215,8 @@ that every generated application is ready for production.
 
 ## Documentation
 
+[Code review history and corrective evidence](docs/code-reviews.md).
+
 | I want to… | Read |
 | --- | --- |
 | Understand the architecture | [How it works](docs/how-it-works.md) |

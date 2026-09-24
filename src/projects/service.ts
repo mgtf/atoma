@@ -288,6 +288,11 @@ export class ProjectService {
     return publicRun(run, this.store.getPublicationForRun(orgId, run.projectRunId));
   }
 
+  /** The coordinator owns the budget; MCP only adds result retention. */
+  runTaskBudgetMs(): number {
+    return this.coordinator.runTaskBudgetMs();
+  }
+
   /** The same start from an already-parsed payload: the MCP's door. */
   async startProjectRunFromInput(viewer: Viewer, projectId: string, body: unknown): Promise<unknown> {
     if (!roleAtLeast(viewer.role, 'org:member')) {

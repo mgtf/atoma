@@ -240,6 +240,7 @@ export const previewStopReasonSchema = z.enum([
   'crash',
   'logout',
   'policy-change',
+  'run-finished',
 ]);
 
 /**

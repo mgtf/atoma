@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config';
+import { availableParallelism } from 'node:os';
 import type { Reporter, TestModule, TestRunEndReason, TestSpecification, Vitest } from 'vitest/node';
 import type { SerializedError } from 'vitest';
 
@@ -79,6 +80,10 @@ export default defineConfig({
       // order change which calls fire. Cache tests re-enable it per-test.
       ATOMA_PREFILTER_CACHE: '0',
     },
+    // Process-bound fixtures start their own Node/Python workers. Spawning a
+    // worker per CPU oversubscribed these deadlines in the full suite. Bound
+    // concurrency instead of extending the transport or warmup timeouts.
+    maxWorkers: Math.min(4, availableParallelism()),
     environment: 'node',
     globals: false,
     testTimeout: 15_000,

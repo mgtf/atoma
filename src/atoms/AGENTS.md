@@ -131,10 +131,12 @@ load-bearing.
   continues into model-authored prose. Measured twice on 2026-09-21:
   [progressive runs](../../docs/incidents/progressive-runs-2026-09-21.md).
 - `llm-synthesize` aggregation on a LANDED parallel dispatch rides
-  `landingSignal()`, not `ctx.signal` — which is already aborted by then, so the
+  `landingSignal(ctx.deadlineAt)`, not `ctx.signal` — which is already aborted by then, so the
   synthesis would throw before its first token and discard the branches the
-  landing exists to preserve. Same decoupling and same ceiling as
-  `postApprovalSignal()`; sequential aggregation makes no call and needs none.
+  landing exists to preserve. Synthesis and root acceptance share the absolute
+  deadline + 45s ceiling, inside the runner watchdog's 60s grace. A library
+  context without a deadline retains the post-approval cap. Sequential
+  aggregation makes no call and needs none.
 
 ## Verification and ground truth
 

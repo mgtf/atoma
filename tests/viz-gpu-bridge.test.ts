@@ -361,9 +361,24 @@ describe('full-GL minimal DOM bridge', () => {
     renderBridge(vi.fn(), runs, undefined, [], 'Weather Lab');
     expect(screen.getByRole('button', { name: 'Start run on Weather Lab' })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Run prompt' })).toBeInTheDocument();
-    expect(screen.getByText(/This prompt is for the next run on Weather Lab/)).toBeInTheDocument();
+    expect(screen.getByText(/latest delivered or partial work/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Create project' })).not.toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: 'Project name' })).not.toBeInTheDocument();
+  });
+
+  it.each(['fork', 'pull-request'] as const)('explains that a %s project resumes from GitHub rather than unpublished partial bytes', mode => {
+    useGpuStore.setState({ view: 'projects', entered: true, selectedProjectId: 'imported' });
+    render(createElement(DomBridge, {
+      runs, releaseVersion: '9.8.7', onSelectRun: vi.fn(),
+      t: (key: string, vars?: Record<string, unknown>) => translate('en', key, vars),
+      projects: [{ projectId: 'imported', name: 'Imported', repositoryTarget: {
+        installationId: '1', owner: 'owner', name: 'app', visibility: 'private',
+        source: { owner: 'upstream', name: 'app', mode },
+      } }],
+    }));
+    expect(screen.getByText(/default branch/)).toBeInTheDocument();
+    expect(screen.getByText(/Partial changes are not reused/)).toBeInTheDocument();
+    expect(screen.queryByText(/latest delivered or partial work/)).not.toBeInTheDocument();
   });
 
   it('bounds a valid long project name inside the run controls', () => {
@@ -373,7 +388,7 @@ describe('full-GL minimal DOM bridge', () => {
     const start = screen.getByRole('button', { name: /Start run on/ });
     expect(start).toHaveAttribute('title', name);
     expect(start.textContent?.length).toBeLessThan(80);
-    expect(screen.getByText(/This prompt is for the next run/)).not.toHaveTextContent(name);
+    expect(screen.getByText(/latest delivered or partial work/)).not.toHaveTextContent(name);
   });
 
   it('mirrors project selection for keyboard and assistive navigation', async () => {

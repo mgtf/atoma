@@ -168,12 +168,16 @@ export function postApprovalSignal(): AbortSignal {
  * budget and returning nothing. Sequential aggregation needs none of this; it
  * is string assembly and makes no call at all.
  *
- * Same explicit trade-off as its neighbour: a landed run may extend past its
- * deadline by at most this much while it finishes saying what it delivered. A
- * hard process kill still reaps everything.
+ * With a run deadline, synthesis and root acceptance share an absolute 45s
+ * finalization window, inside the runner's 60s watchdog grace. Library callers
+ * without a deadline retain the post-approval cap. A hard kill still reaps
+ * everything.
  */
-export function landingSignal(): AbortSignal {
-  return AbortSignal.timeout(POST_APPROVAL_LLM_TIMEOUT_MS);
+export function landingSignal(deadlineAt?: number): AbortSignal {
+  // All landing stages share this absolute ceiling, below the runner's 60s
+  // watchdog grace. Nested synthesis must not buy another full timeout.
+  const remaining = deadlineAt === undefined ? POST_APPROVAL_LLM_TIMEOUT_MS : deadlineAt + 45_000 - Date.now();
+  return AbortSignal.timeout(Math.max(1, Math.min(POST_APPROVAL_LLM_TIMEOUT_MS, remaining)));
 }
 
 /**

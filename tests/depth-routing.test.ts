@@ -7,7 +7,7 @@ import { superviseLoop } from '../src/core/supervisor.js';
 import type { Plan, Result, RunContext, Task, Tier, ToolExecutor, Verdict } from '../src/core/types.js';
 import { modelForTier } from '../src/core/models.js';
 import { rootProofCoverage, acceptRootResult } from '../src/atoms/rootAcceptance.js';
-import { dispatchWithAggregation } from '../src/atoms/dispatch.js';
+import { dispatchWithAggregation, markLanded } from '../src/atoms/dispatch.js';
 import { NON_JSON_PAYLOAD_SUMMARY_PREFIX } from '../src/atoms/json.js';
 import { buildResultGateEnv, runResultGates } from '../src/atoms/resultGates.js';
 import { PROBE_MANIFEST_FILENAME } from '../src/contracts/probeManifest.js';
@@ -516,4 +516,68 @@ describe('depth transition through the production supervision loop', () => {
     })).rejects.toThrow('transport failed');
     expect(restart).not.toHaveBeenCalled();
   });
+});
+
+describe('deadline landing across dispatch and depth acceptance', () => {
+  it.each(['sequential', 'concat'] as const)('retains accepted work after a real %s dispatch abort', async mode => {
+    const ctx = context();
+    const controller = new AbortController();
+    const accepted = vi.fn();
+    ctx.llm.enqueue({ text: jsonText({ approved: true, reasoning: 'Accepted completed work' }), stopReason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 } });
+    const plan = makePlan({ subtasks: [{ description: 'completed' }, { description: 'interrupted' }], aggregation: { mode } });
+    const out = await runDepthTask({ mode: 'deep', task, floor, ctx: { ...ctx, signal: controller.signal },
+      restart: vi.fn(), onTopology: vi.fn(), onAcceptance: accepted,
+      createExecutor: () => ({ actor: new Actor(), handle: async (_task, current) => {
+        const dispatch = await dispatchWithAggregation(plan.subtasks, plan, current, async (_subtask, idx) => {
+          if (idx === 0) return result;
+          await Promise.resolve();
+          controller.abort(new DOMException('Execution deadline', 'TimeoutError'));
+          current.signal.throwIfAborted();
+          return result;
+        });
+        return markLanded(dispatch.results[0]!, dispatch.unfinished);
+      } }),
+    });
+    expect(controller.signal.aborted).toBe(true);
+    expect(out.unfinishedPhases).toEqual(['interrupted']);
+    expect(accepted).toHaveBeenCalledWith(expect.objectContaining({ approved: true }));
+    expect(ctx.llm.calls).toHaveLength(1);
+    expect(ctx.llm.calls[0]!.signal?.aborted).toBe(false);
+  });
+});
+
+it('retains deadline work as refused partial if final acceptance itself expires', async () => {
+  const ctx = context();
+  const controller = new AbortController();
+  const finalization = new AbortController();
+  const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(finalization.signal);
+  ctx.llm.enqueue(() => {
+    finalization.abort(new DOMException('Finalization deadline', 'TimeoutError'));
+    return new Promise(() => {}); // The outer lifetime must not trust cooperation.
+  });
+  try {
+    const out = await runDepthTask({ mode: 'short', task, floor,
+      ctx: { ...ctx, signal: controller.signal }, restart: vi.fn(), onTopology: vi.fn(), onAcceptance: vi.fn(),
+      createExecutor: () => ({ actor: new Actor(), handle: async () => {
+        controller.abort(new DOMException('Execution deadline', 'TimeoutError'));
+        return markLanded(result, [{ description: 'unfinished' }]);
+      } }),
+    });
+    expect(out.unfinishedPhases).toEqual(['unfinished']);
+    expect(out.refusal).toContain('landing budget');
+  } finally { timeout.mockRestore(); }
+});
+
+it('never converts an explicit cancellation into a deadline landing', async () => {
+  const ctx = context();
+  const controller = new AbortController();
+  const accepted = vi.fn();
+  await expect(runDepthTask({ mode: 'short', task, floor,
+    ctx: { ...ctx, signal: controller.signal }, restart: vi.fn(), onTopology: vi.fn(), onAcceptance: accepted,
+    createExecutor: () => ({ actor: new Actor(), handle: async () => {
+      controller.abort(new Error('Cancelled by operator'));
+      return markLanded(result, [{ description: 'unfinished' }]);
+    } }),
+  })).rejects.toThrow('Cancelled by operator');
+  expect(accepted).not.toHaveBeenCalled();
 });

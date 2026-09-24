@@ -165,7 +165,7 @@ export function DomBridge({
   onEnter?: () => void;
   githubInstallations?: VizGitHubInstallation[];
   /** Minimal project index mirrored for keyboard and assistive navigation. */
-  projects?: readonly Pick<VizProject, 'projectId' | 'name'>[];
+  projects?: readonly (Pick<VizProject, 'projectId' | 'name'> & Partial<Pick<VizProject, 'repositoryTarget'>>)[];
   onCreateProject?: () => void;
   onStartRun?: () => void;
   projectBusy?: boolean;
@@ -233,8 +233,8 @@ export function DomBridge({
     (installation) => installation.status === 'active'
   );
   const selectedRun = runs.find((run) => run.id === selectedRunId);
-  const selectedProjectName =
-    projects.find((project) => project.projectId === selectedProjectId)?.name ?? null;
+  const selectedProject = projects.find((project) => project.projectId === selectedProjectId);
+  const selectedProjectName = selectedProject?.name ?? null;
   const selectedProjectLabel = selectedProjectName && selectedProjectName.length > 48
     ? `${selectedProjectName.slice(0, 47)}…`
     : selectedProjectName;
@@ -579,7 +579,7 @@ export function DomBridge({
           </div>
           <p className="gpu-project-hint">
             {selectedProjectLabel
-              ? t('projects.actionsHint.ready', { name: selectedProjectLabel })
+              ? t(selectedProject?.repositoryTarget?.source ? 'projects.actionsHint.readyImported' : 'projects.actionsHint.ready', { name: selectedProjectLabel })
               : projectRepositoryMode !== 'new' ? t(projectRepositoryMode === 'fork' ? 'projects.sourceHint.fork' : 'projects.sourceHint.pullRequest') : `${t('projects.actionsHint.new')} ${t(
                   projectVisibility === 'public'
                     ? 'projects.visibility.publicHint'

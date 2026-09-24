@@ -911,6 +911,7 @@ describe('runs as tasks, and the run log', () => {
     const service = {
       startProjectRunFromInput: async (_v: unknown, _p: string, body: unknown) => ({ projectRunId: 'run-1', status: 'queued', goal: (body as { goal: string }).goal }),
       projectRunStatus: () => ({ projectRunId: 'run-1', status: statuses.length > 1 ? statuses.shift()! : statuses[0]! }),
+      runTaskBudgetMs: () => 2 * 60 * 60 * 1000,
       cancelProjectRun: async (_v: unknown, _p: string, runId: string) => { cancelled.push(runId); return { cancelled: runId }; },
     };
     const store = new SessionTaskStore();
@@ -939,6 +940,47 @@ describe('runs as tasks, and the run log', () => {
     expect(cancelled).toEqual(['run-1']);
     for (const cleanup of host.cleanups) cleanup();
     store.close();
+  });
+
+
+  it.each(['delivered', 'partial', 'failed', 'cancelled'] as const)('retains a two-hour project task through preparation and completion (%s)', async terminal => {
+    vi.useFakeTimers();
+    const store = new SessionTaskStore();
+    const host: RunTaskHost = { store, follow: () => {}, cleanups: [] };
+    let runStatus = 'running';
+    const read = vi.fn(() => ({ projectRunId: 'long-run', status: runStatus }));
+    const service = {
+      runTaskBudgetMs: () => 133 * 60_000,
+      startProjectRunFromInput: async () => ({ projectRunId: 'long-run', status: 'running' }),
+      projectRunStatus: read,
+      cancelProjectRun: async () => ({}),
+    };
+    const handler = projectRunTaskHandler(host, { viewer: () => viewer('org:member'), service, pollMs: 60_000 });
+    const requestStore = {
+      createTask: (params: { ttl?: number | null; pollInterval?: number }) => store.createTask(params, 1, { method: 'tools/call' }),
+      getTask: async (taskId: string) => (await store.getTask(taskId))!,
+      storeTaskResult: (taskId: string, status: 'completed' | 'failed', result: { content: unknown[] }) => store.storeTaskResult(taskId, status, result),
+      getTaskResult: (taskId: string) => store.getTaskResult(taskId),
+      updateTaskStatus: (taskId: string, status: 'working' | 'input_required' | 'completed' | 'failed' | 'cancelled', message?: string) => store.updateTaskStatus(taskId, status, message),
+    };
+    const extra = { taskStore: requestStore, signal: new AbortController().signal, requestId: 1, sendNotification: async () => {}, sendRequest: async () => ({}) } as never;
+    try {
+      const created = await handler.createTask({ projectId: 'p', goal: 'long', idempotencyKey: undefined }, extra);
+      await vi.advanceTimersByTimeAsync(131 * 60_000);
+      expect(await store.getTask(created.task.taskId)).toMatchObject({ status: 'working' });
+      runStatus = terminal;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(await store.getTask(created.task.taskId)).toMatchObject({ status: ['delivered', 'partial'].includes(terminal) ? 'completed' : 'failed' });
+      expect(await store.getTaskResult(created.task.taskId)).toMatchObject({ structuredContent: { status: terminal } });
+      const reads = read.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      expect(read).toHaveBeenCalledTimes(reads);
+      expect(await store.getTaskResult(created.task.taskId)).toMatchObject({ structuredContent: { status: terminal } });
+    } finally {
+      for (const cleanup of host.cleanups) cleanup();
+      store.close();
+      vi.useRealTimers();
+    }
   });
 
   it('sends the output of a run this session started as notifications/message, and one notice when it ends', async () => {

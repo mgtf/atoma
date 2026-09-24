@@ -54,7 +54,7 @@ import {
  * stream that keeps alive and replays.
  */
 
-/** How long a finished task's result stays readable after the run ends. */
+/** Retention margin added to the run budget; the SDK renews the full TTL at terminal. */
 export const TASK_RESULT_GRACE_MS = 10 * 60 * 1000;
 /** How often `tasks/result` re-checks a working task, and how often the project watcher reads the store. */
 export const TASK_POLL_INTERVAL_MS = 2_000;
@@ -251,6 +251,7 @@ export function operatorRunTaskHandler(
 export interface ProjectRunTaskDeps {
   readonly viewer: () => Viewer;
   readonly service: {
+    runTaskBudgetMs(): number;
     startProjectRunFromInput(viewer: Viewer, projectId: string, body: unknown): Promise<unknown>;
     projectRunStatus(viewer: Viewer, projectId: string, projectRunId: string): unknown;
     cancelProjectRun(viewer: Viewer, projectId: string, projectRunId: string): Promise<unknown>;
@@ -280,7 +281,7 @@ const PROJECT_COMPLETED = new Set(['delivered', 'partial']);
 export function projectRunTaskHandler(host: RunTaskHost, deps: ProjectRunTaskDeps): ToolTaskHandler<typeof PROJECT_RUN_INPUT> {
   const pollMs = deps.pollMs ?? TASK_POLL_INTERVAL_MS;
   return handlerWith<typeof PROJECT_RUN_INPUT>(async (args, extra) => {
-    const task = await extra.taskStore.createTask({ ttl: DEFAULT_RUN_TIMEOUT_MS + TASK_RESULT_GRACE_MS, pollInterval: pollMs });
+    const task = await extra.taskStore.createTask({ ttl: deps.service.runTaskBudgetMs() + TASK_RESULT_GRACE_MS, pollInterval: pollMs });
     const viewer = deps.viewer();
     let started: { projectRunId: string; status: string };
     try {
@@ -305,8 +306,13 @@ export function projectRunTaskHandler(host: RunTaskHost, deps: ProjectRunTaskDep
     };
     host.cleanups.push(stop);
     let lastStatus = started.status;
-    const tick = (): void => {
+    const tick = async (): Promise<void> => {
       if (stopped) return;
+      const current = await host.store.getTask(task.taskId);
+      if (stopped || !current || ['cancelled', 'completed', 'failed'].includes(current.status)) {
+        stop();
+        return;
+      }
       let snapshot: { status: string } | null = null;
       try {
         snapshot = deps.service.projectRunStatus(viewer, args.projectId, runId) as { status: string };
@@ -325,11 +331,11 @@ export function projectRunTaskHandler(host: RunTaskHost, deps: ProjectRunTaskDep
         quietly(() => extra.taskStore.storeTaskResult(task.taskId, PROJECT_COMPLETED.has(String(snapshot.status)) ? 'completed' : 'failed', jsonResult(snapshot)));
         return;
       }
-      timer = setTimeout(tick, pollMs);
+      timer = setTimeout(() => { void tick(); }, pollMs);
       timer.unref();
     };
     await extra.taskStore.updateTaskStatus(task.taskId, 'working', `run ${runId} ${started.status}`);
-    timer = setTimeout(tick, pollMs);
+    timer = setTimeout(() => { void tick(); }, pollMs);
     timer.unref();
     return { task: await extra.taskStore.getTask(task.taskId) };
   });

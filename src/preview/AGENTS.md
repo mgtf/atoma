@@ -72,7 +72,10 @@ closes that loop and still allocates nothing. It is also why `stop` re-reads
 through the service, and why the client re-asks on a run-status change: the
 manager knows about the instance, never about the run. An explicit terminal
 run status overrides the historical in-flight source: a stopped snapshot must
-not advertise a reopening that requires a delivered descriptor.
+not advertise a reopening that requires a delivered descriptor. Opening,
+joining a generation and heartbeats all require running or delivered status.
+The terminal hook retires the in-flight generation and revokes its grants;
+an opening rechecks status after asynchronous startup.
 
 Three rules make it safe: the run's workspace is only ever READ; the COPY is
 classified, never the live workspace, so the classifier sees bytes that cannot

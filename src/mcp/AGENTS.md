@@ -58,6 +58,10 @@ Neighbours:
   `MCP_MAX_SESSIONS_PER_CALLER` loses its OWN stalest session, and the host's
   `MCP_MAX_SESSIONS` backstop answers 503. Both are counted in `health()`, so
   a client re-initialising in a loop is visible rather than merely survived.
+  Initializations reserve both ceilings before allocation; a caller whose
+  slots are all pending receives 503. Incomplete bodies expire after 30s.
+  In-flight POST responses pin a session until finish/disconnect, with a
+  configurable 3h hard ceiling; standalone GET streams do not pin it.
 - IDENTITY. Gated: `Authorization: Bearer atoma_…`, an API token a principal
   minted for ONE organisation (`/api/tokens`, or `npm run auth -- token`).
   `AuthStore.resolveApiToken` returns a fresh viewer — role and platform flag
@@ -151,9 +155,10 @@ Neighbours:
   stored once, never on a terminal task); its last word is `tasks/get`, and
   the run's own final status stays readable through the status tool.
 - TASKS LIVE WITH THE SESSION, like the event ring and the subscriptions: the
-  store is per server, the ttl is the run timeout plus `TASK_RESULT_GRACE_MS`,
-  the watchers are unhooked in `onclose`. A restart forgets task ids, never
-  runs.
+  store is per server. Project task TTL uses the coordinator's effective
+  preparation + run + hard-backstop budget, plus `TASK_RESULT_GRACE_MS`, not
+  the operator default. Polling stops on terminal, missing or cancelled tasks;
+  watchers are unhooked in `onclose`. A restart forgets task ids, never runs.
 - THE TRANSPORT ANSWERS ON SSE, NEVER PLAIN JSON. `enableJsonResponse` makes
   the SDK drop every notification related to a request (measured 2026-09-07:
   0 of 3 delivered), and the standalone stream is what carries the run log and

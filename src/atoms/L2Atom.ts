@@ -1850,7 +1850,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       this.toLlmRequest('execute', {
         userContent,
         params: this.params,
-        signal: landed ? landingSignal() : ctx.signal,
+        signal: landed ? landingSignal(ctx.deadlineAt) : ctx.signal,
       })
     );
     const { output, summary } = parsePayloadTolerant(resp.text);
