@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir as osTmpdir } from 'node:os';
-import { TraceRecorder, runLabelFromGoal } from '../src/viz/trace.js';
+import { TraceRecorder, runLabelFromGoal, executionProvenance } from '../src/viz/trace.js';
 
 /**
  * A run's label is a display NAME derived from its goal, and the goal itself
@@ -62,4 +62,19 @@ describe('run labels admit when they are cut', () => {
       )
     ).toThrow(/safe filename/);
   });
+});
+
+
+it('records a release revision from its receipt and never guesses missing historical provenance', () => {
+  const root = mkdtempSync(join(osTmpdir(), 'atoma-provenance-'));
+  try {
+    expect(executionProvenance(root)).toMatchObject({ revision: null, source: 'unknown' });
+    writeFileSync(join(root, 'REVISION'), 'a'.repeat(40) + '\n');
+    expect(executionProvenance(root)).toMatchObject({ revision: 'a'.repeat(40), source: 'release-receipt', dirty: null });
+    const recorder = new TraceRecorder(root);
+    const run = recorder.beginRun({ description: 'record provenance' });
+    expect(run.provenance?.node).toBe(process.version);
+    expect(run.provenance?.source).toBe('git');
+    recorder.endRun({ error: 'test complete' });
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

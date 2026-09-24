@@ -112,7 +112,7 @@ export function tracePromptText(file: string): string {
     '',
     TRACE_ERROR_CAVEAT,
     '',
-    'Event payloads are omitted from that reader on purpose: a trace holds every prompt and every tool result verbatim. A human reads the bodies in the visualiser (npm run viz).',
+    'When a decision needs evidence, call section=metadata for the complete run error and result, or section=event with an eventId for the complete verdict, prompt, response or tool exchange. Follow nextTextOffset with the returned snapshot and concatenate text pages before parsing JSON. Never infer a historical revision from the current host.',
   ].join('\n');
 }
 

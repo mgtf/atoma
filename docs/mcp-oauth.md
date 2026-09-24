@@ -30,6 +30,37 @@ is available in the existing MCP token list as `OAuth: <client>` and through the
 OAuth revocation endpoint. Membership and platform flags are resolved on every
 MCP request, exactly as for manually minted API tokens.
 
+## Diagnosing a run through MCP
+
+`atoma_run_trace` accepts the project `runId` (or an operator `file` at the
+platform tier). Its default summary pages events with `offset`, `limit` and
+`nextOffset`, including recorded durations, acceptance decisions and excerpts.
+For the evidence behind those summaries, use the same tool:
+
+- `section: "metadata"`: all persisted top-level trace fields except events,
+  including the task, final error/result, attestations and execution provenance.
+- `section: "event", eventId: "<id from summary>"`: the complete event,
+  including prompts, responses, validation reasons, tool arguments/results,
+  usage and durations when recorded.
+- `section: "log"`: the project runner log, even before a trace exists.
+  This section requires `runId`, not an operator filename.
+
+Detail replies contain JSON-encoded `text`, a `snapshot` hash and
+`nextTextOffset`. Concatenate successive text pages, passing the returned
+`nextTextOffset` as `textOffset` and the same `snapshot`, then parse the joined
+JSON. Offsets count UTF-16 code units. Pages default to 12,000 characters and
+cap at 24,000; nothing is silently truncated. If `changed: true` is returned,
+restart at offset zero because the selected evidence changed during the read.
+Missing/expired files and files beyond the shared trace read ceiling are
+reported explicitly. The normal organisation and platform read permissions
+apply to every section; all model-authored content remains untrusted data.
+
+New traces record the executable release's `REVISION` receipt, or the exact
+checkout's Git HEAD and dirty state during development, plus the Node runtime
+and platform. A missing receipt/checkout is unknown. Old traces are never
+backfilled with the revision of the server reading them today. Provenance
+identifies the runner, not the generated application's publication commit.
+
 ## Wire contract
 
 - `/.well-known/oauth-protected-resource/mcp` (also root fallback): resource,

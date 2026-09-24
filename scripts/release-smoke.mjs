@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -131,6 +131,17 @@ const mcpSmoke = async (base) => {
   }
   const refused = await call('tools/call', { name: 'atoma_run_trace', arguments: { file: '../etc/passwd' } });
   if (!JSON.stringify(refused).includes('refused')) throw new Error('atoma_run_trace did not refuse a traversal');
+  for (const section of ['metadata', 'event']) {
+    const detail = await call('tools/call', { name: 'atoma_run_trace', arguments: {
+      file: 'diagnostic-smoke.json', section, ...(section === 'event' ? { eventId: 'verdict' } : {}),
+    } });
+    const page = detail.structuredContent;
+    if (detail.isError || !page?.snapshot || page.nextTextOffset !== null) throw new Error('compiled MCP detail paging failed');
+    const evidence = JSON.parse(page.text);
+    if (section === 'metadata' ? evidence.error !== 'exact terminal error' : evidence.reasoning !== 'exact refusal') {
+      throw new Error('compiled MCP omitted diagnostic evidence');
+    }
+  }
   if (!initialized?.capabilities?.resources?.subscribe) throw new Error('compiled MCP does not advertise subscribable resources');
   const resources = (await call('resources/list', {}))?.resources;
   if (!Array.isArray(resources) || !resources.some((resource) => resource.uri === 'atoma://families')) {
@@ -170,6 +181,12 @@ try {
   // ATOMA_RUNS_DIR and now hosts a resident watch, so an inherited variable
   // would aim this smoke at whatever corpus the machine happens to have.
   const vizRuns = join(smokeRoot, 'runs');
+  mkdirSync(vizRuns, { recursive: true });
+  writeFileSync(join(vizRuns, 'diagnostic-smoke.json'), JSON.stringify({
+    id: 'diagnostic-smoke', label: 'diagnostic smoke', task: { description: 'read evidence' },
+    startedAt: '2026-09-24T00:00:00Z', endedAt: '2026-09-24T00:00:01Z', error: 'exact terminal error',
+    events: [{ id: 'verdict', kind: 'acceptance', ts: 1, approved: false, reasoning: 'exact refusal' }],
+  }));
   const viz = spawn(
     process.execPath,
     [
@@ -179,7 +196,7 @@ try {
       '--dir', vizRuns,
       '--db', join(smokeRoot, 'store.db'),
     ],
-    { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] }
+    { cwd: root, env: { ...process.env, ATOMA_RUNS_DIR: vizRuns }, stdio: ['ignore', 'pipe', 'pipe'] }
   );
   let vizStderr = '';
   viz.stderr.on('data', (chunk) => {

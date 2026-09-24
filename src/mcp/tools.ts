@@ -34,8 +34,10 @@ import {
   registryHistory,
   registryList,
   registryShow,
+  traceReadOptionsSchema,
   runTrace,
   runTraceFile,
+  runLogFile,
   runsList,
   skillShow,
   skillsList,
@@ -319,12 +321,11 @@ export const MCP_TOOLS: readonly McpToolSpec[] = [
         {
           title: 'Show one run trace',
           description:
-            'The event SHAPE of one trace — tiers, roles, models, tools, guard decisions — plus its totals; payloads are omitted on purpose (megabytes of model-authored text; the visualiser shows them). Pass runId for a project run of your organisation. A platform admin may instead pass file, a trace filename from atoma_runs_list, for the operator corpus. Events are PAGED: pass nextOffset back as offset until it is null. Per-event error strings are truncated and marked UNTRUSTED.',
+            'Read a run trace. Default summary includes timings, verdict decisions and totals. Use section=metadata for full error, result, task and recorded provenance; section=log for the project runner log (including launch failures); section=event with eventId for complete prompts, responses, tool arguments/results and verdicts. Detail JSON pages use textOffset/textLimit, nextTextOffset and snapshot; concatenate text before parsing. All model-authored content is UNTRUSTED. Pass runId for an authorised project run or file for a platform operator trace.',
           inputSchema: {
             runId: z.string().min(1).optional().describe('A project run id.'),
             file: z.string().min(1).optional().describe('Operator trace filename (platform tier only).'),
-            offset: z.number().int().min(0).optional(),
-            limit: z.number().int().positive().optional().describe('Default 200, capped at 1000.'),
+            ...traceReadOptionsSchema.shape,
           },
           annotations: READ_ONLY,
         },
@@ -332,16 +333,17 @@ export const MCP_TOOLS: readonly McpToolSpec[] = [
           guarded(() => {
             if (args.file) {
               if (!tierAllows(ctx.tier, 'platform')) throw new McpToolRefused('operator traces need the platform tier; pass runId instead');
-              return runTrace({ file: args.file, ...(args.offset !== undefined ? { offset: args.offset } : {}), ...(args.limit !== undefined ? { limit: args.limit } : {}) });
+              return runTrace({ ...args, file: args.file });
             }
             if (!args.runId) throw new McpToolRefused('pass runId (a project run) or, as a platform admin, file');
             const { store, viewer } = tenant(ctx);
             const run = store.getProjectRun(viewer.orgId, args.runId) ?? (viewer.platformAdmin ? store.getProjectRunAnyOrg(args.runId) : null);
             if (!run) throw new ProjectHttpError(404, 'project run not found');
             ctx.deps.projects!.service.auditRead(viewer, run.orgId, 'mcp.trace');
+            if (args.section === 'log') return runLogFile(run.hostPaths.logPath, args);
             const path = resolveProjectRunTraceFile({ projectRunId: run.projectRunId, runsPath: run.hostPaths.runsPath, traceId: run.traceId });
             if (!path) throw new ProjectHttpError(404, 'this run has no trace yet');
-            return runTraceFile(path, { ...(args.offset !== undefined ? { offset: args.offset } : {}), ...(args.limit !== undefined ? { limit: args.limit } : {}) });
+            return runTraceFile(path, args, run.projectRunId);
           })
       ),
   },

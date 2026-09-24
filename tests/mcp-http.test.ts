@@ -1091,3 +1091,63 @@ it('journals a platform-admin MCP trace read under the foreign organisation', as
     expect(events[0]).toMatchObject({ actorId: a.viewer.principalId, orgId: b.viewer.orgId, detail: { surface: 'mcp.trace' } });
   } finally { await client.close(); }
 });
+it('reads complete diagnostics over HTTP with lossless pages and organisation isolation', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'atoma-mcp-detail-'));
+  dirs.push(root);
+  const a = projectRetrievalFixture(root, { subject: 'reader', slug: 'reader' });
+  const b = projectRetrievalFixture(root, { subject: 'other', slug: 'other' });
+  const own = a.makeRun();
+  const foreign = b.makeRun();
+  const verdict = { id: 'acceptance-final', kind: 'acceptance', ts: 42, approved: false,
+    reasoning: 'Missing restart evidence. ' + 'é🧪'.repeat(12_000) };
+  const trace = { id: own.run.projectRunId, label: 'diagnostic', startedAt: '2026-09-24T15:00:00Z',
+    error: 'Root acceptance failed: exact cause', result: { refusal: 'not verified' },
+    events: [verdict, { id: 'tool-1', kind: 'tool', ts: 43, name: 'fetch_url', durationMs: 123,
+      args: { url: 'http://localhost:3000/health' }, result: { status: 500, body: 'exact response' } }] };
+  mkdirSync(own.layout.runsPath, { recursive: true });
+  const path = join(own.layout.runsPath, `${own.run.projectRunId}.json`);
+  writeFileSync(path, JSON.stringify(trace));
+  writeFileSync(own.run.hostPaths.logPath, 'runner stderr: fatal\n' + 'x'.repeat(30_000));
+  const service = new ProjectService({ store: a.projects, github: null, coordinator: {} as ProjectRunCoordinator });
+  const { url } = await listen(() => ({ kind: 'principal', viewer: a.viewer, tokenId: 'reader' }),
+    { ...NO_TENANT, auth: a.auth, projects: { store: a.projects, service } });
+  const client = await connect(url);
+  type DetailPage = { text: string; snapshot: string; nextTextOffset: number | null; changed?: boolean };
+  const call = (args: Record<string, unknown>) => client.callTool({ name: 'atoma_run_trace', arguments: { runId: own.run.projectRunId, ...args } });
+  try {
+    const summary = await call({});
+    expect(summary.structuredContent).toMatchObject({ error: trace.error, provenance: null,
+      events: [{ id: verdict.id, approved: false }, { durationMs: 123 }] });
+    const header = await call({ section: 'metadata' });
+    expect(JSON.parse((header.structuredContent as DetailPage).text)).toEqual({
+      id: trace.id, label: trace.label, startedAt: trace.startedAt, error: trace.error, result: trace.result,
+    });
+    let offset = 0;
+    let snapshot: string | undefined;
+    let text = '';
+    for (;;) {
+      const response = await call({ section: 'event', eventId: verdict.id, textOffset: offset, textLimit: 999_999, ...(snapshot ? { snapshot } : {}) });
+      expect(response.isError).not.toBe(true);
+      const page = response.structuredContent as DetailPage;
+      expect(page.text.length).toBeLessThanOrEqual(24_000);
+      text += page.text;
+      snapshot = page.snapshot;
+      if (page.nextTextOffset === null) break;
+      offset = page.nextTextOffset;
+    }
+    expect(JSON.parse(text)).toEqual(verdict);
+    const event = await call({ section: 'event', eventId: 'tool-1' });
+    expect(JSON.parse((event.structuredContent as DetailPage).text)).toEqual(trace.events[1]);
+    const log = await call({ section: 'log' });
+    expect((log.structuredContent as DetailPage).text).toContain('runner stderr: fatal');
+    expect((log.structuredContent as DetailPage).nextTextOffset).not.toBeNull();
+    trace.events[0] = { ...verdict, reasoning: 'new verdict' };
+    writeFileSync(path, JSON.stringify(trace));
+    expect((await call({ section: 'event', eventId: verdict.id, textOffset: 24_000, snapshot })).structuredContent).toMatchObject({ changed: true });
+    expect((await call({ section: 'event' })).isError).toBe(true);
+    for (const section of ['summary', 'metadata', 'event', 'log']) {
+      expect((await call({ runId: foreign.run.projectRunId, section, eventId: verdict.id })).isError).toBe(true);
+      expect((await call({ file: 'any.json', section, eventId: verdict.id })).isError).toBe(true);
+    }
+  } finally { await client.close(); }
+});

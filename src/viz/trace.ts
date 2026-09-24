@@ -1,5 +1,7 @@
 import { writeFileSync, mkdirSync, existsSync, readFileSync, renameSync } from 'node:fs';
 import { resolve, join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import type { ContextCitation, ContextSource } from '../contracts/llmTrace.js';
 import type { AtomType } from '../registry/atomRegistry.js';
@@ -418,7 +420,31 @@ export interface VizRunTotals {
   }>;
 }
 
+/** Capture execution provenance once; never infer historical revisions at read time. */
+export function executionProvenance(root = fileURLToPath(new URL('../../', import.meta.url))) {
+  let revision: string | null = null;
+  let source: 'release-receipt' | 'git' | 'unknown' = 'unknown';
+  let dirty: boolean | null = null;
+  try {
+    const receipt = readFileSync(join(root, 'REVISION'), 'utf8').trim();
+    if (/^[a-f0-9]{40}$/.test(receipt)) { revision = receipt; source = 'release-receipt'; }
+  } catch { /* Development checkout, or no release receipt. */ }
+  if (!revision) {
+    try {
+      const git = (args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      // Refuse an enclosing repository: it does not identify this executable.
+      if (resolve(git(['rev-parse', '--show-toplevel'])) === resolve(root)) {
+        revision = git(['rev-parse', 'HEAD']);
+        dirty = git(['status', '--porcelain']).length > 0;
+        source = 'git';
+      }
+    } catch { revision = null; source = 'unknown'; }
+  }
+  return { revision, source, dirty, node: process.version, platform: process.platform, arch: process.arch };
+}
+
 export interface VizRun {
+  provenance?: ReturnType<typeof executionProvenance>;
   /** Resolves floor/phase coverage references, including abandoned attempts. */
   attestations?: import('../contracts/attestation.js').AttestationRecord[];
   id: string;
@@ -523,6 +549,7 @@ export class TraceRecorder {
       label: label ?? runLabelFromGoal(task.description, 140),
       task,
       startedAt: new Date().toISOString(),
+      provenance: executionProvenance(),
       events: [],
     };
     if (opts?.initialTypes && opts.initialTypes.length > 0) {
