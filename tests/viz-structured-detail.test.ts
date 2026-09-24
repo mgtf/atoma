@@ -146,7 +146,7 @@ describe('structured detail presentation', () => {
     // read (2026-09-21).
     expect(withoutCatalog.map((node) => node.label)).toEqual([
       'Skill id',
-      'Molecule',
+      'Recipe owner',
     ]);
     expect(withoutCatalog.map((node) => node.value)).not.toContain(
       skillEventTitle(event, en)
@@ -311,10 +311,43 @@ describe('structured detail hierarchy', () => {
 
     const labels = nodes.map((node) => node.label);
     expect(labels.indexOf('Description')).toBeLessThan(labels.indexOf('Skill id'));
-    expect(labels.indexOf('When to use')).toBeLessThan(labels.indexOf('Molecule'));
+    expect(labels.indexOf('When to use')).toBeLessThan(labels.indexOf('Recipe owner'));
     expect(labels.indexOf('Reasoning')).toBeLessThan(labels.indexOf('Initiator'));
     // The recipe is the whole skill body: it stays, at the foot of the pane.
     expect(labels.at(-1)).toBe('Recipe');
+  });
+
+  it('names both molecules on a donor match, and only then', () => {
+    // A recipe that ran somewhere other than its own namespace. `l1Name` is
+    // the OWNER — the pair the viz addresses `/api/skills` with — so the
+    // executing molecule needs its own field or it overwrites that address.
+    const donor = {
+      kind: 'skill',
+      op: 'inject',
+      l1Name: 'Ammonia',
+      executorName: 'CarbonDioxide',
+      skillId: 'dialog-to-inline-form',
+      actor: { name: 'Tracheid' },
+    };
+    expect(skillEventSubtitle(donor)).toBe(
+      'Ammonia / dialog-to-inline-form → CarbonDioxide · Tracheid'
+    );
+    const nodes = buildSkillEventDetail(donor, null, en) as StructuredDetailField[];
+    expect(nodes.map((node) => node.label)).toEqual([
+      'Skill id',
+      'Recipe owner',
+      'Executed by',
+      'Initiator',
+    ]);
+    expect(nodes.find((node) => node.label === 'Recipe owner')?.value).toBe('Ammonia');
+    expect(nodes.find((node) => node.label === 'Executed by')?.value).toBe('CarbonDioxide');
+
+    // Owner and executor are the same molecule: the emitter omits the field,
+    // and nothing here invents a donor that is not there.
+    const home = { ...donor, executorName: undefined };
+    expect(skillEventSubtitle(home)).toBe('Ammonia / dialog-to-inline-form · Tracheid');
+    const homeNodes = buildSkillEventDetail(home, null, en) as StructuredDetailField[];
+    expect(homeNodes.map((node) => node.label)).not.toContain('Executed by');
   });
 
   it('never reorders an array, a document or the llm envelope', () => {

@@ -585,7 +585,7 @@
   "detail.enum.contextSource.event-skill": "事件skill",
   "detail.enum.contextSource.coaching": "指导",
   "detail.enum.contextSource.fallback-trace": "fallback追踪",
-  "detail.field.l1Name": "分子",
+  "detail.field.l1Name": "",
   "detail.field.whenToUse": "使用时机",
   "detail.field.updatedAt": "更新时间",
   "detail.field.recipe": "配方",

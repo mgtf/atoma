@@ -585,7 +585,7 @@
   "detail.enum.contextSource.event-skill": "Skill peristiwa",
   "detail.enum.contextSource.coaching": "Pembinaan",
   "detail.enum.contextSource.fallback-trace": "Jejak fallback",
-  "detail.field.l1Name": "Molekul",
+  "detail.field.l1Name": "",
   "detail.field.whenToUse": "Kapan digunakan",
   "detail.field.updatedAt": "Diperbarui pada",
   "detail.field.recipe": "Resep",

@@ -585,7 +585,7 @@
   "detail.enum.contextSource.event-skill": "Ereignis-Skill",
   "detail.enum.contextSource.coaching": "Coaching",
   "detail.enum.contextSource.fallback-trace": "Fallback-Ablaufverfolgung",
-  "detail.field.l1Name": "Molekül",
+  "detail.field.l1Name": "",
   "detail.field.whenToUse": "Verwendungszweck",
   "detail.field.updatedAt": "Aktualisiert am",
   "detail.field.recipe": "Rezept",

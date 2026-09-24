@@ -939,7 +939,13 @@ function GpuAppContent({
     registryQuery.error,
     namespacesQuery.error,
     ...skillLists.results.map((result) => result.error),
-    skillDetailQuery.error,
+    // skillDetailQuery.error is DELIBERATELY absent, for the reason the
+    // project routes below are: one recipe body that will not load is the
+    // business of the pane that shows it, not of the view. A run's skill
+    // events cite the identities they saw, and a recipe dropped, merged or
+    // learned under an identity the fold has since moved answers 404 — which
+    // as a global error painted a banner over the whole run graph. It
+    // surfaces as `skillDetailFailed` in the pane instead.
     burninQuery.error,
     profilesQuery.error,
     projectsQuery.error,
@@ -961,6 +967,7 @@ function GpuAppContent({
     skillNamespaces: namespacesQuery.data ?? [],
     skillsByNamespace: skillLists.byNamespace,
     skillDetail: skillDetailQuery.data ?? null,
+    skillDetailFailed: skillDetailQuery.isError,
     burnin: burninQuery.data ?? null,
     profiles: profilesQuery.data?.profiles ?? [],
     projects: projectsQuery.data ?? [],
@@ -1022,6 +1029,7 @@ function GpuAppContent({
     runQuery.data,
     runsQuery.data,
     skillDetailQuery.data,
+    skillDetailQuery.isError,
     skillLists.byNamespace,
   ]);
 

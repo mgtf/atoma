@@ -148,6 +148,12 @@ export interface GpuDataSnapshot {
   skillNamespaces: SkillNamespace[];
   skillsByNamespace: Record<string, SkillSummary[]>;
   skillDetail: SkillSummary | null;
+  /**
+   * The selected recipe's body could not be read. Kept HERE rather than in
+   * the global error: a dangling skill reference is one pane's problem, and a
+   * banner over the run graph was the wrong answer to it.
+   */
+  skillDetailFailed: boolean;
   burnin: { rows: BurninRow[]; csvPath: string } | null;
   profiles: LaunchProfile[];
   projects: VizProject[];

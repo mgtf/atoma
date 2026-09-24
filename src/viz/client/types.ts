@@ -60,6 +60,10 @@ export interface VizEvent extends Partial<AcceptanceInfo>, Partial<TopologyInfo>
   l1Name?: string;
   /** Stored skill-namespace key (atom id). Address `/api/skills` with this, not `l1Name`. */
   l1AtomId?: string;
+  /** The molecule that RAN the recipe, when a donor match made it not the owner. */
+  executorName?: string;
+  /** Identity of that executing molecule — never an address into `/api/skills`. */
+  executorAtomId?: string;
   skillId?: string;
   snapshot?: RegistryType;
   modifications?: unknown;

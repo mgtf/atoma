@@ -585,7 +585,7 @@
   "detail.enum.contextSource.event-skill": "skill الحدث",
   "detail.enum.contextSource.coaching": "التوجيه",
   "detail.enum.contextSource.fallback-trace": "تتبّع fallback",
-  "detail.field.l1Name": "الجزيء",
+  "detail.field.l1Name": "",
   "detail.field.whenToUse": "متى يُستخدم",
   "detail.field.updatedAt": "تاريخ التحديث",
   "detail.field.recipe": "الوصفة",

@@ -117,7 +117,7 @@ import {
 import type { Skill } from '../skills/types.js';
 import type { SkillRegistry } from '../skills/registry.js';
 import { visibleSkillNamespaces } from '../skills/visibility.js';
-import { namespaceOf, type SkillNamespace } from '../skills/namespace.js';
+import { namespaceOf, skillEventExecutor, type SkillNamespace } from '../skills/namespace.js';
 
 
 
@@ -800,8 +800,9 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           );
           ctx.recordSkill?.({
             op: 'quarantine',
-            l1Name: l1Type.name,
-            l1AtomId: l1Type.atomId,
+            l1Name: this.displayNameForNamespace(skills.ownerNs),
+            l1AtomId: skills.ownerNs,
+            ...skillEventExecutor(skills.ownerNs, l1Type),
             skillId: skills.skill.id,
             actorName: this.name,
             actorTier: 2,
@@ -823,6 +824,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           op: 'match',
           l1Name: this.displayNameForNamespace(skills.ownerNs),
           l1AtomId: skills.ownerNs,
+          ...skillEventExecutor(skills.ownerNs, l1Type),
           skillId: skills.skill.id,
           actorName: this.name,
           actorTier: 2,
@@ -884,7 +886,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
               );
             } else {
               memo.set(skills.skill.id, [...seen.slice(-7), direct.summary]);
-              this.lifecycle()?.commitScriptSkillDirect(skills.skill, skills.ownerNs, ctx);
+              this.lifecycle()?.commitScriptSkillDirect(skills.skill, skills.ownerNs, ctx, l1Type);
               return direct;
             }
           }
@@ -917,8 +919,14 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         // re-run the model with a fresh body.
         ctx.recordSkill?.({
           op: 'inject',
-          l1Name: l1Type.name,
-          l1AtomId: l1Type.atomId,
+          // The OWNER namespace, like every other skill event: this pair is
+          // what addresses the catalog. Until 2026-09-24 it carried the
+          // RECEIVING molecule, so a donor match handed the viz a link into a
+          // namespace with no such body — 404, and the GPU client raised it
+          // as a whole-view error over the run graph.
+          l1Name: this.displayNameForNamespace(skills.ownerNs),
+          l1AtomId: skills.ownerNs,
+          ...skillEventExecutor(skills.ownerNs, l1Type),
           skillId: skills.skill.id,
           actorName: this.name,
           actorTier: 2,
@@ -1499,6 +1507,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
                   op: 'update',
                   l1Name: this.displayNameForNamespace(activeSkillNs),
                   l1AtomId: activeSkillNs,
+                  ...skillEventExecutor(activeSkillNs, child),
                   skillId: activeSkillId,
                   actorName: this.name,
                   actorTier: 2,
@@ -1580,6 +1589,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
               op: 'credit-withheld',
               l1Name: this.displayNameForNamespace(withheldNs),
               l1AtomId: withheldNs,
+              ...skillEventExecutor(withheldNs, child),
               skillId: withheldSkillId,
               actorName: this.name,
               actorTier: 2,
@@ -1620,6 +1630,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
             op: 'credit-withheld',
             l1Name: this.displayNameForNamespace(skillNs),
             l1AtomId: skillNs,
+            ...skillEventExecutor(skillNs, child),
             skillId,
             actorName: this.name,
             actorTier: 2,
@@ -1631,6 +1642,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
             op: 'success',
             l1Name: this.displayNameForNamespace(skillNs),
             l1AtomId: skillNs,
+            ...skillEventExecutor(skillNs, child),
             skillId,
             actorName: this.name,
             actorTier: 2,
@@ -1720,6 +1732,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
             op: 'credit-withheld',
             l1Name: this.displayNameForNamespace(blameNs),
             l1AtomId: blameNs,
+            ...skillEventExecutor(blameNs, child),
             skillId,
             actorName: this.name,
             actorTier: 2,
@@ -1731,6 +1744,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
             op: 'failure',
             l1Name: this.displayNameForNamespace(blameNs),
             l1AtomId: blameNs,
+            ...skillEventExecutor(blameNs, child),
             skillId,
             actorName: this.name,
             actorTier: 2,
@@ -1755,6 +1769,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
                 op: 'demote',
                 l1Name: this.displayNameForNamespace(blameNs),
                 l1AtomId: blameNs,
+                ...skillEventExecutor(blameNs, child),
                 skillId,
                 actorName: this.name,
                 actorTier: 2,

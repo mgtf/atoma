@@ -585,7 +585,7 @@
   "detail.enum.contextSource.event-skill": "इवेंट skill",
   "detail.enum.contextSource.coaching": "प्रशिक्षण",
   "detail.enum.contextSource.fallback-trace": "fallback ट्रेस",
-  "detail.field.l1Name": "अणु",
+  "detail.field.l1Name": "",
   "detail.field.whenToUse": "कब उपयोग करें",
   "detail.field.updatedAt": "अपडेट का समय",
   "detail.field.recipe": "रेसिपी",

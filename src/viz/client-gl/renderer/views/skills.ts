@@ -91,7 +91,11 @@ export function drawSkills(
   );
   const skill = snapshot.data.skillDetail;
   if (!skill) {
-    ctx.text(ctx.root, snapshot.t('pane.selectSkill'), rightX + 18, top + 20, {
+    // A selected recipe whose read FAILED is not an unselected one: the body
+    // was dropped, merged away, or asked for under an identity the registry
+    // fold has moved. Say so here — this pane is where that 404 belongs.
+    const message = snapshot.data.skillDetailFailed ? 'pane.skillUnavailable' : 'pane.selectSkill';
+    ctx.text(ctx.root, snapshot.t(message), rightX + 18, top + 20, {
       color: GPU_COLORS.muted,
     });
     return;

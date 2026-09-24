@@ -214,10 +214,24 @@ export interface VizSkillEvent {
     | 'direct'
     | 'quarantine'
     | 'credit-withheld';
-  /** Display name of the molecule that owns the skill. */
+  /** Display name of the molecule that OWNS the skill. */
   l1Name: string;
   /** Stored namespace key (atom id) — what `/api/skills/:l1Name` expects. */
   l1AtomId: string;
+  /**
+   * Display name of the molecule that RAN the recipe, when a donor match put
+   * it somewhere other than its owner. Present on the ops that name a run —
+   * inject, quarantine, direct, success, failure, credit-withheld, demote —
+   * and absent when owner and executor are the same atom.
+   *
+   * Kept SEPARATE from `l1Name` deliberately, and the separation is the whole
+   * point of the field: the pair above addresses the catalog, so writing the
+   * executor there gave the viz a `/api/skills/<executor>/<id>` link into a
+   * namespace that has no such body — a 404 on every donor match.
+   */
+  executorName?: string;
+  /** Identity of that executing molecule, on the same terms as `l1AtomId`. */
+  executorAtomId?: string;
   /** Stable kebab-case skill id within that namespace. */
   skillId: string;
   /** Atom that triggered the event (usually the supervising L2). */
@@ -683,6 +697,8 @@ export class TraceRecorder {
       op: info.op,
       l1Name: info.l1Name,
       l1AtomId: info.l1AtomId,
+      ...(info.executorName !== undefined ? { executorName: info.executorName } : {}),
+      ...(info.executorAtomId !== undefined ? { executorAtomId: info.executorAtomId } : {}),
       skillId: info.skillId,
       actor: { name: info.actorName, tier: info.actorTier },
       ...(info.reasoning !== undefined ? { reasoning: info.reasoning } : {}),

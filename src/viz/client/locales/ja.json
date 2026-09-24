@@ -585,7 +585,7 @@
   "detail.enum.contextSource.event-skill": "イベントskill",
   "detail.enum.contextSource.coaching": "コーチング",
   "detail.enum.contextSource.fallback-trace": "fallbackトレース",
-  "detail.field.l1Name": "分子",
+  "detail.field.l1Name": "",
   "detail.field.whenToUse": "使用条件",
   "detail.field.updatedAt": "更新日時",
   "detail.field.recipe": "レシピ",

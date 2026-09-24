@@ -79,13 +79,20 @@ function close(actor: string, executionId: string, branchId?: string): Trajector
   };
 }
 
-function skill(op: string, l1Name: string, skillId: string, branchId?: string): TrajectoryTraceEvent {
+function skill(
+  op: string,
+  l1Name: string,
+  skillId: string,
+  branchId?: string,
+  executorName?: string
+): TrajectoryTraceEvent {
   return {
     kind: 'skill',
     id: nextId('skill'),
     op,
     l1Name,
     skillId,
+    ...(executorName !== undefined ? { executorName } : {}),
     ...(branchId !== undefined ? { branchId } : {}),
   };
 }
@@ -145,6 +152,26 @@ describe('deriving signatures from a window', () => {
     expect(second!.key).toEqual({ l1Name: 'Methane', skillId: null, keyedBy: 'atom' });
     expect(trajectoryKeyId(first!.key)).toBe('Methane::node-api');
     expect(trajectoryKeyId(second!.key)).toBe('Methane::*');
+  });
+
+  it('keys a donor match on the molecule that RAN it, not the namespace that owns it', () => {
+    // A skill event names its OWNER, because that pair addresses the catalog.
+    // Executions are keyed by the actor that made the call, so a donor match
+    // read through `l1Name` filed the inject under a molecule that ran
+    // nothing: the execution stayed unkeyed and, worse, uncredited.
+    const events = [
+      skill('match', 'Ammonia', 'dialog-to-inline-form', undefined, 'CarbonDioxide'),
+      skill('inject', 'Ammonia', 'dialog-to-inline-form', undefined, 'CarbonDioxide'),
+      ...execution('CarbonDioxide', 'x1', ['write_file', 'validate_html']),
+      skill('success', 'Ammonia', 'dialog-to-inline-form', undefined, 'CarbonDioxide'),
+    ];
+    const [signature] = deriveTrajectorySignatures('run', events);
+    expect(signature!.key).toEqual({
+      l1Name: 'CarbonDioxide',
+      skillId: 'dialog-to-inline-form',
+      keyedBy: 'skill',
+    });
+    expect(signature!.credited).toBe(true);
   });
 
   it('never borrows another lane inject, and prefers its own lane over a lane-less one', () => {

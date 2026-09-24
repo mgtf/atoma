@@ -60,6 +60,16 @@ Skills follow learn → match/inject → earn credit → compile → trusted dis
   `skill-merge`, so a re-created id never reads IMPOSSIBLE. Mutations refuse
   to run inside a caller's transaction, where `.immediate()` would silently
   become a savepoint.
+- EVERY skill event NAMES ITS OWNER. `l1Name`/`l1AtomId` on a `SkillEventInfo`
+  are the namespace the body and the counters live under — the pair a reader
+  addresses `/api/skills/:ns/:id` with — and the molecule that RAN the recipe
+  goes in `executorName`/`executorAtomId`, present only when the two differ.
+  A donor match is ordinary under the shared catalog, so this is not an edge:
+  until 2026-09-24 `inject` and `quarantine` wrote the EXECUTOR into the owner
+  pair, which handed the viz a link into a namespace holding no such recipe
+  (404 on every donor match) and filed the trajectory's pending skill under a
+  molecule that ran nothing. Never widen the owner pair to mean "the molecule
+  this event is about": two facts, two fields.
 - Match against reusable `when_to_use` capability language, not task theme or
   hidden workspace state the prefilter cannot inspect.
 - The skill prefilter runs only when candidates exist. Injection is guidance;

@@ -26,6 +26,19 @@ const seed = {
   createdBy: 'test',
 };
 
+/**
+ * The smallest toolset that forms a capability bucket (`file-scribe`). The
+ * shared catalog offers a donor namespace only when the reader can execute
+ * the donor's CLASS, and a molecule with no tools has no class at all.
+ */
+const scribeTools = [
+  {
+    name: 'write_file',
+    description: 'writes a file',
+    inputSchema: { type: 'object', properties: {}, required: [] },
+  },
+];
+
 describe('L2 — recordSkill events', () => {
   let dir: string;
   let skills: SkillRegistry;
@@ -83,6 +96,92 @@ describe('L2 — recordSkill events', () => {
     expect(seen[0]!.reasoning).toMatch(/fits/);
     // Inject carries kind metadata for the viz badge.
     expect(seen[1]!.reasoning).toMatch(/kind=llm/);
+  });
+
+  it('names the OWNER namespace and the executing molecule on a donor match', async () => {
+    // The shared catalog makes a recipe learned by one molecule matchable for
+    // another whose tools cover it. Both facts have to reach the trace: the
+    // OWNER, because `l1AtomId` is what `/api/skills/:ns/:id` is addressed
+    // with and the body lives nowhere else, and the EXECUTOR, because that is
+    // what the run actually did. Writing the executor into the owner's pair
+    // gave the viz a link into a namespace with no such recipe — a 404 on
+    // every donor match, raised as a whole-view error over the run graph.
+    // Two molecules of the SAME class, so the shared catalog offers Water's
+    // recipe to Methane. Their system prompts differ because the routing
+    // catalogue keeps one identity per exact behaviour, and two identical L1s
+    // would collapse into one before the prefilter ever saw them.
+    reg.patch('Water', { addTools: scribeTools }, 'test');
+    reg.create(1, {
+      ...seed,
+      description: 'json builder',
+      systemPrompt: 'You are a JSON L1.',
+      tools: scribeTools,
+    });
+    for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) reg.recordSuccess('Methane');
+    skills.save(nsOf(reg, 'Water'), {
+      id: 'web-build-loop',
+      description: 'd',
+      whenToUse: 'when web',
+      kind: 'llm',
+      body: 'STEP 1.',
+    });
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
+    const seen: SkillEventInfo[] = [];
+    const ctx = { ...makeCtx(), recordSkill: (info: SkillEventInfo) => seen.push(info) };
+
+    ctx.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'Methane', confidence: 'high', reasoning: 't' })
+    );
+    ctx.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'web-build-loop', confidence: 'high', reasoning: 'fits' })
+    );
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok' }));
+
+    await neuron.handleDirect({ description: 'task' }, ctx);
+
+    expect(seen.map((e) => e.op)).toEqual(['match', 'inject', 'success']);
+    // Every event addresses the catalog by the owner, inject included.
+    expect(seen.every((e) => e.l1Name === 'Water')).toBe(true);
+    expect(seen.every((e) => e.l1AtomId === nsOf(reg, 'Water'))).toBe(true);
+    // And every one names the molecule that ran it.
+    expect(seen.every((e) => e.executorName === 'Methane')).toBe(true);
+    expect(seen.every((e) => e.executorAtomId === reg.getByName('Methane')!.atomId)).toBe(true);
+    // The body is readable under the pair the events published.
+    expect(
+      skills.loadFor(seen[1]!.l1AtomId).map((recipe) => recipe.id)
+    ).toContain('web-build-loop');
+  });
+
+  it('leaves the executor unstated when the molecule runs its own recipe', async () => {
+    // Same atom on both sides: an executor field present on every event would
+    // read as a donor everywhere and make the distinction worthless.
+    trustChild();
+    skills.save(nsOf(reg, 'Water'), {
+      id: 'web-build-loop',
+      description: 'd',
+      whenToUse: 'when web',
+      kind: 'llm',
+      body: 'STEP 1.',
+    });
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
+    const seen: SkillEventInfo[] = [];
+    const ctx = { ...makeCtx(), recordSkill: (info: SkillEventInfo) => seen.push(info) };
+
+    ctx.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 't' })
+    );
+    ctx.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'web-build-loop', confidence: 'high', reasoning: 'fits' })
+    );
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok' }));
+
+    await neuron.handleDirect({ description: 'task' }, ctx);
+
+    expect(seen.map((e) => e.op)).toEqual(['match', 'inject', 'success']);
+    expect(seen.every((e) => e.executorName === undefined)).toBe(true);
+    expect(seen.every((e) => e.executorAtomId === undefined)).toBe(true);
   });
 
   it('emits no skill events when the L1 has no skills', async () => {

@@ -531,6 +531,11 @@ npm run viz:mark-turn:analyze
   namespace (chain-followed): the fold moves recipes under the kept identity while traces and
   bookmarks keep carrying the old one, so the typed boundary answers the historical URL —
   traces are never rewritten to do it (2026-09-18).
+- A skill card is addressed by the event's OWNER pair (`l1AtomId`), never by
+  `executorName` ([src/skills](../skills/AGENTS.md)); a body that will not load
+  stays OUT of the global `error` and surfaces as `skillDetailFailed` in its own
+  pane, as the project-route 404s and tray errors already do — a run cites the
+  identities it saw, and one dangling reference never banners the graph.
 - `/mcp` is the ONE MCP (contract in [src/mcp](../mcp/AGENTS.md)): OAuth or
   API bearer token behind the gate, the operator on the ungated loopback, Host
   pinned either way. `/api/tokens` mints (POST, same-origin, journaled

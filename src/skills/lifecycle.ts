@@ -30,7 +30,7 @@ import { hostAllowsLoopbackNetwork, scanScriptBody } from './scriptScan.js';
 import { LEARNED_CONTENT_TRUST_BOUNDARY_LINES } from './events.js';
 import { REFUSAL_GENERATION, refusalStampIsCurrent } from './generations.js';
 import { undeclaredToolMentions } from '../atoms/verdict.js';
-import { type SkillNamespace } from './namespace.js';
+import { skillEventExecutor, type SkillNamespace } from './namespace.js';
 import { transportOf, tryParseModelSelector } from '../contracts/modelSelector.js';
 
 // Historical export home — the generation machinery lives in generations.ts
@@ -1442,8 +1442,21 @@ export class SkillLifecycle {
     }
   }
 
-  /** Publish credit/events only after the caller accepts a direct result. */
-  commitScriptSkillDirect(skill: Skill, l1Name: SkillNamespace, ctx: RunContext): void {
+  /**
+   * Publish credit/events only after the caller accepts a direct result.
+   *
+   * `executor` is the molecule that RAN the script, which under the shared
+   * catalog is not the one whose namespace supplied it — the same pair
+   * `runScriptSkillDirect` already stamps on the result's `producedBy`. It is
+   * omitted from the events when it IS the owner.
+   */
+  commitScriptSkillDirect(
+    skill: Skill,
+    l1Name: SkillNamespace,
+    ctx: RunContext,
+    executor?: { readonly atomId: string; readonly name: string }
+  ): void {
+    const via = skillEventExecutor(l1Name, executor);
     try {
       this.skills?.clearDirectFailures(l1Name, skill.id);
       this.skills?.recordSuccess(l1Name, skill.id);
@@ -1451,6 +1464,7 @@ export class SkillLifecycle {
         op: 'direct',
         l1Name: this.displayName(l1Name),
         l1AtomId: l1Name,
+        ...via,
         skillId: skill.id,
         actorName: this.host.name,
         actorTier: 2,
@@ -1460,6 +1474,7 @@ export class SkillLifecycle {
         op: 'success',
         l1Name: this.displayName(l1Name),
         l1AtomId: l1Name,
+        ...via,
         skillId: skill.id,
         actorName: this.host.name,
         actorTier: 2,

@@ -585,7 +585,7 @@
   "detail.enum.contextSource.event-skill": "ইভেন্ট skill",
   "detail.enum.contextSource.coaching": "প্রশিক্ষণ",
   "detail.enum.contextSource.fallback-trace": "Fallback ট্রেস",
-  "detail.field.l1Name": "মলিকিউল",
+  "detail.field.l1Name": "",
   "detail.field.whenToUse": "কখন ব্যবহার করবেন",
   "detail.field.updatedAt": "আপডেটের সময়",
   "detail.field.recipe": "রেসিপি",

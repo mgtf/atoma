@@ -701,6 +701,7 @@ function makeData(overrides: Partial<GpuDataSnapshot> = {}): GpuDataSnapshot {
     skillNamespaces: [],
     skillsByNamespace: {},
     skillDetail: null,
+    skillDetailFailed: false,
     burnin: null,
     profiles: [],
     projects: [],
@@ -4065,6 +4066,30 @@ describe('drawSkills scrolling honesty and search', () => {
     expect(ctx.detailBounds!.width).toBe(WIDTH - rightX - 10);
     // Both the overflowing list and the long body get the shared thumb.
     expect(scrollbarThumbs(ctx.root).length).toBe(2);
+  });
+
+  it('says a selected recipe could not be read, instead of "select a skill"', () => {
+    // A dangling skill reference — a recipe dropped, merged, or asked for
+    // under an identity the registry fold has moved — is one pane's problem.
+    // It is deliberately absent from the global error, so this pane is the
+    // only place that can report it; showing the unselected prompt there
+    // would read as "nothing is selected".
+    const failed = createRecordingCtx();
+    drawSkills(
+      failed,
+      makeSnapshot({ view: 'skills' }, { ...data, skillDetailFailed: true }),
+      WIDTH,
+      HEIGHT
+    );
+    const values = failed.texts.map((text) => text.value);
+    expect(values).toContain(I18N_CATALOGS.en['pane.skillUnavailable']);
+    expect(values).not.toContain(I18N_CATALOGS.en['pane.selectSkill']);
+
+    const idle = createRecordingCtx();
+    drawSkills(idle, makeSnapshot({ view: 'skills' }, data), WIDTH, HEIGHT);
+    expect(idle.texts.map((text) => text.value)).toContain(
+      I18N_CATALOGS.en['pane.selectSkill']
+    );
   });
 
   it('filters on visible identity, never on hidden when_to_use text', () => {

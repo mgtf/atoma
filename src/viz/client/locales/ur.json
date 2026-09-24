@@ -608,7 +608,7 @@
   "detail.enum.contextSource.event-skill": "ایونٹ skill",
   "detail.enum.contextSource.coaching": "رہنمائی",
   "detail.enum.contextSource.fallback-trace": "Fallback ٹریس",
-  "detail.field.l1Name": "مالیکیول",
+  "detail.field.l1Name": "",
   "detail.field.whenToUse": "کب استعمال کریں",
   "detail.field.updatedAt": "اپ ڈیٹ کا وقت",
   "detail.field.recipe": "ترکیب",

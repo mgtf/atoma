@@ -585,7 +585,7 @@
   "detail.enum.contextSource.event-skill": "Skill événement",
   "detail.enum.contextSource.coaching": "Coaching",
   "detail.enum.contextSource.fallback-trace": "Trace de fallback",
-  "detail.field.l1Name": "Molécule",
+  "detail.field.l1Name": "",
   "detail.field.whenToUse": "Quand l'utiliser",
   "detail.field.updatedAt": "Mis à jour",
   "detail.field.recipe": "Recette",

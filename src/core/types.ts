@@ -496,6 +496,17 @@ export interface SkillEventInfo {
   l1Name: string;
   /** Identity of that molecule, for anything that must look it back up. */
   l1AtomId: string;
+  /**
+   * DISPLAY name of the molecule that RAN the recipe, when that is not the
+   * one that owns it. Under the platform catalog a donor match is ordinary —
+   * Ammonia's recipe executes inside CarbonDioxide — and the pair above is
+   * the OWNER, because that is the namespace the body, the counters and
+   * `/api/skills/:ns/:id` live under. Omitted when owner and executor are the
+   * same atom, so a reader is told about a donor and nothing else.
+   */
+  executorName?: string;
+  /** Identity of that executing molecule, on the same terms as `l1AtomId`. */
+  executorAtomId?: string;
   skillId: string;
   actorName: string;
   actorTier: Tier;

@@ -235,6 +235,7 @@ const DETAIL_RANKS: ReadonlyMap<string, DetailRank> = new Map<string, DetailRank
   ['llmEventId', DETAIL_RANK.identity],
   ['l1Name', DETAIL_RANK.identity],
   ['l1AtomId', DETAIL_RANK.identity],
+  ['executorName', DETAIL_RANK.identity],
   ['skillId', DETAIL_RANK.identity],
   ['by', DETAIL_RANK.identity],
   ['from', DETAIL_RANK.identity],
@@ -781,12 +782,18 @@ export function skillEventReasoning(event: { kind?: string; op?: string; reasoni
 
 export function skillEventSubtitle(event: {
   l1Name?: string;
+  executorName?: string;
   skillId?: string;
   actor?: { name?: string };
 }): string {
+  // owner / recipe → executor · initiator. The arrow is only drawn on a donor
+  // match, where the recipe ran somewhere other than the namespace it lives
+  // in; the emitter omits `executorName` when the two are one molecule.
   const path = [event.l1Name, event.skillId].filter(Boolean).join(' / ');
+  const ran = event.executorName ? `${path} → ${event.executorName}` : path;
   const actor = event.actor?.name;
-  return [path, actor && actor !== event.l1Name ? actor : ''].filter(Boolean).join(' · ');
+  const initiator = actor && actor !== event.l1Name && actor !== event.executorName ? actor : '';
+  return [ran, initiator].filter(Boolean).join(' · ');
 }
 
 function present(value: unknown): boolean {
@@ -798,6 +805,7 @@ export function buildSkillEventDetail(
     kind?: string;
     op?: string;
     l1Name?: string;
+    executorName?: string;
     skillId?: string;
     reasoning?: string;
     actor?: { name?: string };
@@ -825,6 +833,7 @@ export function buildSkillEventDetail(
     // description, the recipe adherence and the reasoning below the fold.
     skillId: event.skillId,
     l1Name: event.l1Name,
+    executorName: event.executorName,
     actor: event.actor?.name && event.actor.name !== event.l1Name
       ? event.actor.name
       : undefined,

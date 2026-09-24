@@ -54,6 +54,25 @@ export function namespaceOf(atom: {
 }
 
 /**
+ * The executor half of a skill event — the ONE derivation, for the same
+ * reason `namespaceOf` is one.
+ *
+ * Every skill event names its OWNER in `l1Name`/`l1AtomId`: that pair is what
+ * addresses the catalog (the folder, the trust row, `/api/skills/:ns/:id`).
+ * Which molecule RAN the recipe is a different fact, and under the shared
+ * catalog a common one, so it gets its own pair instead of overwriting the
+ * address. Returns nothing when the two are the same atom: a field present on
+ * every event would read as a donor everywhere and say nothing.
+ */
+export function skillEventExecutor(
+  ownerNs: SkillNamespace,
+  executor?: { readonly atomId: string; readonly name: string }
+): { executorName?: string; executorAtomId?: string } {
+  if (!executor || namespaceOf(executor) === ownerNs) return {};
+  return { executorName: executor.name, executorAtomId: executor.atomId };
+}
+
+/**
  * Re-admit a namespace that came OUT of the store (`listNamespaces`, the
  * visibility lattice, an operator CLI argument, an MCP request parameter).
  *

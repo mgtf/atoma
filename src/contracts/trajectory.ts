@@ -130,6 +130,8 @@ export interface TrajectoryTraceEvent {
   readonly parentBranchId?: string;
   readonly op?: string;
   readonly l1Name?: string;
+  /** On a `skill` event: the molecule that RAN the recipe, when not its owner. */
+  readonly executorName?: string;
   readonly skillId?: string;
   readonly subject?: string;
 }
@@ -314,7 +316,13 @@ export function deriveTrajectorySignatures(
         return;
       }
       case 'skill': {
-        const l1Name = event.l1Name;
+        // A skill event NAMES ITS OWNER, and this module keys on the molecule
+        // that EXECUTED — `executions` is keyed by the actor of the `llm`
+        // event, and a `trust` RESULT credits `event.child`. Under the shared
+        // catalog the two differ on every donor match, and reading the owner
+        // here filed the pending skill under a molecule that ran nothing:
+        // its executions were never credited and produced no signature.
+        const l1Name = event.executorName ?? event.l1Name;
         const skillId = event.skillId;
         if (!l1Name || !skillId) return;
         if (event.op === 'inject' || event.op === 'direct') {
