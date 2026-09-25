@@ -247,9 +247,26 @@ function RunSummary({ run }: { run: VizRun }) {
         <StatCard label={t('summary.cost')} value={fmtCost(totals.costUsd)} />
         <StatCard label={t('summary.fallback')} value={run.result?.producedBy?.viaFallback ? t('summary.yes') : t('summary.no')} accent={direct ? '#fbbf24' : undefined} />
       </Box>
+      {run.tierModels ? (
+        <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
+          <Typography variant="caption" color="text.secondary">{t('summary.tierModels')}</Typography>
+          {(['l1', 'l2', 'l3'] as const).map((tier) => (
+            <Chip key={tier} size="small" label={`${tier.toUpperCase()} · ${run.tierModels![tier]}`} />
+          ))}
+        </Stack>
+      ) : null}
       <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: 'wrap' }}>
         {(totals.perModel ?? []).map((value) => (
-          <Chip key={value.model} size="small" variant="outlined" label={`${value.model.replace(/^claude-/, '')} · ${value.calls} · ${fmtCost(value.costUsd)}`} />
+          <Chip
+            key={value.model}
+            size="small"
+            variant="outlined"
+            label={[
+              value.model.replace(/^claude-/, '') + (value.servedModels?.length ? ` → ${value.servedModels.join(', ')}` : ''),
+              value.calls,
+              fmtCost(value.costUsd),
+            ].join(' · ')}
+          />
         ))}
         {direct ? <Chip size="small" color="warning" label={t('summary.freePhases.value', { count: direct })} /> : null}
         {cache ? <Chip size="small" color="info" label={t('summary.cachedRouting.value', { count: cache })} /> : null}

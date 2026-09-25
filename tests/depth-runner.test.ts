@@ -119,6 +119,10 @@ describe('runner supervision depth, concrete L3/L2/L1 and real backend', () => {
       expect(await handle.settled).toEqual({ outcome: rootApproved && !deadline ? 'delivered' : 'partial' });
       const path = readdirSync(runs).find((name) => name.endsWith('.json') && name !== 'index.json')!;
       const trace = JSON.parse(readFileSync(join(runs, path), 'utf8')) as VizRun;
+      // The launch pins are persisted beside the per-call models.
+      expect(trace.tierModels).toEqual({
+        l1: OLLAMA_PINS.ATOMA_MODEL_L1, l2: OLLAMA_PINS.ATOMA_MODEL_L2, l3: OLLAMA_PINS.ATOMA_MODEL_L3,
+      });
       if (deadline) {
         expect(deadlineController.signal.aborted).toBe(true);
         expect(trace.result?.unfinishedPhases).toEqual([unfinishedDescription]);

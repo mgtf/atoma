@@ -145,4 +145,41 @@ describe('RecordingLlmClient — served-model-aware pricing', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('keeps the launch pins and names the served models under each pin in the totals', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-recording-usage-'));
+    const recorder = new TraceRecorder(dir);
+    const tierModels = { l1: 'sub:anthropic:haiku', l2: 'sub:openai:gpt-5.6-sol', l3: 'sub:anthropic:opus' };
+    recorder.beginRun({ description: 't' }, 't', { tierModels });
+    try {
+      const served: Record<string, string | undefined> = {
+        'sub:anthropic:haiku': 'claude-haiku-4-5',
+        'sub:openai:gpt-5.6-sol': undefined,
+      };
+      const transport: LlmClient = {
+        async complete(req): Promise<LlmCompletionResponse> {
+          const servedModel = served[req.model];
+          return {
+            text: 'ok',
+            stopReason: 'end_turn',
+            usage: { inputTokens: 10, outputTokens: 10 },
+            ...(servedModel ? { servedModel } : {}),
+          };
+        },
+      };
+      const rec = new RecordingLlmClient(transport, recorder);
+      await rec.complete({ model: 'sub:anthropic:haiku', systemPrompt: 's', userContent: 'u' });
+      await rec.complete({ model: 'sub:anthropic:haiku', systemPrompt: 's', userContent: 'u' });
+      await rec.complete({ model: 'sub:openai:gpt-5.6-sol', systemPrompt: 's', userContent: 'u' });
+      const run = recorder.endRun()!;
+      expect(run.tierModels).toEqual(tierModels);
+      const byModel = new Map(run.totals!.perModel.map((m) => [m.model, m]));
+      expect(byModel.get('sub:anthropic:haiku')).toMatchObject({ calls: 2, servedModels: ['claude-haiku-4-5'] });
+      // A pin served verbatim carries no servedModels, so older readers see the old shape.
+      expect(byModel.get('sub:openai:gpt-5.6-sol')?.calls).toBe(1);
+      expect(byModel.get('sub:openai:gpt-5.6-sol')).not.toHaveProperty('servedModels');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

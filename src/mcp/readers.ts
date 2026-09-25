@@ -49,7 +49,7 @@ import { supervisorVerdictSchema, type VerdictMeta } from '../contracts/supervis
 import { assessShareability } from '../skills/shareability.js';
 import { computeFrictionRows, extractFrictionEvents } from '../viz/friction.js';
 import type { FrictionEvent } from '../viz/friction.js';
-import type { VizRun } from '../viz/trace.js';
+import type { VizRun, VizTierModels } from '../viz/trace.js';
 import { LAUNCHABLE_PROFILES } from '../run/profiles/index.js';
 import { taxonomyForTier } from '../core/taxonomy.js';
 import { elementForTool } from '../contracts/toolTaxonomy.js';
@@ -473,6 +473,7 @@ export function runsList(opts: { last?: number } = {}): unknown {
         startedAt: run.startedAt,
         endedAt: run.endedAt,
         cancelled: run.cancelled,
+        tierModels: run.tierModels ?? null,
         events: run.events?.length ?? 0,
         totals: run.totals,
       };
@@ -624,6 +625,7 @@ export function runTraceFile(
     degraded: run.degraded,
     error: run.error ? truncate(run.error) : undefined,
     provenance: run.provenance ?? null,
+    tierModels: run.tierModels ?? null,
     totals: run.totals,
     eventCount: totalEvents,
     totalEvents,
@@ -956,6 +958,7 @@ export function costs(opts: { last?: number } = {}): unknown {
     endedAt: string | null;
     cancelled: boolean;
     degraded: boolean;
+    tierModels: VizTierModels | null;
     calls: number;
     costUsd: number;
   }[] = [];
@@ -978,6 +981,7 @@ export function costs(opts: { last?: number } = {}): unknown {
       endedAt: run.endedAt ?? null,
       cancelled: Boolean(run.cancelled),
       degraded: Boolean(run.degraded),
+      tierModels: run.tierModels ?? null,
       calls: totals?.calls ?? 0,
       costUsd: round(totals?.costUsd ?? 0),
     });

@@ -696,6 +696,7 @@
   "card.llmStart.issued": "call issued — no response recorded yet",
   "summary.cacheHit": "Cache hit",
   "summary.cost": "Cost",
+  "summary.tierModels": "Pinned models",
   "summary.fallback": "Fallback",
   "summary.yes": "yes",
   "summary.no": "no",

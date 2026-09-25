@@ -96,6 +96,8 @@ export interface VizRun {
   cancelled?: boolean;
   error?: string;
   initialTypes?: RegistryType[];
+  /** The three tier pins the run launched with. Absent on older traces. */
+  tierModels?: { l1: string; l2: string; l3: string };
   result?: {
     summary?: string;
     output?: unknown;
@@ -113,6 +115,8 @@ export interface VizRun {
     costUsd?: number;
     perModel?: Array<{
       model: string;
+      /** Models the transport served under this pin, when any differs from it. */
+      servedModels?: string[];
       calls: number;
       inputTokens: number;
       outputTokens: number;
@@ -282,6 +286,8 @@ export interface VizProjectRun {
   status: 'queued' | 'running' | 'delivered' | 'partial' | 'failed' | 'cancelled';
   traceId: string | null;
   costUsd: number | null;
+  /** The per-tier selectors the run was resolved to; null before it started. */
+  models?: Record<'l1' | 'l2' | 'l3', { selection: string; provider: string; payer: string; source: string }> | null;
   durationS: number | null;
   error: string | null;
   createdAt: string;

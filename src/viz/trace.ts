@@ -428,11 +428,30 @@ export interface VizRunTotals {
   costUsd: number;
   perModel: Array<{
     model: string;
+    /**
+     * Every model a transport reported SERVING under this pin, when any
+     * differs from it (`VizLlmEvent.servedModel`). Absent when the pin was
+     * served verbatim, and on traces written before 2026-09-25.
+     */
+    servedModels?: string[];
     calls: number;
     inputTokens: number;
     outputTokens: number;
     costUsd: number;
   }>;
+}
+
+/**
+ * The three tier pins a run LAUNCHED with, as full selectors
+ * (`formatModelSelector`). Recorded once at `beginRun`, because the events
+ * only name the models that were actually CALLED: a tier the run never
+ * reached leaves no llm event, and a run relaunched on other models has to be
+ * comparable pin for pin, not call for call.
+ */
+export interface VizTierModels {
+  l1: string;
+  l2: string;
+  l3: string;
 }
 
 /** Capture execution provenance once; never infer historical revisions at read time. */
@@ -460,6 +479,8 @@ export function executionProvenance(root = fileURLToPath(new URL('../../', impor
 
 export interface VizRun {
   provenance?: ReturnType<typeof executionProvenance>;
+  /** Absent on traces written before 2026-09-25. See `VizTierModels`. */
+  tierModels?: VizTierModels;
   /** Resolves floor/phase coverage references, including abandoned attempts. */
   attestations?: import('../contracts/attestation.js').AttestationRecord[];
   id: string;
@@ -548,7 +569,7 @@ export class TraceRecorder {
   beginRun(
     task: Task,
     label?: string,
-    opts?: { initialTypes?: readonly AtomType[]; runId?: string }
+    opts?: { initialTypes?: readonly AtomType[]; runId?: string; tierModels?: VizTierModels }
   ): VizRun {
     this.attempt = undefined;
     const generatedId = `${new Date()
@@ -565,6 +586,7 @@ export class TraceRecorder {
       task,
       startedAt: new Date().toISOString(),
       provenance: executionProvenance(),
+      ...(opts?.tierModels ? { tierModels: { ...opts.tierModels } } : {}),
       events: [],
     };
     if (opts?.initialTypes && opts.initialTypes.length > 0) {
@@ -822,7 +844,14 @@ function computeTotals(events: readonly VizEvent[]): VizRunTotals {
   };
   const byModel = new Map<
     string,
-    { model: string; calls: number; inputTokens: number; outputTokens: number; costUsd: number }
+    {
+      model: string;
+      served: Set<string>;
+      calls: number;
+      inputTokens: number;
+      outputTokens: number;
+      costUsd: number;
+    }
   >();
   for (const e of events) {
     if (e.kind !== 'llm') continue;
@@ -832,22 +861,24 @@ function computeTotals(events: readonly VizEvent[]): VizRunTotals {
     totals.cacheReadInputTokens += e.usage.cacheReadInputTokens;
     totals.cacheCreationInputTokens += e.usage.cacheCreationInputTokens;
     totals.costUsd += e.costUsd;
-    const prev = byModel.get(e.model) ?? {
+    const bucket = byModel.get(e.model) ?? {
       model: e.model,
+      served: new Set<string>(),
       calls: 0,
       inputTokens: 0,
       outputTokens: 0,
       costUsd: 0,
     };
-    byModel.set(e.model, {
-      model: e.model,
-      calls: prev.calls + 1,
-      inputTokens: prev.inputTokens + e.usage.inputTokens,
-      outputTokens: prev.outputTokens + e.usage.outputTokens,
-      costUsd: prev.costUsd + e.costUsd,
-    });
+    bucket.calls++;
+    bucket.inputTokens += e.usage.inputTokens;
+    bucket.outputTokens += e.usage.outputTokens;
+    bucket.costUsd += e.costUsd;
+    if (e.servedModel !== undefined && e.servedModel !== e.model) bucket.served.add(e.servedModel);
+    byModel.set(e.model, bucket);
   }
-  totals.perModel = [...byModel.values()].sort((a, b) => b.costUsd - a.costUsd);
+  totals.perModel = [...byModel.values()]
+    .map(({ served, ...bucket }) => (served.size > 0 ? { ...bucket, servedModels: [...served].sort() } : bucket))
+    .sort((a, b) => b.costUsd - a.costUsd);
   return totals;
 }
 

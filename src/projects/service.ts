@@ -13,6 +13,7 @@ import { eventLabel, type CrossOrgRead, type CrossOrgReadSink, type PlatformEven
 import { GitHubStore } from '../github/store.js';
 import { PublicationSupersededError, type GitHubPublisher } from './publisher.js';
 import { ProjectStateConflict, resolveProjectRunTraceFile } from './store.js';
+import type { RunPayerLedger } from '../contracts/runPayers.js';
 import {
   ProjectRunBusy,
   ProjectRunConfigurationError,
@@ -75,7 +76,11 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   }
 }
 
-function publicRun(run: ProjectRun, publication: import('../contracts/projects.js').Publication | null) {
+function publicRun(
+  run: ProjectRun,
+  publication: import('../contracts/projects.js').Publication | null,
+  models: RunPayerLedger | null
+) {
   const base = projectRunPublicSchema.parse(run);
   // Persisted project lifecycle time, including host finalization, not the
   // narrower trace duration. Missing launch/end times remain unknown.
@@ -91,6 +96,10 @@ function publicRun(run: ProjectRun, publication: import('../contracts/projects.j
     ...base,
     traceId: run.traceId ?? (traceFile ? run.projectRunId : null),
     costUsd: run.stats?.costUsd ?? null,
+    // The per-tier selectors this run was RESOLVED to, from the immutable payer
+    // ledger written at start: what a relaunch on other models is compared
+    // against. Null for a run started before the ledger existed.
+    models,
     durationS: Number.isFinite(elapsedMs) && elapsedMs >= 0 ? elapsedMs / 1000 : null,
     publication: publication
       ? {
@@ -154,6 +163,10 @@ export class ProjectService {
     this.publisher = deps.publisher;
     // A no-op default keeps every emission site free of `?.` noise.
     this.events = deps.events ?? (() => undefined);
+  }
+
+  private present(run: ProjectRun, publication: import('../contracts/projects.js').Publication | null) {
+    return publicRun(run, publication, this.store.getRunPayers(run.orgId, run.projectRunId));
   }
 
   /** GET /api/github/installations — org-scoped. */
@@ -282,7 +295,7 @@ export class ProjectService {
     if (!runs) throw new ProjectHttpError(404, 'project not found');
     return runs.map((run) => {
       const publication = this.store.getPublicationForRun(orgId, run.projectRunId);
-      return publicRun(run, publication);
+      return this.present(run, publication);
     });
   }
 
@@ -296,7 +309,7 @@ export class ProjectService {
     const orgId = this.readOrgFor(viewer, projectId);
     const run = this.store.getProjectRun(orgId, projectRunId);
     if (!run || run.projectId !== projectId) throw new ProjectHttpError(404, 'project run not found');
-    return publicRun(run, this.store.getPublicationForRun(orgId, run.projectRunId));
+    return this.present(run, this.store.getPublicationForRun(orgId, run.projectRunId));
   }
 
   /** The coordinator owns the budget; MCP only adds result retention. */
@@ -330,7 +343,7 @@ export class ProjectService {
         summary: `Run started: ${eventLabel(run.goal, 120)}`,
       });
       const publication = this.store.getPublicationForRun(viewer.orgId, run.projectRunId);
-      return publicRun(run, publication);
+      return this.present(run, publication);
     } catch (error) {
       if (error instanceof ProjectRunBusy) throw new ProjectHttpError(409, error.message);
       if (error instanceof ProjectRunConfigurationError) throw new ProjectHttpError(400, error.message);
@@ -369,7 +382,7 @@ export class ProjectService {
       summary: `Run cancellation requested: ${eventLabel(cancelled.goal, 120)}`,
     });
     const publication = this.store.getPublicationForRun(viewer.orgId, cancelled.projectRunId);
-    return publicRun(cancelled, publication);
+    return this.present(cancelled, publication);
   }
 
   /** POST /api/projects/:id/runs/:runId/publish — org:member or above. */
@@ -383,7 +396,7 @@ export class ProjectService {
       const retried = await this.coordinator.retryPublication(viewer.orgId, projectRunId);
       if (!retried) throw new ProjectHttpError(404, 'project run not found');
       const publication = this.store.getPublicationForRun(viewer.orgId, projectRunId);
-      return publicRun(retried, publication);
+      return this.present(retried, publication);
     } catch (error) {
       if (error instanceof ProjectHttpError) throw error;
       if (error instanceof ProjectStateConflict) throw new ProjectHttpError(409, error.message);

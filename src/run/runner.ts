@@ -8,6 +8,7 @@ import { containerImageDigestSchema } from '../contracts/containerImage.js';
 import { applyTierPins } from '../core/models.js';
 import { createAttestationLog } from '../core/attestation.js';
 import {
+  formatModelSelector,
   ModelSelectorError,
   selectorSpendsSubscription,
   tryParseModelSelector,
@@ -1054,6 +1055,13 @@ export async function startTask(
       ...registry.listByTier(2),
       ...registry.listByTier(3),
     ],
+    // The pins the run LAUNCHED with, beside the per-call models the events
+    // record: what a relaunch on other models is compared against.
+    tierModels: {
+      l1: formatModelSelector(selectors[1]),
+      l2: formatModelSelector(selectors[2]),
+      l3: formatModelSelector(selectors[3]),
+    },
   });
   // The trace run id IS the project run id for a tenant run (the coordinator
   // passes it as ATOMA_RUN_ID); for an operator run it is the one the recorder

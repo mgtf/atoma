@@ -240,6 +240,32 @@ describe('ProjectService — roles, IDOR and slug identity', () => {
     ]);
   });
 
+  it('projects the per-tier models a run was resolved to, from its payer ledger', async () => {
+    linkInstallation(alice, '501', 'alice-org');
+    const { svc } = service();
+    const created = await svc.createProject(jsonReq(payload('501')), alice) as { projectId: string };
+    const reserved = projects.createProjectRun({
+      orgId: alice.orgId,
+      projectId: created.projectId,
+      principalId: alice.principalId,
+      request: { idempotencyKey: 'run-models', goal: 'Build a dashboard.' },
+      projectRunId: randomUUID(),
+      hostPaths: { workspacePath: '/w', runsPath: '/r', logPath: '/l.log' },
+    })!;
+    const runId = reserved.run.projectRunId;
+    // Queued: nothing resolved yet, and a run from before the ledger reads the same.
+    expect(svc.projectRunStatus(alice, created.projectId, runId)).toMatchObject({ models: null });
+    const payers = {
+      l1: { selection: 'api:zai:glm-4.5-air', provider: 'zai-api', payer: 'org-key', source: 'org' },
+      l2: { selection: 'sub:anthropic:sonnet', provider: 'claude-cli', payer: 'host-subscription', source: 'account' },
+      l3: { selection: 'api:anthropic:claude-opus-5', provider: 'anthropic-api', payer: 'host-key', source: 'host' },
+    } as const;
+    projects.startProjectRun({ orgId: alice.orgId, projectRunId: runId, payers });
+    expect(svc.projectRunStatus(alice, created.projectId, runId)).toMatchObject({ models: payers });
+    const listed = svc.listProjectRuns(alice, created.projectId) as Record<string, unknown>[];
+    expect(listed[0]?.['models']).toEqual(payers);
+  });
+
   it.each([
     ['delivered', '2026-09-12T10:35:14.096Z', '2026-09-12T11:00:43.190Z', 1529.094],
     ['failed', '2026-09-12T09:36:42.766Z', '2026-09-12T10:05:17.691Z', 1714.925],
