@@ -8,7 +8,11 @@ import { runCodexSupervisor } from '../src/supervisor/codexSession.js';
 import { writeCodexStub } from './supervisorCodexFixture.js';
 
 const roots: string[] = [];
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+// The runtime test leaves a full `npm ci` tree behind (node_modules plus the
+// Puppeteer browser), and deleting it on a CI runner has exceeded vitest's
+// 10s default hook budget after the test itself passed (2026-09-25, twice).
+// The cleanup gets its own bound instead of failing a green test.
+afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); }, 120_000);
 
 it('passes inference credentials only, without publisher tokens or host config', () => {
   expect(menderContainerEnv({ GH_TOKEN: 'publisher', GITHUB_TOKEN: 'publisher', HOME: '/host',
