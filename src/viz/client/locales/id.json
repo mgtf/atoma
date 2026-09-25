@@ -1176,5 +1176,18 @@
   "detail.field.checklist": "Daftar periksa penerimaan",
   "detail.field.checklistSource": "Sumber daftar periksa",
   "detail.field.checklistDigest": "Ringkasan daftar periksa",
-  "detail.field.behaviour": "Perilaku"
+  "detail.field.behaviour": "Perilaku",
+  "projects.runStatus.partial": "belum selesai",
+  "projects.runPartial.continue": "Belum selesai. Pekerjaan Anda tetap tersimpan: jalankan kembali proyek ini untuk menyelesaikannya.",
+  "projects.runPartial.imported": "Belum selesai. Perubahan ini tidak disimpan: jalankan kembali proyek ini untuk mencoba lagi.",
+  "runs.flag.partial": "◐ belum selesai",
+  "summary.tierModels": "Model yang disematkan",
+  "run.partial.cause.budget": "run ini mencapai batas waktunya sebelum semua langkah selesai.",
+  "run.partial.cause.refused": "Pekerjaan telah dilakukan, tetapi pemeriksaan akhir menemukan bahwa sebagian permintaan Anda belum terpenuhi.",
+  "run.partial.cause.both": "run ini mencapai batas waktunya, dan pemeriksaan akhir menemukan bahwa sebagian permintaan Anda belum terpenuhi.",
+  "run.partial.next.continue": "Tidak ada yang hilang dan belum ada yang dipublikasikan. Mulai run baru pada proyek ini: run tersebut akan melanjutkan dari sini dan diberi tahu apa yang masih kurang.",
+  "run.partial.next.imported": "Proyek ini memulai setiap run dari repositori GitHub-nya, dan perubahan ini tidak dipublikasikan di sana. Mulai run baru untuk mencoba lagi.",
+  "run.partial.action.continue": "Lanjutkan proyek ini",
+  "run.partial.action.retry": "Coba lagi",
+  "run.partial.details": "Detail teknis"
 }

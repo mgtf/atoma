@@ -1176,5 +1176,18 @@
   "detail.field.checklist": "Lista de verificación de aceptación",
   "detail.field.checklistSource": "Origen de la lista de verificación",
   "detail.field.checklistDigest": "Resumen de la lista de verificación",
-  "detail.field.behaviour": "Comportamiento"
+  "detail.field.behaviour": "Comportamiento",
+  "projects.runStatus.partial": "incompleto",
+  "projects.runPartial.continue": "Aún no ha terminado. Tu trabajo se ha conservado: vuelve a ejecutar este proyecto para finalizarlo.",
+  "projects.runPartial.imported": "Aún no ha terminado. Estos cambios no se conservaron: vuelve a ejecutar este proyecto para intentarlo de nuevo.",
+  "runs.flag.partial": "◐ incompleto",
+  "summary.tierModels": "Modelos fijados",
+  "run.partial.cause.budget": "Este run alcanzó su límite de tiempo antes de completar todos los pasos.",
+  "run.partial.cause.refused": "El trabajo se completó, pero la comprobación final determinó que aún no se ha cumplido parte de tu solicitud.",
+  "run.partial.cause.both": "Este run alcanzó su límite de tiempo y la comprobación final determinó que aún no se ha cumplido parte de tu solicitud.",
+  "run.partial.next.continue": "No se ha perdido nada ni se ha publicado nada todavía. Inicia un nuevo run en este proyecto: continuará desde aquí y recibirá información sobre lo que aún falta.",
+  "run.partial.next.imported": "Este proyecto inicia cada run desde su repositorio de GitHub, y estos cambios no se publicaron allí. Inicia un nuevo run para intentarlo de nuevo.",
+  "run.partial.action.continue": "Continuar este proyecto",
+  "run.partial.action.retry": "Intentar de nuevo",
+  "run.partial.details": "Detalles técnicos"
 }

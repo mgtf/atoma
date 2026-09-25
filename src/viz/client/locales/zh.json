@@ -1176,5 +1176,18 @@
   "detail.field.checklist": "验收检查清单",
   "detail.field.checklistSource": "检查清单来源",
   "detail.field.checklistDigest": "检查清单摘要",
-  "detail.field.behaviour": "行为"
+  "detail.field.behaviour": "行为",
+  "projects.runStatus.partial": "未完成",
+  "projects.runPartial.continue": "尚未完成。你的工作已保留：再次为此项目启动 run 即可完成。",
+  "projects.runPartial.imported": "尚未完成。这些更改未保留：再次为此项目启动 run 以重试。",
+  "runs.flag.partial": "◐ 未完成",
+  "summary.tierModels": "已固定的模型",
+  "run.partial.cause.budget": "此次 run 在完成所有步骤前已达到时间限制。",
+  "run.partial.cause.refused": "工作已完成，但最终检查发现你的部分要求尚未满足。",
+  "run.partial.cause.both": "此次 run 已达到时间限制，并且最终检查发现你的部分要求尚未满足。",
+  "run.partial.next.continue": "没有丢失任何内容，也尚未发布任何内容。为此项目启动新的 run：它会从这里继续，并获知仍缺少哪些内容。",
+  "run.partial.next.imported": "此项目的每次 run 都从其 GitHub 仓库开始，而这些更改尚未发布到该仓库。启动新的 run 以重试。",
+  "run.partial.action.continue": "继续此项目",
+  "run.partial.action.retry": "重试",
+  "run.partial.details": "技术详情"
 }

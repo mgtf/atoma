@@ -1176,5 +1176,18 @@
   "detail.field.checklist": "Akzeptanzprüfliste",
   "detail.field.checklistSource": "Prüflistenquelle",
   "detail.field.checklistDigest": "Prüflisten-Digest",
-  "detail.field.behaviour": "Verhalten"
+  "detail.field.behaviour": "Verhalten",
+  "projects.runStatus.partial": "unvollständig",
+  "projects.runPartial.continue": "Noch nicht abgeschlossen. Ihre Arbeit bleibt erhalten: Führen Sie dieses Projekt erneut aus, um es abzuschließen.",
+  "projects.runPartial.imported": "Noch nicht abgeschlossen. Diese Änderungen wurden nicht gespeichert: Führen Sie dieses Projekt erneut aus, um es noch einmal zu versuchen.",
+  "runs.flag.partial": "◐ unvollständig",
+  "summary.tierModels": "Angeheftete Modelle",
+  "run.partial.cause.budget": "Dieser run hat sein Zeitlimit erreicht, bevor alle Schritte abgeschlossen waren.",
+  "run.partial.cause.refused": "Die Arbeit wurde erledigt, aber bei der abschließenden Prüfung wurde festgestellt, dass ein Teil Ihrer Anfrage noch nicht erfüllt ist.",
+  "run.partial.cause.both": "Dieser run hat sein Zeitlimit erreicht, und bei der abschließenden Prüfung wurde festgestellt, dass ein Teil Ihrer Anfrage noch nicht erfüllt ist.",
+  "run.partial.next.continue": "Nichts ist verloren gegangen und noch wurde nichts veröffentlicht. Starten Sie einen neuen run für dieses Projekt: Er setzt hier fort und erhält Informationen dazu, was noch fehlt.",
+  "run.partial.next.imported": "Dieses Projekt startet jeden run aus seinem GitHub-Repository, und diese Änderungen wurden dort nicht veröffentlicht. Starten Sie einen neuen run, um es noch einmal zu versuchen.",
+  "run.partial.action.continue": "Dieses Projekt fortsetzen",
+  "run.partial.action.retry": "Erneut versuchen",
+  "run.partial.details": "Technische Details"
 }

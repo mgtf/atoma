@@ -1176,5 +1176,18 @@
   "detail.field.checklist": "स्वीकृति चेकलिस्ट",
   "detail.field.checklistSource": "चेकलिस्ट स्रोत",
   "detail.field.checklistDigest": "चेकलिस्ट सारांश",
-  "detail.field.behaviour": "व्यवहार"
+  "detail.field.behaviour": "व्यवहार",
+  "projects.runStatus.partial": "अधूरा",
+  "projects.runPartial.continue": "अभी पूरा नहीं हुआ है। आपका काम सुरक्षित है: इसे पूरा करने के लिए इस प्रोजेक्ट को फिर से run करें।",
+  "projects.runPartial.imported": "अभी पूरा नहीं हुआ है। ये बदलाव सुरक्षित नहीं रखे गए: फिर से कोशिश करने के लिए इस प्रोजेक्ट को दोबारा run करें।",
+  "runs.flag.partial": "◐ अधूरा",
+  "summary.tierModels": "पिन किए गए मॉडल",
+  "run.partial.cause.budget": "हर चरण पूरा होने से पहले ही इस run की समय-सीमा पूरी हो गई।",
+  "run.partial.cause.refused": "काम पूरा हो गया था, लेकिन अंतिम जाँच में पाया गया कि आपके अनुरोध का एक हिस्सा अभी पूरा नहीं हुआ है।",
+  "run.partial.cause.both": "इस run की समय-सीमा पूरी हो गई, और अंतिम जाँच में पाया गया कि आपके अनुरोध का एक हिस्सा अभी पूरा नहीं हुआ है।",
+  "run.partial.next.continue": "कुछ भी खोया नहीं है और अभी तक कुछ भी प्रकाशित नहीं हुआ है। इस प्रोजेक्ट पर नया run शुरू करें: यह यहीं से आगे बढ़ेगा और इसे बताया जाएगा कि अभी क्या बाकी है।",
+  "run.partial.next.imported": "यह प्रोजेक्ट हर run को अपनी GitHub रिपॉज़िटरी से शुरू करता है, और ये बदलाव वहाँ प्रकाशित नहीं किए गए थे। फिर से कोशिश करने के लिए नया run शुरू करें।",
+  "run.partial.action.continue": "इस प्रोजेक्ट को जारी रखें",
+  "run.partial.action.retry": "फिर से कोशिश करें",
+  "run.partial.details": "तकनीकी विवरण"
 }

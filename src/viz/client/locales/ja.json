@@ -1176,5 +1176,18 @@
   "detail.field.checklist": "受け入れチェックリスト",
   "detail.field.checklistSource": "チェックリストのソース",
   "detail.field.checklistDigest": "チェックリストのダイジェスト",
-  "detail.field.behaviour": "動作"
+  "detail.field.behaviour": "動作",
+  "projects.runStatus.partial": "未完了",
+  "projects.runPartial.continue": "まだ完了していません。作業内容は保持されています。このプロジェクトをもう一度runして完了してください。",
+  "projects.runPartial.imported": "まだ完了していません。これらの変更は保持されていません。このプロジェクトをもう一度runして再試行してください。",
+  "runs.flag.partial": "◐ 未完了",
+  "summary.tierModels": "固定モデル",
+  "run.partial.cause.budget": "すべての手順が完了する前に、このrunが制限時間に達しました。",
+  "run.partial.cause.refused": "作業は完了しましたが、最終チェックでリクエストの一部がまだ満たされていないことが判明しました。",
+  "run.partial.cause.both": "このrunが制限時間に達し、最終チェックでリクエストの一部がまだ満たされていないことが判明しました。",
+  "run.partial.next.continue": "失われたものはなく、まだ何も公開されていません。このプロジェクトで新しいrunを開始してください。ここから再開し、まだ不足している内容が伝えられます。",
+  "run.partial.next.imported": "このプロジェクトでは、各runをGitHubリポジトリから開始します。これらの変更はリポジトリに公開されていません。新しいrunを開始して再試行してください。",
+  "run.partial.action.continue": "このプロジェクトを続行",
+  "run.partial.action.retry": "再試行",
+  "run.partial.details": "技術的な詳細"
 }

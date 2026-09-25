@@ -1176,5 +1176,18 @@
   "detail.field.checklist": "قبولیت کی چیک لسٹ",
   "detail.field.checklistSource": "چیک لسٹ کا ماخذ",
   "detail.field.checklistDigest": "چیک لسٹ کا خلاصہ",
-  "detail.field.behaviour": "طرزِ عمل"
+  "detail.field.behaviour": "طرزِ عمل",
+  "projects.runStatus.partial": "نامکمل",
+  "projects.runPartial.continue": "ابھی مکمل نہیں ہوا۔ آپ کا کام محفوظ ہے: اسے مکمل کرنے کے لیے اس پروجیکٹ کو دوبارہ run کریں۔",
+  "projects.runPartial.imported": "ابھی مکمل نہیں ہوا۔ یہ تبدیلیاں محفوظ نہیں کی گئیں: دوبارہ کوشش کرنے کے لیے اس پروجیکٹ کو پھر run کریں۔",
+  "runs.flag.partial": "◐ نامکمل",
+  "summary.tierModels": "پِن کیے گئے ماڈلز",
+  "run.partial.cause.budget": "یہ run تمام مراحل مکمل ہونے سے پہلے اپنی وقت کی حد تک پہنچ گیا۔",
+  "run.partial.cause.refused": "کام کیا گیا، لیکن آخری جانچ سے معلوم ہوا کہ آپ کی درخواست کا ایک حصہ ابھی پورا نہیں ہوا۔",
+  "run.partial.cause.both": "یہ run اپنی وقت کی حد تک پہنچ گیا، اور آخری جانچ سے معلوم ہوا کہ آپ کی درخواست کا ایک حصہ ابھی پورا نہیں ہوا۔",
+  "run.partial.next.continue": "کچھ بھی ضائع نہیں ہوا اور ابھی تک کچھ بھی شائع نہیں کیا گیا۔ اس پروجیکٹ پر نیا run شروع کریں: یہ یہیں سے آگے بڑھے گا اور اسے بتایا جائے گا کہ ابھی کیا باقی ہے۔",
+  "run.partial.next.imported": "یہ پروجیکٹ ہر run اپنی GitHub ریپوزٹری سے شروع کرتا ہے، اور یہ تبدیلیاں وہاں شائع نہیں کی گئیں۔ دوبارہ کوشش کرنے کے لیے نیا run شروع کریں۔",
+  "run.partial.action.continue": "اس پروجیکٹ کو جاری رکھیں",
+  "run.partial.action.retry": "دوبارہ کوشش کریں",
+  "run.partial.details": "تکنیکی تفصیلات"
 }

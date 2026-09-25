@@ -1176,5 +1176,18 @@
   "detail.field.checklist": "গ্রহণযোগ্যতার চেকলিস্ট",
   "detail.field.checklistSource": "চেকলিস্টের উৎস",
   "detail.field.checklistDigest": "চেকলিস্টের সারসংক্ষেপ",
-  "detail.field.behaviour": "আচরণ"
+  "detail.field.behaviour": "আচরণ",
+  "projects.runStatus.partial": "অসম্পূর্ণ",
+  "projects.runPartial.continue": "এখনও শেষ হয়নি। আপনার কাজ সংরক্ষিত আছে: শেষ করতে এই প্রকল্পটি আবার run করুন।",
+  "projects.runPartial.imported": "এখনও শেষ হয়নি। এই পরিবর্তনগুলো সংরক্ষিত হয়নি: আবার চেষ্টা করতে এই প্রকল্পটি আবার run করুন।",
+  "runs.flag.partial": "◐ অসম্পূর্ণ",
+  "summary.tierModels": "পিন করা মডেল",
+  "run.partial.cause.budget": "প্রতিটি ধাপ শেষ হওয়ার আগেই এই run-এর সময়সীমা শেষ হয়েছে।",
+  "run.partial.cause.refused": "কাজটি করা হয়েছে, কিন্তু চূড়ান্ত যাচাইয়ে দেখা গেছে যে আপনার অনুরোধের একটি অংশ এখনও পূরণ হয়নি।",
+  "run.partial.cause.both": "এই run-এর সময়সীমা শেষ হয়েছে এবং চূড়ান্ত যাচাইয়ে দেখা গেছে যে আপনার অনুরোধের একটি অংশ এখনও পূরণ হয়নি।",
+  "run.partial.next.continue": "কিছুই হারায়নি এবং এখনও কিছুই প্রকাশিত হয়নি। এই প্রকল্পে একটি নতুন run শুরু করুন: এটি এখান থেকে কাজ চালিয়ে যাবে এবং কী এখনও বাকি আছে তা একে জানানো হবে।",
+  "run.partial.next.imported": "এই প্রকল্পের প্রতিটি run এর GitHub রিপোজিটরি থেকে শুরু হয় এবং এই পরিবর্তনগুলো সেখানে প্রকাশিত হয়নি। আবার চেষ্টা করতে একটি নতুন run শুরু করুন।",
+  "run.partial.action.continue": "এই প্রকল্প চালিয়ে যান",
+  "run.partial.action.retry": "আবার চেষ্টা করুন",
+  "run.partial.details": "প্রযুক্তিগত বিবরণ"
 }

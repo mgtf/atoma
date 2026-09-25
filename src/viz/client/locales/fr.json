@@ -1176,5 +1176,18 @@
   "detail.field.checklist": "Liste de contrôle d’acceptation",
   "detail.field.checklistSource": "Source de la liste de contrôle",
   "detail.field.checklistDigest": "Empreinte de la liste de contrôle",
-  "detail.field.behaviour": "Comportement"
+  "detail.field.behaviour": "Comportement",
+  "projects.runStatus.partial": "incomplet",
+  "projects.runPartial.continue": "Pas encore terminé. Ton travail est conservé : relance ce projet pour le terminer.",
+  "projects.runPartial.imported": "Pas encore terminé. Ces modifications n’ont pas été conservées : relance ce projet pour réessayer.",
+  "runs.flag.partial": "◐ incomplet",
+  "summary.tierModels": "Modèles épinglés",
+  "run.partial.cause.budget": "Ce run a atteint sa limite de temps avant d’avoir terminé toutes les étapes.",
+  "run.partial.cause.refused": "Le travail a été effectué, mais la vérification finale a constaté qu’une partie de ta demande n’est pas encore satisfaite.",
+  "run.partial.cause.both": "Ce run a atteint sa limite de temps, et la vérification finale a constaté qu’une partie de ta demande n’est pas encore satisfaite.",
+  "run.partial.next.continue": "Rien n’est perdu et rien n’a encore été publié. Démarre un nouveau run sur ce projet : il reprendra ici avec les indications sur ce qu’il reste à faire.",
+  "run.partial.next.imported": "Ce projet démarre chaque run depuis son dépôt GitHub, et ces modifications n’y ont pas été publiées. Démarre un nouveau run pour réessayer.",
+  "run.partial.action.continue": "Continuer ce projet",
+  "run.partial.action.retry": "Réessayer",
+  "run.partial.details": "Détails techniques"
 }

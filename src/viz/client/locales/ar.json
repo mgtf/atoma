@@ -1176,5 +1176,18 @@
   "detail.field.checklist": "قائمة تحقق القبول",
   "detail.field.checklistSource": "مصدر قائمة التحقق",
   "detail.field.checklistDigest": "بصمة قائمة التحقق",
-  "detail.field.behaviour": "السلوك"
+  "detail.field.behaviour": "السلوك",
+  "projects.runStatus.partial": "غير مكتمل",
+  "projects.runPartial.continue": "لم يكتمل بعد. تم الاحتفاظ بعملك: ابدأ run آخر لهذا المشروع لإكماله.",
+  "projects.runPartial.imported": "لم يكتمل بعد. لم يتم الاحتفاظ بهذه التغييرات: ابدأ run آخر لهذا المشروع لإعادة المحاولة.",
+  "runs.flag.partial": "◐ غير مكتمل",
+  "summary.tierModels": "النماذج المثبتة",
+  "run.partial.cause.budget": "بلغت عملية run هذه حدها الزمني قبل إكمال جميع الخطوات.",
+  "run.partial.cause.refused": "أُنجز العمل، لكن الفحص النهائي وجد أن جزءًا من طلبك لم يُستوفَ بعد.",
+  "run.partial.cause.both": "بلغت عملية run هذه حدها الزمني، ووجد الفحص النهائي أن جزءًا من طلبك لم يُستوفَ بعد.",
+  "run.partial.next.continue": "لم يُفقد شيء ولم يُنشر شيء بعد. ابدأ run جديدًا لهذا المشروع؛ سيتابع من هذه النقطة وسيُبلَّغ بما لا يزال ناقصًا.",
+  "run.partial.next.imported": "يبدأ هذا المشروع كل عملية run من مستودعه على GitHub، ولم تُنشر هذه التغييرات هناك. ابدأ run جديدًا لإعادة المحاولة.",
+  "run.partial.action.continue": "متابعة هذا المشروع",
+  "run.partial.action.retry": "إعادة المحاولة",
+  "run.partial.details": "التفاصيل التقنية"
 }
