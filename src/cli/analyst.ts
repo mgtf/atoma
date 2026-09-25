@@ -30,6 +30,7 @@ import {
   analyseRun,
   analyseTarget,
   pendingTargets,
+  stopsTheBatch,
   runAnalystLoop,
   type AnalystOptions,
 } from '../supervisor/analyst.js';
@@ -196,9 +197,13 @@ async function main(): Promise<void> {
     const queue = pendingTargets(analyst, backfill);
     log(`once: analysing ${queue.length} run(s): ${queue.map((target) => `${target.runId} (${target.corpus})`).join(', ') || 'none'}`);
     let failures = 0;
-    for (const target of queue) {
+    for (const [index, target] of queue.entries()) {
       const result = await analyseTarget(target, analyst);
       if (result.outcome !== 'analysed' && result.outcome !== 'dry-run') failures += 1;
+      if (stopsTheBatch(result.outcome)) {
+        warn(`the analyst provider refused the account (429); ${queue.length - index - 1} run(s) left unanalysed for a later batch`);
+        break;
+      }
     }
     process.exitCode = failures > 0 ? 1 : 0;
     return;

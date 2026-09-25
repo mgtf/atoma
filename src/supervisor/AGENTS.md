@@ -111,6 +111,12 @@ Neighbours:
   atoma MCP surface. The same verdict schema derives Codex's nullable optionals.
 - A run with no `endedAt` is refused, never analysed: the digest of a live
   trace is a partial view and the session would spend beside the run.
+- A provider refusal of the ACCOUNT (`api_error_status: 429` in the `claude -p`
+  wrapper — the typed field, never the provider's prose) is `quota-refused`,
+  not `session-failed`, and it ends the batch: `--once` stops and says how many
+  runs it left; watch mode gives the run back its single attempt and pauses
+  `ANALYST_QUOTA_PAUSE_MS`. Measured 2026-09-24: without it a Z.ai five-hour
+  limit spawned one session per remaining target, six 429s in seven seconds.
 - The digest carries a mechanical `trajectories` block — one row per Molecule
   execution: ordered element names collapsed, the skill it was handed, whether
   the run credited it — derived by `src/contracts/trajectory.ts`, the same

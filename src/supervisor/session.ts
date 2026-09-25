@@ -328,6 +328,18 @@ export function extractStructured(wrapper: unknown): unknown {
 }
 
 /**
+ * The HTTP status a failed `claude -p` session reports for its provider, when
+ * it reports one. Read from the wrapper's typed `api_error_status` field, never
+ * from the prose of `result`: measured 2026-09-24 on the Z.ai endpoint, a
+ * five-hour usage limit arrives as exit 1 with `"api_error_status":429` and a
+ * sentence whose wording belongs to the provider.
+ */
+export function sessionApiErrorStatus(stdout: string): number | null {
+  const status = asRecord(parseLooseJson(stdout))?.['api_error_status'];
+  return typeof status === 'number' && Number.isInteger(status) ? status : null;
+}
+
+/**
  * What the session ACTUALLY consumed, per model. `claude -p` reports a
  * `modelUsage` map and it is never one model: the main loop's model plus the
  * harness's auxiliary calls, all inside `total_cost_usd`.

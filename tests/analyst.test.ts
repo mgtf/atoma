@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { stageReviewsSchema } from '../src/contracts/supervisorVerdict.js';
 import { closeStoreHandles } from '../src/core/stores.js';
 import { PlatformEventLog } from '../src/platform/events.js';
-import { analyseRun, analyseTarget, pendingRuns, pendingTargets, resolveTarget, type AnalystOptions } from '../src/supervisor/analyst.js';
+import { analyseRun, analyseTarget, pendingRuns, pendingTargets, resolveTarget, runAnalystLoop, type AnalyseResult, type AnalystOptions } from '../src/supervisor/analyst.js';
 import type { FetchLike } from '../src/supervisor/dispatch.js';
 import { digestRun, runStatusOf } from '../src/supervisor/digest.js';
 import { eligibleFindings } from '../src/supervisor/menderPolicy.js';
@@ -26,6 +26,8 @@ const dirs: string[] = [];
 afterEach(() => {
   closeStoreHandles();
   delete process.env['STUB_VERDICT'];
+  delete process.env['STUB_API_ERROR_STATUS'];
+  delete process.env['STUB_SPAWNS'];
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -82,8 +84,14 @@ function fixture(trace: Record<string, unknown> = finishedTrace()): Fixture {
   writeFileSync(
     stub,
     `
-import { writeFileSync } from 'node:fs';
+import { appendFileSync, writeFileSync } from 'node:fs';
 writeFileSync(process.env.STUB_CLAUDE_ARGS, JSON.stringify(process.argv.slice(2)));
+if (process.env.STUB_SPAWNS) appendFileSync(process.env.STUB_SPAWNS, 'x');
+if (process.env.STUB_API_ERROR_STATUS) {
+  // The measured shape of a provider refusal (Z.ai, 2026-09-24): exit 1, typed status, provider prose.
+  process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: true, api_error_status: Number(process.env.STUB_API_ERROR_STATUS), result: 'API Error: Request rejected · [1308][Usage limit reached for 5 hour.]', total_cost_usd: 0 }));
+  process.exit(1);
+}
 const verdict = process.env.STUB_VERDICT ? JSON.parse(process.env.STUB_VERDICT) : null;
 process.stdout.write(JSON.stringify({ type: 'result', structured_output: verdict, total_cost_usd: 0.7, duration_ms: 90000, num_turns: 6, session_id: 's-1', modelUsage: { 'glm-5.3': { costUSD: 0.65 }, 'claude-haiku-4-5-20251001': { costUSD: 0.05 } } }));
 `
@@ -403,5 +411,71 @@ describe('analyseRun', () => {
     expect(lines.join('\n')).toContain('dry-run: would spawn');
     expect(existsSync(f.claudeArgs)).toBe(false);
     expect(pendingRuns(f.options()).map((entry) => entry.id)).toEqual([RUN_ID]);
+  });
+});
+
+describe('an account-level refusal from the analyst provider', () => {
+  it('is its own outcome, read from the typed status and not from the prose', async () => {
+    const f = fixture();
+    process.env['STUB_API_ERROR_STATUS'] = '429';
+    expect((await analyseRun(RUN_ID, f.options())).outcome).toBe('quota-refused');
+    process.env['STUB_API_ERROR_STATUS'] = '529';
+    expect((await analyseRun(RUN_ID, f.options())).outcome).toBe('session-failed');
+    expect(existsSync(join(f.supervisorDir, 'verdicts', `${RUN_ID}.json`))).toBe(false);
+  });
+
+  it('pauses watch mode and leaves the refused run its one attempt', async () => {
+    const f = fixture();
+    const spawns = join(f.root, 'spawns');
+    process.env['STUB_SPAWNS'] = spawns;
+    process.env['STUB_API_ERROR_STATUS'] = '429';
+    const count = (): number => (existsSync(spawns) ? readFileSync(spawns, 'utf8').length : 0);
+    const controller = new AbortController();
+    const results: AnalyseResult[] = [];
+    const loop = runAnalystLoop({
+      analyst: f.options(),
+      signal: controller.signal,
+      backfill: 1,
+      quietMs: 0,
+      pollMs: 10,
+      quotaPauseMs: 60_000,
+      onResult: (result) => {
+        results.push(result);
+        // The provider comes back: the NEXT attempt at this run must be allowed to succeed.
+        delete process.env['STUB_API_ERROR_STATUS'];
+        process.env['STUB_VERDICT'] = JSON.stringify(verdict);
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    // Paused: fifteen polls later, still one spawn and no second attempt.
+    expect(count()).toBe(1);
+    expect(results.map((result) => result.outcome)).toEqual(['quota-refused']);
+    controller.abort();
+    await loop;
+
+    // Without the pause the same run is retried, and is not consumed by the refusal.
+    delete process.env['STUB_VERDICT'];
+    process.env['STUB_API_ERROR_STATUS'] = '429';
+    const again = new AbortController();
+    const retried: AnalyseResult[] = [];
+    const second = runAnalystLoop({
+      analyst: f.options(),
+      signal: again.signal,
+      backfill: 1,
+      quietMs: 0,
+      pollMs: 10,
+      quotaPauseMs: 0,
+      onResult: (result) => {
+        retried.push(result);
+        if (retried.length === 1) {
+          delete process.env['STUB_API_ERROR_STATUS'];
+          process.env['STUB_VERDICT'] = JSON.stringify(verdict);
+        } else {
+          again.abort();
+        }
+      },
+    });
+    await second;
+    expect(retried.map((result) => result.outcome)).toEqual(['quota-refused', 'analysed']);
   });
 });

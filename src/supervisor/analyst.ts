@@ -25,6 +25,7 @@ import { runCodexSupervisor } from './codexSession.js';
 import {
   runClaudeSession,
   servedMatchesPin,
+  sessionApiErrorStatus,
   type SupervisorProvider,
 } from './session.js';
 
@@ -134,7 +135,18 @@ export type AnalyseOutcome =
   | 'refused-active'
   | 'dry-run'
   | 'session-failed'
+  | 'quota-refused'
   | 'invalid-verdict';
+
+/**
+ * The provider refused the ACCOUNT, not this run: every later session in the
+ * batch would be refused the same way until the quota window resets. Measured
+ * 2026-09-24: a batch that hit the Z.ai five-hour limit spawned one `claude`
+ * per remaining target and took six 429s in seven seconds.
+ */
+export function stopsTheBatch(outcome: AnalyseOutcome): boolean {
+  return outcome === 'quota-refused';
+}
 
 export interface AnalyseResult {
   readonly runId: string;
@@ -349,7 +361,8 @@ export async function analyseTarget(target: AnalysisTarget, options: AnalystOpti
     if (session.code !== 0) {
       const detail = truncate(session.stderr.trim() || session.stdout.trim(), 2000);
       options.warn(`${codex ? 'codex' : 'claude'} exited ${session.code} for ${runId}: ${detail}`);
-      return { runId, outcome: 'session-failed', verdictPath: null, detail };
+      const quota = !codex && sessionApiErrorStatus(session.stdout) === 429;
+      return { runId, outcome: quota ? 'quota-refused' : 'session-failed', verdictPath: null, detail };
     }
     const parsed = analystVerdictSchema.safeParse(session.structured);
     if (!parsed.success) {
@@ -411,6 +424,13 @@ export async function analyseTarget(target: AnalysisTarget, options: AnalystOpti
 
 export const ANALYST_DEFAULT_QUIET_MS = 120_000;
 export const ANALYST_DEFAULT_POLL_MS = 15_000;
+/**
+ * How long watch mode waits after the provider refused the ACCOUNT. Without
+ * it the next poll, fifteen seconds later, spends each pending run's single
+ * watch-mode attempt on the same refusal. Z.ai's window is five hours; half
+ * an hour bounds the idle spawns to ten per window and loses nothing.
+ */
+export const ANALYST_QUOTA_PAUSE_MS = 30 * 60_000;
 
 export interface AnalystLoopOptions {
   readonly analyst: AnalystOptions;
@@ -420,6 +440,8 @@ export interface AnalystLoopOptions {
   readonly pollMs?: number;
   /** Re-queue this many already-finished, un-analysed runs at start. */
   readonly backfill?: number;
+  /** Pause after an account-level refusal; default {@link ANALYST_QUOTA_PAUSE_MS}. */
+  readonly quotaPauseMs?: number;
   readonly onResult?: (result: AnalyseResult) => void;
 }
 
@@ -490,7 +512,13 @@ export async function runAnalystLoop(loop: AnalystLoopOptions): Promise<void> {
   if (loop.backfill && loop.backfill > 0) {
     for (const target of pendingTargets(analyst, loop.backfill)) baseline.delete(target.runId);
   }
+  const quotaPauseMs = loop.quotaPauseMs ?? ANALYST_QUOTA_PAUSE_MS;
+  let pausedUntil = 0;
   while (!signal.aborted) {
+    if (Date.now() < pausedUntil) {
+      await sleep(pollMs, signal);
+      continue;
+    }
     const ready = finishedTargets(analyst).filter(
       (target) =>
         !baseline.has(target.runId) &&
@@ -500,12 +528,23 @@ export async function runAnalystLoop(loop: AnalystLoopOptions): Promise<void> {
     if (ready.length > 0 && !anyRunActive({ runsDir: analyst.runsDir, leasePath: analyst.leasePath })) {
       for (const target of ready) {
         if (signal.aborted) break;
+        let result: AnalyseResult | undefined;
         try {
-          loop.onResult?.(await analyseTarget(target, analyst));
+          result = await analyseTarget(target, analyst);
+          loop.onResult?.(result);
         } catch (error) {
           analyst.warn(`analysis of ${target.runId} failed: ${String(error)}`);
         } finally {
           baseline.add(target.runId);
+        }
+        if (result && stopsTheBatch(result.outcome)) {
+          // The refusal was about the account, so the run keeps its one attempt.
+          baseline.delete(target.runId);
+          pausedUntil = Date.now() + quotaPauseMs;
+          analyst.warn(
+            `the analyst provider refused the account (429); pausing ${Math.round(quotaPauseMs / 60_000)} min before the next batch`
+          );
+          break;
         }
         if (anyRunActive({ runsDir: analyst.runsDir, leasePath: analyst.leasePath })) break;
       }
