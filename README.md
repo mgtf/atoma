@@ -1,6 +1,6 @@
 <div align="center">
 
-# ⚛️ atoma
+# <img src="src/viz/public/favicon.svg" width="40" height="40" alt="" align="top"> atoma
 
 ### Turn business ideas into working software.
 
