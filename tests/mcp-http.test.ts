@@ -953,7 +953,7 @@ describe('runs as tasks, and the run log', () => {
       updateTaskStatus: (taskId: string, status: 'working' | 'input_required' | 'completed' | 'failed' | 'cancelled', message?: string) => store.updateTaskStatus(taskId, status, message),
     };
     const extra = { taskStore: requestStore, signal: new AbortController().signal, requestId: 1, sendNotification: async () => {}, sendRequest: async () => ({}) } as never;
-    const created = await handler.createTask({ projectId: 'p-1', goal: 'ship it', idempotencyKey: undefined, acceptanceCriteria: undefined }, extra);
+    const created = await handler.createTask({ projectId: 'p-1', goal: 'ship it', idempotencyKey: undefined, acceptanceCriteria: undefined, rerunOf: undefined, models: undefined }, extra);
     expect(created.task.status).toBe('working');
     expect(created.task.statusMessage).toBe('run run-1 queued');
     await tick(120);
@@ -963,7 +963,7 @@ describe('runs as tasks, and the run log', () => {
     expect(result.structuredContent.status).toBe('delivered');
     // A second task, cancelled the way the SDK's tasks/cancel handler does it: the run is cancelled too.
     statuses.splice(0, statuses.length, 'running');
-    const second = await handler.createTask({ projectId: 'p-1', goal: 'stop me', idempotencyKey: undefined, acceptanceCriteria: undefined }, extra);
+    const second = await handler.createTask({ projectId: 'p-1', goal: 'stop me', idempotencyKey: undefined, acceptanceCriteria: undefined, rerunOf: undefined, models: undefined }, extra);
     await store.updateTaskStatus(second.task.taskId, 'cancelled', 'Client cancelled task execution.');
     expect(cancelled).toEqual(['run-1']);
     for (const cleanup of host.cleanups) cleanup();
@@ -990,13 +990,13 @@ describe('runs as tasks, and the run log', () => {
     };
     const extra = { taskStore: requestStore, signal: new AbortController().signal, requestId: 1, sendNotification: async () => {}, sendRequest: async () => ({}) } as never;
     await handler.createTask({ projectId: 'p-1', goal: 'notes API', idempotencyKey: 'k-1',
-      acceptanceCriteria: ['GET /api/notes/:id 404 — unknown id is refused', 'The README explains how to start it'] }, extra);
+      acceptanceCriteria: ['GET /api/notes/:id 404 — unknown id is refused', 'The README explains how to start it'], rerunOf: undefined, models: undefined }, extra);
     expect(bodies).toEqual([{ goal: 'notes API', idempotencyKey: 'k-1', acceptanceChecklist: [
       { behaviour: 'unknown id is refused', check: { kind: 'http', method: 'GET', path: '/api/notes/:id', status: 404 } },
       { behaviour: 'The README explains how to start it', check: { kind: 'review' } },
     ] }]);
     const refused = await handler.createTask({ projectId: 'p-1', goal: 'notes API', idempotencyKey: 'k-2',
-      acceptanceCriteria: ['fine', 'two\ncriteria'] }, extra);
+      acceptanceCriteria: ['fine', 'two\ncriteria'], rerunOf: undefined, models: undefined }, extra);
     expect(bodies).toHaveLength(1);
     expect(refused.task.status).toBe('failed');
     const result = (await store.getTaskResult(refused.task.taskId)) as { content: Array<{ text: string }> };
@@ -1028,7 +1028,7 @@ describe('runs as tasks, and the run log', () => {
     };
     const extra = { taskStore: requestStore, signal: new AbortController().signal, requestId: 1, sendNotification: async () => {}, sendRequest: async () => ({}) } as never;
     try {
-      const created = await handler.createTask({ projectId: 'p', goal: 'long', idempotencyKey: undefined, acceptanceCriteria: undefined }, extra);
+      const created = await handler.createTask({ projectId: 'p', goal: 'long', idempotencyKey: undefined, acceptanceCriteria: undefined, rerunOf: undefined, models: undefined }, extra);
       await vi.advanceTimersByTimeAsync(131 * 60_000);
       expect(await store.getTask(created.task.taskId)).toMatchObject({ status: 'working' });
       runStatus = terminal;

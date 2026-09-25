@@ -370,7 +370,8 @@ async function main(): Promise<void> {
         // COUNT over rows that already exist, not a stored pointer: a stored
         // head would be a cache of state only GitHub owns.
         const published = projects.lastPublishedCommitForProject(org.orgId, project.projectId);
-        const delivered = runs.filter((run) => run.status === 'delivered');
+        // A comparison rerun never publishes, so it is never "behind".
+        const delivered = runs.filter((run) => run.status === 'delivered' && !run.rerunOf);
         const behind = published
           ? delivered.filter((run) => run.createdAt > published.runCreatedAt).length
           : delivered.length;

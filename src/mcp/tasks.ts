@@ -202,10 +202,16 @@ export const OPERATOR_RUN_INPUT = {
 
 export const PROJECT_RUN_INPUT = {
   projectId: z.string().min(1),
-  goal: z.string().min(1).max(MAX_GOAL_CHARS),
+  goal: z.string().min(1).max(MAX_GOAL_CHARS).optional().describe('Required for a new run; omitted for a rerun, which re-asks its origin’s goal.'),
   idempotencyKey: z.string().min(1).max(200).optional().describe('Idempotency key; the same key returns the same run.'),
   acceptanceCriteria: z.array(z.string().min(1).max(400)).min(1).max(MAX_CHECKLIST_ITEMS).optional().describe(
     'Acceptance criteria you approve for this run, one per entry. "GET /api/notes/:id 404 — unknown id is refused" is an HTTP criterion (status optional, any 2xx without one); any other text is judged by review. The run is checked against exactly these; one malformed entry refuses the call.'
+  ),
+  rerunOf: z.string().min(1).optional().describe(
+    'A COMPARISON RERUN of this delivered or partial run of the same project: same goal, same acceptance list, same starting workspace, on the models you pass. It is never published and never seeds a later run.'
+  ),
+  models: z.object({ l1: z.string().min(1), l2: z.string().min(1), l3: z.string().min(1) }).optional().describe(
+    'With rerunOf, required: the full model selector for each tier (<api|sub|own>:<vendor>:<model>).'
   ),
 };
 
@@ -300,10 +306,14 @@ export function projectRunTaskHandler(host: RunTaskHost, deps: ProjectRunTaskDep
     }
     const criteria = parsed ? { items: parsed.flatMap((entry) => entry.items) } : null;
     try {
+      // Forwarded as given: the service's one schema decides which combination
+      // is a run and which a rerun, and refuses every other one with 400.
       started = (await deps.service.startProjectRunFromInput(viewer, args.projectId, {
-        goal: args.goal,
+        ...(args.goal !== undefined ? { goal: args.goal } : {}),
         idempotencyKey: args.idempotencyKey ?? `mcp-task-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
         ...(criteria ? { acceptanceChecklist: criteria.items } : {}),
+        ...(args.rerunOf !== undefined ? { rerunOf: args.rerunOf } : {}),
+        ...(args.models !== undefined ? { models: args.models } : {}),
       })) as { projectRunId: string; status: string };
     } catch (error) {
       if (error instanceof ProjectHttpError) {

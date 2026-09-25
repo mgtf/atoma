@@ -87,6 +87,12 @@ export type AcceptanceSpec = z.infer<typeof acceptanceSpecSchema>;
 
 /** Environment variable carrying the captured spec from the coordinator to the child runner. */
 export const ACCEPTANCE_SPEC_ENV = 'ATOMA_ACCEPTANCE_SPEC';
+/**
+ * Who wrote the carried spec. Absent is a USER list, every spec carried before
+ * 2026-09-25; `drafted` is a comparison rerun carrying the list its origin
+ * drafted for itself, judged as a draft is judged (`withAcceptanceChecklist`).
+ */
+export const ACCEPTANCE_SOURCE_ENV = 'ATOMA_ACCEPTANCE_SOURCE';
 export const MAX_ACCEPTANCE_SPEC_BYTES = 16_384;
 
 /**

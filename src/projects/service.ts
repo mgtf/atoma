@@ -4,7 +4,7 @@ import { roleAtLeast } from '../auth/store.js';
 export { roleAtLeast } from '../auth/store.js';
 import {
   createProjectInputSchema,
-  createProjectRunInputSchema,
+  startProjectRunInputSchema,
   projectRunPublicSchema,
   type Project,
   type ProjectRun,
@@ -322,7 +322,8 @@ export class ProjectService {
     if (!roleAtLeast(viewer.role, 'org:member')) {
       throw new ProjectHttpError(403, 'org:member role or above is required to start runs');
     }
-    const input = createProjectRunInputSchema.safeParse(body);
+    // ONE schema for both doors: a new run, or a comparison rerun of one.
+    const input = startProjectRunInputSchema.safeParse(body);
     if (!input.success) throw new ProjectHttpError(400, 'invalid run payload');
     try {
       const run = await this.coordinator.start({
@@ -340,7 +341,10 @@ export class ProjectService {
         orgId: viewer.orgId,
         projectId,
         runId: run.projectRunId,
-        summary: `Run started: ${eventLabel(run.goal, 120)}`,
+        summary: run.rerunOf
+          ? `Comparison rerun started: ${eventLabel(run.goal, 100)}`
+          : `Run started: ${eventLabel(run.goal, 120)}`,
+        ...(run.rerunOf ? { detail: { rerunOf: run.rerunOf } } : {}),
       });
       const publication = this.store.getPublicationForRun(viewer.orgId, run.projectRunId);
       return this.present(run, publication);
@@ -350,6 +354,9 @@ export class ProjectService {
       if (error instanceof ProjectStateConflict) throw new ProjectHttpError(409, error.message);
       if (error instanceof Error && error.message === 'project not found') {
         throw new ProjectHttpError(404, 'project not found');
+      }
+      if (error instanceof Error && error.message === 'project run not found') {
+        throw new ProjectHttpError(404, 'project run not found');
       }
       throw error;
     }

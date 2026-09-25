@@ -37,8 +37,8 @@ list. These values come from the host snapshot, never a tenant prompt.
 
 - Every tier of a project run resolves to one full selector,
   `<api|sub|own>:<vendor>:<model>` ([src/contracts](../contracts/AGENTS.md)
-  `modelSelector.ts`), by walking account pin > organisation default > host
-  `ATOMA_MODEL_L*`. ALL THREE TIERS MUST RESOLVE: there is no base transport,
+  `modelSelector.ts`), by walking a rerun's run level > account pin >
+  organisation default > host `ATOMA_MODEL_L*`. ALL THREE TIERS MUST RESOLVE: there is no base transport,
   no `ATOMA_LLM` and no built-in default since 2026-09-07; a tier no level
   can honour refuses the run and names the two ways out (a Settings choice
   whose vendor key the organisation saved, or a host pin beside its
@@ -443,6 +443,16 @@ The operator commands and offline prerequisites live in
   back to `failed` — the feature would have been inert on one of its two
   production shapes while appearing to work.
 
+## Comparison reruns
+
+- `{rerunOf, models}` reruns a delivered or partial run on other models with
+  ITS goal, ITS acceptance list (a drafted one is recovered from its trace and
+  carried as `drafted`) and the seed IT started from (`seed_json`, recorded for
+  every run; a legacy row through its retrieval receipt). Run-level models
+  REFUSE rather than fall through. A rerun never seeds (`previousSeedRun`) and
+  never publishes (`reservePublication`). Imported projects are refused. Contract
+  and limits: [comparison reruns](../../docs/comparison-reruns-2026-09-25.md).
+
 ## Intentional choices and rejected shortcuts
 
 - Reading egress settings, or an ollama destination, from a tenant prompt:
@@ -479,6 +489,8 @@ The operator commands and offline prerequisites live in
 - Creating the repository at project creation: deliberately not done. It is
   created at PUBLICATION, so a project with no delivered run leaves no empty
   repository behind.
+- A rerun seeded from the project's latest run, redrafting its list, or
+  publishing on delivery: refused — each compares two different requests.
 - Resolving the request-key conflict outside a transaction: refused. Two
   processes write this file, and the loser of that race met the index instead
   of the typed conflict, handing the caller a driver's UNIQUE prose naming an

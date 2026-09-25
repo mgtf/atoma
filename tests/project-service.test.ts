@@ -406,6 +406,28 @@ describe('ProjectService — roles, IDOR and slug identity', () => {
     } satisfies Partial<ProjectHttpError>);
   });
 
+  it('accepts a comparison rerun only as rerunOf + models, and maps an unknown origin to 404', async () => {
+    linkInstallation(alice, '501', 'alice-org');
+    const { svc, start } = service();
+    const created = await svc.createProject(jsonReq(payload('501')), alice) as { projectId: string };
+    const models = { l1: 'api:anthropic:claude-haiku-4-5', l2: 'api:anthropic:claude-sonnet-4-5', l3: 'api:anthropic:claude-opus-4-5' };
+    const rerunOf = randomUUID();
+    for (const body of [
+      { idempotencyKey: 'r-1', rerunOf, models, goal: 'A goal of its own.' },
+      { idempotencyKey: 'r-1', rerunOf },
+      { idempotencyKey: 'r-1', rerunOf, models: { ...models, l3: null } },
+      { idempotencyKey: 'r-1', rerunOf, models, acceptanceChecklist: [{ behaviour: 'x', check: { kind: 'review' } }] },
+    ]) {
+      await expect(svc.startProjectRun(jsonReq(body), alice, created.projectId))
+        .rejects.toMatchObject({ status: 400 } satisfies Partial<ProjectHttpError>);
+    }
+    expect(start).not.toHaveBeenCalled();
+    start.mockRejectedValue(new Error('project run not found'));
+    await expect(svc.startProjectRun(jsonReq({ idempotencyKey: 'r-1', rerunOf, models }), alice, created.projectId))
+      .rejects.toMatchObject({ status: 404 } satisfies Partial<ProjectHttpError>);
+    expect(start).toHaveBeenCalledWith(expect.objectContaining({ request: { idempotencyKey: 'r-1', rerunOf, models } }));
+  });
+
   it('binds publication retry to the project in the path and to org:member or above', async () => {
     linkInstallation(alice, '501', 'alice-org');
     const { svc, retryPublication } = service();

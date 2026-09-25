@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { runStatsSchema } from './runStats.js';
 import { approvedChecklistInputSchema } from './acceptanceChecklist.js';
+import { runTierModelsSchema } from './tierModels.js';
 
 /** Zero suspends admission; the host still has one global run slot. */
 export const orgRunLimitSchema = z.number().int().min(0).max(1);
@@ -243,6 +244,36 @@ export const createProjectRunInputSchema = z
   })
   .strict();
 
+/**
+ * A COMPARISON RERUN: run `rerunOf` again, on other models, from the state it
+ * started from (src/projects/AGENTS.md, "Comparison reruns"). No goal and no
+ * checklist are accepted, because both are the ORIGIN's, copied by the host:
+ * a rerun that could restate either would compare two different requests.
+ */
+export const rerunProjectRunInputSchema = z
+  .object({
+    rerunOf: projectRunIdSchema,
+    idempotencyKey: idempotencyKeySchema,
+    models: runTierModelsSchema,
+  })
+  .strict();
+
+/** What either door accepts: a new run, or a rerun of an existing one. */
+export const startProjectRunInputSchema = z.union([createProjectRunInputSchema, rerunProjectRunInputSchema]);
+
+/**
+ * WHERE A RUN'S WORKSPACE CAME FROM, recorded once when the seed is resolved.
+ * `run` names the run whose workspace was copied in; `repository` is an
+ * imported project's snapshot of its default branch (the commit is the run's
+ * `repositoryBase`); `none` is a first run. Absent on rows started before
+ * 2026-09-25, which recorded no seed.
+ */
+export const runSeedSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('none') }).strict(),
+  z.object({ kind: z.literal('run'), runId: projectRunIdSchema }).strict(),
+  z.object({ kind: z.literal('repository') }).strict(),
+]);
+
 /** Host-owned locations supplied only after a project-run UUID is reserved. */
 export const projectRunHostPathsSchema = z
   .object({
@@ -328,6 +359,11 @@ export const projectRunSchema = z
     hostPaths: projectRunHostPathsSchema,
     bytesExpiredAt: instantSchema.nullable().optional(),
     repositoryBase: repositoryRunBaseSchema.optional(),
+    /** Present on a comparison rerun: the run it re-ran, which is never its seed. */
+    rerunOf: projectRunIdSchema.optional(),
+    /** The run-level models a comparison rerun was launched with. */
+    modelOverrides: runTierModelsSchema.optional(),
+    seed: runSeedSchema.optional(),
     traceId: z.string().min(1).max(255).nullable(),
     stats: runStatsSchema.nullable(),
     artifactManifest: artifactManifestSchema.nullable(),
@@ -420,6 +456,9 @@ export type RepositoryVisibility = z.infer<typeof repositoryVisibilitySchema>;
 export type RepositoryTarget = z.infer<typeof repositoryTargetSchema>;
 export type RepositoryReceipt = z.infer<typeof repositoryReceiptSchema>;
 export type CreateProjectRunInput = z.input<typeof createProjectRunInputSchema>;
+export type RerunProjectRunInput = z.input<typeof rerunProjectRunInputSchema>;
+export type StartProjectRunInput = z.input<typeof startProjectRunInputSchema>;
+export type RunSeed = z.infer<typeof runSeedSchema>;
 export type ProjectRunHostPaths = z.infer<typeof projectRunHostPathsSchema>;
 export type ProjectRun = z.infer<typeof projectRunSchema>;
 export type ProjectRunPublic = z.infer<typeof projectRunPublicSchema>;

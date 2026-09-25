@@ -50,6 +50,19 @@ export class ProjectRetrievalLaunchStore {
     return row ? projectRetrievalLaunchSchema.parse(JSON.parse(row.receipt_json)) : null;
   }
 
+  /**
+   * The run whose workspace `runId` was launched against, as its receipt
+   * recorded it at preparation: a HISTORICAL fact, so a revoked receipt still
+   * answers. `undefined` means no receipt exists, which is not the same as a
+   * run that had no source (`null`). The one reader is a comparison rerun of
+   * a run that predates `project_runs.seed_json`.
+   */
+  recordedSourceRunId(runId: string): string | null | undefined {
+    const row = this.db.prepare('SELECT receipt_json FROM project_retrieval_launches WHERE run_id = ?')
+      .get(projectRunIdSchema.parse(runId)) as { receipt_json: string } | undefined;
+    return row ? projectRetrievalLaunchSchema.parse(JSON.parse(row.receipt_json)).sourceRunId : undefined;
+  }
+
   resolve(runId: string): ProjectRetrievalLaunch | null {
     try {
       return this.db.transaction(() => {

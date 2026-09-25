@@ -58,7 +58,7 @@ import type { Logger, Plan, Result, RunContext, Task } from '../core/types.js';
 import type { TaskProfile } from './profile.js';
 import { describeSeedManifest, seedWorkspace } from './workspace.js';
 import { draftAcceptanceChecklist } from '../atoms/acceptanceChecklist.js';
-import { readAcceptanceSpec } from './acceptanceSpec.js';
+import { readAcceptanceSource, readAcceptanceSpec } from './acceptanceSpec.js';
 
 export const consoleLogger: Logger = {
   debug: (m, meta) => console.debug(m, meta ?? ''),
@@ -589,8 +589,11 @@ export async function startTask(
   // before any model call; and refused outside depth routing, the only path
   // that reads a checklist, so no approved criterion is silently ignored.
   let acceptanceSpec: ReturnType<typeof readAcceptanceSpec>;
-  try { acceptanceSpec = readAcceptanceSpec(process.env); }
-  catch (error) { throw new RunnerConfigError((error as Error).message); }
+  let acceptanceSource: ReturnType<typeof readAcceptanceSource>;
+  try {
+    acceptanceSpec = readAcceptanceSpec(process.env);
+    acceptanceSource = readAcceptanceSource(process.env);
+  } catch (error) { throw new RunnerConfigError((error as Error).message); }
   if (acceptanceSpec && !args.depth) {
     throw new RunnerConfigError('an approved acceptance list requires depth routing; baseline and comparison arms read none');
   }
@@ -898,10 +901,15 @@ export async function startTask(
       // A list the user approved REPLACES the draft, and no drafting call is
       // made: the model's reading of the goal never overrides the person's.
       handle = async (t, c) => runDepthTask({
-        ...(acceptanceSpec
-          ? { checklist: acceptanceSpec.items,
-              checklistOrigin: { source: 'user' as const, digest: acceptanceSpec.digest } }
-          : { checklist: await draftAcceptanceChecklist(c, t.description) }),
+        // A comparison rerun of a run that drafted its own list carries THAT
+        // draft: the same yardstick as its origin, judged as a draft, with no
+        // second drafting call from the rerun's own models.
+        ...(acceptanceSpec && acceptanceSource === 'drafted'
+          ? { checklist: acceptanceSpec.items }
+          : acceptanceSpec
+            ? { checklist: acceptanceSpec.items,
+                checklistOrigin: { source: 'user' as const, digest: acceptanceSpec.digest } }
+            : { checklist: await draftAcceptanceChecklist(c, t.description) }),
         mode: args.depth!, task: t, ctx: c, floor: t.proofFloor!,
         createExecutor: (mode) => {
           const currentSeed = { ...seedCtx, toolDecls: backend.toolDecls };

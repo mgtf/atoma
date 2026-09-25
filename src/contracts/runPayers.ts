@@ -153,7 +153,7 @@ export function payerForSelector(selector: ModelSelector, orgBroughtKey: boolean
 }
 
 /** WHERE the selection came from, so a surprising payer is traceable to a row. */
-export const payerSourceSchema = z.enum(['account', 'org', 'host']);
+export const payerSourceSchema = z.enum(['run', 'account', 'org', 'host']);
 
 export type PayerSource = z.infer<typeof payerSourceSchema>;
 

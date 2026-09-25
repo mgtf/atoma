@@ -7,17 +7,17 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { parseRunLog, spawnRun, DEFAULT_HARD_KILL_MARGIN_MS, UNKILLABLE_BACKSTOP_EXTRA_MS, type RunStats } from '../cli/burnin.js';
 import { encodePreviousLanding, PREVIOUS_LANDING_ENV } from '../contracts/runLanding.js';
-import { ACCEPTANCE_SPEC_ENV } from '../contracts/acceptanceChecklist.js';
+import { ACCEPTANCE_SOURCE_ENV, ACCEPTANCE_SPEC_ENV } from '../contracts/acceptanceChecklist.js';
 import { encodeAcceptanceSpec } from '../run/acceptanceSpec.js';
 import { declaredArtifactManifestSchema } from '../contracts/artifactManifest.js';
 import type {
   ArtifactManifest,
-  CreateProjectRunInput,
+  StartProjectRunInput,
   Project,
   ProjectRun,
   Publication,
 } from '../contracts/projects.js';
-import type { TierModelPins } from '../contracts/tierModels.js';
+import type { RunTierModels, TierModelPins } from '../contracts/tierModels.js';
 import { PERSONAL_CODEX_PROFILE_ROOT_ENV } from '../core/codexHomeLease.js';
 import { skillsDirPath } from '../core/stores.js';
 import { LLM_PROVIDER_CATALOG, findProvider } from '../core/providerCatalog.js';
@@ -66,6 +66,7 @@ import { repoRoot } from '../mcp/run.js';
 import { buildWorkspaceArtifactManifest } from './artifacts.js';
 import { ProjectStateConflict, ProjectStore } from './store.js';
 import { ProjectRetrievalLaunchStore } from './retrievalLaunch.js';
+import { resolveRerunOrigin, type RerunOrigin } from './rerun.js';
 import { HAYSTACK_LAUNCH_ENV, readHaystackLaunch } from '../contracts/retrievalHaystack.js';
 
 const MAX_CONTROL_JSON_BYTES = 512 * 1024;
@@ -338,7 +339,9 @@ function assertSubscriptionPinIsHonourable(input: {
   readonly orgId: string | undefined;
 }): void {
   const where = tierPinVariable(input.tier);
-  if (input.level !== 'account') {
+  // `run` is the requester's own choice for ONE run (a comparison rerun), so
+  // it stands where the account pin stands; the grant is still asked below.
+  if (input.level !== 'account' && input.level !== 'run') {
     // An org default is inherited by every member by construction, and the
     // host env is the third candidate for EVERY tier: a `sub:` selector at
     // either level would be a payer-bearing default nobody chose (D2/D3).
@@ -381,7 +384,7 @@ function assertPrincipalSubscriptionPinIsHonourable(input: {
   readonly profile: PrincipalCodexProfile | undefined;
 }): void {
   const where = tierPinVariable(input.tier);
-  if (input.level !== 'account') {
+  if (input.level !== 'account' && input.level !== 'run') {
     throw new ProjectRunConfigurationError(
       `${where} names a personal subscription from the ${input.level} level; only the ` +
         "requesting member's own account pin may spend their subscription"
@@ -432,6 +435,13 @@ export function projectRunEnvironment(input: {
   /** The org-level defaults under `tierModels`. See its doc above. */
   readonly orgTierModels?: TierModelPins;
   /**
+   * A comparison rerun's models, above every stored level. Unlike those, a
+   * run-level `api:` choice whose vendor has no credential REFUSES instead of
+   * falling through: the whole point of the rerun is to run on exactly these
+   * models, and a fall-through would compare against models nobody asked for.
+   */
+  readonly runModels?: RunTierModels;
+  /**
    * The organisation this run belongs to. Required to judge a per-tier
    * host-subscription pin: the deployment declares ONE organisation in
    * `ATOMA_HOST_SUBSCRIPTION_ORG` where the operator's own login may be
@@ -481,7 +491,7 @@ export function projectRunEnvironment(input: {
   /** Vendors whose credential this run takes, and from where. */
   const vendorSources = new Map<ModelSelector['vendor'], VendorCredentialSource>();
 
-  // TIER RESOLUTION: account pin > org default > host env, resolved PER
+  // TIER RESOLUTION: run > account pin > org default > host env, resolved PER
   // CANDIDATE so a preference pointing at a vendor whose credential nobody
   // configured falls through to the level beneath it instead of reaching the
   // router and detonating mid-run.
@@ -498,6 +508,7 @@ export function projectRunEnvironment(input: {
     const variable = tierPinVariable(tier);
     const chosen = resolveTierChain(
       tierChainCandidates({
+        run: input.runModels,
         account: input.tierModels,
         org: input.orgTierModels,
         host: input.hostEnv[variable],
@@ -530,11 +541,16 @@ export function projectRunEnvironment(input: {
           });
           return 'take';
         }
+        const available = vendorCredentialSource(selector.vendor, orgKeys, input.hostEnv) !== null;
+        if (!available && candidate.level === 'run') {
+          throw new ProjectRunConfigurationError(
+            `${variable}=${candidate.value} was asked for this run, but neither the organisation nor ` +
+              `this deployment holds a ${selector.vendor} credential`
+          );
+        }
         // Fail-open: nobody brought this vendor's credential, so the next
         // level of the chain decides instead.
-        return vendorCredentialSource(selector.vendor, orgKeys, input.hostEnv) !== null
-          ? 'take'
-          : 'skip';
+        return available ? 'take' : 'skip';
       }
     );
     if (!chosen) {
@@ -702,6 +718,11 @@ export function previousSeedRun(
   if (!runs) return null;
   for (const run of runs) {
     if (run.status !== 'delivered' && run.status !== 'partial') continue;
+    // A COMPARISON RERUN IS NOT PART OF THE LINE: it is a measurement taken
+    // beside the project, and seeding from it would turn an experiment into
+    // the project's state. The retention hold and the retrieval source follow
+    // this function, so this one filter keeps it out of all three.
+    if (run.rerunOf) continue;
     if (run.bytesExpiredAt) throw new ProjectStateConflict('The previous workspace has expired; restore it before continuing this project');
     try {
       if (lstatSync(run.hostPaths.workspacePath).isDirectory()) {
@@ -1165,7 +1186,7 @@ export class ProjectRunCoordinator {
     readonly orgId: string;
     readonly principalId: string;
     readonly projectId: string;
-    readonly request: CreateProjectRunInput;
+    readonly request: StartProjectRunInput;
   }): Promise<ProjectRun> {
     const findRetry = () => this.store.findProjectRunForRequest(
       input.orgId, input.projectId, input.principalId, input.request
@@ -1181,6 +1202,21 @@ export class ProjectRunCoordinator {
       throw new ProjectRunConfigurationError((error as Error).message);
     }
     if (this.hostEnv['ATOMA_LAUNCHER_SOCKET'] && !this.hostEnv['ATOMA_LAUNCHER_WORKSPACE_ROOT']) throw new ProjectRunConfigurationError('Launcher workspace root is required for project runs');
+    // A comparison rerun resolves WHAT IT COPIES before it reserves anything,
+    // so an origin that cannot be rerun is refused without a row or a lease.
+    let rerun: RerunOrigin | null = null;
+    if ('rerunOf' in input.request) {
+      const project = this.store.getProject(input.orgId, input.projectId);
+      if (!project) throw new Error('project not found');
+      const retrieval = ProjectRetrievalLaunchStore.open(this.dbPath);
+      rerun = resolveRerunOrigin({
+        store: this.store,
+        project,
+        orgId: input.orgId,
+        rerunOf: input.request.rerunOf,
+        recordedSourceRunId: (runId) => retrieval.recordedSourceRunId(runId),
+      });
+    }
     const candidateRunId = randomUUID();
     const candidatePaths = projectRunHostLayout(
       this.root,
@@ -1209,6 +1245,7 @@ export class ProjectRunCoordinator {
         projectId: input.projectId,
         principalId: input.principalId,
         request: input.request,
+        ...(rerun ? { origin: { goal: rerun.origin.goal, acceptance: rerun.acceptance } } : {}),
         projectRunId: candidateRunId,
         enforceCapacity: true,
         hostPaths: {
@@ -1264,6 +1301,9 @@ export class ProjectRunCoordinator {
         runId: run.projectRunId,
         artifactManifestPath: paths.artifactManifestPath,
         orgId: input.orgId,
+        // Read back from the RESERVED ROW, like the acceptance list below: the
+        // row is what the rerun was admitted as.
+        ...(run.modelOverrides ? { runModels: run.modelOverrides } : {}),
         tierModels: this.resolveTierModels(input.principalId),
         orgTierModels: this.resolveOrgTierModels(input.orgId),
         orgProviderKeys: this.resolveOrgProviderKeys(input.orgId),
@@ -1333,7 +1373,9 @@ export class ProjectRunCoordinator {
 
     let driven: Promise<string>;
     try {
-      const seedRun = previousSeedRun(this.store, input.orgId, input.projectId);
+      // A rerun starts where its origin started; every other run continues
+      // the project's line.
+      const seedRun = rerun ? rerun.seedRun : previousSeedRun(this.store, input.orgId, input.projectId);
       let seedFrom = seedRun?.hostPaths.workspacePath;
       // The tenant's wall clock starts when the CHILD does, not here: the
       // repository import and corpus preparation below have their own bound
@@ -1367,6 +1409,11 @@ export class ProjectRunCoordinator {
           if (!this.publisher?.prepareRun) throw new ProjectRunConfigurationError('GitHub repository import is unavailable');
           seedFrom = await this.publisher.prepareRun(project, run, preparationSignal);
         }
+        // WHERE THIS RUN STARTED, recorded for every run: it is what a later
+        // comparison rerun of THIS run copies (src/projects/rerun.ts).
+        this.store.recordRunSeed(run.orgId, run.projectRunId,
+          project.repositoryTarget.source ? { kind: 'repository' }
+            : seedRun ? { kind: 'run', runId: seedRun.projectRunId } : { kind: 'none' });
         await ProjectRetrievalLaunchStore.open(this.dbPath).prepare(run.projectRunId,
           seedRun?.projectRunId ?? null, { signal: preparationSignal, deadlineAt: preparationDeadlineAt });
         if (preparationSignal.aborted || Date.now() >= preparationDeadlineAt) throw new Error('project document preparation cancelled');
@@ -1386,8 +1433,13 @@ export class ProjectRunCoordinator {
         // reservation wrote them to, never from the request: the child runs
         // against the captured version, and a row that no longer matches its
         // digest fails the run here instead of launching it without them.
-        const acceptance = this.store.getRunAcceptanceSpec(run.orgId, run.projectRunId);
-        if (acceptance) environment[ACCEPTANCE_SPEC_ENV] = encodeAcceptanceSpec(acceptance);
+        const acceptance = this.store.getRunAcceptance(run.orgId, run.projectRunId);
+        if (acceptance) {
+          environment[ACCEPTANCE_SPEC_ENV] = encodeAcceptanceSpec(acceptance.spec);
+          // A rerun of a run that drafted its own list carries that draft, and
+          // is judged as a draft is judged — not as a list a person approved.
+          if (acceptance.source === 'drafted') environment[ACCEPTANCE_SOURCE_ENV] = 'drafted';
+        }
         return launch();
       })();
     } catch (error) {
@@ -1492,7 +1544,9 @@ export class ProjectRunCoordinator {
       // download and the seed of the next run, but an incomplete artefact set
       // never reaches the project's repository, where nothing would mark it
       // as incomplete afterwards.
-      if (this.publisher && !landed) {
+      // Nor ever for a comparison rerun: its repository is the project's
+      // line, and the rerun is a measurement beside it.
+      if (this.publisher && !landed && !completed.rerunOf) {
         await this.publisher.publish({
           project,
           run: completed,
@@ -1599,6 +1653,7 @@ export class ProjectRunCoordinator {
     }
     const run = this.store.getProjectRun(orgId, projectRunId);
     if (!run) return null;
+    if (run.rerunOf) throw new ProjectStateConflict('a comparison rerun is never published');
     if (run.bytesExpiredAt) throw new ProjectStateConflict('Run bytes have expired; restore them before publication');
     if (run.status !== 'delivered' || !run.artifactManifest || !run.artifactManifestHash) {
       throw new ProjectStateConflict('publication retry requires a delivered run with artifacts');

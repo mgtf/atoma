@@ -17,7 +17,7 @@ import type { VizRun } from '../src/viz/trace.js';
 import { makePlan } from './helpers/factories.js';
 import { forceKillTestProcessTree } from './helpers.js';
 import { OLLAMA_PINS } from './tier-pins.js';
-import { ACCEPTANCE_SPEC_ENV } from '../src/contracts/acceptanceChecklist.js';
+import { ACCEPTANCE_SOURCE_ENV, ACCEPTANCE_SPEC_ENV } from '../src/contracts/acceptanceChecklist.js';
 import { captureAcceptanceSpec, encodeAcceptanceSpec } from '../src/run/acceptanceSpec.js';
 
 vi.mock('../src/run/providers.js', async (original) => ({
@@ -332,7 +332,10 @@ describe('runner supervision depth, concrete L3/L2/L1 and real backend', () => {
   // by the host in the environment, replaces the draft: no drafting call, the
   // planner is told who wrote it, the root reads the host-held list including
   // its review items, and the acceptance record names the source and digest.
-  it.skipIf(process.platform === 'win32')('runs against the user-approved list instead of drafting one', async () => {
+  // `drafted` is a comparison rerun carrying the list its origin drafted: the
+  // same items, no drafting call, and judged as a draft rather than as a list
+  // a person approved (src/projects/rerun.ts).
+  it.skipIf(process.platform === 'win32').each(['user', 'drafted'] as const)('runs against a carried %s list instead of drafting one', async (source) => {
     const root = mkdtempSync(join(tmpdir(), 'atoma-depth-approved-'));
     const runs = join(root, 'runs');
     const spec = captureAcceptanceSpec([
@@ -343,6 +346,7 @@ describe('runner supervision depth, concrete L3/L2/L1 and real backend', () => {
       ATOMA_DB_PATH: join(root, 'store.db'), ATOMA_SKILLS_DIR: join(root, 'skills'), ATOMA_RUNS_DIR: runs,
       ATOMA_BUILD_WORKSPACE: join(root, 'workspace'), ATOMA_BUILD_TIMEOUT_MS: '60000', ATOMA_CONTAINER: '0',
       ATOMA_REQUIRE_ISOLATION: '0', ATOMA_PREFILTER_CACHE: '0', [ACCEPTANCE_SPEC_ENV]: encodeAcceptanceSpec(spec),
+      ...(source === 'drafted' ? { [ACCEPTANCE_SOURCE_ENV]: 'drafted' } : {}),
     })) vi.stubEnv(key, value);
     resetHostLifecycleSnapshotForTests();
     for (const method of ['log', 'warn', 'error'] as const) vi.spyOn(console, method).mockImplementation(() => {});
@@ -384,18 +388,23 @@ describe('runner supervision depth, concrete L3/L2/L1 and real backend', () => {
       expect(await handle.settled).toEqual({ outcome: 'delivered' });
       expect(calls.filter((req) => req.role === 'draft-checklist')).toHaveLength(0);
       const planning = calls.filter((req) => req.role === 'plan').map((req) => req.userContent).join('\n');
-      expect(planning).toContain('Approved by the user before launch');
+      expect(planning).toContain(source === 'user' ? 'Approved by the user before launch' : 'Drafted from the goal');
       expect(planning).toContain('c2: the README explains how to start it (judged by review)');
       const rootVerdict = calls.find((req) => req.actor?.name === 'run-root')!;
-      expect(rootVerdict.userContent).toContain('ACCEPTANCE CRITERIA — approved by the user before launch');
-      expect(rootVerdict.userContent).toContain('- [OBSERVED] c1 lists notes (GET /api/notes → 2xx)');
-      expect(rootVerdict.userContent).toContain('- [REVIEW] c2 the README explains how to start it (judged by review)');
+      if (source === 'user') expect(rootVerdict.userContent).toContain('ACCEPTANCE CRITERIA — approved by the user before launch');
+      else expect(rootVerdict.userContent).not.toContain('approved by the user');
+      expect(rootVerdict.userContent).toContain('c1 lists notes (GET /api/notes → 2xx)');
+      expect(rootVerdict.userContent).toContain('c2 the README explains how to start it (judged by review)');
       const path = readdirSync(runs).find((name) => name.endsWith('.json') && name !== 'index.json')!;
       const trace = JSON.parse(readFileSync(join(runs, path), 'utf8')) as VizRun;
-      expect(trace.events.find((event) => event.kind === 'acceptance')).toMatchObject({
-        checklistSource: 'user', checklistDigest: spec.digest,
+      const acceptance = trace.events.find((event) => event.kind === 'acceptance');
+      expect(acceptance).toMatchObject({
+        checklistSource: source,
         checklist: [{ id: 'c1', status: 'covered' }, { id: 'c2', status: 'review' }],
       });
+      // Only a USER list is bound to the host's digest of it.
+      if (source === 'user') expect(acceptance).toMatchObject({ checklistDigest: spec.digest });
+      else expect(acceptance).not.toHaveProperty('checklistDigest');
     } finally {
       await handle?.shutdown();
       forceKillTestProcessTree(serverPid);

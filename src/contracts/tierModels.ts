@@ -69,6 +69,25 @@ export const accountTierModelPinsSchema = z.object({
 
 export type TierModelPins = z.infer<typeof tierModelPinsSchema>;
 
+/**
+ * THE RUN LEVEL: the models ONE run was asked to use, above every stored
+ * preference — a comparison rerun's override (src/projects/AGENTS.md). The
+ * account value space, because it is the requester's own choice for their own
+ * run, but never null: a rerun that inherited a tier would compare against
+ * whatever the chain resolves TODAY, which is not a choice anybody made.
+ */
+function runSelection(tier: TierNumber) {
+  return z.string().trim().min(1).max(200).refine((value) => isAccountTierSelection(value, tier), {
+    message: 'must be a catalogue model or an account subscription available to this tier',
+  });
+}
+
+export const runTierModelsSchema = z
+  .object({ l1: runSelection(1), l2: runSelection(2), l3: runSelection(3) })
+  .strict();
+
+export type RunTierModels = z.infer<typeof runTierModelsSchema>;
+
 export const EMPTY_TIER_MODEL_PINS: TierModelPins = { l1: null, l2: null, l3: null };
 
 /** Parsed at module load: a schema/example mismatch must fail tests at once. */
@@ -84,7 +103,7 @@ export function pinForTier(pins: TierModelPins, tier: TierNumber): string | null
 }
 
 /** Where a candidate came from. The chain is walked in this order. */
-export const TIER_CHAIN_LEVELS = ['account', 'org', 'host'] as const;
+export const TIER_CHAIN_LEVELS = ['run', 'account', 'org', 'host'] as const;
 
 export type TierChainLevel = (typeof TIER_CHAIN_LEVELS)[number];
 
@@ -118,8 +137,9 @@ export function resolveTierChain(
   return null;
 }
 
-/** The three candidates for one tier, in precedence order, nulls preserved. */
+/** The candidates for one tier, in precedence order, nulls preserved. */
 export function tierChainCandidates(input: {
+  readonly run?: RunTierModels | undefined;
   readonly account?: TierModelPins | undefined;
   readonly org?: TierModelPins | undefined;
   readonly host?: string | null | undefined;
@@ -127,7 +147,9 @@ export function tierChainCandidates(input: {
 }): readonly (TierChainCandidate | null)[] {
   const account = input.account ? pinForTier(input.account, input.tier) : null;
   const org = input.org ? pinForTier(input.org, input.tier) : null;
+  const run = input.run ? pinForTier(input.run, input.tier) : null;
   return [
+    run === null ? null : { level: 'run', value: run },
     account === null ? null : { level: 'account', value: account },
     org === null ? null : { level: 'org', value: org },
     input.host ? { level: 'host', value: input.host } : null,

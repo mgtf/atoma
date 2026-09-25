@@ -11,6 +11,9 @@ import {
   commitShaSchema,
   createProjectInputSchema,
   createProjectRunInputSchema,
+  rerunProjectRunInputSchema,
+  runSeedSchema,
+  startProjectRunInputSchema,
   idempotencyKeySchema,
   organisationIdSchema,
   principalIdSchema,
@@ -30,7 +33,8 @@ import {
   repositoryStatusSchema,
   type ArtifactManifest,
   type CreateProjectInput,
-  type CreateProjectRunInput,
+  type RunSeed,
+  type StartProjectRunInput,
   type Project,
   type ProjectRun,
   type ProjectRunHostPaths,
@@ -43,7 +47,13 @@ import {
 } from '../contracts/projects.js';
 import { artifactManifestHash } from './artifacts.js';
 import { captureAcceptanceSpec, parseAcceptanceSpec } from '../run/acceptanceSpec.js';
-import type { AcceptanceSpec } from '../contracts/acceptanceChecklist.js';
+import type { AcceptanceSpec, ChecklistSource } from '../contracts/acceptanceChecklist.js';
+
+/** An acceptance list a run carries, and who wrote it. */
+export interface RunAcceptance {
+  readonly spec: AcceptanceSpec;
+  readonly source: ChecklistSource;
+}
 
 /**
  * The `project_runs` table, parameterised by its NAME — the one table whose
@@ -88,6 +98,28 @@ CREATE TABLE IF NOT EXISTS ${name} (
     (artifact_manifest_json IS NULL AND artifact_manifest_hash IS NULL) OR
     (artifact_manifest_json IS NOT NULL AND artifact_manifest_hash IS NOT NULL)
   )
+);
+`;
+}
+
+/**
+ * The `project_run_payers` table, parameterised by its NAME for the same
+ * reason as `projectRunsTable`: its `source` CHECK gained `'run'` on
+ * 2026-09-25 (a comparison rerun's model override), and a CHECK is widened
+ * only by a rebuild (`migrateRunPayersForRunSource`).
+ */
+function projectRunPayersTable(name: string): string {
+  return `
+CREATE TABLE IF NOT EXISTS ${name} (
+  project_run_id TEXT NOT NULL REFERENCES project_runs(project_run_id),
+  tier           TEXT NOT NULL CHECK (tier IN ('l1','l2','l3')),
+  org_id         TEXT NOT NULL REFERENCES auth_organisations(org_id),
+  selection      TEXT NOT NULL,
+  provider       TEXT NOT NULL,
+  payer          TEXT NOT NULL CHECK (payer IN ('host-subscription','principal-subscription','org-key','host-key','host-selfhosted')),
+  source         TEXT NOT NULL CHECK (source IN ('run','account','org','host')),
+  recorded_at    TEXT NOT NULL,
+  PRIMARY KEY (project_run_id, tier)
 );
 `;
 }
@@ -218,17 +250,7 @@ END;
  * NO SECRETS. A row names a selector, a transport, a payer KIND and which
  * level chose it — never a credential, and never tenant-supplied text.
  */
-CREATE TABLE IF NOT EXISTS project_run_payers (
-  project_run_id TEXT NOT NULL REFERENCES project_runs(project_run_id),
-  tier           TEXT NOT NULL CHECK (tier IN ('l1','l2','l3')),
-  org_id         TEXT NOT NULL REFERENCES auth_organisations(org_id),
-  selection      TEXT NOT NULL,
-  provider       TEXT NOT NULL,
-  payer          TEXT NOT NULL CHECK (payer IN ('host-subscription','principal-subscription','org-key','host-key','host-selfhosted')),
-  source         TEXT NOT NULL CHECK (source IN ('account','org','host')),
-  recorded_at    TEXT NOT NULL,
-  PRIMARY KEY (project_run_id, tier)
-);
+${projectRunPayersTable('project_run_payers')}
 CREATE INDEX IF NOT EXISTS project_run_payers_org_idx ON project_run_payers(org_id, payer);
 
 CREATE TRIGGER IF NOT EXISTS project_run_payers_immutable
@@ -301,16 +323,35 @@ END;
  *     it runs once per store and never on a fresh one.
  */
 function migrateProjectRunsForPartial(db: Database.Database): void {
+  rebuildTableUnlessSchemaNames(db, 'project_runs', `'partial'`, projectRunsTable);
+}
+
+/**
+ * Widen `project_run_payers.source` to admit `'run'`, by the same rebuild. The
+ * payer rows are immutable evidence, so the rebuild copies them verbatim and
+ * the DDL re-run restores their immutability trigger with the index.
+ */
+function migrateRunPayersForRunSource(db: Database.Database): void {
+  rebuildTableUnlessSchemaNames(db, 'project_run_payers', `'run'`, projectRunPayersTable);
+}
+
+/** The one rebuild procedure, documented on `migrateProjectRunsForPartial`. */
+function rebuildTableUnlessSchemaNames(
+  db: Database.Database,
+  table: string,
+  marker: string,
+  definition: (name: string) => string
+): void {
   const stored = db
-    .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'project_runs'`)
-    .get() as { sql: string | null } | undefined;
-  if (!stored?.sql || stored.sql.includes(`'partial'`)) return;
-  const temporary = 'project_runs_partial_rebuild';
+    .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`)
+    .get(table) as { sql: string | null } | undefined;
+  if (!stored?.sql || stored.sql.includes(marker)) return;
+  const temporary = `${table}_rebuild`;
   const columnsOf = (table: string): string[] =>
     (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(
       (column) => column.name
     );
-  const oldColumns = columnsOf('project_runs');
+  const oldColumns = columnsOf(table);
   const foreignKeysWereOn =
     (db.prepare('PRAGMA foreign_keys').get() as { foreign_keys: number } | undefined)
       ?.foreign_keys === 1;
@@ -320,15 +361,15 @@ function migrateProjectRunsForPartial(db: Database.Database): void {
     db.exec('BEGIN');
     try {
       db.exec(`DROP TABLE IF EXISTS ${temporary}`);
-      db.exec(projectRunsTable(temporary));
+      db.exec(definition(temporary));
       const fresh = columnsOf(temporary);
       for (const column of oldColumns) {
         if (!fresh.includes(column)) db.exec(`ALTER TABLE ${temporary} ADD COLUMN ${column} TEXT`);
       }
       const list = oldColumns.join(', ');
-      db.exec(`INSERT INTO ${temporary} (${list}) SELECT ${list} FROM project_runs`);
-      db.exec('DROP TABLE project_runs');
-      db.exec(`ALTER TABLE ${temporary} RENAME TO project_runs`);
+      db.exec(`INSERT INTO ${temporary} (${list}) SELECT ${list} FROM ${table}`);
+      db.exec(`DROP TABLE ${table}`);
+      db.exec(`ALTER TABLE ${temporary} RENAME TO ${table}`);
       // The drop took the table's indexes and its identity trigger with it.
       // Re-running the whole DDL is the honest way to restore them: every
       // statement in it is `IF NOT EXISTS`, so it recreates exactly what is
@@ -416,6 +457,9 @@ interface ProjectRunRow {
   log_path: string;
   skills_path?: string | null;
   bytes_expired_at?: string | null;
+  rerun_of_run_id?: string | null;
+  model_overrides_json?: string | null;
+  seed_json?: string | null;
   trace_id: string | null;
   stats_json: string | null;
   artifact_manifest_json: string | null;
@@ -523,6 +567,9 @@ function runFromRow(row: ProjectRunRow): ProjectRun {
       ...(row.skills_path ? { skillsPath: row.skills_path } : {}),
     },
     ...(row.repository_base_json ? { repositoryBase: parseJson(row.repository_base_json, 'repository base') } : {}),
+    ...(row.rerun_of_run_id ? { rerunOf: row.rerun_of_run_id } : {}),
+    ...(row.model_overrides_json ? { modelOverrides: parseJson(row.model_overrides_json, 'model overrides') } : {}),
+    ...(row.seed_json ? { seed: parseJson(row.seed_json, 'run seed') } : {}),
     traceId: row.trace_id,
     stats: row.stats_json === null ? null : runStatsSchema.parse(parseJson(row.stats_json, 'run stats')),
     artifactManifest:
@@ -667,6 +714,7 @@ export class ProjectStore {
       // store created prior to 2026-09-22 carries a status CHECK that refuses
       // `'partial'`, and the rebuild copies the table as it finds it.
       migrateProjectRunsForPartial(this.db);
+      migrateRunPayersForRunSource(this.db);
       // ADDITIVE MIGRATION. `CREATE TABLE IF NOT EXISTS` does nothing to a
       // table that already exists, so a column added to the DDL above never
       // reaches a store created before it. Same guarded shape the auth store
@@ -689,6 +737,10 @@ export class ProjectStore {
         ['project_runs', 'skills_path'],
         ['project_runs', 'bytes_expired_at'],
         ['project_runs', 'bytes_deleted_at'],
+        ['project_runs', 'rerun_of_run_id'],
+        ['project_runs', 'model_overrides_json'],
+        ['project_runs', 'seed_json'],
+        ['project_run_acceptance', 'source'],
         ['project_publications', 'pull_request_url'],
         ['project_publications', 'seed_commit_sha'],
         ['project_publications', 'git_json'],
@@ -696,6 +748,26 @@ export class ProjectStore {
         const columns = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
         if (!columns.some(item => item.name === column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`);
       }
+      // AFTER the ALTER loop and outside the DDL constant, because the columns
+      // exist only once that loop ran; `IF NOT EXISTS` recreates them after a
+      // rebuild, which restores only what the DDL declares. What a rerun
+      // re-ran and on which models is fixed at reservation, and a seed once
+      // recorded is a fact about the past.
+      this.db.exec(`
+CREATE TRIGGER IF NOT EXISTS project_runs_rerun_immutable
+BEFORE UPDATE OF rerun_of_run_id, model_overrides_json ON project_runs
+WHEN NEW.rerun_of_run_id IS NOT OLD.rerun_of_run_id
+  OR NEW.model_overrides_json IS NOT OLD.model_overrides_json
+BEGIN
+  SELECT RAISE(ABORT, 'what a comparison rerun re-ran is immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS project_runs_seed_immutable
+BEFORE UPDATE OF seed_json ON project_runs
+WHEN OLD.seed_json IS NOT NULL AND NEW.seed_json IS NOT OLD.seed_json
+BEGIN
+  SELECT RAISE(ABORT, 'a recorded run seed is immutable');
+END;
+`);
       // ONE PROJECT PER REPOSITORY, per organisation, COMPARED THE WAY GITHUB
       // COMPARES IT. Nothing forbade two
       // projects naming the same repository, and since publication became
@@ -1189,19 +1261,34 @@ export class ProjectStore {
     orgIdInput: string,
     projectIdInput: string,
     principalIdInput: string,
-    requestInput: CreateProjectRunInput
+    requestInput: StartProjectRunInput
   ): ProjectRun | null {
     const orgId = organisationIdSchema.parse(orgIdInput);
     const projectId = projectIdSchema.parse(projectIdInput);
     const principalId = principalIdSchema.parse(principalIdInput);
-    const request = createProjectRunInputSchema.parse(requestInput);
+    const parsed = startProjectRunInputSchema.parse(requestInput);
     const project = this.getProject(orgId, projectId);
     if (!project) return null;
     if (project.status !== 'active') throw new ProjectStateConflict('cannot run an archived project');
     const existing = this.db
       .prepare('SELECT * FROM project_runs WHERE project_id = ? AND request_key = ? AND org_id = ?')
-      .get(projectId, request.idempotencyKey, orgId) as ProjectRunRow | undefined;
+      .get(projectId, parsed.idempotencyKey, orgId) as ProjectRunRow | undefined;
     if (!existing) return null;
+    if ('rerunOf' in parsed) {
+      // A rerun's identity is WHAT it re-ran and ON WHICH MODELS; its goal and
+      // list are copies of the origin's, which is immutable, so comparing them
+      // again would compare a row with itself.
+      if (existing.requested_by_principal_id !== principalId ||
+          existing.rerun_of_run_id !== parsed.rerunOf ||
+          existing.model_overrides_json !== JSON.stringify(parsed.models)) {
+        throw new ProjectStateConflict('run idempotency key was already used for different input');
+      }
+      return runFromRow(existing);
+    }
+    const request = createProjectRunInputSchema.parse(requestInput);
+    if (existing.rerun_of_run_id) {
+      throw new ProjectStateConflict('run idempotency key was already used for different input');
+    }
     // The approved list is part of the request: the same key and goal with a
     // different list is a different request, never a retry of the old run.
     const wantedDigest = request.acceptanceChecklist ? captureAcceptanceSpec(request.acceptanceChecklist).digest : null;
@@ -1242,7 +1329,16 @@ export class ProjectStore {
     readonly orgId: string;
     readonly projectId: string;
     readonly principalId: string;
-    readonly request: CreateProjectRunInput;
+    readonly request: StartProjectRunInput;
+    /**
+     * Required with a rerun request, refused without one: what the host
+     * copied from the origin run. The goal is the origin's; the acceptance
+     * list is the one the origin ran against, with who wrote it.
+     */
+    readonly origin?: {
+      readonly goal: string;
+      readonly acceptance: RunAcceptance | null;
+    };
     readonly hostPaths: ProjectRunHostPaths;
     readonly projectRunId?: string;
     readonly enforceCapacity?: boolean;
@@ -1250,16 +1346,28 @@ export class ProjectStore {
     const orgId = organisationIdSchema.parse(input.orgId);
     const projectId = projectIdSchema.parse(input.projectId);
     const principalId = principalIdSchema.parse(input.principalId);
-    const request = createProjectRunInputSchema.parse(input.request);
+    const parsed = startProjectRunInputSchema.parse(input.request);
+    const rerun = 'rerunOf' in parsed ? rerunProjectRunInputSchema.parse(parsed) : null;
+    if (Boolean(rerun) !== Boolean(input.origin)) {
+      throw new Error('a rerun request and its origin are supplied together or not at all');
+    }
+    const request = rerun
+      ? createProjectRunInputSchema.parse({ goal: input.origin!.goal, idempotencyKey: rerun.idempotencyKey })
+      : createProjectRunInputSchema.parse(parsed);
     const paths = hostPaths(input.hostPaths);
     const requestedRunId = projectRunIdSchema.parse(input.projectRunId ?? randomUUID());
-    const acceptance = request.acceptanceChecklist ? captureAcceptanceSpec(request.acceptanceChecklist) : null;
+    let acceptance: RunAcceptance | null = null;
+    if (rerun && input.origin!.acceptance) {
+      acceptance = { spec: parseAcceptanceSpec(input.origin!.acceptance.spec), source: input.origin!.acceptance.source };
+    } else if (!rerun && request.acceptanceChecklist) {
+      acceptance = { spec: captureAcceptanceSpec(request.acceptanceChecklist), source: 'user' };
+    }
     const transact = this.db.transaction(() => {
       const project = this.getProject(orgId, projectId);
       if (!project) return null;
       if (project.status !== 'active') throw new ProjectStateConflict('cannot run an archived project');
       const goal = request.goal;
-      const existing = this.findProjectRunForRequest(orgId, projectId, principalId, request);
+      const existing = this.findProjectRunForRequest(orgId, projectId, principalId, parsed);
       if (existing) {
         return { run: existing, created: false } as const;
       }
@@ -1269,8 +1377,9 @@ export class ProjectStore {
         .prepare(
           `INSERT INTO project_runs (
              project_run_id, project_id, org_id, requested_by_principal_id, request_key,
-             goal, status, workspace_path, runs_path, log_path, skills_path, created_at, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`
+             goal, status, workspace_path, runs_path, log_path, skills_path,
+             rerun_of_run_id, model_overrides_json, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           requestedRunId,
@@ -1283,16 +1392,22 @@ export class ProjectStore {
           paths.runsPath,
           paths.logPath,
           paths.skillsPath ?? null,
+          rerun?.rerunOf ?? null,
+          rerun ? JSON.stringify(rerun.models) : null,
           now,
           now
         );
       if (acceptance) {
+        // `source` NULL is a user list, which is every row written before
+        // 2026-09-25; only a rerun of a run that drafted its own list writes
+        // 'drafted' here.
         this.db
           .prepare(
-            `INSERT INTO project_run_acceptance (project_run_id, org_id, spec_json, digest, recorded_at)
-             VALUES (?, ?, ?, ?, ?)`
+            `INSERT INTO project_run_acceptance (project_run_id, org_id, spec_json, digest, recorded_at, source)
+             VALUES (?, ?, ?, ?, ?, ?)`
           )
-          .run(requestedRunId, orgId, JSON.stringify(acceptance), acceptance.digest, now);
+          .run(requestedRunId, orgId, JSON.stringify(acceptance.spec), acceptance.spec.digest, now,
+            acceptance.source === 'user' ? null : acceptance.source);
       }
       return { run: this.getProjectRun(orgId, requestedRunId)!, created: true } as const;
     });
@@ -1314,6 +1429,16 @@ export class ProjectStore {
    * that no longer matches its digest THROWS: a corrupted list is not "none".
    */
   getRunAcceptanceSpec(orgIdInput: string, projectRunIdInput: string): AcceptanceSpec | null {
+    return this.getRunAcceptance(orgIdInput, projectRunIdInput)?.spec ?? null;
+  }
+
+  /**
+   * The same row with WHO WROTE IT: `user` for a list a person approved,
+   * `drafted` for the list a comparison rerun inherited from an origin that
+   * drafted its own. The child is told which, because the two are judged
+   * differently (`withAcceptanceChecklist`).
+   */
+  getRunAcceptance(orgIdInput: string, projectRunIdInput: string): RunAcceptance | null {
     const orgId = organisationIdSchema.parse(orgIdInput);
     const projectRunId = projectRunIdSchema.parse(projectRunIdInput);
     // A store opened with `initialize: false` ran no DDL and may predate the
@@ -1323,12 +1448,31 @@ export class ProjectStore {
       .get();
     if (!table) return null;
     const row = this.db
-      .prepare('SELECT spec_json, digest FROM project_run_acceptance WHERE project_run_id = ? AND org_id = ?')
-      .get(projectRunId, orgId) as { spec_json: string; digest: string } | undefined;
+      .prepare('SELECT * FROM project_run_acceptance WHERE project_run_id = ? AND org_id = ?')
+      .get(projectRunId, orgId) as { spec_json: string; digest: string; source?: string | null } | undefined;
     if (!row) return null;
     const spec = parseAcceptanceSpec(parseJson(row.spec_json, 'acceptance specification'));
     if (spec.digest !== row.digest) throw new Error('acceptance specification row digest does not match its content');
-    return spec;
+    if (row.source !== undefined && row.source !== null && row.source !== 'drafted') {
+      throw new Error('acceptance specification row names an unknown source');
+    }
+    return { spec, source: row.source === 'drafted' ? 'drafted' : 'user' };
+  }
+
+  /**
+   * Record where a running run's workspace came from, once. A compare-and-set
+   * like `saveRepositoryRunBase`: only a `running` row with no seed yet, so a
+   * second resolution cannot rewrite what the first one copied.
+   */
+  recordRunSeed(orgIdInput: string, projectRunIdInput: string, seedInput: RunSeed): void {
+    const orgId = organisationIdSchema.parse(orgIdInput);
+    const projectRunId = projectRunIdSchema.parse(projectRunIdInput);
+    const seed = runSeedSchema.parse(seedInput);
+    const changed = this.db
+      .prepare(`UPDATE project_runs SET seed_json = ?
+        WHERE org_id = ? AND project_run_id = ? AND status = 'running' AND seed_json IS NULL`)
+      .run(JSON.stringify(seed), orgId, projectRunId).changes;
+    if (changed !== 1) throw new ProjectStateConflict('run seed already recorded or run is not running');
   }
 
   /** A platform admin's READ across organisations; never a write path. */
@@ -1700,6 +1844,12 @@ export class ProjectStore {
       // download and seeds the next run, but never publishes.
       if (run.status !== 'delivered' || !run.artifactManifestHash) {
         throw new ProjectStateConflict('publication requires a delivered run with artifacts');
+      }
+      // THE CHOKE POINT for every publication path: a comparison rerun is a
+      // measurement beside the project's line, and the project's repository
+      // is that line.
+      if (run.rerunOf) {
+        throw new ProjectStateConflict('a comparison rerun is never published');
       }
       const byKey = this.db
         .prepare('SELECT * FROM project_publications WHERE org_id = ? AND idempotency_key = ?')

@@ -5,6 +5,7 @@ import Database from 'better-sqlite3';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
 import {
+  ACCEPTANCE_SOURCE_ENV,
   ACCEPTANCE_SPEC_ENV,
   MAX_CHECKLIST_ITEMS,
   coverAcceptanceChecklist,
@@ -12,7 +13,7 @@ import {
   renderChecklistCoverage,
 } from '../src/contracts/acceptanceChecklist.js';
 import { createProjectRunInputSchema } from '../src/contracts/projects.js';
-import { captureAcceptanceSpec, encodeAcceptanceSpec, readAcceptanceSpec } from '../src/run/acceptanceSpec.js';
+import { captureAcceptanceSpec, encodeAcceptanceSpec, readAcceptanceSource, readAcceptanceSpec } from '../src/run/acceptanceSpec.js';
 import { withAcceptanceChecklist } from '../src/run/depth.js';
 import { AuthStore } from '../src/auth/store.js';
 import { ProjectStateConflict, ProjectStore } from '../src/projects/store.js';
@@ -109,6 +110,15 @@ describe('capture and transport', () => {
     expect(() => readAcceptanceSpec({ [ACCEPTANCE_SPEC_ENV]: '{not json' })).toThrow(/not valid JSON/);
     expect(() => readAcceptanceSpec({ [ACCEPTANCE_SPEC_ENV]: JSON.stringify({ ...spec, items: [] }) })).toThrow(/invalid/);
     expect(() => readAcceptanceSpec({ [ACCEPTANCE_SPEC_ENV]: 'x'.repeat(20_000) })).toThrow(/exceeds/);
+  });
+
+  it('reads who wrote the carried spec, and refuses a label it cannot place', () => {
+    const encoded = encodeAcceptanceSpec(captureAcceptanceSpec(LIST));
+    expect(readAcceptanceSource({})).toBe('user');
+    expect(readAcceptanceSource({ [ACCEPTANCE_SPEC_ENV]: encoded })).toBe('user');
+    expect(readAcceptanceSource({ [ACCEPTANCE_SPEC_ENV]: encoded, [ACCEPTANCE_SOURCE_ENV]: 'drafted' })).toBe('drafted');
+    expect(() => readAcceptanceSource({ [ACCEPTANCE_SPEC_ENV]: encoded, [ACCEPTANCE_SOURCE_ENV]: 'user' })).toThrow(/must be/);
+    expect(() => readAcceptanceSource({ [ACCEPTANCE_SOURCE_ENV]: 'drafted' })).toThrow(/without/);
   });
 });
 

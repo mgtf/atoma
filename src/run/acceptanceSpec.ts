@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto';
 import {
+  ACCEPTANCE_SOURCE_ENV,
   ACCEPTANCE_SPEC_ENV,
   MAX_ACCEPTANCE_SPEC_BYTES,
   acceptanceSpecSchema,
   canonicalAcceptanceItems,
   type AcceptanceSpec,
   type ApprovedChecklistInput,
+  type ChecklistSource,
 } from '../contracts/acceptanceChecklist.js';
 
 /**
@@ -60,4 +62,17 @@ export function readAcceptanceSpec(env: NodeJS.ProcessEnv): AcceptanceSpec | nul
   try { parsed = JSON.parse(raw); } catch { throw new Error(`${ACCEPTANCE_SPEC_ENV} is not valid JSON`); }
   try { return parseAcceptanceSpec(parsed); }
   catch (error) { throw new Error(`${ACCEPTANCE_SPEC_ENV} is invalid: ${(error as Error).message}`); }
+}
+
+/**
+ * Who wrote the carried spec. Anything but absent or `drafted` THROWS, and so
+ * does a source with no spec: a label the child cannot place is a list it
+ * would judge by the wrong rule.
+ */
+export function readAcceptanceSource(env: NodeJS.ProcessEnv): ChecklistSource {
+  const raw = env[ACCEPTANCE_SOURCE_ENV];
+  if (raw === undefined || raw === '') return 'user';
+  if (raw !== 'drafted') throw new Error(`${ACCEPTANCE_SOURCE_ENV} must be 'drafted' when set`);
+  if (!env[ACCEPTANCE_SPEC_ENV]) throw new Error(`${ACCEPTANCE_SOURCE_ENV} is set without ${ACCEPTANCE_SPEC_ENV}`);
+  return 'drafted';
 }
