@@ -5,11 +5,11 @@
 ### Turn business ideas into working software.
 
 Describe the tool your team needs. atoma coordinates AI agents to build it,
-check the result, and let you inspect the work along the way.
+checks the result against what you asked for, and lets you inspect every step.
 
 **[Open atoma.run →](https://atoma.run)**
 
-[Demo](#watch-the-demo) · [Use cases](#what-could-your-team-build) · [How it works](#how-it-works) · [Self-host](#install-and-evaluate-it-locally) · [Documentation](#documentation)
+[Demo](#watch-the-demo) · [Use cases](#what-could-your-team-build) · [A run, step by step](#a-run-step-by-step) · [Features](#features) · [How it works](#how-it-works) · [Self-host](#install-and-evaluate-it-locally) · [Documentation](#documentation)
 
 [![CI](https://github.com/mgtf/atoma/actions/workflows/ci.yml/badge.svg)](https://github.com/mgtf/atoma/actions/workflows/ci.yml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
@@ -34,27 +34,18 @@ https://github.com/user-attachments/assets/481c59de-2f29-423e-a55c-80cc5b448b92
 ## From a business need to a tool you can use
 
 An operations team needs a dashboard. An agency needs a client demo. A product
-team needs an API prototype. atoma helps turn those requests into software:
-web applications, HTTP APIs, command-line tools and their technical documentation.
+team needs an API prototype. atoma turns those requests into software: web
+applications, HTTP APIs, command-line tools and their technical documentation.
 
 Start at **[atoma.run](https://atoma.run)**. The web console brings projects,
-AI execution, result previews and run history into one place. This repository
-contains the open-source engine and console for teams that want to inspect,
-extend or self-host them.
-
-- **Make an idea tangible.** Describe a goal and review the application it produces.
-- **Keep the work visible.** Follow progress, verification results and model cost
-  estimates as the agents work.
-- **Build on the result.** Review the generated files and publish delivered
-  artifacts to a connected GitHub repository.
-- **Learn as a platform.** Agent types, skills and the trust they earn are shared
-  by every run on an instance. What one run works out is offered to the next,
-  whoever started it.
+AI execution, acceptance criteria, result previews, model choice and run history
+into one place. This repository contains the open-source engine and console for
+teams that want to inspect, extend or self-host them.
 
 ## What could your team build?
 
-These are example project briefs for the kinds of software atoma builds, not
-prebuilt industry integrations or customer deployment claims.
+These are example project briefs, not prebuilt industry integrations or
+customer deployment claims.
 
 | Team or industry | Example project | What it helps you do |
 | --- | --- | --- |
@@ -70,18 +61,22 @@ For example:
 > and revenue columns. Add filters, monthly totals and a chart by region.
 > Include sample data and instructions to run it locally.
 
-## From brief to review
+## A run, step by step
 
-1. **Create a project** in the web console and describe the outcome you want.
-2. **Follow the run** as agents plan, write files and check their work.
-3. **Preview supported web results**, including a timestamped snapshot while work
-   is still in progress.
-4. **Review and keep the deliverable**, with its verification record and optional
-   GitHub publication.
+1. **Create a project**, from scratch or by importing an existing GitHub
+   repository, and describe the outcome you want.
+2. **Say what "done" means**, if you want to: list the behaviours the result
+   must show. Otherwise the run drafts its own checklist from your goal.
+3. **Follow the run** as agents plan, write files, start servers and check their
+   work, with the model, tokens and cost behind every step.
+4. **Preview web results** in a temporary, isolated environment, including a
+   snapshot while the run is still building.
+5. **Keep the deliverable**, with its verification record, and publish it to a
+   connected GitHub repository. The project's next run continues from it.
 
-Previews are temporary review environments. Deploying the generated application
-is a separate step. Project runs use the configured model accounts and consume
-model quota or incur API charges.
+Previews are review environments; deploying the generated application is a
+separate step. Project runs use the configured model accounts and consume model
+quota or incur API charges.
 
 <p align="center">
   <img src="docs/atoma-run-audit.png" alt="atoma console showing a build run, its timeline, validation results and model cost estimates">
@@ -95,59 +90,120 @@ model quota or incur API charges.
 
 <p align="center"><em>Filter the timeline to LLM calls: the model, tokens and cost behind each step.</em></p>
 
+## Features
+
+### Acceptance criteria you approve before launch
+
+A project run can carry up to twelve criteria, written one per line in the
+console, the CLI (`--criteria <file>`) or over MCP. A line such as
+`GET /api/items` is an HTTP check; any other line is judged by review. The host
+stores the list before planning starts and nothing can change it afterwards.
+The planner is told the user wrote it, and the final check is told which HTTP
+checks were actually observed on servers the run itself started.
+
+Without a list, the run drafts one from the goal with a single call to the
+cheapest model. A drafted list can only add to what the final check looks for;
+it can never make a run pass. Read
+[the acceptance checklist](docs/acceptance-checklist-2026-09-25.md).
+
+### Finished work is never thrown away
+
+A run that exhausts its budget, or whose result the final check refuses after
+one remediation attempt, is kept as **incomplete** rather than discarded. Its
+finished phases stay in the workspace, and the console explains in plain
+language why it stopped and what to do next, with the technical reasons one
+click away. The project's next run starts from that workspace and is told why
+the previous one stopped. Read
+[continuing a run that did not finish](docs/run-continuation-design-2026-09-24.md).
+
+### Choose the models, then compare them
+
+Each tier (workers, supervisors, planners) takes its own model selector, of the
+form `<api|sub|own>:<vendor>:<model>`, across Anthropic, OpenAI, Z.ai and
+Ollama: `api:` bills a key, `sub:` the host's Claude or ChatGPT subscription,
+and `own:` the member's own ChatGPT account, whose available models Settings
+lists. The operator can delegate the host subscription to named members without
+making them administrators.
+
+Every run records the models it was pinned to and the models the provider
+actually served. Any delivered or incomplete project run can be **rerun on other
+models**: same goal, same acceptance criteria, same starting workspace. The
+rerun sits beside the project's history, so you can compare cost, time and
+result; it never publishes and never seeds a later run. Read
+[comparison reruns](docs/comparison-reruns-2026-09-25.md).
+
+### Start from your repository, publish back to it
+
+Install the GitHub App to import a repository into a project or create a new
+one, then publish delivered results to it. A project's earlier deliverables,
+including Markdown, CSV, PDF and Office documents, are indexed so later runs
+can search them and cite exact passages. See [GitHub App setup](docs/github-app-setup.md)
+and [project retrieval](docs/project-retrieval-haystack-only-2026-09-09.md).
+
+### Verification you can read
+
+Supervisors check results with evidence the run produced: files, command
+exit codes, HTTP probes, and browser checks laid out at the viewport widths the
+goal asks for. They never replay shell commands a model wrote. Every verdict,
+retry and refusal is in the timeline, and the console is available in thirteen
+languages, on desktop and mobile.
+
+### Connect an existing agent through MCP
+
+The console serves an HTTP MCP endpoint at `https://<your-instance>/mcp`.
+Compatible clients such as Claude Code or Codex can start runs, pass acceptance
+criteria, request reruns and read traces, costs and diagnostics, with the same
+organisation permissions as the web console.
+
+**Thirty-nine tools.** The visible subset depends on the caller's role.
+See the [MCP connection and authorization guide](docs/mcp-oauth.md).
+
+### A platform that reviews its own runs
+
+Three background services watch the platform itself. The **sentinel** watches
+runs in flight for cost overruns and drifting trajectories. The **analyst**
+writes a cited post-mortem verdict for each finished run. The **mender** turns a
+verdict that names a code defect into a pull request, which a person reviews and
+merges. Read the [supervisor design](docs/supervisor-design.md).
+
 ## How it works
 
 atoma assigns planning, supervision and execution to different AI agents and
 model tiers. Ordinary build runs start with a supervisor and workers; a deeper
-planning tier can take over if supervision exhausts its retries.
+planning tier takes over if supervision exhausts its retries, and a seeded run
+keeps its starting workspace when it does.
 
-- **Workers build.** They read and write files, run commands and use tools.
-- **Supervisors check.** They review results and use artifact evidence and fixed
-  probes where applicable. Before delivery, a separate check reviews the final
-  result; a refused result gets one more attempt, then is delivered marked as
-  refused.
-- **Trust is earned.** Successful components can skip some model reviews while
-  retaining mechanical checks. A failure revokes that trust.
-- **Skills carry forward.** Verified work can become reusable recipes. Recipes
-  are compiled into scripts only when a run continues existing work, such as a
-  project's later runs; historical benchmarks have not established a cost
-  benefit from compilation.
+- **Workers build.** They read and write files, run commands and use tools, in a
+  container with no network unless egress is explicitly allowed.
+- **Supervisors check.** They review results against artifact evidence and fixed
+  probes. Before delivery, a separate check reviews the final result against
+  the goal and its acceptance criteria.
+- **Trust is earned.** Components that keep succeeding can skip some model
+  reviews while retaining mechanical checks. A failure revokes that trust.
+- **Skills carry forward.** Verified work becomes reusable recipes. Recipes are
+  compiled into scripts only when a run continues existing work.
 
 The composition model is **Element → Molecule → Cell → Tissue**: tools, workers,
-supervisors and planners. Model selection is configurable per tier.
+supervisors and planners. Read **[How atoma works](docs/how-it-works.md)** for
+the architecture, execution boundaries and verification design.
 
-Read **[How atoma works](docs/how-it-works.md)** for the architecture, execution
-boundaries and verification design.
-
-### One catalogue, shared by every run
-
-A run is a run. One instance keeps one agent registry and one skill catalogue,
-and every run reads and writes them — the operator's own runs and every
-organisation's alike. A recipe distilled during one team's run is offered to the
-next team's run, and the trust a component earns is the trust the next supervisor
-reads. Projects, workspaces, run traces and the documents a run may search stay
-scoped to their organisation.
-
-This is the design, not a pending isolation gap. Read
-**[One registry, one trust](docs/platform-trust-2026-09-15.md)** for what is
-shared, what is not, and why.
-
-### Connect an existing agent through MCP
-
-The console also serves an HTTP MCP endpoint at `https://<your-instance>/mcp`.
-Compatible clients can submit tasks and inspect their results through the same
-organisation permissions as the web console.
-
-**Thirty-nine tools.** The visible subset depends on the caller's role.
-See the [MCP connection and authorization guide](docs/mcp-oauth.md) for setup.
+**One catalogue, shared by every run.** An instance keeps one agent registry,
+one skill catalogue and one set of trust counters, and every run reads and
+writes them, whichever organisation started it. What one team's run works out
+is offered to the next team's run. Projects, workspaces, traces and searchable
+documents stay scoped to their organisation. This is the design, and it has a
+price: prompts and recipes a run writes, including wording derived from a
+document it was given, are readable by other organisations' runs. An instance
+therefore suits teams that accept pooling what their runs learn. Read
+**[One registry, one trust](docs/platform-trust-2026-09-15.md)**.
 
 ## Install and evaluate it locally
 
 For the web experience, start at **[atoma.run](https://atoma.run)**.
 For a source checkout, use the pinned Node version and follow the
-[platform setup guide](docs/development-setup.md), including system prerequisites.
-Runs and the full test suite require macOS or Linux; on Windows, use WSL2 with
-its own checkout on ext4.
+[development setup guide](docs/development-setup.md), including system
+prerequisites. Runs and the full test suite require macOS or Linux; on Windows,
+use WSL2 with its own checkout on ext4.
 
 ```bash
 git clone https://github.com/mgtf/atoma.git
@@ -159,7 +215,8 @@ npm run doctor
 ```
 
 Configure your model providers using [`.env.example`](.env.example) and the
-[development guide](docs/development-setup.md), then run a task:
+[development guide](docs/development-setup.md), then run a task and open the
+console:
 
 ```bash
 npm run run:build -- "a Node CLI that converts CSV to JSON"
@@ -172,29 +229,23 @@ runs additionally require Docker and a configured
 [Haystack search runtime](docs/project-retrieval-haystack-only-2026-09-09.md#activation).
 A fresh checkout contains no learned state.
 
-For a hosted instance, follow the [deployment guide](docs/automatic-deployment.md),
-[GitHub App setup](docs/github-app-setup.md) and
-[preview deployment guide](docs/preview-deployment.md).
+To host an instance for others, follow the [packaged stack](docs/packaged-stack.md),
+[deployment](docs/automatic-deployment.md), [GitHub App](docs/github-app-setup.md)
+and [preview](docs/preview-deployment.md) guides, and back the state up
+off-machine with `npm run backup -- --dest <mount>`.
 
 ## Status
 
-atoma is an evolving open-source system with a working web console, project
-runs, GitHub publication, result previews and inspectable execution.
-
-**Shared learning is the design, and it has a price.** One instance means one
-agent registry, one skill catalogue and one lifecycle ledger, shared by every
-organisation on it. Prompts, recipes and trust counters that a run writes are
-readable by every other organisation's runs — including wording a supervisor
-derived from a document that run was given to search. Projects, workspaces and
-traces stay organisation-scoped, and a platform admin can read across
-organisations. An instance therefore suits teams that accept pooling what their
-runs learn; mutually untrusted tenants are not a supported deployment shape.
-See [One registry, one trust](docs/platform-trust-2026-09-15.md) and the
-[architecture and roadmap](docs/saas-architecture.md).
+atoma is an evolving open-source system. Its web console, project runs,
+acceptance criteria, comparison reruns, GitHub import and publication, result
+previews and MCP endpoint are in use on [atoma.run](https://atoma.run).
 
 Local file-tool containment is not shell isolation; use the container backend
-for isolated execution. Verification provides evidence for review, not a guarantee
-that every generated application is ready for production.
+for isolated execution. A platform admin can read across organisations, and
+mutually untrusted tenants are not a supported deployment shape. Verification
+provides evidence for review, not a guarantee that a generated application is
+ready for production. See the [architecture and roadmap](docs/saas-architecture.md)
+and the [changelog](CHANGELOG.md).
 
 <details>
 <summary>Repository facts</summary>
@@ -218,62 +269,50 @@ that every generated application is ready for production.
 
 ## Documentation
 
-[Code review history and corrective evidence](docs/code-reviews.md).
-
 | I want to… | Read |
 | --- | --- |
 | Understand the architecture | [How it works](docs/how-it-works.md) |
 | Know what runs share with each other | [One registry, one trust](docs/platform-trust-2026-09-15.md) |
+| Write acceptance criteria | [Acceptance checklist](docs/acceptance-checklist-2026-09-25.md) · [Acceptance contract](docs/acceptance-contract-2026-09-14.md) |
+| Compare models on the same run | [Comparison reruns](docs/comparison-reruns-2026-09-25.md) |
+| Use a Claude or ChatGPT subscription | [Per-tier subscriptions](docs/subscription-per-tier-design-2026-08-28.md) · [Delegation](docs/subscription-delegation-2026-09-22.md) · [Personal models](docs/personal-model-discovery.md) |
 | Develop locally or contribute | [Development setup](docs/development-setup.md) · [Contributing](CONTRIBUTING.md) |
-| Operate a hosted instance | [Deployment](docs/automatic-deployment.md) · [Configuration](.env.example) |
+| Operate a hosted instance | [Packaged stack](docs/packaged-stack.md) · [Deployment](docs/automatic-deployment.md) · [Maintenance](docs/project-maintenance.md) · [Configuration](.env.example) |
 | Publish results or enable previews | [GitHub App](docs/github-app-setup.md) · [Preview deployment](docs/preview-deployment.md) |
 | Connect an MCP client | [MCP authorization](docs/mcp-oauth.md) |
-| Review changes and limitations | [Changelog](CHANGELOG.md) · [SaaS architecture](docs/saas-architecture.md) |
+| Review changes and past reviews | [Changelog](CHANGELOG.md) · [Code reviews](docs/code-reviews.md) · [Incidents](docs/incidents/) |
 | Report a vulnerability | [Security policy](SECURITY.md) |
 
 ## Historical measurements
 
-**Twelve controlled rounds** explored build and maintenance tasks. Results were
-mixed: some comparisons favoured atoma over a frontier agent; cheaper direct
-models matched or outperformed it on the tested maintenance tasks. These findings
-do not establish savings or correctness for the current release.
-
-The measurements predate the 2026-08-18 state reset. Raw CSVs and workspaces were
-archived outside this repository; the committed reports retain findings and
-failures. Read the [protocol](benchmark/PROTOCOL.md),
-[initial results](benchmark/RESULT.md),
-[model comparisons](benchmark/ROUND11.md) and
-[harder maintenance task](benchmark/ROUND12.md) for context.
+**Twelve controlled rounds** compared atoma with a single frontier agent on
+build and maintenance tasks. Results were mixed, and they predate the
+2026-08-18 state reset, so they do not establish savings or correctness for the
+current release. Read the [protocol](benchmark/PROTOCOL.md) and the
+[results](benchmark/RESULT.md) for context.
 
 ## License
 
 atoma is **free and open-source software** under the
 [GNU Affero General Public License, version 3](LICENSE) (`AGPL-3.0-only`).
-You may use, study, modify and redistribute it, and build products and services
-on it. If you distribute a modified version, or run one that users interact with
-over a network, you must offer those users its source under the same licence.
+If you distribute a modified version, or run one that users interact with over
+a network, you must offer those users its source under the same licence.
 Unmodified use, including internal production use and hosting, carries no
-obligation beyond keeping the notices. The licence is approved by the OSI and
-the FSF; its terms are the ones Grafana, MinIO, Mattermost and Nextcloud publish
-under.
-
-Organisations that cannot accept the AGPL, for example to embed atoma in a
-closed product, can obtain a commercial licence from the author; contributors
-grant the rights that make this possible through the [CLA](CLA.md), which
-also commits the project to remaining under an OSI-approved licence.
+obligation beyond keeping the notices. A commercial licence is available from
+the author for organisations that cannot accept the AGPL; contributors grant
+the rights that make this possible through the [CLA](CLA.md), which also
+commits the project to remaining under an OSI-approved licence.
 
 Contributions start with [`CONTRIBUTING.md`](CONTRIBUTING.md). Vulnerabilities
-go through [`SECURITY.md`](SECURITY.md), not the issue tracker.
-
-The hosted service at [atoma.run](https://atoma.run) publishes its
+go through [`SECURITY.md`](SECURITY.md), not the issue tracker. The hosted
+service at [atoma.run](https://atoma.run) publishes its
 [shared-learning service terms and operator contact](docs/platform-commons-terms.md)
 separately from the software licence.
 
-The model transports are your own accounts under each provider's terms: the
-Anthropic API and Claude Code, OpenAI Codex, Z.ai and Ollama are called with the
-credentials you supply, and the `@anthropic-ai/claude-agent-sdk` dependency is
-distributed by Anthropic under its own licence, not under this one. The 3D assets
-under `src/viz/public/` carry their CC0 and CC-BY-4.0 notices beside the files.
+Model providers are called with the credentials you supply, under each
+provider's own terms. The `@anthropic-ai/claude-agent-sdk` dependency is
+distributed by Anthropic under its own licence, and the 3D assets under
+`src/viz/public/` carry their CC0 and CC-BY-4.0 notices beside the files.
 
 Copyright 2026 Matthieu Foillard.
 
