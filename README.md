@@ -103,8 +103,7 @@ checks were actually observed on servers the run itself started.
 
 Without a list, the run drafts one from the goal with a single call to the
 cheapest model. A drafted list can only add to what the final check looks for;
-it can never make a run pass. Read
-[the acceptance checklist](docs/acceptance-checklist-2026-09-25.md).
+it can never make a run pass.
 
 ### Finished work is never thrown away
 
@@ -113,8 +112,7 @@ one remediation attempt, is kept as **incomplete** rather than discarded. Its
 finished phases stay in the workspace, and the console explains in plain
 language why it stopped and what to do next, with the technical reasons one
 click away. The project's next run starts from that workspace and is told why
-the previous one stopped. Read
-[continuing a run that did not finish](docs/run-continuation-design-2026-09-24.md).
+the previous one stopped.
 
 ### Choose the models, then compare them
 
@@ -129,16 +127,14 @@ Every run records the models it was pinned to and the models the provider
 actually served. Any delivered or incomplete project run can be **rerun on other
 models**: same goal, same acceptance criteria, same starting workspace. The
 rerun sits beside the project's history, so you can compare cost, time and
-result; it never publishes and never seeds a later run. Read
-[comparison reruns](docs/comparison-reruns-2026-09-25.md).
+result; it never publishes and never seeds a later run.
 
 ### Start from your repository, publish back to it
 
 Install the GitHub App to import a repository into a project or create a new
 one, then publish delivered results to it. A project's earlier deliverables,
 including Markdown, CSV, PDF and Office documents, are indexed so later runs
-can search them and cite exact passages. See [GitHub App setup](docs/github-app-setup.md)
-and [project retrieval](docs/project-retrieval-haystack-only-2026-09-09.md).
+can search them and cite exact passages. See [GitHub App setup](docs/github-app-setup.md).
 
 ### Verification you can read
 
@@ -194,8 +190,8 @@ is offered to the next team's run. Projects, workspaces, traces and searchable
 documents stay scoped to their organisation. This is the design, and it has a
 price: prompts and recipes a run writes, including wording derived from a
 document it was given, are readable by other organisations' runs. An instance
-therefore suits teams that accept pooling what their runs learn. Read
-**[One registry, one trust](docs/platform-trust-2026-09-15.md)**.
+therefore suits teams that accept pooling what their runs learn. The hosted
+service states this in its [shared-learning terms](docs/platform-commons-terms.md).
 
 ## Install and evaluate it locally
 
@@ -225,8 +221,8 @@ npm run viz:serve
 
 The compiled commands read the process environment; they do not load `.env`.
 The local console is open on loopback by default. Organisation-scoped project
-runs additionally require Docker and a configured
-[Haystack search runtime](docs/project-retrieval-haystack-only-2026-09-09.md#activation).
+runs additionally require Docker and a Haystack search runtime, described in
+the [development setup guide](docs/development-setup.md).
 A fresh checkout contains no learned state.
 
 To host an instance for others, follow the [packaged stack](docs/packaged-stack.md),
@@ -244,8 +240,7 @@ Local file-tool containment is not shell isolation; use the container backend
 for isolated execution. A platform admin can read across organisations, and
 mutually untrusted tenants are not a supported deployment shape. Verification
 provides evidence for review, not a guarantee that a generated application is
-ready for production. See the [architecture and roadmap](docs/saas-architecture.md)
-and the [changelog](CHANGELOG.md).
+ready for production. See the [changelog](CHANGELOG.md) for what changed.
 
 <details>
 <summary>Repository facts</summary>
@@ -272,15 +267,13 @@ and the [changelog](CHANGELOG.md).
 | I want to… | Read |
 | --- | --- |
 | Understand the architecture | [How it works](docs/how-it-works.md) |
-| Know what runs share with each other | [One registry, one trust](docs/platform-trust-2026-09-15.md) |
-| Write acceptance criteria | [Acceptance checklist](docs/acceptance-checklist-2026-09-25.md) · [Acceptance contract](docs/acceptance-contract-2026-09-14.md) |
-| Compare models on the same run | [Comparison reruns](docs/comparison-reruns-2026-09-25.md) |
-| Use a Claude or ChatGPT subscription | [Per-tier subscriptions](docs/subscription-per-tier-design-2026-08-28.md) · [Delegation](docs/subscription-delegation-2026-09-22.md) · [Personal models](docs/personal-model-discovery.md) |
+| Know what runs share with each other | [Shared-learning terms](docs/platform-commons-terms.md) |
+| Use your own ChatGPT account | [Personal model discovery](docs/personal-model-discovery.md) |
 | Develop locally or contribute | [Development setup](docs/development-setup.md) · [Contributing](CONTRIBUTING.md) |
 | Operate a hosted instance | [Packaged stack](docs/packaged-stack.md) · [Deployment](docs/automatic-deployment.md) · [Maintenance](docs/project-maintenance.md) · [Configuration](.env.example) |
 | Publish results or enable previews | [GitHub App](docs/github-app-setup.md) · [Preview deployment](docs/preview-deployment.md) |
 | Connect an MCP client | [MCP authorization](docs/mcp-oauth.md) |
-| Review changes and past reviews | [Changelog](CHANGELOG.md) · [Code reviews](docs/code-reviews.md) · [Incidents](docs/incidents/) |
+| Review changes | [Changelog](CHANGELOG.md) · [Code reviews](docs/code-reviews.md) |
 | Report a vulnerability | [Security policy](SECURITY.md) |
 
 ## Historical measurements
