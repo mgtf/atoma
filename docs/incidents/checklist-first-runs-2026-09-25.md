@@ -67,6 +67,30 @@ states it"; the goal states 400 and 409, the drafter merged them under the
 12-item cap and dropped the status. The list reads covered for two error
 paths it never saw.
 
+`cc922a60`, a responsive goal on the same project (the task list in
+`index.html` at 320/375/768px), revision `1959763`. The viewport parameter did
+its job: Water laid the page out at each width and measured `innerWidth` 320
+and `scrollWidth` 320 with every control at 44px. Root acceptance refused the
+delivery once, correctly, for the ephemeral port copied into the README. The
+remediation then did the worst thing this session saw:
+
+- Its prefilter excluded Water — "Already tried and failed THIS task (do NOT
+  pick these): Water" — although Water's work was sound and refused only for
+  one README line, and picked Glucose.
+- Glucose is a molecule branched on 2026-09-07, the day before `1d6ac6e` made
+  branched registry rows tier- and tool-scoped. Its PERSISTED system prompt
+  still reads "Your current subtask: Create index.html as a small, polished,
+  self-contained static page that clearly confirms completion", followed by a
+  PRIOR ATTEMPT DIAGNOSIS from that other run. Sucrose, branched the same
+  night, is the only other row of that vintage.
+- Glucose followed its system prompt over the task and REPLACED the task
+  list with a "Task complete" page (`index.html` 4754 → 2256 bytes). The L2
+  result validator approved it, credited Glucose and distilled a skill ("adapt
+  a static page for narrow screens"); the root refused again with the FIRST
+  refusal's reasoning, "responsive browser checks otherwise pass".
+- The run landed `partial`, unpublished, and the destroyed page is now the
+  corpus the next run of this project is seeded from.
+
 The project corpus carries every earlier deliverable (`flags.mjs`,
 `bookmarks.mjs`, `inventory.mjs`…) into each new run's manifest. That is the
 continuation contract working as designed, noted because it makes a
@@ -118,5 +142,14 @@ continuation contract working as designed, noted because it makes a
   skill needs the refusal to be corroborated before it is kept, and whether
   the two named above are retired.
 - The trust fast path and a self-declared incomplete result.
+- Root remediation (`cc922a60`): whether the molecule the root refused is
+  excluded from the pass meant to fix one line of its work; what a remediation
+  that REPLACES the deliverable may land (the pre-remediation workspace was
+  the better one); and why the L2 validator approved a page that no longer
+  did what the goal asked while the root reasoned from its first verdict.
+- Registry rows persisted before `1d6ac6e` (Glucose, Sucrose) carry another
+  run's subtask in their system prompt. Current code never writes one; the
+  rows are data, and the prototype rule is a reset rather than a repair path —
+  an operator decision on the production store.
 - A warning when `dist/` or `atoma-worker:latest` is older than the source a
   local project run is meant to exercise.
