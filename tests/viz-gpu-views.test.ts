@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { Container, Graphics, Rectangle } from 'pixi.js';
+import { CanvasTextMetrics, Container, Graphics, Rectangle } from 'pixi.js';
 import type { FederatedPointerEvent, Text, Ticker } from 'pixi.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { I18N_CATALOGS, translate } from '../src/viz/client/i18n-catalog.js';
@@ -6051,6 +6051,47 @@ describe('touch scrolling — a finger drag drives the same router as the wheel'
       expect(source).toMatch(new RegExp(`addEventListener\\('${type}', this\\.\\w+, \\{ passive: true \\}\\)`));
       expect(source).toMatch(new RegExp(`removeEventListener\\('${type}', this\\.\\w+\\)`));
     }
+  });
+});
+
+describe('GpuRenderer.text column fit', () => {
+  // Node has no canvas, so both measurements — `fitText`'s and the rasterised
+  // label's `width` — go through one fixed advance of 6px per character.
+  afterEach(() => vi.restoreAllMocks());
+  const stubMetrics = () =>
+    vi.spyOn(CanvasTextMetrics, 'measureText').mockImplementation(
+      (text) => ({ width: String(text).length * 6, height: 14 }) as CanvasTextMetrics
+    );
+
+  it('ellipsises a single-line label to its column before keying the pool', () => {
+    stubMetrics();
+    const renderer = new GpuRenderer();
+    const parent = new Container();
+    const long = 'facts '.repeat(40).trim();
+    const label = renderer.text(parent, long, 0, 0, { size: 11, singleLine: true, width: 120 });
+    expect(label.text).not.toBe(long);
+    expect(label.text.endsWith('…')).toBe(true);
+    // The pool is keyed by the fitted text, so the full string drawn without
+    // a column is a different label and is not handed the shortened one.
+    const unbounded = renderer.text(parent, long, 0, 20, { size: 11 });
+    expect(unbounded.text).toBe(long);
+    parent.destroy({ children: true, context: true });
+  });
+
+  it('never squashes a label past the legible floor', () => {
+    stubMetrics();
+    const renderer = new GpuRenderer();
+    // Simulate a caller whose geometry is wrong: the fit keeps everything.
+    renderer.fitText = (value) => value;
+    const parent = new Container();
+    const label = renderer.text(parent, 'mmmm '.repeat(30), 0, 0, {
+      size: 11,
+      singleLine: true,
+      width: 40,
+    });
+    expect(label.scale.x).toBeGreaterThanOrEqual(0.94);
+    expect(label.scale.x).toBeLessThan(1);
+    parent.destroy({ children: true, context: true });
   });
 });
 

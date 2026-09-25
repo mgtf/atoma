@@ -291,6 +291,15 @@ export const TOUCH_SCROLL_SLOP_PX = 6;
  */
 const BUTTON_LABEL_IDLE = 0xa9b5ca;
 const BUTTON_LABEL_IDLE_TINT = multiplyTint(GPU_COLORS.text, BUTTON_LABEL_IDLE);
+/**
+ * The narrowest a single-line label may be compressed to fit its column.
+ * `text()` fits the copy with an ellipsis first, so anything reaching this
+ * clamp is the residue between `CanvasTextMetrics` and the rasterised label —
+ * a pixel or two. It exists so a caller's future geometry mistake degrades to
+ * a slightly overflowing line rather than the unreadable 0.69 the timeline
+ * facts line was measured at.
+ */
+const TEXT_MIN_SQUASH = 0.94;
 /** A disabled button stays legible — it is saying why it cannot be used. */
 const BUTTON_DISABLED_ALPHA = 0.62;
 const FPS_BITMAP_FONT_NAME = 'AtomaFps';
@@ -2660,10 +2669,26 @@ export class GpuRenderer {
 
   text(parent: Container, value: string, x: number, y: number, options: TextOptions = {}) {
     const { style, key } = this.textStyle(options);
+    // `singleLine` WITH a `width` means "this text lives in a column", so fit
+    // it to that column HERE — before the pool is keyed, because the key IS
+    // the text, and re-truncating a label after `acquire` would hand the next
+    // caller of the same string a shortened one.
+    //
+    // The x-axis fit below used to absorb the WHOLE overflow rather than the
+    // measurement residue it was written for. A timeline facts line whose
+    // footer the caller declined to truncate rendered at `scale.x` 0.69 —
+    // 9px glyphs compressed 31%, which thins the stems past what the glyph
+    // cache resolves. Measured on the real client after the owner reported
+    // that copy illegible twice (2026-09-21). An ellipsis loses the tail of a
+    // line; an anamorphic squash loses the line.
+    const fitted =
+      options.singleLine && options.width !== undefined
+        ? this.fitText(value, Math.max(0, options.width), options)
+        : value;
     // Retained across renders: a scroll tick rebuilds the scene, and
     // re-rasterising every label was the cost that made it expensive.
-    const label = this.labels.acquire(`${key}\u0000${value}`, () =>
-      new Text({ text: value, style, ...gpuTextRasterOptions() })
+    const label = this.labels.acquire(`${key}\u0000${fitted}`, () =>
+      new Text({ text: fitted, style, ...gpuTextRasterOptions() })
     );
     label.position.set(x, y);
     label.alpha = options.alpha ?? 1;
@@ -2680,17 +2705,25 @@ export class GpuRenderer {
     label.anchor.set(0, 0);
     label.scale.set(1);
     label.rotation = 0;
-    // Character-count truncation is only a copy bound; proportional glyphs
-    // can still be wider than its estimate (`mmmm` is the adversarial case).
-    // Measure the real Pixi label after rasterisation and fit only its x-axis,
-    // so a bounded row can neither wrap into the next line nor cross its
-    // allotted column. Resetting scale above is mandatory for pooled labels.
+    // `fitText` above works from `CanvasTextMetrics`; this is the RASTERISED
+    // label, and the two can disagree by a pixel or two (`mmmm` is the
+    // adversarial case). Absorb that residue on the x-axis so a bounded row
+    // can neither wrap into the next line nor cross its allotted column.
+    // Resetting scale above is mandatory for pooled labels.
+    //
+    // Clamped, because a squash is legible only while it is small. Past the
+    // floor the caller's geometry is wrong and the honest failure is a line
+    // that overflows its column by a hair — visibly a bug to fix — not one
+    // compressed into a grey smear that reads as a font choice.
     if (
       options.singleLine &&
       options.width !== undefined &&
       label.width > Math.max(0, options.width)
     ) {
-      label.scale.x = Math.max(0, options.width) / label.width;
+      label.scale.x = Math.max(
+        TEXT_MIN_SQUASH,
+        Math.max(0, options.width) / label.width
+      );
     }
     label.eventMode = 'none';
     parent.addChild(label);

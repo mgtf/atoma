@@ -167,6 +167,17 @@ export function modelPairLabel(model?: string, servedModel?: string): string {
   const served = compactModelName(servedModel);
   if (!served || served === pin) return pin;
   if (!pin) return served;
+  // A pin carries a ROUTING PREFIX the served name never has
+  // (`own:openai:gpt-5.6-terra` served as `gpt-5.6-terra`), so comparing the
+  // two whole strings called one model two models and drew the arrow anyway.
+  // That is the case this function was written to collapse, and it is the
+  // common one: every llm card of a subscription-routed run spent about 16
+  // characters restating its own model, which at the facts line's width cost
+  // the card its cost and clock (measured 2026-09-21). The pin is a SUPERSET
+  // of the served name here — it adds the provider — so showing it alone
+  // drops nothing. A real substitution still differs in the model segment and
+  // still gets its arrow.
+  if (pin.endsWith(`:${served}`)) return pin;
   return `${pin} ⇢ ${served}`;
 }
 

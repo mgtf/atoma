@@ -38,6 +38,16 @@ describe('modelPairLabel', () => {
       .toBe('claude-haiku-4-5 ⇢ haiku');
   });
 
+  it('does not call a routing-prefixed pin a substitution of its own model', () => {
+    // A subscription-routed pin carries its provider; the served name never
+    // does. The pin already says everything the served name would.
+    expect(modelPairLabel('own:openai:gpt-5.6-terra', 'gpt-5.6-terra'))
+      .toBe('own:openai:gpt-5.6-terra');
+    // A real substitution still differs in the model segment.
+    expect(modelPairLabel('own:openai:gpt-5.6-terra', 'gpt-5.6-sol'))
+      .toBe('own:openai:gpt-5.6-terra ⇢ gpt-5.6-sol');
+  });
+
   it('degrades to whichever it has', () => {
     expect(modelPairLabel(undefined, 'haiku')).toBe('haiku');
     expect(modelPairLabel('claude-opus-5', undefined)).toBe('claude-opus-5');
