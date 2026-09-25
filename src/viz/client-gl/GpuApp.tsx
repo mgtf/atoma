@@ -11,6 +11,7 @@ import { MAX_CHECKLIST_ITEMS, parseChecklistLines } from '../../contracts/accept
 import { applyDocumentLocale, translate } from '../client/i18n-catalog.js';
 import { loginBounceParams, providerLoginHref } from '../client/session-guard.js';
 import { isIndexEntryLive } from '../client/run-utils.js';
+import { PARTIAL_CONTINUE_PREFIX, partialRunGuidance } from './partial-run.js';
 import {
   dismissPushPrompt,
   enableWebPush,
@@ -825,6 +826,20 @@ function GpuAppContent({
       openGitHubRepository(run?.publication?.pullRequestUrl);
       return;
     }
+    if (id.startsWith(PARTIAL_CONTINUE_PREFIX)) {
+      // Open the project with this run's goal already in the prompt. The
+      // person reviews it and presses Run; nothing launches from here.
+      const projectId = id.slice(PARTIAL_CONTINUE_PREFIX.length);
+      const run = runQuery.data;
+      const guidance = run
+        ? partialRunGuidance(run, runsQuery.data ?? [], projectsQuery.data ?? [])
+        : null;
+      if (guidance?.project?.projectId !== projectId) return;
+      store.selectProject(projectId);
+      if (guidance.goal) store.setSearch('projectPrompt', guidance.goal);
+      store.setView('projects');
+      return;
+    }
     if (id.startsWith('project.run.')) {
       store.selectRun(id.slice('project.run.'.length));
       store.setView('runs');
@@ -927,6 +942,8 @@ function GpuAppContent({
     profilesQuery.data,
     projectsQuery.data,
     requestPreview,
+    runQuery.data,
+    runsQuery.data,
     stopPreview,
   ]);
 

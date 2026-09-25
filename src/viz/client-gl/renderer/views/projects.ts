@@ -160,9 +160,22 @@ export function projectsGpuContentTop(
  */
 const RUNS_HEADING_HEIGHT = 30;
 
-function runRowHeight(run: VizProjectRun, compact = false): number {
+/**
+ * Whether a run row says, in plain words, what to do next. Only the NEWEST
+ * run of a project, and only when it is incomplete: that is the one the next
+ * run continues from, and on an older row "run again" is advice already taken.
+ * An incomplete row's `error` is the acceptor's technical prose, so no
+ * incomplete row prints it: the Runs view keeps it under its technical-details
+ * heading instead.
+ */
+function showsPartialGuidance(run: VizProjectRun, newest: boolean): boolean {
+  return newest && run.status === 'partial';
+}
+
+function runRowHeight(run: VizProjectRun, compact = false, newest = false): number {
   const hasSecondLine = Boolean(
-    run.error ||
+    showsPartialGuidance(run, newest) ||
+    (run.error && run.status !== 'partial') ||
     (run.publication?.status === 'published' && run.publication.commitSha)
   );
   if (!compact) return hasSecondLine ? RUN_ROW_HEIGHT + RUN_SECOND_LINE_EXTRA : RUN_ROW_HEIGHT;
@@ -407,7 +420,9 @@ export function projectLayout(
       continue;
     }
     cursor += RUNS_HEADING_HEIGHT;
-    for (const run of selectedRuns) cursor += runRowHeight(run, compactRunRows);
+    selectedRuns.forEach((run, runIndex) => {
+      cursor += runRowHeight(run, compactRunRows, runIndex === 0);
+    });
   }
   const contentBottom = cursor + 20;
   return { x, panelWidth, listTop, contentBottom };
@@ -794,10 +809,11 @@ export function drawProjects(
         { size: 10, color: GPU_COLORS.muted, weight: '600' }
       );
       cursor += RUNS_HEADING_HEIGHT;
-      for (const run of runs) {
+      runs.forEach((run, runIndex) => {
+        const newest = runIndex === 0;
         const statusText = statusLabel(snapshot.t, run.status, 'projects.runStatus');
         const cost = run.costUsd === null ? '' : ` · ${runCost(run.costUsd)}`;
-        const rowHeight = runRowHeight(run, compactRunRows);
+        const rowHeight = runRowHeight(run, compactRunRows, newest);
         const goalWidth = compactRunRows
           ? Math.max(0, layout.panelWidth - 52)
           : Math.max(0, statusX - runColumnX - 12);
@@ -860,7 +876,22 @@ export function drawProjects(
               cursor + (compactRunRows ? 34 : RUN_SECOND_LINE_Y - 14),
               compactRunRows ? goalWidth : statusCol, 22, snapshot.onActivate);
           }
-        } else if (run.error) {
+        } else if (showsPartialGuidance(run, newest)) {
+          // Warning, not error: nothing is broken, the work is unfinished.
+          const guidanceX = runColumnX + BUTTON_LABEL_INSET;
+          const guidanceWidth = goalWidth - BUTTON_LABEL_INSET;
+          ctx.text(
+            pane.content,
+            ctx.fitText(
+              snapshot.t(project.repositoryTarget.source ? 'projects.runPartial.imported' : 'projects.runPartial.continue'),
+              guidanceWidth,
+              { size: 9 }
+            ),
+            guidanceX,
+            cursor + (compactRunRows ? 48 : RUN_SECOND_LINE_Y),
+            { size: 9, color: GPU_COLORS.warning, width: guidanceWidth, singleLine: true }
+          );
+        } else if (run.error && run.status !== 'partial') {
           const boundedError = run.error.replace(/\s+/g, ' ');
           // Starts on the LABEL's vertical, not the button's border: this line
           // belongs to the goal above it, and at `runColumnX` it hung 10px out
@@ -880,7 +911,7 @@ export function drawProjects(
           );
         }
         cursor += rowHeight;
-      }
+      });
     } else if (selected && runs.length === 0) {
       ctx.text(
         pane.content,

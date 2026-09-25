@@ -73,6 +73,7 @@ import {
   VIEW_FRAME_TITLE_Y,
 } from '../src/viz/client-gl/renderer/view-frame.js';
 import { overlayMenuClip } from '../src/viz/client-gl/renderer/overlay-menu-clip.js';
+import { PARTIAL_CONTINUE_PREFIX, landingCause } from '../src/viz/client-gl/partial-run.js';
 import {
   accountMenuLayout,
   drawAccountMenu,
@@ -6323,5 +6324,163 @@ describe('the run timeline decision column', () => {
     expect(cardWidth - (rejected + 62)).toBe(11);
     // A narrower card moves the column with it; nothing here is absolute.
     expect(eventDecisionLeft(320, 62)).toBe(rejected - 200);
+  });
+});
+
+/**
+ * An incomplete run tells the person who asked for the work what to do next,
+ * in words that are not the acceptor's technical prose (2026-09-25: the Runs
+ * view printed the raw catalog key `runs.flag.partial`, and the Projects row
+ * printed the refusal — about a README and a loopback probe — in red).
+ */
+describe('incomplete (partial) runs guide the next step', () => {
+  const WIDTH = 1400;
+  const HEIGHT = 900;
+  const projectId = '9d1e7c1a-2b3c-4d5e-8f90-a1b2c3d4e5f6';
+  const refusal = 'README records a durable numeric loopback probe';
+  const project = (imported = false) => ({
+    projectId,
+    name: 'Tasks',
+    slug: 'tasks',
+    status: 'active' as const,
+    family: 'build',
+    repositoryTarget: {
+      installationId: '501',
+      owner: 'atoma-org',
+      name: 'tasks',
+      visibility: 'private' as const,
+      ...(imported ? { source: { owner: 'someone', name: 'tasks', mode: 'pull-request' as const } } : {}),
+    },
+    repositoryStatus: 'ready' as const,
+    repositoryFullName: 'atoma-org/tasks',
+    repositoryUrl: 'https://github.com/atoma-org/tasks',
+    repositoryError: null,
+    createdAt: '2026-09-25T00:00:00.000Z',
+    updatedAt: '2026-09-25T00:00:00.000Z',
+  });
+  const refusedRun = () =>
+    makeRun([makeLlmEvent('a')], { result: { summary: 'done', refusal } });
+  const indexEntry = {
+    id: 'run-1',
+    label: 'build-app: Make the task list responsive',
+    goal: 'Make the task list responsive',
+    startedAt: '2026-08-14T10:00:00.000Z',
+    endedAt: '2026-08-14T10:30:00.000Z',
+    projectId,
+  };
+
+  it('has a label for every run status, on both surfaces', () => {
+    const en = I18N_CATALOGS.en;
+    for (const status of ['live', 'abandoned', 'cancelled', 'failed', 'partial', 'delivered']) {
+      expect(en[`runs.flag.${status}`], status).toBeTruthy();
+    }
+    for (const status of ['queued', 'running', 'delivered', 'partial', 'failed', 'cancelled']) {
+      expect(en[`projects.runStatus.${status}`], status).toBeTruthy();
+    }
+  });
+
+  it('names the cause from the typed reasons, and they compose', () => {
+    expect(landingCause({ refusal })).toBe('refused');
+    expect(landingCause({ unfinishedPhases: ['ship'] })).toBe('budget');
+    expect(landingCause({ unfinishedPhases: ['ship'], refusal })).toBe('both');
+    expect(landingCause({})).toBeNull();
+  });
+
+  it('says what happened, that the work is kept, and offers to continue', () => {
+    const ctx = createRecordingCtx();
+    drawRuns(
+      ctx,
+      makeSnapshot({}, { run: refusedRun(), runs: [indexEntry], projects: [project()] }),
+      WIDTH,
+      HEIGHT
+    );
+    const texts = ctx.texts.map((entry) => entry.value);
+    expect(texts).toContain(t('runs.flag.partial'));
+    expect(texts).toContain(t('run.partial.cause.refused'));
+    expect(texts).toContain(t('run.partial.next.continue'));
+    // The acceptor's words stay reachable, under a heading that says what they are.
+    expect(texts).toContain(t('run.partial.details').toUpperCase());
+    expect(texts.some((value) => value.includes(refusal))).toBe(true);
+    const button = ctx.buttons.find((candidate) => candidate.id === `${PARTIAL_CONTINUE_PREFIX}${projectId}`);
+    expect(button?.label).toBe(t('run.partial.action.continue'));
+  });
+
+  it('does not promise kept work for a project imported from GitHub', () => {
+    const ctx = createRecordingCtx();
+    drawRuns(
+      ctx,
+      makeSnapshot({}, { run: refusedRun(), runs: [indexEntry], projects: [project(true)] }),
+      WIDTH,
+      HEIGHT
+    );
+    const texts = ctx.texts.map((entry) => entry.value);
+    expect(texts).toContain(t('run.partial.next.imported'));
+    expect(texts).not.toContain(t('run.partial.next.continue'));
+    const button = ctx.buttons.find((candidate) => candidate.id.startsWith(PARTIAL_CONTINUE_PREFIX));
+    expect(button?.label).toBe(t('run.partial.action.retry'));
+  });
+
+  it('offers no continue control for a run outside a project', () => {
+    const ctx = createRecordingCtx();
+    drawRuns(ctx, makeSnapshot({}, { run: refusedRun() }), WIDTH, HEIGHT);
+    expect(ctx.texts.map((entry) => entry.value)).toContain(t('run.partial.cause.refused'));
+    expect(ctx.buttons.some((candidate) => candidate.id.startsWith(PARTIAL_CONTINUE_PREFIX))).toBe(false);
+  });
+
+  it('shows no guidance on a delivered run', () => {
+    const ctx = createRecordingCtx();
+    drawRuns(
+      ctx,
+      makeSnapshot({}, { run: makeRun([makeLlmEvent('a')]), runs: [indexEntry], projects: [project()] }),
+      WIDTH,
+      HEIGHT
+    );
+    const texts = ctx.texts.map((entry) => entry.value);
+    expect(texts.some((value) => value.startsWith(t('run.partial.cause.refused')))).toBe(false);
+    expect(ctx.buttons.some((candidate) => candidate.id.startsWith(PARTIAL_CONTINUE_PREFIX))).toBe(false);
+  });
+
+  it('replaces the technical refusal on the newest project row with a plain next step', () => {
+    const projectRun = (id: string, createdAt: string) => ({
+      projectRunId: id,
+      projectId,
+      goal: 'Make the task list responsive',
+      status: 'partial' as const,
+      traceId: id,
+      costUsd: 0.22,
+      durationS: 944,
+      error: `run landed and was not delivered; refused at delivery: ${refusal}`,
+      createdAt,
+      endedAt: createdAt,
+      publication: null,
+    });
+    const ctx = createRecordingCtx();
+    drawProjects(
+      ctx,
+      makeSnapshot(
+        { view: 'projects', selectedProjectId: projectId },
+        {
+          auth: makeAuth({
+            displayName: 'Alice',
+            activeOrganisation: { id: 'org-1', name: 'Org', role: 'org:owner' },
+          }),
+          projects: [project()],
+          projectRuns: {
+            [projectId]: [
+              projectRun('newer', '2026-09-25T02:00:00.000Z'),
+              projectRun('older', '2026-09-25T01:00:00.000Z'),
+            ],
+          },
+        }
+      ),
+      1280,
+      720
+    );
+    const texts = ctx.texts.map((entry) => String(entry.value));
+    const plain = t('projects.runPartial.continue');
+    // Exactly one: an older incomplete row's "run again" is advice already taken.
+    expect(texts.filter((value) => plain.startsWith(value.replace(/…$/, '')) && value.length > 8)).toHaveLength(1);
+    expect(texts.some((value) => value.includes('loopback'))).toBe(false);
+    expect(texts.some((value) => value.startsWith(t('projects.runStatus.partial')))).toBe(true);
   });
 });

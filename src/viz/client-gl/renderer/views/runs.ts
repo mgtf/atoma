@@ -71,6 +71,11 @@ import {
   VIEW_FRAME_TITLE_Y,
 } from '../view-frame.js';
 import { drawAtomDetail } from './atom-detail.js';
+import {
+  PARTIAL_CONTINUE_PREFIX,
+  partialRunGuidance,
+  type PartialRunGuidance,
+} from '../../partial-run.js';
 
 export const RUN_STATUS_COLOR: Record<RunStatus, number> = {
   live: GPU_COLORS.success,
@@ -1396,6 +1401,31 @@ function drawRunSummaryCard(
     { size: 10, weight: '700', color: summaryStatusColor }
   );
   cursor += 26;
+  // An incomplete run says what to do next, in words for the person who asked
+  // for the work — on the collapsed card too, because it IS the verdict.
+  const guidance =
+    summaryStatus === 'partial'
+      ? partialRunGuidance(run, snapshot.data.runs, snapshot.data.projects)
+      : null;
+  if (guidance) {
+    const cause = ctx.text(block, snapshot.t(`run.partial.cause.${guidance.cause}`), padX, cursor - 8, {
+      size: RUNS_FACTS_SIZE + 1,
+      color: GPU_COLORS.text,
+      width: innerWidth,
+    });
+    cursor += cause.height - 2;
+    if (guidance.project) {
+      const next = ctx.text(
+        block,
+        snapshot.t(guidance.carriesOver ? 'run.partial.next.continue' : 'run.partial.next.imported'),
+        padX,
+        cursor,
+        { size: RUNS_FACTS_SIZE + 1, color: GPU_COLORS.text, width: innerWidth }
+      );
+      cursor += next.height;
+    }
+    cursor += 14;
+  }
   // The four metrics are part of the verdict, not of the expansion: they stay
   // on screen whether the card is collapsed or not, two columns so the card
   // keeps its width for the goal.
@@ -1410,6 +1440,25 @@ function drawRunSummaryCard(
         width: innerWidth,
       });
       cursor += reason.height + 6;
+    }
+    // The acceptor's own words, for whoever wants them: model-authored and
+    // technical, so they sit under a heading that says so, never as the lead.
+    if (guidance && guidance.details.length > 0) {
+      ctx.text(block, snapshot.t('run.partial.details').toUpperCase(), padX, cursor, {
+        size: 9,
+        weight: '700',
+        color: GPU_COLORS.muted,
+      });
+      cursor += 16;
+      for (const detail of guidance.details) {
+        const line = ctx.text(block, detail, padX, cursor, {
+          size: RUNS_FACTS_SIZE,
+          color: GPU_COLORS.muted,
+          width: innerWidth,
+        });
+        cursor += line.height + 4;
+      }
+      cursor += 6;
     }
     // Atoms used ride below the metrics, expansion-only: this card's
     // collapsed height is a verdict-plus-metrics glance, not a registry dump.
@@ -1442,8 +1491,44 @@ function drawRunSummaryCard(
     width: width - 20,
     height: cursor,
   });
-  const previewRow = drawRunPreviewControl(ctx, snapshot, x, y + 10 + cursor + 6, width);
-  return cursor + 18 + previewRow;
+  const continueRow = guidance?.project
+    ? drawPartialContinueControl(ctx, snapshot, guidance, x, y + 10 + cursor + 6, width)
+    : 0;
+  const previewRow = drawRunPreviewControl(ctx, snapshot, x, y + 10 + cursor + 6 + continueRow, width);
+  return cursor + 18 + continueRow + previewRow;
+}
+
+/**
+ * The next step of an incomplete project run, as ONE control: it opens the
+ * project with this run's goal already in the prompt, so continuing is a
+ * review and a click rather than knowing where runs are started. A sibling of
+ * the summary card for the reason the Preview control is (below).
+ */
+function drawPartialContinueControl(
+  ctx: RendererCtx,
+  snapshot: GpuRenderSnapshot,
+  guidance: PartialRunGuidance,
+  x: number,
+  y: number,
+  width: number
+): number {
+  if (!guidance.project) return 0;
+  const height = 30;
+  const label = snapshot.t(guidance.carriesOver ? 'run.partial.action.continue' : 'run.partial.action.retry');
+  const labelWidth = Math.ceil(ctx.measureText(label, { size: 11, weight: '600' })) + 20;
+  ctx.button(
+    ctx.root,
+    `${PARTIAL_CONTINUE_PREFIX}${guidance.project.projectId}`,
+    'button',
+    label,
+    x + 10,
+    y,
+    Math.min(labelWidth, Math.max(0, width - 20)),
+    height,
+    false,
+    snapshot.onActivate
+  );
+  return height + 12;
 }
 
 /**
