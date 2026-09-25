@@ -1648,6 +1648,21 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
               required: ['type'],
             },
           },
+          viewport: {
+            type: 'object',
+            // MEASURED 2026-09-10 and 2026-09-24 (runs `2fac992c`, `0e89e0ce`):
+            // tasks demanding overflow proof at 320/375/768px could not get it,
+            // because the page was always laid out at Puppeteer's 800x600. One
+            // run labelled 800px smokes "320px" and a root acceptance repeated
+            // the claim. The width a page is laid out at is now the caller's
+            // choice and always reported back as a fact.
+            description: `Layout size in CSS px, { width, height? }; default ${DEFAULT_VIEWPORT.width}x${DEFAULT_VIEWPORT.height}. Media queries and window.innerWidth follow it, so a responsive requirement (e.g. 320, 375, 768px) is proven by one call per width. The result's \`viewport\` states the size the page was actually laid out at.`,
+            properties: {
+              width: { type: 'integer', minimum: MIN_VIEWPORT_PX, maximum: MAX_VIEWPORT_PX },
+              height: { type: 'integer', minimum: MIN_VIEWPORT_PX, maximum: MAX_VIEWPORT_PX },
+            },
+            required: ['width'],
+          },
           smoke: {
             type: 'string',
             // Three statements here contradicted the runtime and were paid for
@@ -1680,6 +1695,7 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
           ? Math.max(0, Math.floor(args['waitMs']))
           : 500;
       const waitMs = Math.min(requestedWaitMs, MAX_WAIT_MS);
+      const viewport = parseViewport(args['viewport']);
       let interactions = parseInteractions(args['interactions']);
       // Captured BEFORE the smoke filter empties the list below: the count
       // the caller asked for is a fact about the request, and it is not
@@ -1749,6 +1765,7 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
 
       const browser = await getBrowser();
       const page = await browser.newPage();
+      await page.setViewport(viewport);
       const errors: string[] = [];
       const warnings: string[] = [];
       const failedRequests: Array<{ url: string; reason: string }> = [];
@@ -2042,6 +2059,7 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
           // clicking. `document` binds the observation to a revision.
           requestedInteractions,
           ignoredInteractions,
+          viewport,
           ...(document ? { document } : {}),
           ...(smoke ? { smokeResult } : {}),
         };
@@ -2071,6 +2089,7 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
           interactionLog,
           requestedInteractions,
           ignoredInteractions,
+          viewport,
           ...(document ? { document } : {}),
         };
       } finally {
@@ -2078,6 +2097,35 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
       }
     },
   };
+}
+
+/** Puppeteer's own default, kept explicit so the result can report it. */
+export const DEFAULT_VIEWPORT = Object.freeze({ width: 800, height: 600 });
+export const MIN_VIEWPORT_PX = 240;
+export const MAX_VIEWPORT_PX = 3840;
+
+/**
+ * The layout size a `validate_html` call asked for. A malformed request is
+ * refused rather than clamped: a page silently laid out at another width is
+ * the false proof this parameter exists to end.
+ */
+export function parseViewport(raw: unknown): { width: number; height: number } {
+  if (raw === undefined || raw === null) return { ...DEFAULT_VIEWPORT };
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('validate_html: `viewport` must be an object { width, height? } in CSS px');
+  }
+  const record = raw as Record<string, unknown>;
+  const dimension = (key: 'width' | 'height', fallback: number | undefined): number => {
+    const value = record[key];
+    if (value === undefined && fallback !== undefined) return fallback;
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < MIN_VIEWPORT_PX || value > MAX_VIEWPORT_PX) {
+      throw new Error(
+        `validate_html: viewport.${key} must be an integer between ${MIN_VIEWPORT_PX} and ${MAX_VIEWPORT_PX} CSS px (got ${JSON.stringify(value)})`
+      );
+    }
+    return value;
+  };
+  return { width: dimension('width', undefined), height: dimension('height', DEFAULT_VIEWPORT.height) };
 }
 
 export interface ParsedInteraction {

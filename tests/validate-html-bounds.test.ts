@@ -333,3 +333,42 @@ describe('validate_html — every applicable pre-flight refusal, in one call', (
     expect(res.smokeResult.hint).toMatch(/must be a JS EXPRESSION/);
   });
 });
+
+describe('validate_html viewport', () => {
+  // Runs `2fac992c` and `0e89e0ce` were told to prove overflow at 320/375/768px
+  // and could not: every page was laid out at 800x600, and one smoke labelled
+  // "320px" read innerWidth 800. The width is now requested and reported.
+  const page = '<style>@media (max-width: 400px) { h1 { display: none; } }</style><h1>Title</h1>';
+
+  it('lays the page out at the requested width, which media queries follow', async () => {
+    const sandbox = makeWorkspace({ 'index.html': page });
+    const url = await serve(sandbox);
+    const result = (await validateHtmlTool({ sandbox }).execute({
+      url,
+      viewport: { width: 320 },
+      smoke: "({ ok: window.innerWidth === 320 && matchMedia('(max-width: 400px)').matches && getComputedStyle(document.querySelector('h1')).display === 'none', w: window.innerWidth })",
+    })) as { ok: boolean; viewport: { width: number; height: number }; smokeResult: unknown };
+    expect(result.smokeResult).toMatchObject({ ok: true, w: 320 });
+    expect(result.ok).toBe(true);
+    expect(result.viewport).toEqual({ width: 320, height: 600 });
+  }, 60_000);
+
+  it('reports the default size when none is asked for', async () => {
+    const sandbox = makeWorkspace({ 'index.html': page });
+    const url = await serve(sandbox);
+    const result = (await validateHtmlTool({ sandbox }).execute({
+      url,
+      smoke: '({ ok: window.innerWidth === 800, w: window.innerWidth })',
+    })) as { ok: boolean; viewport: { width: number; height: number } };
+    expect(result.ok).toBe(true);
+    expect(result.viewport).toEqual({ width: 800, height: 600 });
+  }, 60_000);
+
+  it('refuses a malformed size instead of laying the page out at another one', async () => {
+    const sandbox = makeWorkspace({ 'index.html': page });
+    const tool = validateHtmlTool({ sandbox });
+    for (const viewport of [{ width: 100 }, { width: 320.5 }, { height: 600 }, '320']) {
+      await expect(tool.execute({ url: 'http://localhost:1/', viewport })).rejects.toThrow(/viewport/);
+    }
+  });
+});

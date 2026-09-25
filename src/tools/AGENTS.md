@@ -141,6 +141,12 @@ Neighbours:
 
 ## Browser observation
 
+- `validate_html` lays the page out at the caller's `viewport` (default
+  800x600, Puppeteer's own) and ALWAYS reports the size it used. A malformed
+  size is refused, never clamped: a page silently laid out at another width is
+  the false proof the parameter exists to end. Until 2026-09-25 there was no
+  parameter, so a task demanding 320/375/768px proof could not be met, and a
+  smoke labelled "320px" read `innerWidth` 800 (runs `2fac992c`, `0e89e0ce`).
 - `validate_html` reports `requestedInteractions`, `ignoredInteractions` and
   the served `document` digest alongside `interactionLog`. The counts are the
   CALLER's fact and the log is the runtime's; a result that carries only one
