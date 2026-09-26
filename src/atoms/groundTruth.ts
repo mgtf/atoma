@@ -1,4 +1,5 @@
 import type { RunContext } from '../core/types.js';
+import { baseExecutorOf } from '../core/attestation.js';
 import type { Atom } from '../core/atom.js';
 import {
   PROBE_MANIFEST_FILENAME,
@@ -194,7 +195,12 @@ export async function probeGroundTruthEx(args: {
   const empty = { block: '', facts: emptyGroundTruthFacts() };
   if (args.subject !== 'RESULT') return empty;
   if (args.ctx.signal?.aborted) return empty;
-  const tools = args.ctx.tools;
+  // The SUPERVISOR's own looks run on the base executor: attested, they were
+  // filed as the child's evidence under its branch and evicted its browser
+  // observations from the next validator's prompt (2026-09-25 review, 1.4),
+  // and they covered checklist items by looking (2.4). This probe reports
+  // through its own ground-truth block.
+  const tools = args.ctx.tools ? baseExecutorOf(args.ctx.tools) : undefined;
   if (!tools) return empty;
   // Node-capable children may deliver JSON or HTML regardless of which other
   // tools they own. Reuse the loopback/content check below and retain file
@@ -717,7 +723,8 @@ async function probeFilesGroundTruth(args: {
 }): Promise<{ block: string; facts: GroundTruthFacts }> {
   const empty = { block: '', facts: emptyGroundTruthFacts() };
   const facts = emptyGroundTruthFacts();
-  const tools = args.ctx.tools;
+  // A supervisor read: never the child's attested evidence (see probeGroundTruthEx).
+  const tools = args.ctx.tools ? baseExecutorOf(args.ctx.tools) : undefined;
   if (!tools || !tools.has('read_file')) return empty;
   // Only for children that actually write files — otherwise there is nothing
   // to read back and the probe would just add an empty evidence block.

@@ -80,6 +80,14 @@ export const browserObservationSchema = z.object({
   consoleErrors: z.number().int().nonnegative(),
   failedRequests: z.number().int().nonnegative(),
   document: observedDocumentSchema.optional(),
+  /**
+   * The size the page was LAID OUT at, as `validate_html` reports it. Carried
+   * so a validator can tell a 320px proof from an 800px one: until 2026-09-26
+   * the tool reported it to its caller and the attestation dropped it, so the
+   * two rendered identically (2026-09-25 review, 1.6). Absent on observations
+   * recorded before it, which were all laid out at 800x600.
+   */
+  viewport: z.object({ width: z.number().int().positive(), height: z.number().int().positive() }).strict().optional(),
 });
 
 export type ObservedDocument = z.infer<typeof observedDocumentSchema>;
@@ -173,7 +181,10 @@ function evidenceExcerpt(value: unknown, limit: number): string {
 }
 
 export function parseExecutionObservation(tool: string, args: Record<string, unknown>, raw: unknown): ToolObservation | null {
-  if (!['fetch_url', 'run_shell', 'read_file', 'start_node_server'].includes(tool)) return null;
+  // `record_probe` is the shell EVIDENCE tool the writer contract prescribes
+  // instead of run_shell: attesting run_shell and not it showed validators the
+  // scratch commands and hid the evidence invocations (review 2.10).
+  if (!['fetch_url', 'run_shell', 'record_probe', 'read_file', 'start_node_server'].includes(tool)) return null;
   const http = tool === 'fetch_url' ? servedHttpObservation(args, raw) : undefined;
   return executionObservationSchema.parse({ kind: 'execution',
     request: evidenceExcerpt(args, 800), response: evidenceExcerpt(raw, 1600), ...(http ? { http } : {}) });
@@ -263,8 +274,16 @@ export function parseBrowserObservation(
     consoleErrors: errors,
     failedRequests: failed,
     ...(r['document'] !== undefined ? { document: r['document'] } : {}),
+    ...(isViewport(r['viewport']) ? { viewport: { width: r['viewport'].width, height: r['viewport'].height } } : {}),
   });
   return parsed.success ? parsed.data : null;
+}
+
+function isViewport(value: unknown): value is { width: number; height: number } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const v = value as Record<string, unknown>;
+  return Number.isInteger(v['width']) && Number.isInteger(v['height']) &&
+    (v['width'] as number) > 0 && (v['height'] as number) > 0;
 }
 
 /** The one-line rendering the supervisor shows a validator. */
@@ -277,6 +296,7 @@ export function renderObservation(record: AttestationRecord): string {
     `executed=${o.executedInteractions.length}`,
   ];
   if (o.ignoredInteractions > 0) bits.push(`FILTERED=${o.ignoredInteractions}`);
+  if (o.viewport) bits.push(`viewport=${o.viewport.width}x${o.viewport.height}`);
   if (o.document) bits.push(`doc=${o.document.path}`);
   bits.push(`consoleErrors=${o.consoleErrors}`, `failedRequests=${o.failedRequests}`);
   if (o.smokeResult !== undefined) {

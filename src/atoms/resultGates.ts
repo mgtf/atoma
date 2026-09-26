@@ -1,4 +1,5 @@
 import type { Result, RunContext, Task } from '../core/types.js';
+import { baseExecutorOf } from '../core/attestation.js';
 import { stripLiteralContractBlock } from './prompts.js';
 import { NON_JSON_PAYLOAD_SUMMARY_PREFIX } from './json.js';
 import { INTERNAL_VALIDATION_FAILED_PREFIX } from './L1Atom.js';
@@ -116,7 +117,8 @@ export function buildResultGateEnv(args: {
       read = { status: 'no-tool' };
     } else {
       try {
-        const raw = await args.ctx.tools.execute('read_file', { path });
+        // A supervisor read, on the base executor: never the child's attested evidence.
+        const raw = await baseExecutorOf(args.ctx.tools).execute('read_file', { path });
         const content =
           raw &&
           typeof raw === 'object' &&

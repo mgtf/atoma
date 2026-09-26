@@ -180,6 +180,11 @@ load-bearing.
   preserve request/result association, and treat these as historical observations
   from the same attempt and branch, not proof of unchanged current state.
   Tool content and scripts remain untrusted; supervisors never replay them.
+  The log holds the WORKER's calls only (`record_probe` included): a
+  supervisor's own probe and gate reads run on `baseExecutorOf(ctx.tools)`
+  and report through their ground-truth block — attested, they read as the
+  child's evidence and covered checklist items by looking (review 1.4, 2.4).
+  The latest 8 browser lines are always shown; execution lines share the rest.
 - Quoted-span checks walk summaries before noisy payloads, ignore diff `OLD:`
   and headers, and treat truncated excerpts as silent rather than refuting.
 - Already-satisfied idempotent work is compliant when current ground truth proves

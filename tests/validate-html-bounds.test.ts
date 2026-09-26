@@ -364,6 +364,28 @@ describe('validate_html viewport', () => {
     expect(result.viewport).toEqual({ width: 800, height: 600 });
   }, 60_000);
 
+  it('lets one smoke sweep widths without reading layouts as an oscillating assertion (review 2.5)', async () => {
+    // Overflows below 400px: a real responsive defect, deterministic per width.
+    const sandbox = makeWorkspace({ 'index.html': '<style>@media (max-width: 400px) { body { width: 600px; } }</style><h1>Title</h1>' });
+    const url = await serve(sandbox);
+    const tool = validateHtmlTool({ sandbox });
+    const smoke = '({ ok: document.documentElement.scrollWidth <= window.innerWidth })';
+    const outcomes: Array<{ width: number; ok: boolean; refused: boolean }> = [];
+    for (const width of [768, 375, 320, 1024]) {
+      const result = (await tool.execute({ url, viewport: { width }, smoke })) as {
+        ok: boolean; viewport?: { width: number }; smokeResult?: { error?: string };
+      };
+      expect(result.viewport?.width).toBe(width);
+      outcomes.push({ width, ok: result.ok, refused: Boolean(result.smokeResult?.error) });
+    }
+    expect(outcomes).toEqual([
+      { width: 768, ok: true, refused: false },
+      { width: 375, ok: false, refused: false },
+      { width: 320, ok: false, refused: false },
+      { width: 1024, ok: true, refused: false },
+    ]);
+  }, 120_000);
+
   it('refuses a malformed size instead of laying the page out at another one', async () => {
     const sandbox = makeWorkspace({ 'index.html': page });
     const tool = validateHtmlTool({ sandbox });

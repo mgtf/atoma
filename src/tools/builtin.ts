@@ -1765,7 +1765,14 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
 
       const browser = await getBrowser();
       const page = await browser.newPage();
-      await page.setViewport(viewport);
+      try {
+        await page.setViewport(viewport);
+      } catch (error) {
+        // Before the main try/finally: a page the call opened is closed on
+        // every exit path, this one included (review 2.14).
+        await page.close().catch(() => {});
+        throw error;
+      }
       const errors: string[] = [];
       const warnings: string[] = [];
       const failedRequests: Array<{ url: string; reason: string }> = [];
@@ -1832,6 +1839,12 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
           responseBytes = undefined;
         }
         const pageRevision: string = responseBytes ? responseBytes.toString('utf8') : await page.content();
+        // The detector's revision is the page AT THIS SIZE: a responsive sweep
+        // (768 ✓, 375 ✗, 320 ✗) is three different layouts of one document, not
+        // one assertion oscillating, and must not lock the next width out
+        // (2026-09-25 review, 2.5).
+        const layoutRevision = `${viewport.width}x${viewport.height}
+${pageRevision}`;
         // The binding follows the FINAL response: its URL names the document
         // and the port, whatever the caller asked for. A redirect off the
         // requested origin is reported as evidence in its own right.
@@ -1852,7 +1865,7 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
         // smoke failing before an edit and passing after it is normal
         // convergence, not oscillation — a live widget run proved the old
         // smoke-only key false-blocked a repaired page.
-        if (smoke !== undefined && stuck.isStuck(smoke, pageRevision)) {
+        if (smoke !== undefined && stuck.isStuck(smoke, layoutRevision)) {
           return {
             ok: false,
             url,
@@ -1864,9 +1877,10 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
             failedRequests: [],
             interactionLog: [],
             smokeResult: { error: 'stuck', hint: SMOKE_STUCK_HINT },
+            viewport,
           };
         }
-        if (smoke !== undefined && stuck.isOscillating(smoke, pageRevision)) {
+        if (smoke !== undefined && stuck.isOscillating(smoke, layoutRevision)) {
           return {
             ok: false,
             url,
@@ -1878,6 +1892,7 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
             failedRequests: [],
             interactionLog: [],
             smokeResult: { error: 'oscillating', hint: SMOKE_OSCILLATION_HINT },
+            viewport,
           };
         }
 
@@ -2028,7 +2043,7 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
             errors.push(`smoke evaluation threw: ${explained}`);
           }
           // Record outcome for the stuck-detector above.
-          stuck.record(smoke, smokeOk, pageRevision);
+          stuck.record(smoke, smokeOk, layoutRevision);
         }
 
         // Does the DOCUMENT declare an icon? Read it AFTER interactions so a

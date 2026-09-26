@@ -147,6 +147,9 @@ Neighbours:
   the false proof the parameter exists to end. Until 2026-09-25 there was no
   parameter, so a task demanding 320/375/768px proof could not be met, and a
   smoke labelled "320px" read `innerWidth` 800 (runs `2fac992c`, `0e89e0ce`).
+  The size rides the ATTESTED observation too (`viewport=WxH` in the line a
+  validator reads), and keys the smoke stuck/oscillation detector, whose
+  refusals report it: a width sweep is several layouts, not one flaky smoke.
 - `validate_html` reports `requestedInteractions`, `ignoredInteractions` and
   the served `document` digest alongside `interactionLog`. The counts are the
   CALLER's fact and the log is the runtime's; a result that carries only one

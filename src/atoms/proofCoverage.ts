@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { baseExecutorOf } from '../core/attestation.js';
 import type { RunContext } from '../core/types.js';
 import {
   establishesDomInteraction,
@@ -50,7 +51,8 @@ async function documentStillMatches(
   const doc = record.observation.kind === 'browser' ? record.observation.document : undefined;
   // No binding: the observation cannot be shown stale, so it is not refused.
   if (!doc) return { ok: true, detail: 'no document binding' };
-  const tools = ctx.tools;
+  // A supervisor read, on the base executor: never the child's attested evidence.
+  const tools = ctx.tools ? baseExecutorOf(ctx.tools) : undefined;
   if (!tools || !tools.has('read_file')) {
     return { ok: true, detail: 'no reader available to re-check the document' };
   }

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { baseExecutorOf } from '../core/attestation.js';
 import type { Atom } from '../core/atom.js';
 import type { Result, RunContext, Task } from '../core/types.js';
 import { modelForTier } from '../core/models.js';
@@ -37,7 +38,7 @@ export async function rootProofCoverage(ctx: RunContext, floor: ProofFloor): Pro
     if (!reads.has(path)) reads.set(path, (async () => {
       try {
         if (!ctx.tools?.has('read_file')) return undefined;
-        const read: unknown = await ctx.tools.execute('read_file', { path });
+        const read: unknown = await baseExecutorOf(ctx.tools).execute('read_file', { path });
         const content = typeof read === 'string' ? read : read && typeof read === 'object' &&
           'content' in read && typeof read.content === 'string' ? read.content : undefined;
         return content === undefined ? undefined : createHash('sha256').update(content).digest('hex');
