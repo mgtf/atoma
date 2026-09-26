@@ -5,11 +5,15 @@ of the last documentation edit. A retired report remains addressable in Git.
 For the next review, start at the last examined revision below and inspect
 subsequent corrective commits as well.
 
+- **2026-09-25** — [report](code-review-2026-09-25.md) and
+  [reproduction evidence](incidents/code-review-2026-09-25-evidence.md).
+  Window `923bbab..149f141`, 31 commits, including the closure commit
+  `159ab36` of the previous review, whose five findings it re-examines.
 - **2026-09-24** — [report](code-review-2026-09-24.md) and
   [reproduction evidence](incidents/code-review-2026-09-24-evidence.md).
   Window `01ed50c..923bbab`, 343 commits. Corrections and their verification
   are recorded in the report's closure section.
-- **2026-08-27** — window `4459dc0..01ed50c`, 57 commits.
+- **2026-08-27** — window `4459dc0..01ed50c`, 169 commits.
   Report committed in `2892ac2`, closure ledger in `f1c937d`.
   Read with `git show f1c937d:docs/code-review-2026-08-27.md`.
 - **2026-08-20** — window `c517b8e..4459dc0`, 69 commits.
@@ -18,7 +22,7 @@ subsequent corrective commits as well.
   Both August 20 and August 27 reports were retired by `4766f8a`; this does
   not move the next review's starting point back to August 18.
 - **2026-08-18** — [report](code-review-2026-08-18.md), window
-  `027ae42..08fc043`, 105 commits.
+  `027ae42..08fc043`, 104 commits.
 - **2026-08-14** — [external review](code-review-2026-08-14.md),
   August 4–14, 296 commits; examined `a56ee0c` plus the then-current worktree.
 
