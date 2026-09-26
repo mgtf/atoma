@@ -1028,6 +1028,23 @@ describe('runs as tasks, and the run log', () => {
     await handler.createTask(args, { ...(extra as object), _meta: {}, sendNotification: async (n: unknown) => { quiet.push(n); } } as never);
     await tick(60);
     expect(quiet).toEqual([]);
+    // A task-augmented call is answered at once and followed through tasks/*.
+    statuses.splice(0, statuses.length, 'running', 'running', 'running', 'running', 'delivered');
+    await handler.createTask(args, { ...(extra as object), taskRequestedTtl: 60_000, sendNotification: async (n: unknown) => { quiet.push(n); } } as never);
+    await tick(60);
+    expect(quiet).toEqual([]);
+    // A cancelled call hears nothing more, though its run goes on.
+    statuses.splice(0, statuses.length, ...Array.from({ length: 30 }, () => 'running'), 'delivered');
+    const cancelled = new AbortController();
+    const afterCancel: unknown[] = [];
+    await handler.createTask(args, { ...(extra as object), signal: cancelled.signal,
+      sendNotification: async (n: unknown) => { afterCancel.push(n); } } as never);
+    await tick(20);
+    cancelled.abort();
+    const atCancel = afterCancel.length;
+    await tick(60);
+    expect(atCancel).toBeGreaterThan(0);
+    expect(afterCancel.length).toBe(atCancel);
     for (const cleanup of host.cleanups) cleanup();
     store.close();
   });

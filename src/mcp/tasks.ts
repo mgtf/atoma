@@ -148,16 +148,26 @@ export const PROGRESS_HEARTBEAT_MS = 30_000;
  * meanwhile: Claude Code gives up on a server that sends "no response or
  * progress for 300s" while the run it started carries on (production
  * 2026-09-26, every run past five minutes). The heartbeat sends the run's
- * current status line at once and every `everyMs`; it stops for good at the
- * first send that fails — the request was answered (a task-augmented call
- * returns at once) or its stream is gone.
+ * current status line at once and every `everyMs`; it stops with the run,
+ * with the session, when the caller cancels the call, and at the first send
+ * that fails — the stream is gone.
+ *
+ * NOT for a task-augmented call: its tools/call is answered at once with the
+ * task, the SDK then drops that request's stream, and a later heartbeat has
+ * nowhere to go. Such a host follows `tasks/get` / `tasks/result`; carrying
+ * progress on the `tasks/result` stream is not built.
  */
 function requestHeartbeat(
-  extra: { readonly _meta?: { readonly progressToken?: string | number }; readonly sendNotification: (notification: { method: 'notifications/progress'; params: { progressToken: string | number; progress: number; message?: string } }) => Promise<void> },
+  extra: {
+    readonly _meta?: { readonly progressToken?: string | number };
+    readonly taskRequestedTtl?: number | null;
+    readonly signal?: AbortSignal;
+    readonly sendNotification: (notification: { method: 'notifications/progress'; params: { progressToken: string | number; progress: number; message?: string } }) => Promise<void>;
+  },
   everyMs: number
 ): { readonly note: (message: string) => void; readonly stop: () => void } {
   const token = extra._meta?.progressToken;
-  if (token === undefined) return { note: () => {}, stop: () => {} };
+  if (token === undefined || extra.taskRequestedTtl !== undefined) return { note: () => {}, stop: () => {} };
   let alive = true;
   let progress = 0;
   let message = '';
@@ -174,7 +184,11 @@ function requestHeartbeat(
   const stop = (): void => {
     alive = false;
     clearInterval(timer);
+    extra.signal?.removeEventListener('abort', stop);
   };
+  // A cancelled call's sends return silently rather than fail, so the
+  // failure path alone would keep this timer until the run ended.
+  extra.signal?.addEventListener('abort', stop, { once: true });
   // A new status line goes out at once, but never more than one per
   // `HEARTBEAT_MIN_GAP_MS`: an operator run changes its line on every chunk.
   const note = (next: string): void => {
