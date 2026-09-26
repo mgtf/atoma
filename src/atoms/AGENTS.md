@@ -52,7 +52,12 @@ Neighbours:
   The root changes no phase credits or learning state. The probe receives only `output` and `summary`, as at L3; internal
   plan/verdict/fallback trace quotes are not delivery claims. Phase coverage
   is collected with its original attempt and branch, never reevaluated
-  against the root floor. The floor is not inherited by phases.
+  against the root floor. The floor is not inherited by phases. The review
+  reads one mechanical line naming the sizes the attempt's pages were laid
+  out at (`observedLayoutsBlock`): run 134d916a was accepted on "no overflow
+  at 375 and 1280 pixels" with every check at 800x600. No criterion text is
+  parsed — a width detector is the vocabulary-frozen kind this file warns
+  about; the acceptor compares.
 - A LANDED result carries `LANDED_RESULT_GUIDANCE` to that validator, and
   nothing else does. A landed run stopped before it could prove the floor, so
   `floorCoverage` is uncovered BY CONSTRUCTION and the verdict is always a

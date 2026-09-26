@@ -148,6 +148,27 @@ describe('one common root acceptance, independent of phase credit', () => {
     expect(recordSkill).not.toHaveBeenCalled();
     expect(recordTrust).not.toHaveBeenCalled();
   });
+  it('names the sizes the attempt laid its pages out at, beside the criteria (production run 134d916a)', async () => {
+    // "No horizontal overflow at 375 and 1280 pixels" was accepted on checks
+    // only ever laid out at 800x600: the acceptor now reads one line saying so.
+    const ctx = context();
+    await observe(ctx);
+    const record = ctx.attestations.forAttempt(1)[0]!;
+    if (record.observation.kind !== 'browser') throw new Error('expected browser observation');
+    ctx.attestations = createAttestationLog();
+    ctx.attestations.append({ ...record, observation: { ...record.observation, viewport: { width: 800, height: 600 } } });
+    ctx.attestations.append({ ...record, eventId: 'e-375', observation: { ...record.observation, viewport: { width: 375, height: 667 } } });
+    ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'Not laid out at 1280' }));
+    await acceptRootResult({ actor: new Actor(), task, result, ctx, floor: [], phaseCoverage: [] });
+    expect(ctx.llm.calls[0]!.userContent).toContain('BROWSER LAYOUTS OBSERVED IN THIS ATTEMPT');
+    expect(ctx.llm.calls[0]!.userContent).toContain('index.html at 800x600, 375x667');
+    // Nothing observed in a browser, nothing said.
+    const bare = context();
+    bare.llm.enqueueText(jsonText({ approved: true, reasoning: 'Reviewed' }));
+    await acceptRootResult({ actor: new Actor(), task, result, ctx: bare, floor: [], phaseCoverage: [] });
+    expect(bare.llm.calls[0]!.userContent).not.toContain('BROWSER LAYOUTS OBSERVED');
+  });
+
   it('rejects the delegated failure envelope without a validator call', async () => {
     const ctx = context();
     const accepted = await acceptRootResult({ actor: new Actor(3), task, ctx, floor: [], phaseCoverage: [],

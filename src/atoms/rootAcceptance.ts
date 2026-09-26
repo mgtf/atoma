@@ -30,6 +30,29 @@ function checklistCoverage(ctx: RunContext, checklist: AcceptanceChecklist): Che
   return coverAcceptanceChecklist(checklist, observations);
 }
 
+/**
+ * The sizes THIS attempt's browser observations were laid out at, per
+ * document: a mechanical fact beside the criteria, never a verdict. Each
+ * observation line already carries its viewport; one line naming them all is
+ * what lets the acceptor set "at 375 and 1280 pixels wide" against
+ * "800x600" — production run 134d916a (2026-09-26) was accepted on overflow
+ * checks that were only ever laid out at 800x600. No criterion text is
+ * parsed: the acceptor compares.
+ */
+export function observedLayoutsBlock(ctx: RunContext): string {
+  const layouts = new Map<string, Set<string>>();
+  for (const record of ctx.attestations?.forAttempt(ctx.attempt ?? 1) ?? []) {
+    if (record.observation.kind !== 'browser') continue;
+    const document = record.observation.document?.path ?? '(page not bound to a workspace file)';
+    const size = record.observation.viewport ? `${record.observation.viewport.width}x${record.observation.viewport.height}` : 'an unrecorded size';
+    layouts.set(document, (layouts.get(document) ?? new Set()).add(size));
+  }
+  if (layouts.size === 0) return '';
+  return 'BROWSER LAYOUTS OBSERVED IN THIS ATTEMPT (mechanical, from the attested observations): ' +
+    [...layouts].map(([document, sizes]) => `${document} at ${[...sizes].join(', ')}`).join('; ') +
+    '. No page was laid out at any other size in this attempt, whatever a summary or a README claims.';
+}
+
 /** Root proof is stricter than phase proof: no binding or unreadable bytes never cover. */
 export async function rootProofCoverage(ctx: RunContext, floor: ProofFloor): Promise<AcceptanceInfo['floorCoverage']> {
   const records = ctx.attestations?.forAttempt(ctx.attempt ?? 1) ?? [];
@@ -70,6 +93,7 @@ export async function acceptRootResult(args: {
   const coverage = checklistCoverage(ctx, checklist);
   const checklistBlock = renderChecklistCoverage(checklist, coverage,
     { landed: Boolean(result.unfinishedPhases?.length), source });
+  const layoutsBlock = observedLayoutsBlock(ctx);
   const gates = await runResultGates(buildResultGateEnv({ task, result, ctx,
     childName: actor.name, childToolNames: actor.toolNames() }), ctx.mechanicalResultRejections, 'delegated');
   const probe = await checkGroundTruth({ ctx, subject: 'RESULT',
@@ -88,7 +112,7 @@ export async function acceptRootResult(args: {
       groundTruthBlock: probe.block,
       mechanicalFindingsBlock: renderResultGateFindings(gates.reviewFindings),
       proofCoverageBlock: 'ROOT DELIVERY PROOF (no effect on phase credits):\n' + JSON.stringify(floorCoverage) +
-        (checklistBlock ? `\n\n${checklistBlock}` : ''),
+        (checklistBlock ? `\n\n${checklistBlock}` : '') + (layoutsBlock ? `\n\n${layoutsBlock}` : ''),
       // A landed run always reaches here through a validation call, because it
       // stopped before it could prove the floor. Saying what a landing IS costs
       // one block and decides whether the phases it did complete survive.
