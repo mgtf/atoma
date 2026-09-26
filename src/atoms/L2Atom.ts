@@ -40,7 +40,6 @@ import { randomUUID } from 'node:crypto';
 import { RegistryNotFoundError } from '../core/errors.js';
 import { mergeTools } from './toolMerge.js';
 import {
-  landingSignal,
   prefilterStrategy,
   shouldTrustSkill,
   shouldTrustType,
@@ -69,7 +68,7 @@ export {
 export { extractRecordedProbes } from '../contracts/witness.js';
 import { SkillLifecycle, resultHasSuccessfulToolAction } from '../skills/lifecycle.js';
 import { llmVerdict, undeclaredToolMentions} from './verdict.js';
-import { dispatchWithAggregation, markLanded, type DispatchOutcome } from './dispatch.js';
+import { dispatchWithAggregation, keptWithoutSynthesis, markLanded, synthesizeOrKeep, type DispatchOutcome } from './dispatch.js';
 export { llmVerdict, VALIDATION_SYSTEM_PROMPT } from './verdict.js';
 import { skillContextBlock } from '../skills/lifecycle.js';
 export {
@@ -1861,13 +1860,12 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       `Preserve evidence provenance and unresolved failures; never claim an unwritten artifact exists.`,
       `Return JSON: {"output": <any>, "summary": "<one sentence>"}`,
     ].join('\n');
-    const resp = await ctx.llm.complete(
-      this.toLlmRequest('execute', {
-        userContent,
-        params: this.params,
-        signal: landed ? landingSignal(ctx.deadlineAt) : ctx.signal,
-      })
-    );
+    const resp = await synthesizeOrKeep(ctx, landed, (signal) => ctx.llm.complete(
+      this.toLlmRequest('execute', { userContent, params: this.params, signal })
+    ));
+    if (!resp) {
+      return keptWithoutSynthesis(subResults, { tier: 2, name: this.name, viaFallback: false }, landed);
+    }
     const { output, summary } = parsePayloadTolerant(resp.text);
     return {
       output,

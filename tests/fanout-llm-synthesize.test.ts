@@ -134,3 +134,48 @@ describe('L2.execute — llm-synthesize aggregation', () => {
     expect(result.summary).toMatch(/fallback produced non-JSON output/);
   });
 });
+
+describe('a synthesis the run deadline interrupts keeps its sub-results (2026-09-25 review, 1.2c)', () => {
+  function synthesisRun(abortWith: unknown) {
+    const reg = new AtomRegistry(openDb(':memory:'));
+    const a = reg.create(1, seed);
+    const b = reg.create(1, seed);
+    for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) {
+      reg.recordSuccess(a.name);
+      reg.recordSuccess(b.name);
+    }
+    const l2 = L2Atom.fromType(reg.create(2, seed), reg);
+    const controller = new AbortController();
+    const ctx = { ...makeCtx(), signal: controller.signal };
+    ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'skip' }));
+    ctx.llm.enqueueText(jsonTextPair(
+      { strategy: 'reuse', target: a.name, reasoning: 'pf' },
+      { reasoning: 'decompose', subtasks: [
+        { description: 'build layout', preferredChild: a.name },
+        { description: 'build logic', preferredChild: b.name },
+      ], aggregation: { mode: 'llm-synthesize', instruction: 'Assemble' }, expectedOutput: 'full app' },
+    ));
+    for (const _ of ['A', 'B']) ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    ctx.llm.enqueueText(jsonText({ output: '<div>layout</div>', summary: 'layout fragment' }));
+    ctx.llm.enqueueText(jsonText({ output: '<script>logic</script>', summary: 'logic fragment' }));
+    // The merge call: the deadline (or a cancellation) falls while it is in flight,
+    // and the transport never answers.
+    ctx.llm.enqueue(() => { controller.abort(abortWith); return new Promise(() => {}); });
+    return { l2, ctx };
+  }
+
+  it('lands the complete sub-results, naming the missing synthesis, when the deadline falls', async () => {
+    const { l2, ctx } = synthesisRun(new DOMException('Execution deadline', 'TimeoutError'));
+    const plan = await l2.plan({ description: 'full app' }, ctx);
+    const out = await l2.execute({ description: 'full app' }, plan, ctx);
+    expect(out.output).toEqual(['<div>layout</div>', '<script>logic</script>']);
+    expect(out.unfinishedPhases).toEqual(['synthesis of 2 sub-results (the run deadline fell during it)']);
+    expect(out.summary).toContain('layout fragment');
+  });
+
+  it('rethrows an explicit cancellation instead of landing on it', async () => {
+    const { l2, ctx } = synthesisRun(new Error('Cancelled by operator'));
+    const plan = await l2.plan({ description: 'full app' }, ctx);
+    await expect(l2.execute({ description: 'full app' }, plan, ctx)).rejects.toThrow('Cancelled by operator');
+  });
+});

@@ -2,7 +2,7 @@ import type { Atom } from '../core/atom.js';
 import { setMaxListeners } from 'node:events';
 import type { Result, RunContext, Task, ToolExecutor } from '../core/types.js';
 import { attestingExecutor, createAttestationLog } from '../core/attestation.js';
-import { landingSignal } from '../atoms/cost.js';
+import { abortedByDeadline, finalizationSignal, landingSignal, withinSignal } from '../atoms/cost.js';
 import { acceptRootResult } from '../atoms/rootAcceptance.js';
 import { outOfPhaseBudget } from '../core/limits.js';
 import type { AcceptanceInfo, DepthMode, PhaseCoverageRecord, ProofFloor, TopologyInfo } from '../contracts/depthRouting.js';
@@ -93,18 +93,6 @@ export function withAcceptanceChecklist(task: Task, checklist: AcceptanceCheckli
   };
 }
 
-/** The finalization ceiling also bounds a collaborator that ignores abort. */
-async function withinSignal<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
-  let abort: () => void = () => {};
-  const interrupted = new Promise<never>((_resolve, reject) => {
-    abort = () => reject(signal.reason instanceof Error ? signal.reason : new Error('Operation aborted', { cause: signal.reason }));
-    signal.addEventListener('abort', abort, { once: true });
-    if (signal.aborted) abort();
-  });
-  try { return await Promise.race([work, interrupted]); }
-  finally { signal.removeEventListener('abort', abort); }
-}
-
 /** The existing atom protocol executes each attempt; this owns only their lifetime. */
 export async function runDepthTask(args: {
   mode: DepthMode; task: Task; ctx: RunContext; floor: ProofFloor;
@@ -172,24 +160,42 @@ export async function runDepthTask(args: {
       // attempt, as deepening uses, would discard all of it, which is right
       // when the workspace is replaced and wrong when it is being completed.
       let currentTask = task;
+      // The last REFUSED pass. A remediation the deadline cuts before it accepts
+      // a phase lands on it instead of taking it down (2026-09-25 review, 1.2b):
+      // the dispatch of a pass that accepted nothing throws, and until
+      // 2026-09-26 that discarded a complete first result as `failed`.
+      let refused: { readonly result: Result; readonly acceptance: AcceptanceInfo } | null = null;
       for (;;) {
-        const result = await handle(currentTask, attemptCtx);
-        // Only a recovered deadline landing may leave the execution clock.
-        // Deepening and explicit cancellation still abort this attempt.
+        let result: Result;
+        try {
+          result = await handle(currentTask, attemptCtx);
+        } catch (error) {
+          if (refused && !cancellation.signal.aborted && abortedByDeadline(ctx.signal)) {
+            const reasoning = refused.acceptance.reasoning.trim() || 'the root acceptor gave no reason';
+            return markRefused(refused.result, {
+              reasoning: `${reasoning} — the remediation pass was cut by the run deadline before it completed a phase`,
+            });
+          }
+          throw error;
+        }
+        // WORK IN HAND leaves the execution clock for the finalization window,
+        // landed or complete (2026-09-25 review, 1.2a): a complete result whose
+        // root acceptance straddled the deadline used to be thrown away while a
+        // landed one was kept. Deepening and explicit cancellation still abort.
         cancellation.signal.throwIfAborted();
         const landed = Boolean(result.unfinishedPhases?.length);
-        const timedOut = ctx.signal.aborted && ctx.signal.reason instanceof Error && ctx.signal.reason.name === 'TimeoutError';
-        if (!landed || !timedOut) attemptCtx.signal.throwIfAborted();
+        if (!abortedByDeadline(ctx.signal)) attemptCtx.signal.throwIfAborted();
         const explicitCancellation = new AbortController();
         const forwardCancellation = () => {
-          if (!(ctx.signal.reason instanceof Error && ctx.signal.reason.name === 'TimeoutError')) {
-            explicitCancellation.abort(ctx.signal.reason);
-          }
+          if (!abortedByDeadline(ctx.signal)) explicitCancellation.abort(ctx.signal.reason);
         };
-        if (landed) ctx.signal.addEventListener('abort', forwardCancellation, { once: true });
-        const acceptanceCtx = landed ? { ...attemptCtx,
-          signal: AbortSignal.any([landingSignal(ctx.deadlineAt), cancellation.signal, explicitCancellation.signal]),
-        } : attemptCtx;
+        ctx.signal.addEventListener('abort', forwardCancellation, { once: true });
+        // Deadline + grace, absolute. Without a run deadline a landed result keeps
+        // the post-approval cap and a complete one only its cancellations.
+        const bound = finalizationSignal(ctx.deadlineAt) ?? (landed ? landingSignal() : undefined);
+        const acceptanceCtx: RunContext = { ...attemptCtx,
+          signal: AbortSignal.any([...(bound ? [bound] : []), cancellation.signal, explicitCancellation.signal]),
+        };
         let acceptance: AcceptanceInfo;
         try {
           acceptance = await withinSignal(acceptRootResult({ actor, task: currentTask, result, ctx: acceptanceCtx,
@@ -199,9 +205,10 @@ export async function runDepthTask(args: {
         } catch (error) {
           cancellation.signal.throwIfAborted();
           explicitCancellation.signal.throwIfAborted();
-          if (!landed || !acceptanceCtx.signal.aborted) throw error;
-          // Unverified is never delivered. Retain accepted phases even when
-          // the bounded final verdict cannot complete, without a new pass.
+          // A real error before the deadline is still an error. Once the clock
+          // is involved — the window closed, or the run deadline passed — the
+          // work in hand is kept, never delivered, and no new pass is opened.
+          if (!acceptanceCtx.signal.aborted && !abortedByDeadline(ctx.signal)) throw error;
           return markRefused(result, { reasoning: 'Root acceptance could not finish within the landing budget' });
         } finally {
           ctx.signal.removeEventListener('abort', forwardCancellation);
@@ -221,6 +228,7 @@ export async function runDepthTask(args: {
           return markRefused(result, acceptance);
         }
         remediations += 1;
+        refused = { result, acceptance };
         ctx.recordRunStat?.('root-remediation');
         ctx.logger.warn(
           `[root] delivery refused; one more pass with the acceptor's reasons (${remediations}/${MAX_ROOT_REMEDIATIONS})`

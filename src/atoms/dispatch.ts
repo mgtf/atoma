@@ -1,5 +1,6 @@
 import { outOfPhaseBudget } from '../core/limits.js';
-import type { Plan, Result, RunContext } from '../core/types.js';
+import type { LlmCompletionResponse, Plan, Result, RunContext } from '../core/types.js';
+import { abortedByDeadline, landingSignal, withinSignal } from './cost.js';
 
 type Subtask = Plan['subtasks'][number];
 
@@ -174,5 +175,60 @@ export function markLanded(result: Result, unfinished: readonly Subtask[]): Resu
     // makes the whole run partial, and its unfinished phases must survive the
     // aggregate that wraps it.
     unfinishedPhases: [...(result.unfinishedPhases ?? []), ...phases],
+  };
+}
+
+/**
+ * `llm-synthesize` over sub-results that ALREADY EXIST is finalization, not
+ * execution (2026-09-25 review, 1.2c). The L1 molecules wrote the files; the
+ * synthesis is one text call that merges what they reported. Losing it must
+ * not lose them: until 2026-09-26 a synthesis the run deadline cut over
+ * complete sub-results rejected `execute`, and a landed one that failed had no
+ * fallback — either way the run recorded `failed` and seeded nothing.
+ *
+ * Returns the response, or `null` when the caller must KEEP the sub-results
+ * without synthesis (`keptWithoutSynthesis`): the call failed while landing,
+ * or the run deadline fell during it. Explicit cancellation and deepening are
+ * interruptions and rethrow; any other error before the deadline is an error.
+ * Bounded by `withinSignal` because a transport may ignore abort.
+ */
+export async function synthesizeOrKeep(
+  ctx: RunContext,
+  landed: boolean,
+  call: (signal: AbortSignal) => Promise<LlmCompletionResponse>
+): Promise<LlmCompletionResponse | null> {
+  const signal = landed ? landingSignal(ctx.deadlineAt) : ctx.signal;
+  try {
+    return await withinSignal(call(signal), signal);
+  } catch (error) {
+    if (ctx.signal.aborted && !abortedByDeadline(ctx.signal)) throw error;
+    if (landed || abortedByDeadline(ctx.signal)) return null;
+    throw error;
+  }
+}
+
+/**
+ * The sub-results as they are, when their synthesis could not finish. LANDED:
+ * the missing synthesis is named as an unfinished step, so the run is judged
+ * as a partial and its work seeds the next run instead of being claimed.
+ */
+export function keptWithoutSynthesis(
+  subResults: readonly Result[],
+  producedBy: Result['producedBy'],
+  landed: boolean
+): Result {
+  const evidence = subResults.flatMap((result) => result.evidence ?? []);
+  const why = landed ? 'its landing window closed' : 'the run deadline fell during it';
+  return {
+    output: subResults.map((result) => result.output),
+    summary: `${subResults.length} sub-results kept without synthesis (${why}): ${subResults
+      .map((result, i) => `#${i + 1} ${result.summary}`).join(' | ')}`,
+    trace: [],
+    producedBy,
+    ...(evidence.length > 0 ? { evidence } : {}),
+    unfinishedPhases: [
+      ...subResults.flatMap((result) => result.unfinishedPhases ?? []),
+      `synthesis of ${subResults.length} sub-results (${why})`,
+    ],
   };
 }

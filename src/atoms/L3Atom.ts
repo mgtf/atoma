@@ -18,7 +18,7 @@ import {
 } from '../registry/atomRegistry.js';
 import { modelForTier } from '../core/models.js';
 import { capToolIterations } from '../core/limits.js';
-import { dispatchWithAggregation, markLanded, type DispatchOutcome } from './dispatch.js';
+import { dispatchWithAggregation, keptWithoutSynthesis, markLanded, synthesizeOrKeep, type DispatchOutcome } from './dispatch.js';
 import { acceptL3RootPlan } from './l3RootPlan.js';
 import { L2Atom } from './L2Atom.js';
 import { buildResultGateEnv, runResultGates } from './resultGates.js';
@@ -45,7 +45,6 @@ import { randomUUID } from 'node:crypto';
 import { RegistryNotFoundError } from '../core/errors.js';
 import { mergeTools } from './toolMerge.js';
 import {
-  landingSignal,
   prefilterStrategy,
   shouldTrustType,
   trustedApproval,
@@ -1023,8 +1022,8 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     /**
      * True when the run deadline landed the dispatch that produced
      * `subResults`. It changes exactly one thing: the `llm-synthesize` call
-     * below cannot ride `ctx.signal`, which is already aborted by then. See
-     * `landingSignal`.
+     * below cannot ride `ctx.signal`, which is already aborted by then, and a
+     * synthesis that cannot finish keeps its sub-results. See `synthesizeOrKeep`.
      */
     landed = false
   ): Promise<Result> {
@@ -1090,13 +1089,12 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       `Preserve evidence provenance and unresolved failures; never claim an unwritten artifact exists.`,
       `Return JSON: {"output": <any>, "summary": "<one sentence>"}`,
     ].join('\n');
-    const resp = await ctx.llm.complete(
-      this.toLlmRequest('execute', {
-        userContent,
-        params: this.params,
-        signal: landed ? landingSignal(ctx.deadlineAt) : ctx.signal,
-      })
-    );
+    const resp = await synthesizeOrKeep(ctx, landed, (signal) => ctx.llm.complete(
+      this.toLlmRequest('execute', { userContent, params: this.params, signal })
+    ));
+    if (!resp) {
+      return keptWithoutSynthesis(subResults, { tier: 3, name: this.name, viaFallback: false }, landed);
+    }
     const { output, summary } = parsePayloadTolerant(resp.text);
     return {
       output,

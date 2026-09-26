@@ -176,8 +176,58 @@ export function postApprovalSignal(): AbortSignal {
 export function landingSignal(deadlineAt?: number): AbortSignal {
   // All landing stages share this absolute ceiling, below the runner's 60s
   // watchdog grace. Nested synthesis must not buy another full timeout.
-  const remaining = deadlineAt === undefined ? POST_APPROVAL_LLM_TIMEOUT_MS : deadlineAt + 45_000 - Date.now();
+  const remaining = deadlineAt === undefined ? POST_APPROVAL_LLM_TIMEOUT_MS : deadlineAt + FINALIZATION_GRACE_MS - Date.now();
   return AbortSignal.timeout(Math.max(1, Math.min(POST_APPROVAL_LLM_TIMEOUT_MS, remaining)));
+}
+
+/**
+ * THE ONE FINALIZATION WINDOW: how far past the run deadline work ALREADY IN
+ * HAND may still be judged, synthesised and recorded. Below the runner's 60s
+ * watchdog grace (`WATCHDOG_GRACE_MS`), so a hard kill still reaps everything.
+ */
+export const FINALIZATION_GRACE_MS = 45_000;
+
+/**
+ * The finalization bound for a result that EXISTS — landed or complete
+ * (2026-09-25 review, 1.2). Until 2026-09-26 only a landed result got it: a
+ * COMPLETE result whose root acceptance straddled the deadline was thrown
+ * away as `failed`, while the same timing on a landed one was kept as
+ * `partial` — more work, worse outcome. Absolute: deadline + grace, never a
+ * fresh per-call timeout, so a result arriving ten minutes early is judged
+ * on the whole remaining clock. `undefined` without a deadline (library
+ * callers), where the caller's own signal is the only bound.
+ */
+export function finalizationSignal(deadlineAt?: number): AbortSignal | undefined {
+  if (deadlineAt === undefined) return undefined;
+  return AbortSignal.timeout(Math.max(1, deadlineAt + FINALIZATION_GRACE_MS - Date.now()));
+}
+
+/**
+ * Did the RUN DEADLINE abort this signal — as opposed to an explicit
+ * cancellation or a deepening, which are interruptions and never a landing?
+ * The runner's deadline is `AbortSignal.timeout`, whose reason is a
+ * `TimeoutError` DOMException (an `Error` on Node 24).
+ */
+export function abortedByDeadline(signal: AbortSignal | undefined): boolean {
+  if (!signal?.aborted) return false;
+  const reason: unknown = signal.reason;
+  return reason instanceof Error && reason.name === 'TimeoutError';
+}
+
+/**
+ * Settle `work` or reject when `signal` aborts, whichever comes first: the
+ * finalization ceiling must also bound a collaborator (a transport) that
+ * ignores abort.
+ */
+export async function withinSignal<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  let abort: () => void = () => {};
+  const interrupted = new Promise<never>((_resolve, reject) => {
+    abort = () => reject(signal.reason instanceof Error ? signal.reason : new Error('Operation aborted', { cause: signal.reason }));
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+  });
+  try { return await Promise.race([work, interrupted]); }
+  finally { signal.removeEventListener('abort', abort); }
 }
 
 /**

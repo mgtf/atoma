@@ -152,8 +152,10 @@ load-bearing.
   synthesis would throw before its first token and discard the branches the
   landing exists to preserve. Synthesis and root acceptance share the absolute
   deadline + 45s ceiling, inside the runner watchdog's 60s grace. A library
-  context without a deadline retains the post-approval cap. Sequential
-  aggregation makes no call and needs none.
+  context without a deadline retains the post-approval cap. A synthesis that
+  cannot finish — failed while landing, or cut by the deadline over complete
+  sub-results — KEEPS them, landed (`synthesizeOrKeep`); cancellation and
+  deepening rethrow. Sequential aggregation makes no call and needs none.
 
 ## Verification and ground truth
 

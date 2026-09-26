@@ -614,3 +614,81 @@ it('never converts an explicit cancellation into a deadline landing', async () =
   })).rejects.toThrow('Cancelled by operator');
   expect(accepted).not.toHaveBeenCalled();
 });
+
+describe('work in hand at the deadline is finalized, landed or complete (2026-09-25 review, 1.2)', () => {
+  const approve = (reasoning: string) => ({ text: jsonText({ approved: true, reasoning }), stopReason: 'end_turn' as const, usage: { inputTokens: 1, outputTokens: 1 } });
+
+  it('judges a COMPLETE result on the finalization window when the deadline falls during its verdict', async () => {
+    const ctx = context();
+    const controller = new AbortController();
+    const accepted = vi.fn();
+    ctx.llm.enqueue(async () => {
+      controller.abort(new DOMException('Execution deadline', 'TimeoutError'));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return approve('Accepted completed work');
+    });
+    const out = await runDepthTask({ mode: 'short', task, floor: [],
+      ctx: { ...ctx, signal: controller.signal, deadlineAt: Date.now() + 5_000 }, restart: vi.fn(), onTopology: vi.fn(),
+      onAcceptance: accepted, createExecutor: () => ({ actor: new Actor(), handle: async () => result }) });
+    expect(controller.signal.aborted).toBe(true);
+    expect(out.refusal).toBeUndefined();
+    expect(out.unfinishedPhases).toBeUndefined();
+    expect(accepted).toHaveBeenCalledWith(expect.objectContaining({ approved: true }));
+    expect(ctx.llm.calls[0]!.signal?.aborted).toBe(false);
+  });
+
+  it('keeps a complete result as a refused partial when its verdict outlives the window', async () => {
+    const ctx = context();
+    const controller = new AbortController();
+    const finalization = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(finalization.signal);
+    ctx.llm.enqueue(() => {
+      controller.abort(new DOMException('Execution deadline', 'TimeoutError'));
+      finalization.abort(new DOMException('Finalization deadline', 'TimeoutError'));
+      return new Promise(() => {}); // A transport that ignores abort must not hold the run.
+    });
+    try {
+      const out = await runDepthTask({ mode: 'short', task, floor: [],
+        ctx: { ...ctx, signal: controller.signal, deadlineAt: Date.now() + 5_000 }, restart: vi.fn(), onTopology: vi.fn(),
+        onAcceptance: vi.fn(), createExecutor: () => ({ actor: new Actor(), handle: async () => result }) });
+      expect(out.refusal).toContain('landing budget');
+      expect(out.unfinishedPhases).toBeUndefined();
+      expect(landingReasons(out).length).toBeGreaterThan(0);
+    } finally { timeout.mockRestore(); }
+  });
+
+  it('lands a refused complete result when the deadline cuts its remediation before a phase', async () => {
+    const ctx = context();
+    const controller = new AbortController();
+    ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'root DOM proof missing' }));
+    let passes = 0;
+    const out = await runDepthTask({ mode: 'short', task, floor: [],
+      ctx: { ...ctx, signal: controller.signal, deadlineAt: Date.now() + 90_000 }, restart: vi.fn(), onTopology: vi.fn(),
+      onAcceptance: vi.fn(), createExecutor: () => ({ actor: new Actor(), handle: async (_task, current) => {
+        passes += 1;
+        if (passes === 1) return result;
+        controller.abort(new DOMException('Execution deadline', 'TimeoutError'));
+        current.signal.throwIfAborted();
+        return result;
+      } }) });
+    expect(passes).toBe(2);
+    expect(out.refusal).toMatch(/root DOM proof missing.*remediation pass was cut by the run deadline/);
+    expect(out.output).toEqual(result.output);
+  });
+
+  it('still treats an explicit cancellation of the remediation pass as an interruption', async () => {
+    const ctx = context();
+    const controller = new AbortController();
+    ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'root DOM proof missing' }));
+    let passes = 0;
+    await expect(runDepthTask({ mode: 'short', task, floor: [],
+      ctx: { ...ctx, signal: controller.signal, deadlineAt: Date.now() + 90_000 }, restart: vi.fn(), onTopology: vi.fn(),
+      onAcceptance: vi.fn(), createExecutor: () => ({ actor: new Actor(), handle: async (_task, current) => {
+        passes += 1;
+        if (passes === 1) return result;
+        controller.abort(new Error('Cancelled by operator'));
+        current.signal.throwIfAborted();
+        return result;
+      } }) })).rejects.toThrow('Cancelled by operator');
+  });
+});
