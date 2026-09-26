@@ -608,3 +608,35 @@ ajoute seulement ce rapport, son annexe de preuves et son entrée dans
 l'[index des revues](code-reviews.md), dont elle corrige deux comptes de
 commits (D8). Les arbitrages déjà documentés restent distingués des défauts ;
 aucune nouvelle gate de contenu n'est conçue ici.
+
+## 9. Corrections du 26 septembre
+
+À la demande du propriétaire, les findings ont été corrigés sur la branche
+`fix/review-2026-09-25`, conçus ensemble et livrés en commits revus, chacun
+avec un test qui traverse le chemin de production en cause. Les sections
+précédentes conservent le constat initial.
+
+| Finding | Correction | Commit |
+|---|---|---|
+| 1.1 | Ligne de rerun relue par orthographe (`storedRunTierModelsSchema`) ; l'offre du modèle est demandée au lancement, qui refuse. | `654c404` |
+| 1.2 | Tout travail en main se finalise jusqu'à deadline + 45 s (`finalizationSignal`) ; une remédiation coupée atterrit sur le premier refus ; une synthèse interrompue garde ses sous-résultats (`synthesizeOrKeep`). | `c9d12c7` |
+| 1.3 | Un GET qui reprend le flux d'une requête épingle comme le POST ; `reclaim` n'évince jamais une session occupée (503 sinon). | `18a01cc` |
+| 1.4, 2.4, 2.10 | Les sondes des superviseurs passent par `baseExecutorOf` ; budget par type (8 lignes navigateur toujours) ; `record_probe` attesté. | `62d17af` |
+| 1.5, 2.3 | Statut lu après le chemin sous `404`, `→ 404`, `(404)` ; une ligne HTTP qui nomme un statut ailleurs est refusée ; taille encodée bornée à la porte. | `4e3174a` |
+| 1.6, 2.5, 2.14 | Viewport dans l'observation attestée et sa ligne ; clé du détecteur d'oscillation par taille de mise en page ; page fermée si `setViewport` échoue. | `62d17af` |
+| 1.7 | Le `drain` d'approfondissement ne détruit plus le service de recherche du run. | `a90c329` |
+| 2.1 | Origine dont la liste rédigée est irrécupérable : refus 409 ; origine jugée sans liste : rerun sans liste (`ATOMA_ACCEPTANCE_SOURCE=none`). | `654c404` |
+| 2.2 | Journal du runner rédigé sous le tier platform ; message d'inventaire sans chemin. | `289a70f` |
+| 2.6, 2.14 | L'analyste résident garde le run en file et fait une pause sur refus de quota ; compte `--once` corrigé. | `3a696fe` |
+| 2.7 | L'index des runs et les lignes de projet portent `rerunOf` ; un rerun partiel ne promet pas de continuation. | `2ecf33f` |
+| 2.8 | Un `direct` et son `success` ne créditent aucune exécution ; les deux émetteurs nomment l'exécutant. | `b92bf1c` |
+| 2.9 | Entrée de harnais réparée (stdout omis), non supprimée, à l'héritage du seed. | `112fbff` |
+| 2.11 | Le plafond ferme l'appel bloqué seul ; `ATOMA_MCP_MAX_REQUEST_MS`. | `18a01cc` |
+| 2.12 | `run.finished` journalisé avant le retrait de la preview. | `00d8937` |
+| 2.13 | La carte de run dépliée du client GL affiche les pins par tier. | `d945421` |
+| D1–D11 | README, `AGENTS.md`, document de checklist, commentaires, CHANGELOG. | `3cdc6f9`, `7896595` |
+
+Reste ouvert : **D12** (compilation des recettes), dont le comportement est
+modifié en parallèle par un autre chantier. Les décisions
+4.E (visibilité des payeurs) et 4.F (persistance des listes rédigées)
+appartiennent toujours au propriétaire ; 2.1 est fermé sans 4.F, par refus.
