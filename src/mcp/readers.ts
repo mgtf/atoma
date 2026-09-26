@@ -32,6 +32,7 @@ import { unfoldedRegistryPredicate } from '../registry/db.js';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { readBoundedRunFile } from '../viz/runIndex.js';
+import { redactHostPaths, type HostPathRedaction } from '../projects/hostPaths.js';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import Database from 'better-sqlite3';
@@ -559,28 +560,10 @@ function traceDetail(value: unknown, opts: TraceReadOptions) {
     caveat: TRACE_DETAIL_CAVEAT };
 }
 
-/** A host location to replace, in a runner log, by a label a tenant may read. */
-export interface HostPathRedaction {
-  readonly path: string;
-  readonly label: string;
-}
-
 /**
- * Replace each host location by its label, longest first so a nested root is
- * never half-replaced. The runner log names where the host keeps a run
- * (`workspace seeded from …`, `skills root: …`, npm's argv with `--seed`);
- * below the platform tier those are the deployment's layout, which the public
- * run projection and `commonsForTier` already withhold (2026-09-25 review, 2.2).
+ * The log path is resolved from an authorised project row, never supplied by a
+ * caller; `redactions` withhold the host layout below the platform tier.
  */
-export function redactHostPaths(text: string, redactions: readonly HostPathRedaction[]): string {
-  let out = text;
-  const ordered = redactions.filter((redaction) => redaction.path.length > 1)
-    .sort((a, b) => b.path.length - a.path.length);
-  for (const { path, label } of ordered) out = out.split(path).join(label);
-  return out;
-}
-
-/** The log path is resolved from an authorised project row, never supplied by a caller. */
 export function runLogFile(path: string, opts: TraceReadOptions, redactions: readonly HostPathRedaction[] = []): unknown {
   const read = readBoundedRunFile(path);
   if (!read.ok) return { note: `run log unavailable: ${read.reason}` };

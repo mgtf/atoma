@@ -13,6 +13,7 @@ import { eventLabel, type CrossOrgRead, type CrossOrgReadSink, type PlatformEven
 import { GitHubStore } from '../github/store.js';
 import { PublicationSupersededError, type GitHubPublisher } from './publisher.js';
 import { ProjectStateConflict, resolveProjectRunTraceFile } from './store.js';
+import { projectRunHostRedactions, redactHostPaths } from './hostPaths.js';
 import type { RunPayerLedger } from '../contracts/runPayers.js';
 import {
   ProjectRunBusy,
@@ -82,6 +83,11 @@ function publicRun(
   models: RunPayerLedger | null
 ) {
   const base = projectRunPublicSchema.parse(run);
+  // The projection omits `hostPaths`, and an error must not carry them back:
+  // a spawn failure or a publication's staging error names the run's
+  // directories (2026-09-25 adversarial review).
+  const redactions = projectRunHostRedactions(run);
+  const redacted = (text: string | null) => (text === null ? null : redactHostPaths(text, redactions));
   // Persisted project lifecycle time, including host finalization, not the
   // narrower trace duration. Missing launch/end times remain unknown.
   const elapsedMs = run.startedAt && run.endedAt
@@ -94,6 +100,7 @@ function publicRun(
   });
   return {
     ...base,
+    error: redacted(base.error),
     traceId: run.traceId ?? (traceFile ? run.projectRunId : null),
     costUsd: run.stats?.costUsd ?? null,
     // The per-tier selectors this run was RESOLVED to, from the immutable payer
@@ -112,7 +119,7 @@ function publicRun(
           mergeStatus: publication.pullRequestUrl || publication.git?.mode === 'pull-request'
             ? 'unknown' : publication.git?.mode === 'direct' ? 'not-applicable' : 'unknown',
           baseSha: publication.baseSha,
-          error: publication.error,
+          error: redacted(publication.error),
           publishedAt: publication.publishedAt,
           updatedAt: publication.updatedAt,
           commitSha: publication.commitSha,

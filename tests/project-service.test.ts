@@ -298,6 +298,35 @@ describe('ProjectService — roles, IDOR and slug identity', () => {
     });
   });
 
+  it('names no host path in a run error or a publication error (2026-09-25 adversarial review)', async () => {
+    linkInstallation(alice, '501', 'alice-org');
+    const { svc } = service();
+    const created = await svc.createProject(jsonReq(payload('501')), alice) as { projectId: string };
+    const runId = randomUUID();
+    // The launcher layout: `projects/<org>/<project>/<run>`, no `orgs/` segment.
+    const projectRoot = `/srv/volumes/projects/${alice.orgId}/${created.projectId}`;
+    projects.createProjectRun({ orgId: alice.orgId, projectId: created.projectId,
+      principalId: alice.principalId, projectRunId: runId,
+      request: { idempotencyKey: 'redact', goal: 'Read a redacted error' },
+      hostPaths: { workspacePath: `${projectRoot}/${runId}/workspace`, runsPath: `/data/orgs/${alice.orgId}/projects/${created.projectId}/runs/${runId}/traces`,
+        logPath: `/data/orgs/${alice.orgId}/projects/${created.projectId}/runs/${runId}/run.log`, skillsPath: '/data/skills' } });
+    db.prepare('UPDATE project_runs SET status = ?, error = ? WHERE project_run_id = ?')
+      .run('failed', `ENOENT: no such file or directory, open '${projectRoot}/${runId}/workspace/package.json' (skills /data/skills2 kept)`, runId);
+    const now = new Date().toISOString();
+    db.prepare(`INSERT INTO project_publications
+      (publication_id, project_run_id, org_id, idempotency_key, manifest_hash, status,
+       repository_id, repository_full_name, repository_url, commit_sha, base_sha, git_json,
+       pull_request_url, error, created_at, updated_at, published_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(randomUUID(), runId, alice.orgId, 'redact', 'a'.repeat(64), 'failed', '777', 'owner/app',
+        'https://github.com/owner/app', null, null, null, null,
+        `git push failed in /data/orgs/${alice.orgId}/projects/${created.projectId}/runs/${runId}/repository-seed`, now, now, null);
+    const status = svc.projectRunStatus(alice, created.projectId, runId) as { error: string; publication: { error: string } };
+    expect(status.error).toBe(`ENOENT: no such file or directory, open '<project>/${runId}/workspace/package.json' (skills /data/skills2 kept)`);
+    expect(status.publication.error).toBe(`git push failed in <project>/runs/${runId}/repository-seed`);
+    expect(JSON.stringify(svc.listProjectRuns(alice, created.projectId))).not.toContain('/srv/volumes');
+  });
+
   it.each(['direct', 'pull-request', 'legacy', 'failed', 'publishing'] as const)(
     'exposes an honest %s publication receipt through both run readers', async kind => {
       linkInstallation(alice, '501', 'alice-org');
