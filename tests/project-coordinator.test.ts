@@ -32,6 +32,7 @@ import {
   projectRunHostLayout,
   projectRunTimeoutMs,
   runnerFailureDetail,
+  tenantBusyMessage,
   type SubscriptionTransportUse,
 } from '../src/projects/coordinator.js';
 import { ProjectStore } from '../src/projects/store.js';
@@ -1057,6 +1058,33 @@ describe('ProjectRunCoordinator', () => {
       request: { idempotencyKey: 'run-click-busy', goal: 'Build a clock in one index.html.' },
     })).rejects.toBeInstanceOf(ProjectRunBusy);
     expect(f.store.listProjectRuns(f.viewer.orgId, f.project.projectId)).toEqual([]);
+  });
+
+  it('tells a member why the slot is busy without the holder\'s pid or run id (2026-09-26)', async () => {
+    // The lease message named the post-mortem's run id, the host pid and its
+    // start time, and reached tenants verbatim as a 409, after every run.
+    const f = fixture();
+    const owner = { token: 't', runId: 'analyst:cc922a60-90ff-49a7-81ba-fb44d9be9c98', ownerPid: 2463864, acquiredAt: '2026-09-26T12:00:55.612Z' };
+    const coordinator = new ProjectRunCoordinator({
+      store: f.store,
+      dbPath: f.dbPath,
+      projectsRoot: f.root,
+      hostEnv: { ...haystackTestEnvironment(f.root), PATH: process.env['PATH'], ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
+      driver: vi.fn(),
+      acquireLease: async () => {
+        throw new RunLockBusyError(`another MCP server owns the run slot (${owner.runId}, pid ${owner.ownerPid}, since ${owner.acquiredAt})`, owner);
+      },
+    });
+    const refusal = await coordinator.start({
+      orgId: f.viewer.orgId,
+      principalId: f.viewer.principalId,
+      projectId: f.project.projectId,
+      request: { idempotencyKey: 'run-after-review', goal: 'Build a clock in one index.html.' },
+    }).then(() => null, (error: unknown) => error as Error);
+    expect(refusal).toBeInstanceOf(ProjectRunBusy);
+    expect(refusal?.message).toMatch(/reviewing a finished run .* start this run again shortly/);
+    expect(refusal?.message).not.toMatch(/2463864|cc922a60|analyst:|pid/);
+    expect(tenantBusyMessage({ runId: 'project:abc' })).toMatch(/another run is in progress/);
   });
 });
 

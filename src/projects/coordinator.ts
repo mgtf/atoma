@@ -232,6 +232,22 @@ export class ProjectRunBusy extends Error {
   }
 }
 
+/**
+ * What a member is told when the one run slot is taken: WHY, in words that
+ * hold no host detail. The lease's own message names the holder's run id,
+ * pid and start time — the deployment's process table, relayed verbatim to a
+ * tenant as a 409 until 2026-09-26. Holding the slot for post-run
+ * maintenance is the documented resource trade (`src/supervisor/AGENTS.md`);
+ * saying so is what makes "retry in a few minutes" an honest answer.
+ */
+export function tenantBusyMessage(owner: { readonly runId: string } | undefined): string {
+  const holder = owner?.runId ?? '';
+  if (holder.startsWith('analyst:') || holder.startsWith('mender:')) {
+    return 'the platform is reviewing a finished run and holds the one run slot for a few minutes; start this run again shortly';
+  }
+  return 'another run is in progress on this instance; start this run again when it finishes';
+}
+
 export class ProjectRunConfigurationError extends Error {
   constructor(message: string) {
     super(message);
@@ -1243,7 +1259,8 @@ export class ProjectRunCoordinator {
         // this caller waited for the lease. It is a read, not a second run.
         const retry = findRetry();
         if (retry) return retry;
-        throw new ProjectRunBusy(error.message);
+        process.stderr.write(`[atoma projects] run refused, slot busy: ${error.message}\n`);
+        throw new ProjectRunBusy(tenantBusyMessage(error.owner));
       }
       throw error;
     }
