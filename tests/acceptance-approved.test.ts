@@ -8,6 +8,7 @@ import {
   ACCEPTANCE_SOURCE_ENV,
   ACCEPTANCE_SPEC_ENV,
   MAX_CHECKLIST_ITEMS,
+  approvedChecklistInputSchema,
   coverAcceptanceChecklist,
   parseChecklistLines,
   renderChecklistCoverage,
@@ -69,6 +70,39 @@ describe('the line grammar', () => {
     expect(tooLong.errors.map((error) => error.line)).toEqual([2]);
     const many = parseChecklistLines(Array.from({ length: MAX_CHECKLIST_ITEMS + 1 }, (_, i) => `criterion ${i}`).join('\n'));
     expect(many.errors).toEqual([{ line: 0, message: `at most ${MAX_CHECKLIST_ITEMS} criteria` }]);
+  });
+
+  it('reads the host notation and a parenthesised status as the status (review 1.5)', () => {
+    const { items, errors } = parseChecklistLines([
+      'GET /api/notes/:id → 404',
+      'GET /api/notes/:id -> 404: unknown id',
+      'GET /api/notes/:id (404) unknown id',
+    ].join('\n'));
+    expect(errors).toEqual([]);
+    expect(items.map((item) => item.check)).toEqual([
+      { kind: 'http', method: 'GET', path: '/api/notes/:id', status: 404 },
+      { kind: 'http', method: 'GET', path: '/api/notes/:id', status: 404 },
+      { kind: 'http', method: 'GET', path: '/api/notes/:id', status: 404 },
+    ]);
+  });
+
+  it('refuses an http line that names a status where it is not read, instead of accepting any 2xx', () => {
+    // Read as written, each would be a 2xx check shown OBSERVED on the happy
+    // path, for an error the run never provoked (2026-09-25 review, 1.5).
+    for (const line of ['POST /api/notes returns 400 for invalid input', 'GET /api/notes/:id — 404 for an unknown id']) {
+      const { items, errors } = parseChecklistLines(line);
+      expect(items).toEqual([]);
+      expect(errors[0]?.message).toMatch(/names \d{3} but not where its status is read/);
+    }
+  });
+
+  it('refuses at the door a list the child could not be handed (review 2.3)', () => {
+    const escapeHeavy = Array.from({ length: MAX_CHECKLIST_ITEMS }, () => ({
+      behaviour: '\u0001'.repeat(160), check: { kind: 'http' as const, method: 'GET', path: `/${'\u0001'.repeat(199)}` },
+    }));
+    const parsed = approvedChecklistInputSchema.safeParse(escapeHeavy);
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues[0]?.message).toMatch(/too long together/);
   });
 });
 

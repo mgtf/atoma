@@ -74,7 +74,17 @@ export const approvedChecklistItemInputSchema = z.object({
   behaviour: behaviourSchema,
   check: approvedCheckSchema,
 }).strict();
-export const approvedChecklistInputSchema = z.array(approvedChecklistItemInputSchema).min(1).max(MAX_CHECKLIST_ITEMS);
+export const approvedChecklistInputSchema = z.array(approvedChecklistItemInputSchema).min(1).max(MAX_CHECKLIST_ITEMS)
+  // The coordinator hands the child the captured spec in ONE environment
+  // variable bounded to `MAX_ACCEPTANCE_SPEC_BYTES`. Per-field limits alone let
+  // a list escape-heavy enough to pass here fail the run AFTER it started
+  // (2026-09-25 review, 2.3); the whole encoded size is checked at the door.
+  .superRefine((items, ctx) => {
+    const bytes = encodedSpecBytes(items);
+    if (bytes > MAX_ACCEPTANCE_SPEC_BYTES) {
+      ctx.addIssue({ code: 'custom', message: `the criteria are too long together (${bytes} bytes encoded; at most ${MAX_ACCEPTANCE_SPEC_BYTES})` });
+    }
+  });
 export type ApprovedChecklistInput = z.input<typeof approvedChecklistInputSchema>;
 
 /** The captured specification: numbered items and the digest the host computed over them. */
@@ -95,6 +105,12 @@ export const ACCEPTANCE_SPEC_ENV = 'ATOMA_ACCEPTANCE_SPEC';
 export const ACCEPTANCE_SOURCE_ENV = 'ATOMA_ACCEPTANCE_SOURCE';
 export const MAX_ACCEPTANCE_SPEC_BYTES = 16_384;
 
+/** The UTF-8 size of the spec the host would capture from `items`, digest included. */
+function encodedSpecBytes(items: ReadonlyArray<z.infer<typeof approvedChecklistItemInputSchema>>): number {
+  const canonical = items.map((item, index) => ({ id: `c${index + 1}`, behaviour: item.behaviour, check: item.check }));
+  return new TextEncoder().encode(JSON.stringify({ version: 1, items: canonical, digest: '0'.repeat(64) })).length;
+}
+
 /**
  * The items in their ONE canonical order and key order, the bytes the digest
  * is computed over. Numbered here, from the submitted order.
@@ -110,7 +126,11 @@ export function canonicalAcceptanceItems(input: ApprovedChecklistInput): Accepta
   }));
 }
 
-const LINE_METHOD = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\/\S*)(?:\s+([1-5]\d\d))?(?:\s*(?:—|–|-|:)\s*|\s+|$)(.*)$/;
+// The status directly after the path: `404`, `→ 404` / `-> 404` (the notation
+// the host itself renders, `describeCheck`) or `(404)`.
+const LINE_METHOD = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\/\S*)(?:(?:\s*(?:→|->)\s*|\s+)([1-5]\d\d)\b|\s+\(\s*([1-5]\d\d)\s*\))?(?:\s*(?:—|–|-|:)\s*|\s+|$)(.*)$/;
+/** A standalone 1xx–5xx number: a status the line NAMES, wherever it was written. */
+const STATUS_IN_TEXT = /(?<![\d.])[1-5]\d\d(?![\d.])/;
 
 /**
  * THE LINE GRAMMAR a person types, one criterion per line — deterministic,
@@ -124,6 +144,11 @@ const LINE_METHOD = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\/\S*)(?:\s+([
  * is a `review` criterion with its text kept as written. Blank lines and a
  * leading `- ` or `* ` bullet are ignored. Errors are reported per line, and
  * the caller refuses the whole list while any remain.
+ *
+ * An HTTP line whose status is not where the grammar reads it but which still
+ * NAMES one (`POST /api/notes returns 400 for invalid input`) is REFUSED:
+ * read as written it would accept any 2xx and show OBSERVED on the happy path
+ * for an error the run never provoked (2026-09-25 review, 1.5).
  */
 export function parseChecklistLines(text: string): {
   readonly items: ApprovedChecklistInput;
@@ -138,11 +163,21 @@ export function parseChecklistLines(text: string): {
     // A trailing `:` ends the path, so `POST /api/notes: creates one` separates
     // like a dash; a `:name` segment inside the path is untouched.
     const path = http?.[2]!.replace(/:$/, '');
+    const status = http ? http[3] ?? http[4] : undefined;
+    const rest = http ? http[5]!.trim() : '';
+    const named = http && status === undefined ? STATUS_IN_TEXT.exec(rest)?.[0] : undefined;
+    if (named) {
+      errors.push({ line: index + 1, message:
+        `this HTTP criterion names ${named} but not where its status is read, so it would accept any 2xx. ` +
+        `If ${named} is the expected status, write it right after the path ("${http![1]} ${path} ${named} — ..."); ` +
+        'otherwise drop the method to make it a review criterion' });
+      return;
+    }
     const candidate = http
       ? {
-          behaviour: http[4]!.trim() || `${http[1]} ${path}${http[3] ? ` ${http[3]}` : ''}`,
+          behaviour: rest || `${http[1]} ${path}${status ? ` ${status}` : ''}`,
           check: { kind: 'http' as const, method: http[1]!, path: path!,
-            ...(http[3] ? { status: Number(http[3]) } : {}) },
+            ...(status ? { status: Number(status) } : {}) },
         }
       : { behaviour: line, check: { kind: 'review' as const } };
     const parsed = approvedChecklistItemInputSchema.safeParse(candidate);
