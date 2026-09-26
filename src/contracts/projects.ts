@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { runStatsSchema } from './runStats.js';
 import { approvedChecklistInputSchema } from './acceptanceChecklist.js';
-import { runTierModelsSchema } from './tierModels.js';
+import { runTierModelsSchema, storedRunTierModelsSchema } from './tierModels.js';
 
 /** Zero suspends admission; the host still has one global run slot. */
 export const orgRunLimitSchema = z.number().int().min(0).max(1);
@@ -362,7 +362,7 @@ export const projectRunSchema = z
     /** Present on a comparison rerun: the run it re-ran, which is never its seed. */
     rerunOf: projectRunIdSchema.optional(),
     /** The run-level models a comparison rerun was launched with. */
-    modelOverrides: runTierModelsSchema.optional(),
+    modelOverrides: storedRunTierModelsSchema.optional(),
     seed: runSeedSchema.optional(),
     traceId: z.string().min(1).max(255).nullable(),
     stats: runStatsSchema.nullable(),

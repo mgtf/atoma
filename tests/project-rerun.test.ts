@@ -8,6 +8,8 @@ import { AuthStore } from '../src/auth/store.js';
 import { ACCEPTANCE_SOURCE_ENV, ACCEPTANCE_SPEC_ENV } from '../src/contracts/acceptanceChecklist.js';
 import { formatRunStatsEpilogue, type RunStats } from '../src/contracts/runStats.js';
 import { closeStoreHandles } from '../src/core/stores.js';
+import { LLM_PROVIDER_CATALOG, type ProviderModelEntry } from '../src/core/providerCatalog.js';
+import { retentionPlan } from '../src/projects/retention.js';
 import { ProjectRunConfigurationError, ProjectRunCoordinator } from '../src/projects/coordinator.js';
 import { PROJECT_TABLES_DDL, ProjectStateConflict, ProjectStore } from '../src/projects/store.js';
 import { readAcceptanceSpec } from '../src/run/acceptanceSpec.js';
@@ -222,6 +224,85 @@ describe('comparison reruns', () => {
     await expect(f.start({ idempotencyKey: 'c', rerunOf: a.projectRunId, models: { ...OVERRIDES, l2: 'sub:anthropic:sonnet' } }))
       .rejects.toThrow(/host subscription/);
     expect(f.driver).toHaveBeenCalledTimes(1);
+  });
+});
+
+/** A later deploy's catalogue without `id`, for the duration of `fn`. */
+async function withRetiredModel<T>(id: string, fn: () => Promise<T> | T): Promise<T> {
+  const anthropic = LLM_PROVIDER_CATALOG.find((provider) => provider.id === 'anthropic')!;
+  const models = anthropic.models as ProviderModelEntry[];
+  const at = models.findIndex((model) => model.id === id);
+  if (at < 0) throw new Error(`${id} is not in the catalogue`);
+  const [retired] = models.splice(at, 1);
+  try { return await fn(); } finally { models.splice(at, 0, retired!); }
+}
+
+describe('what a rerun row and its origin must survive (2026-09-25 review, 1.1 and 2.1)', () => {
+  it('reads a rerun row whose model a later deploy retired, and refuses to LAUNCH on it', async () => {
+    const f = fixture();
+    const a = await f.start({ idempotencyKey: 'a', goal: 'Build a clock.' });
+    const b = await f.start({ idempotencyKey: 'b', rerunOf: a.projectRunId, models: OVERRIDES });
+    expect(b.status).toBe('delivered');
+    // The next deploy's catalogue no longer offers the rerun's L1 model.
+    await withRetiredModel('claude-haiku-4-5', async () => {
+      // Every reader of the project still reads the immutable row.
+      expect(f.store.getProjectRun(f.viewer.orgId, b.projectRunId)?.modelOverrides).toEqual(OVERRIDES);
+      expect(f.store.listProjectRuns(f.viewer.orgId, f.project.projectId)).toHaveLength(2);
+      const db = new Database(f.dbPath);
+      try {
+        expect(() => retentionPlan(db, f.root, undefined, new Date(Date.now() + 100 * 86_400_000))).not.toThrow();
+      } finally { db.close(); }
+      // The project's line goes on: the next ordinary run is not failed by the row.
+      const c = await f.start({ idempotencyKey: 'c', goal: 'Add an alarm.' });
+      expect(c.status).toBe('delivered');
+      // A NEW rerun on the retired model is refused at the door, before any row.
+      await expect(f.start({ idempotencyKey: 'd', rerunOf: a.projectRunId, models: OVERRIDES })).rejects.toThrow();
+      expect(f.store.listProjectRuns(f.viewer.orgId, f.project.projectId)).toHaveLength(3);
+    });
+  });
+
+  it('refuses to launch a stored run-level model the deployment no longer offers', async () => {
+    const { projectRunEnvironment } = await import('../src/projects/coordinator.js');
+    const root = mkdtempSync(join(tmpdir(), 'atoma-rerun-env-'));
+    roots.push(root);
+    await withRetiredModel('claude-haiku-4-5', () => {
+      expect(() => projectRunEnvironment({
+        hostEnv: { ...ANTHROPIC_PINS, ANTHROPIC_API_KEY: 'model-key' },
+        dbPath: join(root, 'atoma.db'), workspacePath: join(root, 'ws'), runsPath: join(root, 'runs'),
+        skillsPath: join(root, 'skills'), runId: '11111111-1111-4111-8111-111111111111',
+        artifactManifestPath: join(root, 'declared.json'), runModels: OVERRIDES,
+      })).toThrow(/no longer offers/);
+    });
+  });
+
+  it('refuses a rerun whose origin drafted its list but no longer has the trace holding it', async () => {
+    const f = fixture();
+    const a = await f.start({ idempotencyKey: 'a', goal: 'Build a clock.' });
+    rmSync(join(a.hostPaths.runsPath, `${a.projectRunId}.json`), { force: true });
+    await expect(f.start({ idempotencyKey: 'b', rerunOf: a.projectRunId, models: OVERRIDES }))
+      .rejects.toThrow(/cannot be recovered/);
+    // Retention marks the bytes expired first: the same refusal, before the file is even looked at.
+    const db = new Database(f.dbPath);
+    db.prepare('UPDATE project_runs SET bytes_expired_at = ? WHERE project_run_id = ?').run(new Date().toISOString(), a.projectRunId);
+    db.close();
+    await expect(f.start({ idempotencyKey: 'c', rerunOf: a.projectRunId, models: OVERRIDES }))
+      .rejects.toBeInstanceOf(ProjectStateConflict);
+    expect(f.driver).toHaveBeenCalledTimes(1);
+  });
+
+  it('reruns an origin judged WITHOUT a list without drafting one from its own models', async () => {
+    const f = fixture();
+    const a = await f.start({ idempotencyKey: 'a', goal: 'Build a clock.' });
+    // An origin that predates the checklist, or whose draft came back empty: no draft event.
+    writeFileSync(join(a.hostPaths.runsPath, `${a.projectRunId}.json`), JSON.stringify({
+      id: a.projectRunId, endedAt: new Date().toISOString(), result: { summary: 'verified' }, events: [],
+    }), 'utf8');
+    const b = await f.start({ idempotencyKey: 'b', rerunOf: a.projectRunId, models: OVERRIDES });
+    expect(b.status).toBe('delivered');
+    const env = f.driver.mock.calls[1]![0].env!;
+    expect(env[ACCEPTANCE_SOURCE_ENV]).toBe('none');
+    expect(env[ACCEPTANCE_SPEC_ENV]).toBeUndefined();
+    expect(f.store.getRunAcceptance(f.viewer.orgId, b.projectRunId)).toBeNull();
   });
 });
 

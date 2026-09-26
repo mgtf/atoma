@@ -64,7 +64,7 @@ requests become approvable for the project like any run's.
 | `rerunOf` unknown, or in another project | `project run not found` | 404 |
 | origin not delivered/partial; imported project | `ProjectStateConflict` | 409 |
 | origin's seed unrecorded, missing, expired or off disk | `ProjectStateConflict` | 409 |
-| origin trace over `MAX_TRACE_BYTES` or unreadable while a draft is needed | `ProjectStateConflict` | 409 |
+| origin trace over `MAX_TRACE_BYTES`, unreadable, gone or its bytes expired, while the origin has no stored list | `ProjectStateConflict` | 409 |
 | a run-level model it cannot honour | `ProjectRunConfigurationError` | 400 |
 | goal, checklist, partial `models`, or null tiers alongside `rerunOf` | schema | 400 |
 
@@ -81,6 +81,10 @@ leaves nothing behind. The trace read is the fifth disposition above
   for a measurement that must be clean.
 - **The drafting call.** A drafted origin paid for one L1 `draft-checklist`
   call that B does not make.
+- **An origin judged without a list** (it predates the checklist, or its
+  draft came back empty) is rerun without one: the coordinator sets
+  `ATOMA_ACCEPTANCE_SOURCE=none` and the child drafts nothing, rather than
+  judging B against a list A never had (2026-09-25 review, 2.1).
 - **Host settings not recorded per run**: the run budget
   (`ATOMA_PROJECT_TIMEOUT_MS`) and the family's supervision default.
 - **Retention.** R0's bytes are not held for future reruns; after 90 days a
@@ -90,6 +94,10 @@ leaves nothing behind. The trace read is the fifth disposition above
 
 Additive columns on `project_runs` (`rerun_of_run_id`, `model_overrides_json`,
 `seed_json`) and on `project_run_acceptance` (`source`, NULL = user), each
-immutable by trigger once written. The payer ledger's `source` CHECK gained
+immutable by trigger once written. `model_overrides_json` is READ BACK by
+spelling only (`storedRunTierModelsSchema`): a model a later deploy retires
+must not make the row, the project's run list, the seed resolver or offline
+retention throw; whether the model is still offered is asked at launch, where
+it refuses (2026-09-25 review, 1.1). The payer ledger's `source` CHECK gained
 `'run'` through the documented SQLite table rebuild, the same procedure as the
 `'partial'` status; rows and the immutability trigger survive it.

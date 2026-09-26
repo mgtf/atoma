@@ -88,6 +88,27 @@ export const runTierModelsSchema = z
 
 export type RunTierModels = z.infer<typeof runTierModelsSchema>;
 
+/**
+ * The SAME triple as READ BACK from a persisted row: spelling only.
+ *
+ * `runTierModelsSchema` asks the catalogue of TODAY, which is right for a
+ * request and wrong for history. A rerun row written with a model a later
+ * deploy retired must still parse — as `modelPins` degrades a retired account
+ * pin instead of throwing — or every reader of the project (its run list, the
+ * seed resolver, offline retention) fails on one immutable row (2026-09-25
+ * review, 1.1). Authority and availability are asked again at LAUNCH, by the
+ * coordinator, never inferred from a stored value.
+ */
+function storedRunSelection() {
+  return z.string().trim().min(1).max(200).refine((value) => tryParseModelSelector(value) !== null, {
+    message: 'must be a model selector <api|sub|own>:<vendor>:<model>',
+  });
+}
+
+export const storedRunTierModelsSchema = z
+  .object({ l1: storedRunSelection(), l2: storedRunSelection(), l3: storedRunSelection() })
+  .strict();
+
 export const EMPTY_TIER_MODEL_PINS: TierModelPins = { l1: null, l2: null, l3: null };
 
 /** Parsed at module load: a schema/example mismatch must fail tests at once. */

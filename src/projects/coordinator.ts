@@ -20,7 +20,7 @@ import type {
 import type { RunTierModels, TierModelPins } from '../contracts/tierModels.js';
 import { PERSONAL_CODEX_PROFILE_ROOT_ENV } from '../core/codexHomeLease.js';
 import { skillsDirPath } from '../core/stores.js';
-import { LLM_PROVIDER_CATALOG, findProvider } from '../core/providerCatalog.js';
+import { LLM_PROVIDER_CATALOG, findProvider, isAccountTierSelection } from '../core/providerCatalog.js';
 import {
   ledgerTouchesAnySubscription,
   ledgerTouchesSubscription,
@@ -520,6 +520,15 @@ export function projectRunEnvironment(input: {
           throw new ProjectRunConfigurationError(
             `${variable}=${candidate.value} (${candidate.level} level) is not a model selector; ` +
               `expected ${MODEL_SELECTOR_GRAMMAR}`
+          );
+        }
+        // A stored rerun row is read by SPELLING (`storedRunTierModelsSchema`),
+        // so whether its model is still offered is asked HERE, at launch: a
+        // retired model refuses this run instead of reaching the router.
+        if (candidate.level === 'run' && !isAccountTierSelection(candidate.value, tier)) {
+          throw new ProjectRunConfigurationError(
+            `${variable}=${candidate.value} was asked for this run, but this deployment no longer ` +
+              'offers that model on this tier'
           );
         }
         if (selector.mode === 'own') {
@@ -1439,6 +1448,11 @@ export class ProjectRunCoordinator {
           // A rerun of a run that drafted its own list carries that draft, and
           // is judged as a draft is judged — not as a list a person approved.
           if (acceptance.source === 'drafted') environment[ACCEPTANCE_SOURCE_ENV] = 'drafted';
+        } else if (run.rerunOf) {
+          // `resolveRerunOrigin` refused every origin whose list it could not
+          // recover, so a rerun with no row re-runs an origin judged WITHOUT a
+          // list: it must not draft one from its own models either.
+          environment[ACCEPTANCE_SOURCE_ENV] = 'none';
         }
         return launch();
       })();

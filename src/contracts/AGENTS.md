@@ -213,6 +213,16 @@ Neighbours:
 - A reference holds completed AND credited signatures only, newest
   `TRAJECTORY_REFERENCE_MAX_PER_KEY` per key. Assemble it oldest-first.
 
+## Persisted rows versus request schemas
+
+- A REQUEST schema may ask time-varying authorities — today's model
+  catalogue, a principal's inventory. A schema that READS BACK a persisted
+  row may not: it validates spelling, and the authority is asked again where
+  the value is USED. `modelPins` degrades a retired account pin; a rerun row
+  parses through `storedRunTierModelsSchema` and its launch refuses. Reusing
+  the request schema on read made one immutable row throw in every reader of
+  its project once its model was retired (2026-09-25 review, 1.1).
+
 ## Intentional choices and rejected shortcuts
 
 - A second definition of manifest merge semantics, near a writer that needs

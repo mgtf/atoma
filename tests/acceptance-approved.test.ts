@@ -119,6 +119,9 @@ describe('capture and transport', () => {
     expect(readAcceptanceSource({ [ACCEPTANCE_SPEC_ENV]: encoded, [ACCEPTANCE_SOURCE_ENV]: 'drafted' })).toBe('drafted');
     expect(() => readAcceptanceSource({ [ACCEPTANCE_SPEC_ENV]: encoded, [ACCEPTANCE_SOURCE_ENV]: 'user' })).toThrow(/must be/);
     expect(() => readAcceptanceSource({ [ACCEPTANCE_SOURCE_ENV]: 'drafted' })).toThrow(/without/);
+    // A rerun of an origin judged without a list: nothing to carry, nothing to draft.
+    expect(readAcceptanceSource({ [ACCEPTANCE_SOURCE_ENV]: 'none' })).toBe('none');
+    expect(() => readAcceptanceSource({ [ACCEPTANCE_SPEC_ENV]: encoded, [ACCEPTANCE_SOURCE_ENV]: 'none' })).toThrow(/beside/);
   });
 });
 

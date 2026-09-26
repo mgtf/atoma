@@ -65,14 +65,22 @@ export function readAcceptanceSpec(env: NodeJS.ProcessEnv): AcceptanceSpec | nul
 }
 
 /**
- * Who wrote the carried spec. Anything but absent or `drafted` THROWS, and so
- * does a source with no spec: a label the child cannot place is a list it
- * would judge by the wrong rule.
+ * Who wrote the carried spec. Anything but absent, `drafted` or `none` THROWS,
+ * and so does `drafted` without a spec or `none` beside one: a label the child
+ * cannot place is a list it would judge by the wrong rule.
  */
-export function readAcceptanceSource(env: NodeJS.ProcessEnv): ChecklistSource {
+export function readAcceptanceSource(env: NodeJS.ProcessEnv): ChecklistSource | 'none' {
   const raw = env[ACCEPTANCE_SOURCE_ENV];
   if (raw === undefined || raw === '') return 'user';
-  if (raw !== 'drafted') throw new Error(`${ACCEPTANCE_SOURCE_ENV} must be 'drafted' when set`);
+  // `none`: a comparison rerun of an origin that was judged WITHOUT a list
+  // (it predates the checklist, or its draft came back empty). The rerun is
+  // judged the same way, so it drafts nothing either — a spec beside it would
+  // contradict the label.
+  if (raw === 'none') {
+    if (env[ACCEPTANCE_SPEC_ENV]) throw new Error(`${ACCEPTANCE_SOURCE_ENV}=none is set beside ${ACCEPTANCE_SPEC_ENV}`);
+    return 'none';
+  }
+  if (raw !== 'drafted') throw new Error(`${ACCEPTANCE_SOURCE_ENV} must be 'drafted' or 'none' when set`);
   if (!env[ACCEPTANCE_SPEC_ENV]) throw new Error(`${ACCEPTANCE_SOURCE_ENV} is set without ${ACCEPTANCE_SPEC_ENV}`);
   return 'drafted';
 }

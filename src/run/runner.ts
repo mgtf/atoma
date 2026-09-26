@@ -904,7 +904,10 @@ export async function startTask(
         // A comparison rerun of a run that drafted its own list carries THAT
         // draft: the same yardstick as its origin, judged as a draft, with no
         // second drafting call from the rerun's own models.
-        ...(acceptanceSpec && acceptanceSource === 'drafted'
+        // A rerun of an origin judged WITHOUT a list is judged without one too.
+        ...(acceptanceSource === 'none'
+          ? { checklist: [] }
+          : acceptanceSpec && acceptanceSource === 'drafted'
           ? { checklist: acceptanceSpec.items }
           : acceptanceSpec
             ? { checklist: acceptanceSpec.items,

@@ -449,9 +449,11 @@ The operator commands and offline prerequisites live in
   ITS goal, ITS acceptance list (a drafted one is recovered from its trace and
   carried as `drafted`) and the seed IT started from (`seed_json`, recorded for
   every run; a legacy row through its retrieval receipt). Run-level models
-  REFUSE rather than fall through. A rerun never seeds (`previousSeedRun`) and
-  never publishes (`reservePublication`). Imported projects are refused. Contract
-  and limits: [comparison reruns](../../docs/comparison-reruns-2026-09-25.md).
+  REFUSE rather than fall through; the stored row is read by spelling only
+  (`storedRunTierModelsSchema`), the catalogue asked at the door and at launch.
+  An unrecoverable drafted list is refused; an origin judged without one reruns
+  without one. A rerun never seeds (`previousSeedRun`) and never publishes.
+  Imported projects are refused. [Contract](../../docs/comparison-reruns-2026-09-25.md).
 
 ## Intentional choices and rejected shortcuts
 

@@ -22,7 +22,7 @@ export interface RerunOrigin {
   readonly origin: ProjectRun;
   /** The run whose workspace A was seeded from; null when A started empty. */
   readonly seedRun: ProjectRun | null;
-  /** The list A ran against, and who wrote it; null when A had none. */
+  /** The list A ran against, and who wrote it; null when A was judged without one. */
   readonly acceptance: RunAcceptance | null;
 }
 
@@ -97,16 +97,22 @@ function seedRunOf(
  *
  * The fifth disposition over `MAX_TRACE_BYTES` (src/contracts/AGENTS.md): a
  * rerun REFUSES, because a list it could not read would silently be replaced
- * by a new draft from other models — two yardsticks under one comparison.
- * `null` when the origin drafted nothing, which leaves the rerun to draft.
+ * by a new draft from other models — two yardsticks under one comparison. A
+ * trace that is GONE (retention deletes the run directory, traces included)
+ * is the same "could not read", not "drafted nothing" (2026-09-25 review, 2.1).
+ * `null` means the origin was judged WITHOUT a list — it predates the
+ * checklist, or its draft came back empty — and the coordinator then tells
+ * the rerun to draft none either (`ATOMA_ACCEPTANCE_SOURCE=none`).
  */
 function draftedAcceptance(origin: ProjectRun): RunAcceptance | null {
+  const unrecoverable = "this run's trace is no longer on this host, so the checklist it was judged against cannot be recovered";
+  if (origin.bytesExpiredAt) throw new ProjectStateConflict(unrecoverable);
   const tracePath = resolveProjectRunTraceFile({
     projectRunId: origin.projectRunId,
     runsPath: origin.hostPaths.runsPath,
     traceId: origin.traceId,
   });
-  if (!tracePath) return null;
+  if (!tracePath) throw new ProjectStateConflict(unrecoverable);
   const stat = lstatSync(tracePath);
   if (!stat.isFile() || stat.size > MAX_TRACE_BYTES) {
     throw new ProjectStateConflict("this run's trace cannot be read to recover its acceptance checklist");
