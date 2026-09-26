@@ -181,4 +181,22 @@ position. Known limit kept: a task-augmented caller gets no progress on its
   runs on 2026-09-24). R11 then rewrote the delivered server to
   `PORT ?? 0`, breaking the default its project asked for, to get past the
   tool. Fixed: the tool passes a concrete free port, as `start_static_server`
-  already did.
+  already did. Verified on `a06b4e8` by R12 `abcb59c0` (180 s, $0.033),
+  which restored the default: two starts in one run without a collision,
+  and a quantity PATCHed to 57 read back as 57 after the restart.
+
+## Where this leaves the README
+
+Every use case the README lists has a delivered production run today: the
+estimator (R4, R9), the sales dashboard with a verified CSV upload (R2, R8b),
+the shipment prototype and its full-stack inventory (R3, R11, R12), the SaaS
+task list and its JSON services (R10 and the project's earlier runs), the
+CSV-to-JSON CLI and its technical documentation (R1, R7). Approved and
+drafted criteria, continuation of a partial, a comparison rerun, a preview
+and publication (created, then extended) were each exercised.
+
+Open, for the owner: the analyst's hold on the run slot after every run
+(I2, preemption proposed), a single-encoded file body in the Codex protocol
+(I4 residual, proposed), one verdict per review criterion (O1), scratch files
+in published deliverables (O4), and stale read-backs read as current state
+(O5). I1 was not reproduced.
