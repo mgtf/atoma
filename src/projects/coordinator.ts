@@ -1554,8 +1554,8 @@ export class ProjectRunCoordinator {
         }
       }
       // Publication is 'delivered' only, by the operator's decision of
-      // 2026-09-22: a landed run is offered to its customer as a preview, a
-      // download and the seed of the next run, but an incomplete artefact set
+      // 2026-09-22: a landed run is offered to its customer as a download and
+      // the seed of the next run (no preview since 159ab36), but an incomplete artefact set
       // never reaches the project's repository, where nothing would mark it
       // as incomplete afterwards.
       // Nor ever for a comparison rerun: its repository is the project's

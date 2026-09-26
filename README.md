@@ -72,7 +72,8 @@ For example:
 4. **Preview web results** in a temporary, isolated environment, including a
    snapshot while the run is still building.
 5. **Keep the deliverable**, with its verification record, and publish it to a
-   connected GitHub repository. The project's next run continues from it.
+   connected GitHub repository. The project's next run continues from it; a
+   project imported from GitHub starts each run from its default branch.
 
 Previews are review environments; deploying the generated application is a
 separate step. Project runs use the configured model accounts and consume model
@@ -107,12 +108,15 @@ it can never make a run pass.
 
 ### Finished work is never thrown away
 
-A run that exhausts its budget, or whose result the final check refuses after
-one remediation attempt, is kept as **incomplete** rather than discarded. Its
-finished phases stay in the workspace, and the console explains in plain
-language why it stopped and what to do next, with the technical reasons one
-click away. The project's next run starts from that workspace and is told why
-the previous one stopped.
+A run that exhausts its budget after completing at least one phase, or whose
+result the final check refuses after one remediation attempt, is kept as
+**incomplete** rather than discarded — including when the deadline falls while
+its finished work is still being checked. Its finished phases stay in the
+workspace, and the console explains in plain language why it stopped and what
+to do next, with the technical reasons one click away. In a project created in
+atoma, the next run starts from that workspace and is told why the previous one
+stopped; a project imported from GitHub starts each run from its default
+branch, so unpublished changes are not carried over.
 
 ### Choose the models, then compare them
 
@@ -124,8 +128,9 @@ lists. The operator can delegate the host subscription to named members without
 making them administrators.
 
 Every run records the models it was pinned to and the models the provider
-actually served. Any delivered or incomplete project run can be **rerun on other
-models**: same goal, same acceptance criteria, same starting workspace. The
+actually served. A delivered or incomplete run of a project created in atoma can
+be **rerun on other models** through the API or MCP: same goal, same acceptance
+criteria, same starting workspace. The
 rerun sits beside the project's history, so you can compare cost, time and
 result; it never publishes and never seeds a later run.
 
@@ -169,8 +174,10 @@ model tiers. Ordinary build runs start with a supervisor and workers; a deeper
 planning tier takes over if supervision exhausts its retries, and a seeded run
 keeps its starting workspace when it does.
 
-- **Workers build.** They read and write files, run commands and use tools, in a
-  container with no network unless egress is explicitly allowed.
+- **Workers build.** They read and write files, run commands and use tools.
+  Project runs do so in a container with no network unless egress is
+  explicitly allowed; a local `npm run run:build` uses the host unless it is
+  given `--container`.
 - **Supervisors check.** They review results against artifact evidence and fixed
   probes. Before delivery, a separate check reviews the final result against
   the goal and its acceptance criteria.
@@ -278,10 +285,12 @@ ready for production. See the [changelog](CHANGELOG.md) for what changed.
 
 ## Historical measurements
 
-**Twelve controlled rounds** compared atoma with a single frontier agent on
-build and maintenance tasks. Results were mixed, and they predate the
-2026-08-18 state reset, so they do not establish savings or correctness for the
-current release. Read the [protocol](benchmark/PROTOCOL.md) and the
+**Twelve controlled rounds** explored build and maintenance tasks against a
+single agent — a frontier model, and in later rounds cheaper Sonnet and Haiku
+agents. Results were mixed: some comparisons favoured atoma, while cheaper
+direct models matched or outperformed it on the tested maintenance tasks. They
+predate the 2026-08-18 state reset, so they do not establish savings or
+correctness for the current release. Read the [protocol](benchmark/PROTOCOL.md) and the
 [results](benchmark/RESULT.md) for context.
 
 ## License

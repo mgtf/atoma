@@ -1,5 +1,45 @@
 # Changelog
 
+## Unreleased
+
+Acceptance criteria a person approves before launch, incomplete runs kept and
+explained, comparison reruns on other models, complete MCP diagnostics, and the
+corrections of the 2026-09-24 and 2026-09-25 code reviews.
+
+### Added
+
+- Acceptance criteria approved before launch, one per line in the console, the
+  CLI (`--criteria <file>`) or over MCP; without them a run drafts its own
+  checklist with one call to the cheapest tier. Criteria are stored immutably
+  with the run and covered from the host's own HTTP observations.
+- Incomplete (`partial`) runs: work cut by the budget, or refused at delivery
+  after one remediation pass, is kept, explained in plain language and seeds
+  the next run of a project created in atoma.
+- Comparison reruns: rerun a delivered or incomplete run on other models, with
+  its goal, criteria and starting workspace, beside the project's history.
+- Every run records its tier pins and the models the provider served.
+- MCP: complete, losslessly paged run diagnostics (metadata, events, runner
+  log) and persisted Git publication destinations.
+- `validate_html` lays a page out at a requested viewport.
+
+### Fixed
+
+- A rerun row naming a model the catalogue later retires no longer breaks its
+  project's run list, later runs and offline retention.
+- Work in hand at the deadline — landed or complete, a refused result whose
+  remediation was cut, an interrupted synthesis — is finalized as a partial
+  instead of being recorded as failed.
+- MCP sessions answering a call survive a resumed stream and the per-caller
+  ceiling; the request ceiling closes the stalled call only, and is
+  configurable with `ATOMA_MCP_MAX_REQUEST_MS`.
+- Validators see only the worker's attested calls, with browser observations
+  always kept and the viewport they were laid out at.
+- Approved criteria that name a status where it is not read are refused
+  instead of becoming "any 2xx" checks.
+- A deepening keeps the project's document search.
+- Runner logs and publication errors served to tenants no longer carry host
+  paths.
+
 ## v0.4.0 — 2026-09-17
 
 Scoped document retrieval for every project run on a single Haystack backend,

@@ -1848,8 +1848,9 @@ END;
       // 'delivered' ONLY, and 'partial' is excluded on purpose rather than by
       // omission: the customer's repository is the one surface where an
       // incomplete artefact set would be indistinguishable from a finished
-      // one once it landed, so a landed run is offered for preview and
-      // download and seeds the next run, but never publishes.
+      // one once it landed, so a landed run is offered for download and seeds
+      // the next run (of a project created in atoma), but never publishes and,
+      // since 159ab36, is not previewed either.
       if (run.status !== 'delivered' || !run.artifactManifestHash) {
         throw new ProjectStateConflict('publication requires a delivered run with artifacts');
       }

@@ -64,7 +64,9 @@ draft as independent acceptance authority". This checklist has no authority
 to accept: it can only ADD things the acceptor looks for. The worst a bad
 draft can do is ask for a behaviour the goal did not want, which the acceptor
 reads beside the goal; it can never make a run pass. The user-reviewed,
-immutable criterion set of that design remains future work.
+immutable criterion set of that design shipped the same day (`a772b3e`,
+[acceptance contract](acceptance-contract-2026-09-14.md)): a list the user
+approves replaces this draft.
 
 ## Cost, and where this departs from the acceptance contract
 
@@ -88,6 +90,6 @@ is safe to depart there because the list holds no authority to accept.
   pass it down.
 - Binding an observation to the served entry's digest, so a later rewrite
   of the server retires it.
-- User editing or approval; persistence outside the trace; browser, file or
-  persistence checks; a verification reserve; publication binding — all
-  remain as the acceptance contract states them.
+- Browser, file or persistence checks; a verification reserve; publication
+  binding — all remain as the acceptance contract states them. (User approval
+  and persistence outside the trace shipped in `a772b3e`.)

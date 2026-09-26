@@ -103,8 +103,9 @@ Neighbours:
   through the canonical L2, including its peers. Every result goes through
   the same root acceptance; a refusal is handed BACK ONCE
   (`MAX_ROOT_REMEDIATIONS`) and LANDS on the second — it does not fail. The run
-  keeps its workspace, records `partial`, seeds the next run, and never
-  publishes; measured on production run `6ab0ae3b`, which spent thirty minutes
+  keeps its workspace, records `partial`, seeds the next run of a project
+  created in atoma (an imported project restarts from its default branch), and
+  never publishes; measured on production run `6ab0ae3b`, which spent thirty minutes
   and 0.42 USD writing real files and recorded `failed`, so `previousSeedRun`
   skipped it on its status filter and every byte was lost. The refusal
   rides in the task's `inputs` as `rootAcceptanceRefusal` — never appended to

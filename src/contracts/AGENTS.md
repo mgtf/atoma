@@ -135,7 +135,7 @@ Neighbours:
   so a document malformed only below depth 1 is accepted where `JSON.parse`
   would refuse. Unreachable from `TraceRecorder`, which emits one
   `JSON.stringify` per persist, and the projected members are still exact.
-- ONE ceiling (`MAX_TRACE_BYTES`, 32 MiB), FIVE dispositions above it, stated
+- ONE ceiling (`MAX_TRACE_BYTES`, 32 MiB), SIX dispositions above it, stated
   here once: the coordinator fails HARD, because it is deciding whether work
   was delivered; the sentinel fails SOFT (`readBoundedJson` returns null — no
   watch is better than a stall); `summarizeTraceFile` fails soft by skipping the
@@ -143,7 +143,9 @@ Neighbours:
   named trace is owed an answer and a skipped row is not one
   ([src/viz](../viz/AGENTS.md)); a comparison rerun that needs its origin's
   drafted list REFUSES (409), because a new draft would be a second yardstick
-  ([src/projects](../projects/AGENTS.md)). The ceiling is re-exported by
+  ([src/projects](../projects/AGENTS.md)); the MCP detail readers (trace
+  metadata, event, runner log) answer a soft `unavailable` note, because a
+  paged reader must stay answerable ([src/mcp](../mcp/AGENTS.md)). The ceiling is re-exported by
   `src/sentinel/sources.ts`; it is not redefined there.
 - No refusal message carries a filesystem path. `project_runs.error` is served
   to tenants, and the row this reader replaced leaked an absolute host path.
