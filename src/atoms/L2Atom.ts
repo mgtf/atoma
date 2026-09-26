@@ -80,6 +80,7 @@ export {
 } from '../skills/lifecycle.js';
 import {
   HTTP_PORTABLE_DOC_GUIDANCE,
+  STATIC_PORTABLE_DOC_GUIDANCE,
   FALLBACK_VERIFICATION_GUIDANCE,
   FALLBACK_SYSTEM_PROMPT,
   recoveryContext,
@@ -203,6 +204,8 @@ export function buildNarrowL1Prompt(
       `     CONTRACT below — never a one-line summary.`,
       ``,
       ...WEB_GROUND_TRUTH_EVIDENCE_LINES,
+      ``,
+      STATIC_PORTABLE_DOC_GUIDANCE,
       ``,
       SMOKE_DESIGN_GUIDANCE,
     ];

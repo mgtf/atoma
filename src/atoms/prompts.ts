@@ -439,11 +439,32 @@ export const STANDING_PROOF_PLANNING_GUIDANCE = [
   `since the record invalidated.`,
 ].join('\n');
 
-/** Durable HTTP docs must not capture the one port assigned to this run. */
-export const HTTP_PORTABLE_DOC_GUIDANCE = [
+/** The one rule, for any server this run starts: its port dies with it. */
+const PORT_PLACEHOLDER_LINES = [
   `HTTP DOCUMENTATION USES A PORT PLACEHOLDER. In README/docs and durable`,
   `example commands, write \`http://localhost:<port>\`, never the numeric port`,
   `assigned to the current server process. That number dies with the process.`,
+];
+
+/**
+ * The same rule for a page `start_static_server` serves. The root acceptor
+ * refuses a README holding this run's loopback port (`groundTruth.ts`,
+ * `DURABLE_HTTP_PORT_LITERAL_RE`) whichever molecule wrote it, and until
+ * 2026-09-26 only the HTTP and full-stack molecules were told: the static-web
+ * one wrote its measured URL into the README twice in production (runs
+ * cc922a60 and 5a5f1e27), the second time after being handed the first
+ * refusal.
+ */
+export const STATIC_PORTABLE_DOC_GUIDANCE = [
+  ...PORT_PLACEHOLDER_LINES,
+  `The URL start_static_server returned belongs in run evidence/results only,`,
+  `never in README or docs: a README that records measurements names the page`,
+  `and the widths, not the port it was served on.`,
+].join('\n');
+
+/** Durable HTTP docs must not capture the one port assigned to this run. */
+export const HTTP_PORTABLE_DOC_GUIDANCE = [
+  ...PORT_PLACEHOLDER_LINES,
   `The stdout marker is portable the same way: document`,
   `\`LISTENING_ON_PORT=<port>\`, never a captured value such as`,
   `\`LISTENING_ON_PORT=59420\`.`,

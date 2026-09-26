@@ -17,6 +17,8 @@ import {
   isReportedWebProbe,
 } from '../src/contracts/probeManifest.js';
 import { makeTools } from './helpers/factories.js';
+import { HTTP_PORTABLE_DOC_GUIDANCE, STATIC_PORTABLE_DOC_GUIDANCE } from '../src/atoms/prompts.js';
+import { buildNarrowL1Prompt } from '../src/atoms/L2Atom.js';
 
 const WEB_TOOLS = makeTools([
   'write_file',
@@ -86,6 +88,30 @@ describe('ensureCanonicalL1 / ensureCanonicalL2 — idempotent bootstrap', () =>
     expect(l1.systemPrompt).toMatch(/"probe": "web"/);
     expect(l1.systemPrompt).toMatch(/served\s+URL is EPHEMERAL/);
     expect(l1.systemPrompt).toMatch(/INTERACTIONS MUST BE SELECTOR-BASED/);
+  });
+
+  it('tells the web L1 the port rule the root acceptor enforces on its README (runs cc922a60, 5a5f1e27)', () => {
+    // The acceptor refuses a README holding this run's loopback port whatever
+    // molecule wrote it; only the HTTP and full-stack molecules were told.
+    const reg = new AtomRegistry(openDb(':memory:'));
+    const l1 = ensureCanonicalL1(reg, WEB_TOOLS, SMOKE);
+    expect(l1.systemPrompt).toContain(STATIC_PORTABLE_DOC_GUIDANCE);
+    expect(buildNarrowL1Prompt('make it responsive', WEB_TOOLS)).toContain(STATIC_PORTABLE_DOC_GUIDANCE);
+    // The HTTP molecules keep their rule byte for byte: no trust reset there.
+    expect(HTTP_PORTABLE_DOC_GUIDANCE).toBe([
+      'HTTP DOCUMENTATION USES A PORT PLACEHOLDER. In README/docs and durable',
+      'example commands, write `http://localhost:<port>`, never the numeric port',
+      'assigned to the current server process. That number dies with the process.',
+      'The stdout marker is portable the same way: document',
+      '`LISTENING_ON_PORT=<port>`, never a captured value such as',
+      '`LISTENING_ON_PORT=59420`.',
+      'The live bound URL belongs in run evidence/results only, not documentation.',
+    ].join('\n'));
+    // A store holding the previous prompt is re-aligned on the next boot.
+    const stale = new AtomRegistry(openDb(':memory:'));
+    const before = ensureCanonicalL1(stale, WEB_TOOLS, SMOKE);
+    stale.patch(before.name, { systemPromptReplace: before.systemPrompt.replace(STATIC_PORTABLE_DOC_GUIDANCE, '') }, 'test', 'older prompt');
+    expect(ensureCanonicalL1(stale, WEB_TOOLS, SMOKE).systemPrompt).toContain(STATIC_PORTABLE_DOC_GUIDANCE);
   });
 
   it('EVERY probe discriminant the web L1 prompt teaches is one the reader recognises', () => {

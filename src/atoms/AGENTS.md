@@ -180,6 +180,12 @@ load-bearing.
   contradictions.
 - Ground-truth reporting must quote observed tool bytes. Narrative self-report
   alone is not evidence.
+- A rule the acceptor enforces is taught to every molecule it binds. The
+  README port refusal (`DURABLE_HTTP_PORT_LITERAL_RE`) applies to any
+  loopback server, so the static-web molecule carries
+  `STATIC_PORTABLE_DOC_GUIDANCE` beside the HTTP molecules' guidance: it was
+  never told, and wrote its measured URL into the README in two production
+  runs (cc922a60, 5a5f1e27), the second after being handed the first refusal.
 - Node-server children keep file read-back even when they also have browser
   tools. Only a loopback response with status 200 and HTML content appends a
   browser probe; JSON responses and expected root 404s are not browser failures.
