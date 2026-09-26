@@ -1,5 +1,5 @@
 import type { PlatformEvent } from '../contracts/platformEvents.js';
-import type { AnalyseResult } from './analyst.js';
+import { ANALYST_QUOTA_PAUSE_MS, stopsTheBatch, type AnalyseResult } from './analyst.js';
 
 /**
  * THE RESIDENT ANALYST — a host-process shell around `analyseTarget`, armed
@@ -89,6 +89,8 @@ export interface ResidentAnalystOptions {
   readonly isActive: () => boolean;
   readonly quietMs?: number;
   readonly pollMs?: number;
+  /** Pause after the provider refused the ACCOUNT; default {@link ANALYST_QUOTA_PAUSE_MS}. */
+  readonly quotaPauseMs?: number;
   readonly now?: () => number;
   readonly logger?: (line: string) => void;
 }
@@ -107,6 +109,8 @@ export function startResidentAnalyst(options: ResidentAnalystOptions): ResidentA
   let lastResult: ResidentAnalystHealth['lastResult'] = null;
   let lastError: string | null = null;
   let stopped = false;
+  const quotaPauseMs = options.quotaPauseMs ?? ANALYST_QUOTA_PAUSE_MS;
+  let pausedUntil = 0;
 
   const unsubscribe = options.subscribe((event) => {
     if (event.kind !== 'run.finished' || !event.runId) return;
@@ -118,6 +122,9 @@ export function startResidentAnalyst(options: ResidentAnalystOptions): ResidentA
 
   async function drain(): Promise<void> {
     if (inFlight || stopped) return;
+    // The provider refused the ACCOUNT: every run would be refused the same
+    // way until its window resets, so none is spent on it meanwhile.
+    if (now() < pausedUntil) return;
     const due = [...queue.entries()]
       .filter(([, finishedAt]) => now() - finishedAt >= quietMs)
       .sort((a, b) => a[1] - b[1]);
@@ -135,10 +142,19 @@ export function startResidentAnalyst(options: ResidentAnalystOptions): ResidentA
       const result = await options.analyse(runId);
       lastResult = { runId, outcome: result.outcome, at: new Date(now()).toISOString() };
       if (result.outcome === 'analysed') analysed += 1;
-      else if (result.outcome !== 'already-analysed' && result.outcome !== 'dry-run') failed += 1;
+      else if (result.outcome !== 'already-analysed' && result.outcome !== 'dry-run' && !stopsTheBatch(result.outcome)) failed += 1;
       if (result.outcome === 'refused-active') {
         // Not spent: a run started between the gate and the session. Back in line.
         queue.set(runId, now());
+      }
+      if (stopsTheBatch(result.outcome)) {
+        // The refusal was about the account, not this run: it keeps its place
+        // and its one attempt, and the host pauses — as the CLI batch and
+        // watch mode do. Until 2026-09-26 the resident host, which production
+        // runs, dropped the run and moved on to the next refusal (review 2.6).
+        queue.set(runId, next[1]);
+        pausedUntil = now() + quotaPauseMs;
+        log(`the analyst provider refused the account (429); pausing ${Math.round(quotaPauseMs / 60_000)} min`);
       }
     } catch (error) {
       failed += 1;

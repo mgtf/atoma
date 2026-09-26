@@ -107,6 +107,42 @@ describe('startResidentAnalyst', () => {
     }
   });
 
+  it('pauses on the provider refusing the account, keeping every run queued (2026-09-25 review, 2.6)', async () => {
+    const b = bus();
+    let clock = 10_000_000;
+    let refusing = true;
+    const sessions: string[] = [];
+    const resident = startResidentAnalyst({
+      subscribe: b.subscribe,
+      analyse: (runId) => {
+        sessions.push(runId);
+        return Promise.resolve({ runId, outcome: refusing ? 'quota-refused' : 'analysed', verdictPath: null } satisfies AnalyseResult);
+      },
+      isActive: () => false,
+      quietMs: 0,
+      pollMs: 60_000,
+      quotaPauseMs: 30 * 60_000,
+      now: () => clock,
+    });
+    try {
+      for (const runId of ['a', 'b', 'c']) b.finished(runId, new Date(clock - 60_000).toISOString());
+      await resident.drainNow();
+      // ONE refused session, not one per queued run; nothing dropped, nothing failed.
+      expect(sessions).toEqual(['a']);
+      expect(resident.health()).toMatchObject({ queued: 3, failed: 0 });
+      clock += 10 * 60_000;
+      await resident.drainNow();
+      expect(sessions).toEqual(['a']);
+      refusing = false;
+      clock += 21 * 60_000;
+      await resident.drainNow();
+      expect([...sessions].sort()).toEqual(['a', 'a', 'b', 'c']);
+      expect(resident.health()).toMatchObject({ queued: 0, analysed: 3, failed: 0 });
+    } finally {
+      resident.stop();
+    }
+  });
+
   it('counts a throwing analysis as failed and keeps running', async () => {
     const b = bus();
     const resident = startResidentAnalyst({

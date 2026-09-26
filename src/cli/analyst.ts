@@ -201,7 +201,7 @@ async function main(): Promise<void> {
       const result = await analyseTarget(target, analyst);
       if (result.outcome !== 'analysed' && result.outcome !== 'dry-run') failures += 1;
       if (stopsTheBatch(result.outcome)) {
-        warn(`the analyst provider refused the account (429); ${queue.length - index - 1} run(s) left unanalysed for a later batch`);
+        warn(`the analyst provider refused the account (429); ${queue.length - index} run(s), this one included, left unanalysed for a later batch`);
         break;
       }
     }
