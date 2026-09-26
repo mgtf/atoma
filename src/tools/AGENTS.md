@@ -124,7 +124,11 @@ Neighbours:
 ## Generated artefact conventions
 
 - HTTP servers bind `process.env.PORT`, accept port 0, and emit
-  `LISTENING_ON_PORT=<N>` once ready.
+  `LISTENING_ON_PORT=<N>` once ready. `start_node_server` passes a CONCRETE
+  free port, never 0: `Number(process.env.PORT) || 3000` — what "default
+  3000" compiles to — reads 0 as unset, bound 3000, and collided with itself
+  on the next start (EADDRINUSE in three of four runs on 2026-09-24; run
+  811782c2 rewrote its delivered default to get past the tool).
 
 ## Probe manifest writes
 

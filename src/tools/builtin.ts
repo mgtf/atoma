@@ -1276,9 +1276,9 @@ export function fetchUrlTool(opts: BuiltinToolOptions): BuiltinTool {
  * in `sandbox.ts` SIGKILLs orphaned children even on crash-exit paths.
  *
  * Port discovery contract:
- *   - The tool injects `PORT=0` into the child's env (standard Node
- *     convention: the server binds to an OS-assigned port by reading
- *     `process.env.PORT`).
+ *   - The tool injects `PORT=<a free port it just picked>` into the child's
+ *     env (the server binds by reading `process.env.PORT`). A concrete
+ *     number, never 0: `Number(process.env.PORT) || 3000` reads 0 as unset.
  *   - The L1's server code MUST emit the literal line
  *         LISTENING_ON_PORT=<N>
  *     on stdout once it has successfully bound. Example:
@@ -1299,7 +1299,7 @@ export function startNodeServerTool(opts: BuiltinToolOptions): BuiltinTool {
     declaration: {
       name: 'start_node_server',
       description: [
-        'Spawn `node <entry>` as a background process with PORT=0 (OS-assigned) and return the bound URL.',
+        'Spawn `node <entry>` as a background process with PORT set to a free port the host picked, and return the bound URL.',
         'The server MUST emit the literal line "LISTENING_ON_PORT=<port>" on stdout once it has bound.',
         'Example listener:',
         '  app.listen(Number(process.env.PORT) || 0, function(){ console.log("LISTENING_ON_PORT=" + this.address().port); });',
@@ -1315,7 +1315,7 @@ export function startNodeServerTool(opts: BuiltinToolOptions): BuiltinTool {
           env: {
             type: 'object',
             description:
-              'Task-owned environment variables passed to the child over PORT=0 and the credential-stripped sandbox allowlist.',
+              'Task-owned environment variables passed to the child over PORT and the credential-stripped sandbox allowlist.',
           },
         },
         required: ['entry'],
@@ -1328,10 +1328,17 @@ export function startNodeServerTool(opts: BuiltinToolOptions): BuiltinTool {
         args['env'] && typeof args['env'] === 'object' && !Array.isArray(args['env'])
           ? (args['env'] as Record<string, unknown>)
           : {};
-      // Allowlisted base env (no parent secrets), PORT=0 for OS-assigned
-      // port discovery, then the model-supplied extras on top — those are
-      // task config (API keys the TASK owns, feature flags), not ours.
-      const env: NodeJS.ProcessEnv = sandboxChildEnv({ PORT: '0' });
+      // Allowlisted base env (no parent secrets), a CONCRETE free port, then
+      // the model-supplied extras on top — those are task config (API keys
+      // the TASK owns, feature flags), not ours.
+      //
+      // Never PORT=0. The commonest idiom, and what "PORT, default 3000"
+      // compiles to, is `Number(process.env.PORT) || 3000`: 0 is falsy, so
+      // every such server ignored the tool and bound 3000, and the next start
+      // in the same run died on EADDRINUSE against the previous one (three of
+      // four runs on 2026-09-24; run 811782c2 then rewrote the delivered
+      // server to `PORT ?? 0`, breaking its own default, to get past it).
+      const env: NodeJS.ProcessEnv = sandboxChildEnv({ PORT: String(await osAssignedPort()) });
       for (const [k, v] of Object.entries(extraEnv)) {
         if (typeof v === 'string') env[k] = v;
       }
