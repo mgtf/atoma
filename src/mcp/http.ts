@@ -81,6 +81,23 @@ interface Session {
 
 export const MCP_SESSION_IDLE_MS = 30 * 60 * 1000;
 export const MCP_MAX_REQUEST_MS = 3 * 60 * 60 * 1000;
+
+/**
+ * The request ceiling a deployment asks for (`ATOMA_MCP_MAX_REQUEST_MS`), or
+ * the default. It must cover the longest call a client may hold open — a
+ * project run with preparation and finalization, a campaign — so it is the
+ * operator's to raise, never below one minute; a malformed value is refused
+ * rather than guessed.
+ */
+export function mcpMaxRequestMsFromEnv(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env['ATOMA_MCP_MAX_REQUEST_MS'];
+  if (raw === undefined || raw.trim() === '') return MCP_MAX_REQUEST_MS;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 60_000) {
+    throw new Error(`ATOMA_MCP_MAX_REQUEST_MS must be an integer of at least 60000 ms (got ${JSON.stringify(raw)})`);
+  }
+  return value;
+}
 export const MCP_SESSION_HEADER = 'mcp-session-id';
 /** The host's backstop. At 4 MiB of replay ring apiece this bounds the rings at ~512 MiB. */
 export const MCP_MAX_SESSIONS = 128;
@@ -99,6 +116,25 @@ export interface McpHttpHealth {
   readonly overflowed: number;
   /** Frames the live sessions' rings dropped: replay depth a reconnect can no longer reach. */
   readonly replayEvictions: number;
+}
+
+/**
+ * The SDK's id for the standalone GET notification stream
+ * (`WebStandardStreamableHTTPServerTransport._standaloneSseStreamId`). Every
+ * other stream answers one request. Pinned by `tests/mcp-http-lifetimes`
+ * against the installed SDK, so an upgrade that renames it fails a test
+ * rather than silently pinning subscriptions.
+ */
+export const STANDALONE_SSE_STREAM_ID = '_GET_stream';
+
+/** Is `req` a GET resuming the stream of a REQUEST (not the standalone one)? */
+async function resumesACall(events: SessionEventStore, req: IncomingMessage): Promise<boolean> {
+  if (req.method !== 'GET') return false;
+  const header = req.headers['last-event-id'];
+  const lastEventId = Array.isArray(header) ? header[0] : header;
+  if (!lastEventId) return false;
+  const streamId = await events.getStreamIdForEventId(lastEventId);
+  return streamId !== undefined && streamId !== STANDALONE_SSE_STREAM_ID;
 }
 
 export class McpHttpHost {
@@ -164,19 +200,12 @@ export class McpHttpHost {
         return;
       }
       session.lastSeenMs = this.now();
-      // A POST can await a run for longer than the idle TTL. GET event streams
-      // do not pin the session; an abandoned subscription remains sweepable.
-      if (req.method === 'POST') {
-        session.activePosts.set(res, this.now());
-        const finished = () => {
-          session.activePosts.delete(res);
-          session.lastSeenMs = this.now();
-          res.off('finish', finished);
-          res.off('close', finished);
-        };
-        res.once('finish', finished);
-        res.once('close', finished);
-      }
+      // A call ANSWERING pins the session for as long as its response is
+      // open: a POST, and the GET that RESUMES a cut POST's stream with
+      // `Last-Event-ID` — the replay contract promises that resumed call its
+      // response (2026-09-25 review, 1.3a). The standalone notification stream
+      // does not pin: an abandoned subscription remains sweepable.
+      if (req.method === 'POST' || await resumesACall(session.events, req)) this.pinWhileAnswering(session, res);
       await session.transport.handleRequest(req, res);
       return;
     }
@@ -261,11 +290,30 @@ export class McpHttpHost {
   private reclaim(key: string): void {
     for (;;) {
       const mine = [...this.sessions.values()].filter((session) => session.key === key);
-      if (mine.length + [...this.pending.values()].filter(value => value.key === key).length < this.maxPerCaller || !mine.length) return;
-      const stalest = mine.reduce((oldest, session) => (session.lastSeenMs < oldest.lastSeenMs ? session : oldest));
+      if (mine.length + [...this.pending.values()].filter(value => value.key === key).length < this.maxPerCaller) return;
+      // A session still ANSWERING a call is never the victim. Its `lastSeenMs`
+      // froze when the call began, which made it the "stalest" exactly while
+      // a caller waited on it (2026-09-25 review, 1.3b). With every place
+      // busy, the admission check below answers 503, as for pending ones.
+      const idle = mine.filter((session) => session.activePosts.size === 0);
+      if (idle.length === 0) return;
+      const stalest = idle.reduce((oldest, session) => (session.lastSeenMs < oldest.lastSeenMs ? session : oldest));
       this.evicted += 1;
       void this.drop(stalest, 'caller session ceiling');
     }
+  }
+
+  /** Keep `session` out of the idle sweep and of `reclaim` until `res` ends. */
+  private pinWhileAnswering(session: Session, res: ServerResponse): void {
+    session.activePosts.set(res, this.now());
+    const finished = () => {
+      session.activePosts.delete(res);
+      session.lastSeenMs = this.now();
+      res.off('finish', finished);
+      res.off('close', finished);
+    };
+    res.once('finish', finished);
+    res.once('close', finished);
   }
 
   private async drop(session: Session, reason: string): Promise<void> {
@@ -279,9 +327,17 @@ export class McpHttpHost {
     const cutoff = this.now() - idleMs;
     const requestCutoff = this.now() - (this.options.maxRequestMs ?? MCP_MAX_REQUEST_MS);
     for (const session of [...this.sessions.values()]) {
-      if ([...session.activePosts.values()].some(started => started < requestCutoff)) {
-        await this.drop(session, 'request deadline');
-        continue;
+      // A call past the hard ceiling ends ALONE: its response is closed, and
+      // the session keeps its other calls, its tasks and their results. Until
+      // 2026-09-26 the whole session was dropped (review 2.11).
+      for (const [res, started] of [...session.activePosts.entries()]) {
+        if (started >= requestCutoff) continue;
+        this.log(`session ${session.id.slice(0, 8)}: a call past the request ceiling was closed`);
+        session.activePosts.delete(res);
+        // It was answering until now: the idle clock restarts here, not at the
+        // call's start ('close' fires after this loop has moved on).
+        session.lastSeenMs = this.now();
+        res.destroy();
       }
       if (session.activePosts.size === 0 && session.lastSeenMs < cutoff) await this.drop(session, 'idle');
     }

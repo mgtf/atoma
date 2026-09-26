@@ -188,7 +188,7 @@ import {
 } from '../supervisor/resident.js';
 import { analystProvider } from '../supervisor/session.js';
 import { McpOAuth } from '../auth/mcpOAuth.js';
-import { McpHttpHost } from '../mcp/http.js';
+import { McpHttpHost, mcpMaxRequestMsFromEnv } from '../mcp/http.js';
 import type { McpCaller } from '../mcp/identity.js';
 import { buildServer as buildMcpServer } from '../mcp/server.js';
 import { repoRoot, signalActiveRunOnExit } from '../mcp/run.js';
@@ -1310,6 +1310,7 @@ const MCP_HOST = new McpHttpHost({
     ? [AUTH_RUNTIME.publicOrigin.origin]
     : [`http://127.0.0.1:${cli.port}`, `http://localhost:${cli.port}`, `http://[::1]:${cli.port}`],
   logger: (line) => console.error(`[mcp] ${line}`),
+  maxRequestMs: mcpMaxRequestMsFromEnv(),
 });
 // An operator run started through the MCP is a child of THIS process; a
 // generic exit signals it (SIGTERM only, never SIGKILL) so it can close its
