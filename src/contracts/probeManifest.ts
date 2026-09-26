@@ -455,6 +455,7 @@ export function probeEntryProblems(e: unknown, i: number): string[] {
         'keydown',
         'keyup',
         'keypress',
+        'upload',
       ]);
       inter.forEach((action, actionIndex) => {
         if (!action || typeof action !== 'object' || Array.isArray(action)) {
@@ -488,6 +489,13 @@ export function probeEntryProblems(e: unknown, i: number): string[] {
         ) {
           problems.push(
             `entry #${i} (web): interaction #${actionIndex} ${a['type']} is missing a key`
+          );
+        } else if (
+          a['type'] === 'upload' &&
+          (typeof a['selector'] !== 'string' || typeof a['file'] !== 'string')
+        ) {
+          problems.push(
+            `entry #${i} (web): interaction #${actionIndex} upload requires string selector and file`
           );
         }
       });

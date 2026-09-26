@@ -150,6 +150,13 @@ Neighbours:
   The size rides the ATTESTED observation too (`viewport=WxH` in the line a
   validator reads), and keys the smoke stuck/oscillation detector, whose
   refusals report it: a width sweep is several layouts, not one flaky smoke.
+- An `upload` interaction attaches a WORKSPACE file to an `<input type="file">`
+  (`ElementHandle.uploadFile`, whose CDP call fires input and change). A
+  click on a file input opens a chooser a headless page cannot answer, so
+  the README's own "upload a CSV" could never be observed, and run 74fe5cec
+  spent its whole budget trying (2026-09-26). The file goes through
+  `sandbox.resolve` and `lstat`: never a path or a symlink outside the jail,
+  because its bytes reach the page and the trace.
 - `validate_html` reports `requestedInteractions`, `ignoredInteractions` and
   the served `document` digest alongside `interactionLog`. The counts are the
   CALLER's fact and the log is the runtime's; a result that carries only one

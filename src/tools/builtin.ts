@@ -1616,9 +1616,13 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
               properties: {
                 type: {
                   type: 'string',
-                  enum: ['click', 'rightclick', 'type', 'keydown', 'keyup', 'keypress'],
+                  enum: ['click', 'rightclick', 'type', 'keydown', 'keyup', 'keypress', 'upload'],
                   description:
-                    'Event kind. "type" enters a text string into selector; "keypress" = one keydown then keyup after holdMs.',
+                    'Event kind. "type" enters a text string into selector; "keypress" = one keydown then keyup after holdMs; "upload" attaches a workspace file to the <input type="file"> at selector, firing its input and change events as a person picking it would.',
+                },
+                file: {
+                  type: 'string',
+                  description: 'upload-only. Workspace-relative path of the file to attach, e.g. "sample.csv".',
                 },
                 selector: {
                   type: 'string',
@@ -1974,6 +1978,27 @@ ${pageRevision}`;
               await new Promise((r) => setTimeout(r, holdMs));
               await page.keyboard.up(key);
               interactionLog.push(`keypress ${it.key} (${holdMs}ms)`);
+            } else if (it.type === 'upload') {
+              // THE ONE WAY TO PROVE AN UPLOAD. A click on a file input opens a
+              // native chooser the headless page cannot answer, so the README's
+              // own example — "upload a CSV" — could never be observed, and a
+              // production run spent its whole budget re-trying to (run
+              // 74fe5cec, 2026-09-26). The file is resolved inside the
+              // workspace, never beside it.
+              if (!it.selector) throw new Error('upload requires "selector", the <input type="file"> to fill');
+              if (!it.file) throw new Error('upload requires "file", a workspace-relative path');
+              const abs = opts.sandbox.resolve(it.file);
+              // lstat, never stat: a symlink would carry a host file's bytes
+              // into the page, and from there into the trace.
+              if (!existsSync(abs) || !lstatSync(abs).isFile()) {
+                throw new Error(`upload file "${it.file}" is not a regular file in the workspace; write it first`);
+              }
+              const input = await page.$(it.selector);
+              if (!input) throw new Error(`upload selector ${it.selector} matched no element`);
+              const isFileInput = await input.evaluate((element) => element instanceof HTMLInputElement && element.type === 'file');
+              if (!isFileInput) throw new Error(`upload selector ${it.selector} is not an <input type="file">`);
+              await (input as import('puppeteer').ElementHandle<HTMLInputElement>).uploadFile(abs);
+              interactionLog.push(`upload ${it.file} into ${it.selector}`);
             }
             // Let listeners run / raf fire.
             await new Promise((r) => setTimeout(r, 80));
@@ -2144,13 +2169,15 @@ export function parseViewport(raw: unknown): { width: number; height: number } {
 }
 
 export interface ParsedInteraction {
-  type: 'click' | 'rightclick' | 'type' | 'keydown' | 'keyup' | 'keypress';
+  type: 'click' | 'rightclick' | 'type' | 'keydown' | 'keyup' | 'keypress' | 'upload';
   selector?: string;
   x?: number;
   y?: number;
   key?: string;
   text?: string;
   holdMs?: number;
+  /** upload-only: the workspace-relative file to attach. */
+  file?: string;
 }
 
 export function parseInteractions(raw: unknown): ParsedInteraction[] {
@@ -2166,10 +2193,14 @@ export function parseInteractions(raw: unknown): ParsedInteraction[] {
       t !== 'type' &&
       t !== 'keydown' &&
       t !== 'keyup' &&
-      t !== 'keypress'
+      t !== 'keypress' &&
+      t !== 'upload'
     )
       continue;
     const parsed: ParsedInteraction = { type: t };
+    if (typeof rec['file'] === 'string' && rec['file']) {
+      parsed.file = rec['file'];
+    }
     if (typeof rec['selector'] === 'string' && rec['selector']) {
       parsed.selector = rec['selector'];
     }

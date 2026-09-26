@@ -184,6 +184,8 @@ export const SMOKE_DESIGN_GUIDANCE = [
   `or invent a plausible selector: "#increment-btn" does not match`,
   `id="incrementBtn", and one guessed selector invalidates the whole replay.`,
   `For form text, use interaction {type:"type", selector:"#field", text:"..."}.`,
+  `For a file input, write the file first, then {type:"upload", selector:"#file",`,
+  `file:"sample.csv"}: clicking a file input opens a chooser nobody can answer.`,
   `keypress accepts ONE key name (Enter, ArrowRight, "a"), never a full string`,
   `such as "Test User"; submit only after typing every required field.`,
   `Derive expected labels and state thresholds from the TASK CONTRACT.`,
