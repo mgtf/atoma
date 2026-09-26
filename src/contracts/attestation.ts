@@ -286,6 +286,9 @@ function isViewport(value: unknown): value is { width: number; height: number } 
     (v['width'] as number) > 0 && (v['height'] as number) > 0;
 }
 
+/** How much of a smoke expression the validator's line shows: its head, where the checks are named. */
+export const MAX_RENDERED_SMOKE_CHARS = 800;
+
 /** The one-line rendering the supervisor shows a validator. */
 export function renderObservation(record: AttestationRecord): string {
   const o = record.observation;
@@ -299,6 +302,14 @@ export function renderObservation(record: AttestationRecord): string {
   if (o.viewport) bits.push(`viewport=${o.viewport.width}x${o.viewport.height}`);
   if (o.document) bits.push(`doc=${o.document.path}`);
   bits.push(`consoleErrors=${o.consoleErrors}`, `failedRequests=${o.failedRequests}`);
+  // WHAT WAS ASSERTED, beside what came back. A result keyed
+  // `controlsVisible: true` does not say that it measured `height >= 44`;
+  // without the expression a validator refused a delivery for not verifying
+  // exactly what that smoke verified (production run 5a5f1e27, 2026-09-26).
+  // Model-authored, like an execution's request: the block says so.
+  if (o.smoke !== undefined) {
+    bits.push(`smoke=${o.smoke.length > MAX_RENDERED_SMOKE_CHARS ? `${o.smoke.slice(0, MAX_RENDERED_SMOKE_CHARS)} [truncated]` : o.smoke}`);
+  }
   if (o.smokeResult !== undefined) {
     try {
       const smoke = JSON.stringify(o.smokeResult) ?? '[not JSON serializable]';

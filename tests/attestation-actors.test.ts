@@ -47,6 +47,20 @@ describe('the attested browser observation', () => {
     expect(parseBrowserObservation({}, legacy)?.viewport).toBeUndefined();
   });
 
+  it('shows the validator what a smoke asserted, not only what it returned (production run 5a5f1e27)', () => {
+    // The check was named `controlsVisible`; the 44px requirement lived in the
+    // expression, which the line dropped, and the delivery was refused for it.
+    const smoke = "(() => { const controls = [...document.querySelectorAll('input,button')]; const checks = { controlsVisible: controls.every(el => el.getBoundingClientRect().height >= 44) }; return { ok: Object.values(checks).every(Boolean), checks }; })()";
+    const observation = parseBrowserObservation({ url: 'http://127.0.0.1:4000/', smoke, viewport: { width: 320 } }, browserResult(320))!;
+    const line = renderObservation({ eventId: 'e', tool: 'validate_html', observation });
+    expect(line).toContain('height >= 44');
+    expect(line.indexOf('smoke=')).toBeLessThan(line.indexOf('smokeResult='));
+    const long = parseBrowserObservation({ smoke: `(() => { ${'x'.repeat(5000)} })()` }, browserResult(800))!;
+    const bounded = renderObservation({ eventId: 'e', tool: 'validate_html', observation: long });
+    expect(bounded).toContain('[truncated]');
+    expect(bounded.length).toBeLessThan(1200);
+  });
+
   it('attests record_probe, the shell evidence tool, like run_shell', () => {
     expect(parseExecutionObservation('record_probe', { cmd: 'node test.js' }, { exitCode: 0 })).toMatchObject({ kind: 'execution' });
   });
