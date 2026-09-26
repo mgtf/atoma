@@ -757,6 +757,20 @@ describe('the stream — SSE frames and replay', () => {
     expect(store.size()).toBe(2);
     expect(store.evictions()).toBe(3);
   });
+
+  it('says whether a stream still owes its response, and since when, until its last frame goes', async () => {
+    const { SessionEventStore } = await import('../src/mcp/eventStore.js');
+    let clock = 1_000;
+    const store = new SessionEventStore(3, 1 << 20, () => clock);
+    const primed = await store.storeEvent('call', { jsonrpc: '2.0', method: 'notifications/progress', params: { progress: 1 } });
+    clock = 5_000;
+    expect(store.streamState(primed)).toEqual({ streamId: 'call', firstStoredMs: 1_000, answered: false });
+    await store.storeEvent('call', { jsonrpc: '2.0', id: 2, result: { content: [] } });
+    expect(store.streamState(primed)).toEqual({ streamId: 'call', firstStoredMs: 1_000, answered: true });
+    for (let n = 0; n < 4; n += 1) await store.storeEvent('log', { jsonrpc: '2.0', method: 'notifications/message', params: { n } });
+    // The cursor fell off the ring: nothing to say about it, as for replay.
+    expect(store.streamState(primed)).toBeUndefined();
+  });
 });
 
 describe('session ceilings, and what a refused initialize leaves behind', () => {

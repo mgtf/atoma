@@ -49,6 +49,23 @@ interface StoredEvent {
   readonly seq: number;
 }
 
+/**
+ * What the host needs to know about the stream a `Last-Event-ID` names: whether
+ * its call is still unanswered, and since when the store has seen it.
+ */
+export interface StreamState {
+  readonly streamId: StreamId;
+  /** When the stream's first frame was stored: the call began no later. */
+  readonly firstStoredMs: number;
+  /** A JSON-RPC response was stored on it: nothing more will ever be sent there. */
+  readonly answered: boolean;
+}
+
+/** A response closes the call its stream answers; a notification or a request does not. */
+function isResponse(message: JSONRPCMessage): boolean {
+  return 'id' in message && ('result' in message || 'error' in message);
+}
+
 /** The frame's own weight. A malformed message counts as nothing rather than throwing on the hot path. */
 function frameBytes(message: JSONRPCMessage): number {
   try {
@@ -62,6 +79,8 @@ export class SessionEventStore implements EventStore {
   /** One queue per stream, oldest first. An empty queue is deleted, so the map follows live streams. */
   private readonly streams = new Map<StreamId, StoredEvent[]>();
   private readonly byId = new Map<EventId, StoredEvent>();
+  /** One entry per stream holding frames, deleted with its last frame. */
+  private readonly states = new Map<StreamId, { firstStoredMs: number; answered: boolean }>();
   private counter = 0;
   private stored = 0;
   private bytes = 0;
@@ -69,7 +88,8 @@ export class SessionEventStore implements EventStore {
 
   constructor(
     private readonly capacity: number = MCP_EVENT_STORE_CAPACITY,
-    private readonly maxBytes: number = MCP_EVENT_STORE_MAX_BYTES
+    private readonly maxBytes: number = MCP_EVENT_STORE_MAX_BYTES,
+    private readonly now: () => number = () => Date.now()
   ) {
     if (!Number.isInteger(capacity) || capacity <= 0) throw new Error(`event store capacity must be a positive integer (got ${String(capacity)})`);
     if (!Number.isInteger(maxBytes) || maxBytes <= 0) throw new Error(`event store byte budget must be a positive integer (got ${String(maxBytes)})`);
@@ -94,6 +114,9 @@ export class SessionEventStore implements EventStore {
       queue = [];
       this.streams.set(streamId, queue);
     }
+    const state = this.states.get(streamId) ?? { firstStoredMs: this.now(), answered: false };
+    if (isResponse(message)) state.answered = true;
+    this.states.set(streamId, state);
     queue.push(stored);
     this.byId.set(eventId, stored);
     this.stored += 1;
@@ -121,8 +144,18 @@ export class SessionEventStore implements EventStore {
     this.stored -= 1;
     this.bytes -= gone.bytes;
     this.dropped += 1;
-    if (victim!.length === 0) this.streams.delete(gone.streamId);
+    if (victim!.length === 0) {
+      this.streams.delete(gone.streamId);
+      this.states.delete(gone.streamId);
+    }
     return true;
+  }
+
+  /** The stream `eventId` belongs to, while the ring still holds it. */
+  streamState(eventId: EventId): StreamState | undefined {
+    const streamId = this.byId.get(eventId)?.streamId;
+    const state = streamId === undefined ? undefined : this.states.get(streamId);
+    return streamId === undefined || !state ? undefined : { streamId, ...state };
   }
 
   getStreamIdForEventId(eventId: EventId): Promise<StreamId | undefined> {

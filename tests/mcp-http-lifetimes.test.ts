@@ -212,6 +212,57 @@ describe('a call the client is still waiting for (2026-09-25 review, 1.3)', () =
     expect((await resumed).text).toContain('FINISHED-RESULT');
   });
 
+  /** A session with a slow call begun at `now`, its POST cut after the first event id. */
+  async function cutCall(url: string, gates: Array<() => void>) {
+    const init = fragmented(url); init.req.end(initialize.slice(10));
+    const id = (await init.response).id!;
+    const session = { ...headers, 'mcp-session-id': id, 'mcp-protocol-version': '2025-11-25' };
+    await raw(url, 'POST', session, JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }));
+    let eventId: string | undefined;
+    await raw(url, 'POST', session, callBody, (text, req) => {
+      const match = /id: (\S+)/.exec(text);
+      if (match && !eventId) { eventId = match[1]; req.destroy(); }
+    });
+    await vi.waitFor(() => expect(gates).toHaveLength(1));
+    return { session, eventId: eventId! };
+  }
+
+  it('does not pin a session with the resumed stream of a call already answered', async () => {
+    // The SDK holds a resumed stream open after its replay, and nothing more
+    // will ever be sent there: pinned, it held the session for the whole
+    // request ceiling (2026-09-25 adversarial review).
+    const gates: Array<() => void> = [];
+    const url = await listen(slowServer(gates));
+    const { session, eventId } = await cutCall(url, gates);
+    gates.shift()!();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    let replayed = false;
+    const resumed = raw(url, 'GET', { ...session, accept: 'text/event-stream', 'last-event-id': eventId },
+      undefined, (text) => { if (text.includes('FINISHED-RESULT')) replayed = true; });
+    await vi.waitFor(() => expect(replayed).toBe(true));
+    now = 31 * 60_000;
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(host.health().sessions).toBe(0);
+    await resumed;
+  });
+
+  it('bounds a resumed call by the start of the call, so reconnecting never extends the ceiling', async () => {
+    const gates: Array<() => void> = [];
+    const url = await listen(slowServer(gates));
+    const { session, eventId } = await cutCall(url, gates);
+    try {
+      now = 170 * 60_000;
+      const resumed = raw(url, 'GET', { ...session, accept: 'text/event-stream', 'last-event-id': eventId });
+      await new Promise(resolve => setTimeout(resolve, 100));
+      now = 181 * 60_000;
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      // Past three hours of the CALL, not of the reconnect: the response
+      // closes, the session stays for its other calls.
+      expect((await resumed).text).not.toContain('FINISHED-RESULT');
+      expect(host.health().sessions).toBe(1);
+    } finally { gates.shift()?.(); }
+  });
+
   it('never evicts a session answering a call to make room for the same caller', async () => {
     const gates: Array<() => void> = [];
     const url = await listen(slowServer(gates), 16, 2);

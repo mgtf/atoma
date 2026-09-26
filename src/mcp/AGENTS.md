@@ -60,11 +60,14 @@ Neighbours:
   a client re-initialising in a loop is visible rather than merely survived.
   Initializations reserve both ceilings before allocation; a caller whose
   slots are all pending receives 503. Incomplete bodies expire after 30s.
-  A call still ANSWERING — a POST, or the GET resuming its stream with
-  `Last-Event-ID` — pins its session against the idle sweep AND against
-  `reclaim`, which then answers 503 rather than cut it; the standalone GET
-  stream does not pin. Past `ATOMA_MCP_MAX_REQUEST_MS` (default 3h) that one
-  call is closed, never the session holding other calls and tasks.
+  A call still ANSWERING — a POST, or the GET resuming with `Last-Event-ID`
+  the stream of a call whose response is still owed — pins its session
+  against the idle sweep AND against `reclaim`, which then answers 503 rather
+  than cut it; the standalone GET stream, and a resumed stream whose call was
+  already answered, do not pin. A resumed call keeps its original start, so
+  past `ATOMA_MCP_MAX_REQUEST_MS` (default 3h) of the CALL, reconnects
+  included, its open response is closed — never the session holding other
+  calls and tasks.
 - IDENTITY. Gated: `Authorization: Bearer atoma_…`, an API token a principal
   minted for ONE organisation (`/api/tokens`, or `npm run auth -- token`).
   `AuthStore.resolveApiToken` returns a fresh viewer — role and platform flag
@@ -328,6 +331,8 @@ Neighbours:
   stalest session, was rejected: a client whose sessions leak would lock
   itself out of a working server, and the sessions it lost were its own to
   lose. The host ceiling refuses, because there the cost falls on everyone.
+  The one refusal at the caller's ceiling is when EVERY one of its sessions is
+  answering a call: dropping one would cut a call in flight, not a leak.
 - Keeping stdio "for local development" was considered and dropped
   (2026-09-05): `npm run viz` already serves loopback ungated, so the local
   MCP is the same URL on `127.0.0.1`, and a second transport was code kept

@@ -127,14 +127,21 @@ export interface McpHttpHealth {
  */
 export const STANDALONE_SSE_STREAM_ID = '_GET_stream';
 
-/** Is `req` a GET resuming the stream of a REQUEST (not the standalone one)? */
-async function resumesACall(events: SessionEventStore, req: IncomingMessage): Promise<boolean> {
-  if (req.method !== 'GET') return false;
+/**
+ * When `req` is a GET resuming the stream of a call still UNANSWERED, the time
+ * that call began (its stream's first frame); otherwise undefined. The SDK
+ * holds a resumed stream open after replaying it, so the GET resuming a call
+ * already answered would otherwise pin its session to the request ceiling for
+ * a response that was already delivered (2026-09-25 adversarial review).
+ */
+function resumedCallStart(events: SessionEventStore, req: IncomingMessage): number | undefined {
+  if (req.method !== 'GET') return undefined;
   const header = req.headers['last-event-id'];
   const lastEventId = Array.isArray(header) ? header[0] : header;
-  if (!lastEventId) return false;
-  const streamId = await events.getStreamIdForEventId(lastEventId);
-  return streamId !== undefined && streamId !== STANDALONE_SSE_STREAM_ID;
+  if (!lastEventId) return undefined;
+  const stream = events.streamState(lastEventId);
+  if (!stream || stream.streamId === STANDALONE_SSE_STREAM_ID || stream.answered) return undefined;
+  return stream.firstStoredMs;
 }
 
 export class McpHttpHost {
@@ -202,10 +209,14 @@ export class McpHttpHost {
       session.lastSeenMs = this.now();
       // A call ANSWERING pins the session for as long as its response is
       // open: a POST, and the GET that RESUMES a cut POST's stream with
-      // `Last-Event-ID` — the replay contract promises that resumed call its
-      // response (2026-09-25 review, 1.3a). The standalone notification stream
+      // `Last-Event-ID` while its response is still owed — the replay
+      // contract promises that call its response (2026-09-25 review, 1.3a).
+      // The resumed call keeps the start of the original one, so reconnecting
+      // never extends the request ceiling. The standalone notification stream
       // does not pin: an abandoned subscription remains sweepable.
-      if (req.method === 'POST' || await resumesACall(session.events, req)) this.pinWhileAnswering(session, res);
+      const resumed = resumedCallStart(session.events, req);
+      if (req.method === 'POST') this.pinWhileAnswering(session, res, this.now());
+      else if (resumed !== undefined) this.pinWhileAnswering(session, res, resumed);
       await session.transport.handleRequest(req, res);
       return;
     }
@@ -236,7 +247,7 @@ export class McpHttpHost {
     initializationTimer.unref();
     try {
       const server = this.options.buildServer(caller);
-      const events = new SessionEventStore();
+      const events = new SessionEventStore(undefined, undefined, this.now);
       let session: Session | null = null;
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
@@ -303,9 +314,12 @@ export class McpHttpHost {
     }
   }
 
-  /** Keep `session` out of the idle sweep and of `reclaim` until `res` ends. */
-  private pinWhileAnswering(session: Session, res: ServerResponse): void {
-    session.activePosts.set(res, this.now());
+  /**
+   * Keep `session` out of the idle sweep and of `reclaim` until `res` ends, or
+   * until the call begun at `startedMs` outlives the request ceiling.
+   */
+  private pinWhileAnswering(session: Session, res: ServerResponse, startedMs: number): void {
+    session.activePosts.set(res, startedMs);
     const finished = () => {
       session.activePosts.delete(res);
       session.lastSeenMs = this.now();
@@ -332,7 +346,7 @@ export class McpHttpHost {
       // 2026-09-26 the whole session was dropped (review 2.11).
       for (const [res, started] of [...session.activePosts.entries()]) {
         if (started >= requestCutoff) continue;
-        this.log(`session ${session.id.slice(0, 8)}: a call past the request ceiling was closed`);
+        this.log(`session ${session.id.slice(0, 8)}: a response past the request ceiling was closed`);
         session.activePosts.delete(res);
         // It was answering until now: the idle clock restarts here, not at the
         // call's start ('close' fires after this loop has moved on).
