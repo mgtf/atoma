@@ -117,6 +117,9 @@ Neighbours:
   runs it left; watch mode AND the resident host production runs give the
   run back its single attempt and pause `ANALYST_QUOTA_PAUSE_MS`. Measured 2026-09-24: without it a Z.ai five-hour
   limit spawned one session per remaining target, six 429s in seven seconds.
+  Only the `claude -p` wrapper carries that typed field: a Codex session
+  refused for quota is still `session-failed`, spends the run's attempt and
+  does not pause, until its app-server reports a typed status to read.
 - The digest carries a mechanical `trajectories` block — one row per Molecule
   execution: ordered element names collapsed, the skill it was handed, whether
   the run credited it — derived by `src/contracts/trajectory.ts`, the same

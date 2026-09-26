@@ -18,8 +18,10 @@ import type { RunIndexEntry, VizProject, VizRun } from '../client/types.js';
  *     from GitHub, whose every run starts from the repository's default branch,
  *     so an unpublished partial change is not carried over, and EXCEPT a
  *     comparison rerun, which sits beside the project and never seeds it
- *     (2026-09-25 review, 2.7). Saying "your work is kept" there would be the
- *     one sentence on this card that is false.
+ *     (2026-09-25 review, 2.7), and EXCEPT a partial a later run of the same
+ *     line has since superseded: the next run starts from that one. Saying
+ *     "it picks up from here" there would be the one sentence on this card
+ *     that is false.
  *
  * The model's reasons stay reachable as technical detail, never as the lead.
  */
@@ -42,6 +44,12 @@ export interface PartialRunGuidance {
   readonly carriesOver: boolean;
   /** A comparison rerun: kept beside the project, never continued by it. */
   readonly rerun: boolean;
+  /**
+   * A later run of the project's own line finished with work to seed (not
+   * failed, cancelled, live or a rerun): the next run continues from it. The
+   * Projects view shows guidance on its newest row only, for the same reason.
+   */
+  readonly superseded: boolean;
   /** The goal to offer again, when the run carries one. */
   readonly goal: string | null;
   /** The typed reasons, model-authored: detail, never the headline. */
@@ -62,11 +70,17 @@ export function partialRunGuidance(
   // The index's goal is the one the person typed, in full; the trace's task
   // description is the fallback for an index that predates that field.
   const goal = entry?.goal?.trim() || run.task?.description?.trim() || null;
+  const startedAt = entry ? Date.parse(entry.startedAt) : NaN;
+  const superseded = Boolean(entry?.projectId && !entry.rerunOf && Number.isFinite(startedAt) && index.some((other) =>
+    other.id !== entry.id && other.projectId === entry.projectId && !other.rerunOf &&
+    other.endedAt !== undefined && !other.inFlight && !other.hasError && !other.cancelled &&
+    Date.parse(other.startedAt) > startedAt));
   return {
     cause,
     project,
-    carriesOver: Boolean(project && !project.repositoryTarget.source && !entry?.rerunOf),
+    carriesOver: Boolean(project && !project.repositoryTarget.source && !entry?.rerunOf && !superseded),
     rerun: Boolean(entry?.rerunOf),
+    superseded,
     goal,
     details: landingReasons(run.result),
   };

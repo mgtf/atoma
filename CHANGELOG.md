@@ -27,18 +27,21 @@ corrections of the 2026-09-24 and 2026-09-25 code reviews.
 - A rerun row naming a model the catalogue later retires no longer breaks its
   project's run list, later runs and offline retention.
 - Work in hand at the deadline — landed or complete, a refused result whose
-  remediation was cut, an interrupted synthesis — is finalized as a partial
-  instead of being recorded as failed.
-- MCP sessions answering a call survive a resumed stream and the per-caller
-  ceiling; the request ceiling closes the stalled call only, and is
-  configurable with `ATOMA_MCP_MAX_REQUEST_MS`.
+  remediation was cut, an interrupted synthesis — is judged within a 45-second
+  finalization window and kept, delivered when accepted and partial otherwise,
+  instead of being recorded as failed. A library caller's own timeout, without
+  a run deadline, is honoured as a cancellation.
+- An MCP session answering a call, including one resumed with
+  `Last-Event-ID`, is neither swept as idle nor evicted by its caller's
+  session ceiling; past the request ceiling, configurable with
+  `ATOMA_MCP_MAX_REQUEST_MS`, only that response is closed.
 - Validators see only the worker's attested calls, with browser observations
   always kept and the viewport they were laid out at.
 - Approved criteria that name a status where it is not read, or a second
   status, are refused instead of becoming "any 2xx" checks.
 - A deepening keeps the project's document search.
-- Runner logs and publication errors served to tenants no longer carry host
-  paths.
+- Runner logs, run errors and publication errors served to tenants no longer
+  carry host paths.
 
 ## v0.4.0 — 2026-09-17
 

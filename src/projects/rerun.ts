@@ -105,7 +105,9 @@ function seedRunOf(
  * the rerun to draft none either (`ATOMA_ACCEPTANCE_SOURCE=none`).
  */
 function draftedAcceptance(origin: ProjectRun): RunAcceptance | null {
-  const unrecoverable = "this run's trace is no longer on this host, so the checklist it was judged against cannot be recovered";
+  // Said without presuming a list: an origin older than the checklist had
+  // none, and its gone trace can no longer say so either.
+  const unrecoverable = "this run's trace is no longer on this host, so what it was judged against cannot be recovered and a rerun would not be comparable";
   if (origin.bytesExpiredAt) throw new ProjectStateConflict(unrecoverable);
   const tracePath = resolveProjectRunTraceFile({
     projectRunId: origin.projectRunId,

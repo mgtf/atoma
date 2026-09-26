@@ -9,6 +9,7 @@ import type {
   LaunchProfile,
   RegistrySummary,
   RegistryType,
+  RunIndexEntry,
   SkillSummary,
   VizEvent,
   VizNotification,
@@ -6444,6 +6445,27 @@ describe('incomplete (partial) runs guide the next step', () => {
     expect(texts).toContain(t('run.partial.next.rerun'));
     expect(texts).not.toContain(t('run.partial.next.continue'));
     expect(ctx.buttons.some((candidate) => candidate.id.startsWith(PARTIAL_CONTINUE_PREFIX))).toBe(false);
+  });
+
+  it('does not promise to continue a partial a later run of the project superseded (2026-09-25 adversarial review)', () => {
+    const later = { ...indexEntry, id: 'run-2', startedAt: '2026-08-15T10:00:00.000Z', endedAt: '2026-08-15T10:30:00.000Z' };
+    const draw = (runs: RunIndexEntry[]) => {
+      const ctx = createRecordingCtx();
+      drawRuns(ctx, makeSnapshot({}, { run: refusedRun(), runs: [indexEntry, ...runs], projects: [project()] }), WIDTH, HEIGHT);
+      return { texts: ctx.texts.map((entry) => entry.value), continues: ctx.buttons.some((candidate) => candidate.id.startsWith(PARTIAL_CONTINUE_PREFIX)) };
+    };
+    const superseded = draw([later]);
+    expect(superseded.texts).toContain(t('run.partial.next.superseded'));
+    expect(superseded.texts).not.toContain(t('run.partial.next.continue'));
+    expect(superseded.continues).toBe(false);
+    // A later run that failed, is still live, or is a comparison rerun seeds
+    // nothing: this partial is still what the next run continues.
+    const { endedAt: _ended, ...live } = later;
+    for (const other of [{ ...later, hasError: true }, { ...live, inFlight: true }, { ...later, rerunOf: 'run-1' }]) {
+      const kept = draw([other]);
+      expect(kept.texts).toContain(t('run.partial.next.continue'));
+      expect(kept.continues).toBe(true);
+    }
   });
 
   it('offers no continue control for a run outside a project', () => {
