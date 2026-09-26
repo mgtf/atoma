@@ -48,9 +48,12 @@ export async function withProjectRetrievalBackend(
   try {
     retrieval = createProjectRetrievalTool(binding, context);
     const composite = projectRetrievalExecutor(backend.executor, backend.toolDecls, retrieval);
-    return { ...backend, ...composite, cleanup: close,
-      ...(backend.drain ? { drain: async () => { await retrieval?.close(); await backend.drain!(); } } : {}),
-    };
+    // `drain` quiesces the WORKSPACE before a deepening replaces it; the
+    // retrieval service belongs to the RUN and outlives that. Disposing it
+    // here latched the Haystack launch closed, and the deep attempt, whose
+    // backend is rebuilt over the SAME binding, got `denied` on every search
+    // (2026-09-25 review, 1.7). Only `cleanup` disposes it.
+    return { ...backend, ...composite, cleanup: close };
   } catch (error) {
     await close();
     throw error;
