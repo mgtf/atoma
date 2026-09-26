@@ -38,6 +38,7 @@ import { RoutingLlmClient } from '../src/core/llmRouting.js';
 import type { LlmCompletionRequest, ToolExecutor } from '../src/core/types.js';
 import { PERSONAL_CODEX_PROFILE_ROOT_ENV } from '../src/core/codexHomeLease.js';
 import { makeTools } from './helpers/factories.js';
+import { ARGUMENTS_ENCODING, describeInvalidArguments } from '../src/core/codexToolLoop.js';
 
 afterEach(() => cleanupCodexJails());
 
@@ -984,7 +985,22 @@ describe('Codex L1 host-side action loop', () => {
     expect(execute).toHaveBeenCalledExactlyOnceWith('write_file', { path: 'proof.txt', content: 'hello\nworld' });
     expect(inputs[1]).toContain('No tool was executed');
     expect(observe.mock.calls[0]?.[0]).toMatchObject({ error: expect.stringContaining('Invalid Atoma') });
+    // The reason reaches both the model and the trace: the parser's message,
+    // where, and that the character there is a raw control character
+    // (production run c4c270f9, eight blind whole-file retries).
+    const error = observe.mock.calls[0]?.[0].error as string;
+    expect(error).toMatch(/JSON\.parse: .*position \d+/);
+    expect(error).toContain('near "{\\"path\\":\\"proof.txt\\",\\"content\\":\\"hello\\nworld');
+    expect(error).toContain('raw control character');
+    expect(inputs[1]).toContain('raw control character');
     expect(result.usage).toMatchObject({ inputTokens: 24, outputTokens: 9 });
+  });
+
+  it('teaches the double encoding with a worked write that decodes to a real two-line file', () => {
+    const example = /Example, a two-line file: (\{.*\})$/m.exec(ARGUMENTS_ENCODING)![1]!;
+    const action = JSON.parse(example) as { argumentsJson: string };
+    expect(JSON.parse(action.argumentsJson)).toEqual({ path: 'a.txt', content: 'line one\nline two' });
+    expect(describeInvalidArguments('[1]')).toMatch(/decodes to an array, not an object/);
   });
   it('bounds repeated invalid arguments by the existing tool budget', async () => {
     const execute = vi.fn();

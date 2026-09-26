@@ -43,7 +43,12 @@ Neighbours:
   child is still drained and reaped so usage, errors and profile leases remain honest.
   Invalid argument JSON returns a failed observation without executing a tool;
   the model may correct it within the same iteration budget. Never repair or
-  reinterpret executable arguments on its behalf.
+  reinterpret executable arguments on its behalf. The observation names WHY
+  (`describeInvalidArguments`: the parser's message, the length, the escaped
+  characters around the position, and a raw control character when that is
+  what stands there), and the protocol states the double encoding with one
+  worked multi-line write: run c4c270f9 (2026-09-26) lost eight blind
+  whole-page retries to a bare "must encode a JSON object".
   A finite tool budget permits one finalization, which cannot execute tools. Abort and partial
   usage propagate across the complete loop. No Codex-native tools are enabled.
   Acceptance evidence: [codex-all-tiers-2026-09-08](../../docs/incidents/codex-all-tiers-2026-09-08.md).
