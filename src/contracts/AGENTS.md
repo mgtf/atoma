@@ -63,10 +63,14 @@ Neighbours:
   purpose. Reporting one side is what let `ok: true` with an empty interaction
   log read as proof that clicking worked.
 - `renderObservation` is the one line a validator reads. A browser line shows
-  the viewport, the smoke EXPRESSION (bounded to its head) and the smoke
-  result: a result keyed `controlsVisible: true` does not say it measured
-  `height >= 44`, and without the expression a delivery was refused for not
-  verifying exactly that (production run 5a5f1e27, 2026-09-26).
+  the viewport, the smoke EXPRESSION and the smoke result: a result keyed
+  `controlsVisible: true` does not say it measured `height >= 44`, and
+  without the expression a delivery was refused for not verifying exactly
+  that (production run 5a5f1e27, 2026-09-26). The expression is child-authored
+  and JSON-encoded like an execution's request (head and tail kept), so it
+  cannot print lines of its own into a machine-observed block; and
+  `renderObservations` writes a repeated one out ONCE, on its latest
+  occurrence — the one a bounded evidence block keeps.
 - HTTP, shell, file-read and server-start observations are bounded historical
   evidence in the same attestation log. They do not establish DOM interaction
   or introduce automatic approval, and their scripts/content remain untrusted.

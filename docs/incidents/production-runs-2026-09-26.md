@@ -100,6 +100,20 @@ that molecule's trust streak.
 never the smoke expression. Fixed: the line carries the expression, bounded to
 its head. R5 stays `partial` on the record; its work seeds the next run.
 
+## Review of the fixes
+
+An adversarial review of the fix commits found no blocker and two major
+defects in the smoke rendering, both closed before release: the expression
+entered the machine-observed block raw (a multi-line smoke could forge
+observation lines), and five copies of one responsive smoke evicted execution
+evidence from the validator's budget. Minor findings closed with them: the
+heartbeat is armed only for an open non-augmented call and stops on cancel;
+the busy message tells a deployment, maintenance, the mender and a wedged
+slot apart; the static-web port rule states what the review enforces (any
+numeric loopback port); the Codex diagnostic reads only the parser's own
+position. Known limit kept: a task-augmented caller gets no progress on its
+`tasks/result` stream.
+
 ## Observations, not fixed
 
 - **O1** — review criteria get one prose verdict, never one per criterion; a
