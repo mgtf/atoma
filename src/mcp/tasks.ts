@@ -138,6 +138,55 @@ function quietly(work: () => Promise<unknown>): void {
   void work().catch(() => {});
 }
 
+/** How often a caller waiting on a run hears that it is alive. */
+export const PROGRESS_HEARTBEAT_MS = 30_000;
+
+/**
+ * `notifications/progress` for the caller that asked for them with a
+ * `progressToken`. A call WITHOUT task augmentation is one response the
+ * client waits minutes for, and the SDK's automatic polling says nothing
+ * meanwhile: Claude Code gives up on a server that sends "no response or
+ * progress for 300s" while the run it started carries on (production
+ * 2026-09-26, every run past five minutes). The heartbeat sends the run's
+ * current status line at once and every `everyMs`; it stops for good at the
+ * first send that fails — the request was answered (a task-augmented call
+ * returns at once) or its stream is gone.
+ */
+function requestHeartbeat(
+  extra: { readonly _meta?: { readonly progressToken?: string | number }; readonly sendNotification: (notification: { method: 'notifications/progress'; params: { progressToken: string | number; progress: number; message?: string } }) => Promise<void> },
+  everyMs: number
+): { readonly note: (message: string) => void; readonly stop: () => void } {
+  const token = extra._meta?.progressToken;
+  if (token === undefined) return { note: () => {}, stop: () => {} };
+  let alive = true;
+  let progress = 0;
+  let message = '';
+  let sentAt = -Infinity;
+  const send = (): void => {
+    if (!alive) return;
+    progress += 1;
+    sentAt = Date.now();
+    void extra.sendNotification({ method: 'notifications/progress', params: { progressToken: token, progress, ...(message ? { message } : {}) } })
+      .catch(() => { stop(); });
+  };
+  const timer = setInterval(send, everyMs);
+  timer.unref();
+  const stop = (): void => {
+    alive = false;
+    clearInterval(timer);
+  };
+  // A new status line goes out at once, but never more than one per
+  // `HEARTBEAT_MIN_GAP_MS`: an operator run changes its line on every chunk.
+  const note = (next: string): void => {
+    if (next === message) return;
+    message = next;
+    if (Date.now() - sentAt >= Math.min(everyMs, HEARTBEAT_MIN_GAP_MS)) send();
+  };
+  return { note, stop };
+}
+
+const HEARTBEAT_MIN_GAP_MS = 5_000;
+
 /**
  * Shared skeleton: `getTask` and `getTaskResult` read the store, and every
  * handler's `createTask` is the start followed by a lifecycle watcher. A
@@ -222,7 +271,8 @@ export const PROJECT_RUN_INPUT = {
  */
 export function operatorRunTaskHandler(
   host: RunTaskHost,
-  start: (args: StartRunInput) => Promise<RunRecordPublic>
+  start: (args: StartRunInput) => Promise<RunRecordPublic>,
+  heartbeatMs: number = PROGRESS_HEARTBEAT_MS
 ): ToolTaskHandler<typeof OPERATOR_RUN_INPUT> {
   return handlerWith<typeof OPERATOR_RUN_INPUT>(async (args, extra) => {
     const timeoutMs = args.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
@@ -239,18 +289,23 @@ export function operatorRunTaskHandler(
     }
     host.follow(record.runId);
     host.store.onCancel(task.taskId, () => void cancelOperatorRun({ runId: record.runId }));
+    const heartbeat = requestHeartbeat(extra, heartbeatMs);
     const unhookOutput = onRunOutput((update) => {
       if (update.runId !== record.runId) return;
+      // The chunk count only: the tail is model output, and a progress line is not the place for it.
+      heartbeat.note(`run ${record.runId} running, ${update.chunks} chunks`);
       quietly(() => extra.taskStore.updateTaskStatus(task.taskId, 'working', statusLine(`run ${record.runId} running, ${update.chunks} chunks`, update.tail)));
     });
     const unhookFinish = onRunFinished((finished) => {
       if (finished.runId !== record.runId) return;
       unhookOutput();
       unhookFinish();
+      heartbeat.stop();
       const status = finished.status === 'finished' ? 'completed' : 'failed';
       quietly(() => extra.taskStore.storeTaskResult(task.taskId, status, jsonResult(runStatus({ runId: record.runId }))));
     });
-    host.cleanups.push(unhookOutput, unhookFinish);
+    host.cleanups.push(unhookOutput, unhookFinish, heartbeat.stop);
+    heartbeat.note(`run ${record.runId} started (${record.family})`);
     await extra.taskStore.updateTaskStatus(task.taskId, 'working', `run ${record.runId} started (${record.family})`);
     return { task: await extra.taskStore.getTask(task.taskId) };
   });
@@ -268,6 +323,8 @@ export interface ProjectRunTaskDeps {
   };
   /** Injectable clock for the poller; production uses `setTimeout`. */
   readonly pollMs?: number;
+  /** How often a waiting caller that sent a progressToken hears from the run. */
+  readonly heartbeatMs?: number;
 }
 
 const PROJECT_TERMINAL = new Set(['delivered', 'partial', 'failed', 'cancelled']);
@@ -324,10 +381,12 @@ export function projectRunTaskHandler(host: RunTaskHost, deps: ProjectRunTaskDep
     }
     const runId = started.projectRunId;
     host.store.onCancel(task.taskId, () => void deps.service.cancelProjectRun(viewer, args.projectId, runId).catch(() => {}));
+    const heartbeat = requestHeartbeat(extra, deps.heartbeatMs ?? PROGRESS_HEARTBEAT_MS);
     let stopped = false;
     let timer: NodeJS.Timeout | null = null;
     const stop = (): void => {
       stopped = true;
+      heartbeat.stop();
       if (timer) clearTimeout(timer);
     };
     host.cleanups.push(stop);
@@ -350,6 +409,7 @@ export function projectRunTaskHandler(host: RunTaskHost, deps: ProjectRunTaskDep
       }
       if (snapshot.status !== lastStatus) {
         lastStatus = snapshot.status;
+        heartbeat.note(`run ${runId} ${snapshot.status}`);
         quietly(() => extra.taskStore.updateTaskStatus(task.taskId, 'working', `run ${runId} ${snapshot.status}`));
       }
       if (PROJECT_TERMINAL.has(snapshot.status)) {
@@ -360,6 +420,7 @@ export function projectRunTaskHandler(host: RunTaskHost, deps: ProjectRunTaskDep
       timer = setTimeout(() => { void tick(); }, pollMs);
       timer.unref();
     };
+    heartbeat.note(`run ${runId} ${started.status}`);
     await extra.taskStore.updateTaskStatus(task.taskId, 'working', `run ${runId} ${started.status}`);
     timer = setTimeout(() => { void tick(); }, pollMs);
     timer.unref();

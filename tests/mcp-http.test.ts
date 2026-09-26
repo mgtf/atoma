@@ -928,12 +928,16 @@ describe('runs as tasks, and the run log', () => {
     const { driver, handle } = scriptedDriver();
     const { url } = await listen(() => ({ kind: 'operator' }), { ...NO_TENANT, operatorRunDriver: driver, operatorRunLease: lease });
     const client = await connect(url);
-    const pending = client.callTool({ name: 'atoma_operator_run_start', arguments: { goal: 'a synchronous goal' } });
+    const progress: { progress: number; message?: string }[] = [];
+    const pending = client.callTool({ name: 'atoma_operator_run_start', arguments: { goal: 'a synchronous goal' } }, undefined,
+      { onprogress: (update) => { progress.push(update); } });
     await tick(50);
     handle.chunk('one');
     handle.settle('done');
     const result = await pending;
     expect((result.structuredContent as { status: string }).status).toBe('finished');
+    // Over the real transport, on the call's own stream: the caller hears the run started.
+    expect(progress[0]).toMatchObject({ progress: 1, message: expect.stringMatching(/^run .+ started/) });
     // A refused start is a task that fails at once, never a hung call.
     const refused = await client.request(
       { method: 'tools/call', params: { name: 'atoma_operator_run_start', arguments: { goal: 'x', family: 'no-such-family' } } },
@@ -980,6 +984,50 @@ describe('runs as tasks, and the run log', () => {
     const second = await handler.createTask({ projectId: 'p-1', goal: 'stop me', idempotencyKey: undefined, acceptanceCriteria: undefined, rerunOf: undefined, models: undefined }, extra);
     await store.updateTaskStatus(second.task.taskId, 'cancelled', 'Client cancelled task execution.');
     expect(cancelled).toEqual(['run-1']);
+    for (const cleanup of host.cleanups) cleanup();
+    store.close();
+  });
+
+  it('tells a caller waiting on atoma_run_start that the run is alive, when it sent a progressToken (2026-09-26)', async () => {
+    // Claude Code aborts a call that sends "no response or progress for 300s";
+    // every production run past five minutes was cut that way while it ran on.
+    const statuses = ['queued', 'running', 'running', 'running', 'running', 'running', 'running', 'delivered'];
+    const service = {
+      startProjectRunFromInput: async () => ({ projectRunId: 'run-1', status: 'queued' }),
+      projectRunStatus: () => ({ projectRunId: 'run-1', status: statuses.length > 1 ? statuses.shift()! : statuses[0]! }),
+      runTaskBudgetMs: () => 60_000,
+      cancelProjectRun: async () => ({}),
+    };
+    const store = new SessionTaskStore();
+    const host: RunTaskHost = { store, follow: () => {}, cleanups: [] };
+    const handler = projectRunTaskHandler(host, { viewer: () => viewer('org:member'), service, pollMs: 10, heartbeatMs: 15 });
+    const requestStore = {
+      createTask: (params: { ttl?: number | null; pollInterval?: number }) => store.createTask(params, 1, { method: 'tools/call' }),
+      getTask: async (taskId: string) => (await store.getTask(taskId))!,
+      storeTaskResult: (taskId: string, status: 'completed' | 'failed', result: { content: unknown[] }) => store.storeTaskResult(taskId, status, result),
+      getTaskResult: (taskId: string) => store.getTaskResult(taskId),
+      updateTaskStatus: (taskId: string, status: 'working' | 'input_required' | 'completed' | 'failed' | 'cancelled', message?: string) => store.updateTaskStatus(taskId, status, message),
+    };
+    const sent: { progressToken: string | number; progress: number; message?: string }[] = [];
+    const extra = { taskStore: requestStore, signal: new AbortController().signal, requestId: 1, _meta: { progressToken: 'tok-1' },
+      sendNotification: async (notification: { params: (typeof sent)[number] }) => { sent.push(notification.params); }, sendRequest: async () => ({}) } as never;
+    const args = { projectId: 'p-1', goal: 'ship it', idempotencyKey: undefined, acceptanceCriteria: undefined, rerunOf: undefined, models: undefined };
+    const created = await handler.createTask(args, extra);
+    await vi.waitFor(async () => expect((await store.getTask(created.task.taskId))?.status).toBe('completed'));
+    const settled = sent.length;
+    await tick(60);
+    expect(sent[0]).toEqual({ progressToken: 'tok-1', progress: 1, message: 'run run-1 queued' });
+    expect(sent.map((entry) => entry.message)).toContain('run run-1 running');
+    // Heartbeats between status changes, strictly increasing, and silence once the run ended.
+    expect(sent.length).toBeGreaterThan(2);
+    expect(sent.every((entry, index) => entry.progress === index + 1)).toBe(true);
+    expect(sent.length).toBe(settled);
+    // No token, no notification: a caller that did not ask hears nothing.
+    const quiet: unknown[] = [];
+    statuses.splice(0, statuses.length, 'running', 'delivered');
+    await handler.createTask(args, { ...(extra as object), _meta: {}, sendNotification: async (n: unknown) => { quiet.push(n); } } as never);
+    await tick(60);
+    expect(quiet).toEqual([]);
     for (const cleanup of host.cleanups) cleanup();
     store.close();
   });

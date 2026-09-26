@@ -159,7 +159,13 @@ Neighbours:
   host that does not augment the call gets the SDK's own drive and the
   terminal result when the run ends — a synchronous call, minutes long, over
   the SSE stream that keeps alive and replays. A refused start is a task that
-  fails at once, never a hung call.
+  fails at once, never a hung call. A caller that sent a `progressToken` hears
+  `notifications/progress` with the run's status line at once and every 30s
+  (`requestHeartbeat`): the SDK's drive is silent, and Claude Code aborts a
+  call with "no response or progress for 300s" while the run carries on
+  (2026-09-26). This is the protocol's liveness for ONE open call, not the
+  removed `waitMs` channel: no token, no notification, and it stops at the
+  first send that fails.
 - `atoma_run_start.acceptanceCriteria` takes one criterion per ENTRY in the
   console's line grammar (`parseChecklistLines`), not the structured shape: one
   grammar for every human entry point, and a JSON Schema free of transforms.
