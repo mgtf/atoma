@@ -156,3 +156,29 @@ position. Known limit kept: a task-augmented caller gets no progress on its
   accepted, so nothing landed. Fixed after the round: an `upload`
   interaction attaches a workspace file to the input, firing its input and
   change events, resolved inside the sandbox and refused through a symlink.
+
+## Third round, on revision `d4dfb9f`
+
+| Run | Use case | Outcome | Duration | Cost |
+|---|---|---|---|---|
+| R8b `5f1652b3` | Retail: the dashboard as formatted files, sample CSV, upload | delivered | 701 s | $0.198 |
+| R11 `811782c2` | Logistics: full-stack inventory (API, CSV import, page, persistence) on the shipment prototype, 11 criteria | delivered | 637 s | $0.177 |
+
+- **I8 closed.** R8b proved the upload with `upload replacement-sales.csv
+  into #csvFile` (the page then read "Uploaded CSV · 3 valid rows") and the
+  region filter with a real click; its five multi-line writes all went
+  through first time.
+- **I4 residual.** R11 lost two whole-file writes of JavaScript holding
+  `'"'` before the third went through, each diagnosed. Under that pressure its
+  first CSV parser used `'` as the quote character, corrected later in the
+  run. *Proposal for the owner, not built:* a declared `content` field in
+  the Codex action envelope, carrying a file body under ONE level of JSON
+  escaping, mapped only onto a tool's declared `content` argument.
+- **I9 — the tool broke the "default 3000" idiom.** `start_node_server`
+  injected `PORT=0`, and `Number(process.env.PORT) || 3000` — what "listen on
+  PORT, default 3000" compiles to — reads 0 as unset: every such server bound
+  3000 and the next start in the same run died on EADDRINUSE (three of four
+  runs on 2026-09-24). R11 then rewrote the delivered server to
+  `PORT ?? 0`, breaking the default its project asked for, to get past the
+  tool. Fixed: the tool passes a concrete free port, as `start_static_server`
+  already did.

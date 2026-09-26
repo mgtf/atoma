@@ -55,6 +55,8 @@ corrections of the 2026-09-24 and 2026-09-25 code reviews.
   where it stands; the protocol shows how to encode a multi-line file.
 - A run refused because the one run slot is busy says why, without host
   details.
+- A Node server a run starts gets a concrete free port, so a server written
+  as "PORT, default 3000" no longer collides with itself on a restart.
 
 ## v0.4.0 — 2026-09-17
 
