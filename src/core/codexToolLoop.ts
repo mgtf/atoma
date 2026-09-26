@@ -45,7 +45,7 @@ export function describeInvalidArguments(argumentsJson: string): string {
     const position = /position (\d+)/.exec(message);
     const at = position ? Number(position[1]) : -1;
     const near = at >= 0 ? `, near ${JSON.stringify(argumentsJson.slice(Math.max(0, at - 40), at + 40))}` : '';
-    const control = at >= 0 && /[\u0000-\u001f]/.test(argumentsJson.charAt(at))
+    const control = at >= 0 && at < argumentsJson.length && argumentsJson.charCodeAt(at) < 0x20
       ? ' The character there is a raw control character: inside a string value write it escaped (a newline is \\n in the arguments JSON).'
       : '';
     return `JSON.parse: ${message}${near}; ${argumentsJson.length} characters.${control}`;
