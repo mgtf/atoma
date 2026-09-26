@@ -883,7 +883,8 @@ export function drawProjects(
           ctx.text(
             pane.content,
             ctx.fitText(
-              snapshot.t(project.repositoryTarget.source ? 'projects.runPartial.imported' : 'projects.runPartial.continue'),
+              snapshot.t(run.rerunOf ? 'projects.runPartial.rerun'
+                : project.repositoryTarget.source ? 'projects.runPartial.imported' : 'projects.runPartial.continue'),
               guidanceWidth,
               { size: 9 }
             ),

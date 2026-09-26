@@ -23,6 +23,8 @@ export interface RunIndexEntry {
   projectRunId?: string;
   projectName?: string;
   projectSlug?: string;
+  /** Set on a comparison rerun: the run it re-ran. It never continues the project. */
+  rerunOf?: string;
 }
 
 export interface VizEvent extends Partial<AcceptanceInfo>, Partial<TopologyInfo> {
@@ -284,6 +286,8 @@ export interface VizProjectRun {
   projectId: string;
   goal: string;
   status: 'queued' | 'running' | 'delivered' | 'partial' | 'failed' | 'cancelled';
+  /** Set on a comparison rerun: the run it re-ran. It never continues the project. */
+  rerunOf?: string;
   traceId: string | null;
   costUsd: number | null;
   /** The per-tier selectors the run was resolved to; null before it started. */

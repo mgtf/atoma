@@ -985,10 +985,11 @@ END;
     projectId: string;
     projectName: string;
     projectSlug: string;
+    rerunOf?: string;
   }> {
     const rows = this.db
       .prepare(
-        `SELECT r.org_id, r.project_run_id, r.trace_id, r.runs_path, r.project_id, p.name AS project_name, p.slug AS project_slug
+        `SELECT r.org_id, r.project_run_id, r.trace_id, r.runs_path, r.project_id, p.name AS project_name, p.slug AS project_slug, r.rerun_of_run_id
          FROM project_runs r
          JOIN projects p ON p.project_id = r.project_id AND p.org_id = r.org_id
          ORDER BY r.created_at DESC, r.project_run_id ASC`
@@ -1001,6 +1002,7 @@ END;
       project_id: string;
       project_name: string;
       project_slug: string;
+      rerun_of_run_id?: string | null;
     }>;
     const out: Array<{
       id: string;
@@ -1009,6 +1011,7 @@ END;
       projectId: string;
       projectName: string;
       projectSlug: string;
+      rerunOf?: string;
     }> = [];
     for (const row of rows) {
       const file = resolveProjectRunTraceFile({
@@ -1024,6 +1027,7 @@ END;
         projectId: row.project_id,
         projectName: row.project_name,
         projectSlug: row.project_slug,
+        ...(row.rerun_of_run_id ? { rerunOf: row.rerun_of_run_id } : {}),
       });
     }
     return out;
@@ -1522,11 +1526,12 @@ END;
     projectId: string;
     projectName: string;
     projectSlug: string;
+    rerunOf?: string;
   }> {
     const orgId = organisationIdSchema.parse(orgIdInput);
     const rows = this.db
       .prepare(
-        `SELECT r.project_run_id, r.trace_id, r.runs_path, r.project_id, p.name AS project_name, p.slug AS project_slug
+        `SELECT r.project_run_id, r.trace_id, r.runs_path, r.project_id, p.name AS project_name, p.slug AS project_slug, r.rerun_of_run_id
          FROM project_runs r
          JOIN projects p ON p.project_id = r.project_id AND p.org_id = r.org_id
          WHERE r.org_id = ?
@@ -1539,6 +1544,7 @@ END;
       project_id: string;
       project_name: string;
       project_slug: string;
+      rerun_of_run_id?: string | null;
     }>;
     const out: Array<{
       id: string;
@@ -1546,6 +1552,7 @@ END;
       projectId: string;
       projectName: string;
       projectSlug: string;
+      rerunOf?: string;
     }> = [];
     for (const row of rows) {
       const file = resolveProjectRunTraceFile({
@@ -1560,6 +1567,7 @@ END;
         projectId: row.project_id,
         projectName: row.project_name,
         projectSlug: row.project_slug,
+        ...(row.rerun_of_run_id ? { rerunOf: row.rerun_of_run_id } : {}),
       });
     }
     return out;

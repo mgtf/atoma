@@ -417,6 +417,8 @@ export interface VizRunIndexEntry {
   projectRunId?: string;
   projectName?: string;
   projectSlug?: string;
+  /** Set on a comparison rerun: the run it re-ran. It never continues the project. */
+  rerunOf?: string;
 }
 
 export interface VizRunTotals {

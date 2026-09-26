@@ -1686,6 +1686,7 @@ function listOrganisationRunIndex(orgId: string): VizRunIndexEntry[] {
       projectRunId: row.id,
       projectName: row.projectName,
       projectSlug: row.projectSlug,
+      ...(row.rerunOf ? { rerunOf: row.rerunOf } : {}),
     });
   }
   return sortRunIndex(entries);
@@ -1704,6 +1705,7 @@ function listAllRunIndex(viewer: Viewer): VizRunIndexEntry[] {
       projectRunId: row.id,
       projectName: row.projectName,
       projectSlug: row.projectSlug,
+      ...(row.rerunOf ? { rerunOf: row.rerunOf } : {}),
     });
   }
   return sortRunIndex(entries);

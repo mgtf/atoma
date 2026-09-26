@@ -6420,6 +6420,20 @@ describe('incomplete (partial) runs guide the next step', () => {
     expect(button?.label).toBe(t('run.partial.action.retry'));
   });
 
+  it('never promises that the project continues a comparison rerun (2026-09-25 review, 2.7)', () => {
+    const ctx = createRecordingCtx();
+    drawRuns(
+      ctx,
+      makeSnapshot({}, { run: refusedRun(), runs: [{ ...indexEntry, rerunOf: 'origin-run' }], projects: [project()] }),
+      WIDTH,
+      HEIGHT
+    );
+    const texts = ctx.texts.map((entry) => entry.value);
+    expect(texts).toContain(t('run.partial.next.rerun'));
+    expect(texts).not.toContain(t('run.partial.next.continue'));
+    expect(ctx.buttons.some((candidate) => candidate.id.startsWith(PARTIAL_CONTINUE_PREFIX))).toBe(false);
+  });
+
   it('offers no continue control for a run outside a project', () => {
     const ctx = createRecordingCtx();
     drawRuns(ctx, makeSnapshot({}, { run: refusedRun() }), WIDTH, HEIGHT);

@@ -1417,7 +1417,7 @@ function drawRunSummaryCard(
     if (guidance.project) {
       const next = ctx.text(
         block,
-        snapshot.t(guidance.carriesOver ? 'run.partial.next.continue' : 'run.partial.next.imported'),
+        snapshot.t(guidance.rerun ? 'run.partial.next.rerun' : guidance.carriesOver ? 'run.partial.next.continue' : 'run.partial.next.imported'),
         padX,
         cursor,
         { size: RUNS_FACTS_SIZE + 1, color: GPU_COLORS.text, width: innerWidth }
@@ -1512,7 +1512,8 @@ function drawPartialContinueControl(
   y: number,
   width: number
 ): number {
-  if (!guidance.project) return 0;
+  // A rerun has nothing to continue: the project's next run continues its own line.
+  if (!guidance.project || guidance.rerun) return 0;
   const height = 30;
   const label = snapshot.t(guidance.carriesOver ? 'run.partial.action.continue' : 'run.partial.action.retry');
   const labelWidth = Math.ceil(ctx.measureText(label, { size: 11, weight: '600' })) + 20;

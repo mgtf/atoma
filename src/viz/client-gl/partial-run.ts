@@ -16,8 +16,10 @@ import type { RunIndexEntry, VizProject, VizRun } from '../client/types.js';
  *     the latest delivered-or-partial workspace and is handed these reasons
  *     (`previousSeedRun`, `PREVIOUS_LANDING_ENV`) — EXCEPT a project imported
  *     from GitHub, whose every run starts from the repository's default branch,
- *     so an unpublished partial change is not carried over. Saying "your work
- *     is kept" there would be the one sentence on this card that is false.
+ *     so an unpublished partial change is not carried over, and EXCEPT a
+ *     comparison rerun, which sits beside the project and never seeds it
+ *     (2026-09-25 review, 2.7). Saying "your work is kept" there would be the
+ *     one sentence on this card that is false.
  *
  * The model's reasons stay reachable as technical detail, never as the lead.
  */
@@ -38,6 +40,8 @@ export interface PartialRunGuidance {
   readonly project: VizProject | null;
   /** True when the project's next run starts from this work. */
   readonly carriesOver: boolean;
+  /** A comparison rerun: kept beside the project, never continued by it. */
+  readonly rerun: boolean;
   /** The goal to offer again, when the run carries one. */
   readonly goal: string | null;
   /** The typed reasons, model-authored: detail, never the headline. */
@@ -61,7 +65,8 @@ export function partialRunGuidance(
   return {
     cause,
     project,
-    carriesOver: Boolean(project && !project.repositoryTarget.source),
+    carriesOver: Boolean(project && !project.repositoryTarget.source && !entry?.rerunOf),
+    rerun: Boolean(entry?.rerunOf),
     goal,
     details: landingReasons(run.result),
   };
