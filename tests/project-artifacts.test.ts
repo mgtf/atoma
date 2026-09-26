@@ -300,3 +300,14 @@ describe('finished workspace publication inventory', () => {
     expectPolicyError(() => buildWorkspaceArtifactManifest({ workspaceRoot: root, limits: { maxTotalBytes: 7 } }), 'limit');
   });
 });
+
+describe('what a publication error may say (2026-09-25 review, 2.2)', () => {
+  it('names no host path when the workspace is gone', () => {
+    const gone = join(tmpdir(), 'atoma-artifacts-gone', 'orgs', 'o', 'projects', 'p', 'runs', 'r', 'workspace');
+    let message = '';
+    try { buildArtifactManifest({ workspaceRoot: gone, declaredPaths: ['index.html'] }); } catch (error) { message = (error as Error).message; }
+    expect(message).toMatch(/no longer exists/);
+    expect(message).not.toContain(gone);
+    expect(message).not.toContain(tmpdir());
+  });
+});

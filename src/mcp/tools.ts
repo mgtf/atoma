@@ -1,4 +1,7 @@
-import { basename } from 'node:path';
+import { homedir } from 'node:os';
+import { basename, sep } from 'node:path';
+import { skillsDirPath } from '../core/stores.js';
+import type { ProjectRun } from '../contracts/projects.js';
 import { TRUST_THRESHOLD_SUCCESSES } from '../atoms/cost.js';
 import { updateOrgModels } from '../auth/orgModels.js';
 import {
@@ -38,6 +41,7 @@ import {
   runTrace,
   runTraceFile,
   runLogFile,
+  type HostPathRedaction,
   runsList,
   skillShow,
   skillsList,
@@ -62,6 +66,7 @@ import {
 import {
   RunRejected,
   cancelRun as cancelOperatorRun,
+  repoRoot,
   runStatus as operatorRunStatus,
   startRun as startOperatorRun,
   type RunDriver,
@@ -175,6 +180,31 @@ type ToolResult = {
  * platform gets the basename — enough to name the store, nothing about the
  * host's filesystem layout. The platform payload is byte-for-byte the old one.
  */
+/**
+ * What a runner log may not show below the platform tier: the host's layout.
+ * A project's runs live under `…/projects/<projectId>` (runs, traces, and the
+ * seed a later run copies), the platform skills tree and the installation
+ * elsewhere (2026-09-25 review, 2.2).
+ */
+function hostPathRedactions(run: ProjectRun): HostPathRedaction[] {
+  const projectRoot = (location: string): string | null => {
+    for (const separator of new Set([sep, '/'])) {
+      const marker = `${separator}projects${separator}${run.projectId}`;
+      const at = location.indexOf(marker);
+      if (at >= 0) return location.slice(0, at + marker.length);
+    }
+    return null;
+  };
+  const roots = [run.hostPaths.workspacePath, run.hostPaths.logPath, run.hostPaths.runsPath]
+    .map(projectRoot).filter((root): root is string => root !== null);
+  return [
+    ...[...new Set(roots)].map((path) => ({ path, label: '<project>' })),
+    { path: skillsDirPath(), label: '<platform-skills>' },
+    { path: repoRoot(), label: '<atoma>' },
+    { path: homedir(), label: '~' },
+  ];
+}
+
 function commonsForTier(payload: unknown, tier: McpTier): unknown {
   if (tier === 'platform' || payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
     return payload;
@@ -340,7 +370,9 @@ export const MCP_TOOLS: readonly McpToolSpec[] = [
             const run = store.getProjectRun(viewer.orgId, args.runId) ?? (viewer.platformAdmin ? store.getProjectRunAnyOrg(args.runId) : null);
             if (!run) throw new ProjectHttpError(404, 'project run not found');
             ctx.deps.projects!.service.auditRead(viewer, run.orgId, 'mcp.trace');
-            if (args.section === 'log') return runLogFile(run.hostPaths.logPath, args);
+            if (args.section === 'log') {
+              return runLogFile(run.hostPaths.logPath, args, tierAllows(ctx.tier, 'platform') ? [] : hostPathRedactions(run));
+            }
             const path = resolveProjectRunTraceFile({ projectRunId: run.projectRunId, runsPath: run.hostPaths.runsPath, traceId: run.traceId });
             if (!path) throw new ProjectHttpError(404, 'this run has no trace yet');
             return runTraceFile(path, args, run.projectRunId);

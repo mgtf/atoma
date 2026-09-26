@@ -559,11 +559,32 @@ function traceDetail(value: unknown, opts: TraceReadOptions) {
     caveat: TRACE_DETAIL_CAVEAT };
 }
 
+/** A host location to replace, in a runner log, by a label a tenant may read. */
+export interface HostPathRedaction {
+  readonly path: string;
+  readonly label: string;
+}
+
+/**
+ * Replace each host location by its label, longest first so a nested root is
+ * never half-replaced. The runner log names where the host keeps a run
+ * (`workspace seeded from …`, `skills root: …`, npm's argv with `--seed`);
+ * below the platform tier those are the deployment's layout, which the public
+ * run projection and `commonsForTier` already withhold (2026-09-25 review, 2.2).
+ */
+export function redactHostPaths(text: string, redactions: readonly HostPathRedaction[]): string {
+  let out = text;
+  const ordered = redactions.filter((redaction) => redaction.path.length > 1)
+    .sort((a, b) => b.path.length - a.path.length);
+  for (const { path, label } of ordered) out = out.split(path).join(label);
+  return out;
+}
+
 /** The log path is resolved from an authorised project row, never supplied by a caller. */
-export function runLogFile(path: string, opts: TraceReadOptions): unknown {
+export function runLogFile(path: string, opts: TraceReadOptions, redactions: readonly HostPathRedaction[] = []): unknown {
   const read = readBoundedRunFile(path);
   if (!read.ok) return { note: `run log unavailable: ${read.reason}` };
-  return traceDetail(read.bytes.toString('utf8'), opts);
+  return traceDetail(redactHostPaths(read.bytes.toString('utf8'), redactions), opts);
 }
 
 export function runTrace(opts: TraceReadOptions & { file: string }): unknown {

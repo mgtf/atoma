@@ -212,10 +212,12 @@ export function resolveWorkspaceFile(
   try {
     rootStat = lstatSync(root);
   } catch {
-    throw new ArtifactPolicyError('missing', `workspace does not exist: ${root}`);
+    // No path in the message: it becomes a publication error that every role
+    // of the organisation reads (2026-09-25 review, 2.2).
+    throw new ArtifactPolicyError('missing', 'the run workspace no longer exists on this host');
   }
   if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
-    throw new ArtifactPolicyError('special', `workspace root must be a real directory: ${root}`);
+    throw new ArtifactPolicyError('special', 'workspace root must be a real directory');
   }
   const realRoot = realpathSync(root);
   const canonical = normalizeArtifactPath(declaredPath, limits.maxPathChars);

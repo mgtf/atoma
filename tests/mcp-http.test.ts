@@ -4,12 +4,12 @@ import { haystackTestEnvironment } from './helpers/haystack.js';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthStore, sha256Hex, type Viewer } from '../src/auth/store.js';
-import { closeStoreHandles } from '../src/core/stores.js';
+import { closeStoreHandles, skillsDirPath } from '../src/core/stores.js';
 import { readLedger } from '../src/core/ledger.js';
 import { SkillRegistry } from '../src/skills/registry.js';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
@@ -1212,5 +1212,34 @@ it('reads complete diagnostics over HTTP with lossless pages and organisation is
       expect((await call({ runId: foreign.run.projectRunId, section, eventId: verdict.id })).isError).toBe(true);
       expect((await call({ file: 'any.json', section, eventId: verdict.id })).isError).toBe(true);
     }
+  } finally { await client.close(); }
+});
+
+it('serves a tenant the runner log without the host layout (2026-09-25 review, 2.2)', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'atoma-mcp-log-paths-'));
+  dirs.push(root);
+  const a = projectRetrievalFixture(root, { subject: 'reader', slug: 'reader' });
+  const own = a.makeRun();
+  const seedPath = join(dirname(dirname(own.run.hostPaths.workspacePath)), 'previous-run', 'workspace');
+  mkdirSync(dirname(own.run.hostPaths.logPath), { recursive: true });
+  writeFileSync(own.run.hostPaths.logPath, [
+    `> node dist/cli/build-app.js --clean-workspace --container --seed ${seedPath} Build a dashboard.`,
+    `workspace seeded from ${seedPath} (3 entries)`,
+    `workspace: ${own.run.hostPaths.workspacePath}`,
+    `skills root: ${skillsDirPath()}`,
+    'runner stderr: fatal',
+  ].join('\n'));
+  const service = new ProjectService({ store: a.projects, github: null, coordinator: {} as ProjectRunCoordinator });
+  const { url } = await listen(() => ({ kind: 'principal', viewer: a.viewer, tokenId: 'reader' }),
+    { ...NO_TENANT, auth: a.auth, projects: { store: a.projects, service } });
+  const client = await connect(url);
+  try {
+    const log = await client.callTool({ name: 'atoma_run_trace', arguments: { runId: own.run.projectRunId, section: 'log' } });
+    const text = JSON.parse((log.structuredContent as { text: string }).text) as string;
+    expect(text).toContain('runner stderr: fatal');
+    expect(text).toContain('workspace seeded from <project>');
+    expect(text).toContain('skills root: <platform-skills>');
+    expect(text).not.toContain(root);
+    expect(text).not.toContain(skillsDirPath());
   } finally { await client.close(); }
 });
