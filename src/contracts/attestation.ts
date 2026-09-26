@@ -286,11 +286,33 @@ function isViewport(value: unknown): value is { width: number; height: number } 
     (v['width'] as number) > 0 && (v['height'] as number) > 0;
 }
 
-/** How much of a smoke expression the validator's line shows: its head, where the checks are named. */
-export const MAX_RENDERED_SMOKE_CHARS = 800;
+/**
+ * How much of a smoke expression a validator's line shows, JSON-encoded: its
+ * head and its tail, where the checks and the `return` usually sit.
+ */
+export const MAX_RENDERED_SMOKE_CHARS = 600;
+
+/**
+ * Every record's line, in order, with a repeated smoke expression written out
+ * ONCE — on its latest occurrence, which is the one a bounded evidence block
+ * keeps (`verdict.ts` keeps the latest browser lines). A responsive run
+ * replays one smoke at five widths; five copies of it evicted execution
+ * evidence from the same budget.
+ */
+export function renderObservations(records: readonly AttestationRecord[]): string[] {
+  const latest = new Map<string, string>();
+  for (const record of records) {
+    if (record.observation.kind === 'browser' && record.observation.smoke !== undefined) latest.set(record.observation.smoke, record.eventId);
+  }
+  return records.map((record) => {
+    const smoke = record.observation.kind === 'browser' ? record.observation.smoke : undefined;
+    const holder = smoke === undefined ? undefined : latest.get(smoke);
+    return renderObservation(record, holder !== undefined && holder !== record.eventId ? { smokeSameAs: holder } : {});
+  });
+}
 
 /** The one-line rendering the supervisor shows a validator. */
-export function renderObservation(record: AttestationRecord): string {
+export function renderObservation(record: AttestationRecord, options: { readonly smokeSameAs?: string } = {}): string {
   const o = record.observation;
   if (o.kind === 'execution') return `${record.tool} (attempt=${record.attempt ?? 1}, branch=${record.branchId ?? 'root'}): request=${o.request}; observed result=${o.response}`;
   const bits = [
@@ -306,9 +328,13 @@ export function renderObservation(record: AttestationRecord): string {
   // `controlsVisible: true` does not say that it measured `height >= 44`;
   // without the expression a validator refused a delivery for not verifying
   // exactly what that smoke verified (production run 5a5f1e27, 2026-09-26).
-  // Model-authored, like an execution's request: the block says so.
+  // Model-authored, like an execution's request, and encoded like it: a raw
+  // multi-line smoke could otherwise print lines that read as observations
+  // of their own inside a block the supervisor labels machine-observed.
   if (o.smoke !== undefined) {
-    bits.push(`smoke=${o.smoke.length > MAX_RENDERED_SMOKE_CHARS ? `${o.smoke.slice(0, MAX_RENDERED_SMOKE_CHARS)} [truncated]` : o.smoke}`);
+    bits.push(options.smokeSameAs !== undefined
+      ? `smoke=(same as ${options.smokeSameAs})`
+      : `smoke=${evidenceExcerpt(JSON.stringify(o.smoke), MAX_RENDERED_SMOKE_CHARS)}`);
   }
   if (o.smokeResult !== undefined) {
     try {

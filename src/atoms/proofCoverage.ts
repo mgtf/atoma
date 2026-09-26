@@ -3,7 +3,7 @@ import { baseExecutorOf } from '../core/attestation.js';
 import type { RunContext } from '../core/types.js';
 import {
   establishesDomInteraction,
-  renderObservation,
+  renderObservations,
   type AttestationRecord,
   type ProofObligation,
 } from '../contracts/attestation.js';
@@ -140,7 +140,7 @@ export async function checkProofCoverage(args: {
       covered: true,
       reason:
         `dom-interaction covered by ${fresh.length} transport-observed interaction(s): ` +
-        fresh.map((c) => renderObservation(c.record)).join(' | '),
+        renderObservations(fresh.map((c) => c.record)).join(' | '),
       eventIds: fresh.map((c) => c.record.eventId),
     });
   }

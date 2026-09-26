@@ -14,7 +14,7 @@ import { capToolIterations } from '../core/limits.js';
 import { parsePayloadTolerant, parseWith, planSchema } from './json.js';
 import type { Skill } from '../skills/types.js';
 import { witnessesFromPayload, type Witness } from '../contracts/witness.js';
-import { renderObservation } from '../contracts/attestation.js';
+import { renderObservations, type AttestationRecord } from '../contracts/attestation.js';
 import { SkillRegistry } from '../skills/registry.js';
 import { namespaceOf, type SkillNamespace } from '../skills/namespace.js';
 import {
@@ -479,16 +479,20 @@ export class L1Atom extends Atom {
       // it out of the N>1 aggregation losses.
       evidence: [
         ...witnessesFromPayload({ output }),
-        ...(ctx.attestations?.forBranch(ctx.currentBranchId) ?? [])
-          .filter(record => (record.attempt ?? 1) === (ctx.attempt ?? 1)).map(
-          (record): Witness => ({
-            source: 'transport-observed',
-            eventId: record.eventId,
-            tool: record.tool,
-            observed: renderObservation(record),
-          })
-        ),
+        ...transportWitnessesFor((ctx.attestations?.forBranch(ctx.currentBranchId) ?? [])
+          .filter(record => (record.attempt ?? 1) === (ctx.attempt ?? 1))),
       ],
     };
   }
+}
+
+/** One witness per attested record, rendered together so a repeated smoke is written out once. */
+function transportWitnessesFor(records: readonly AttestationRecord[]): Witness[] {
+  const lines = renderObservations(records);
+  return records.map((record, index): Witness => ({
+    source: 'transport-observed',
+    eventId: record.eventId,
+    tool: record.tool,
+    observed: lines[index]!,
+  }));
 }
