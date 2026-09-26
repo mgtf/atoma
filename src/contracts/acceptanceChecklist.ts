@@ -127,10 +127,15 @@ export function canonicalAcceptanceItems(input: ApprovedChecklistInput): Accepta
 }
 
 // The status directly after the path: `404`, `→ 404` / `-> 404` (the notation
-// the host itself renders, `describeCheck`) or `(404)`.
-const LINE_METHOD = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\/\S*)(?:(?:\s*(?:→|->)\s*|\s+)([1-5]\d\d)\b|\s+\(\s*([1-5]\d\d)\s*\))?(?:\s*(?:—|–|-|:)\s*|\s+|$)(.*)$/;
-/** A standalone 1xx–5xx number: a status the line NAMES, wherever it was written. */
-const STATUS_IN_TEXT = /(?<![\d.])[1-5]\d\d(?![\d.])/;
+// the host itself renders, `describeCheck`) or `(404)`, with or without a space,
+// and followed by punctuation or the text. A path never holds `(`, `→` or `>`.
+const LINE_METHOD = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\/[^\s(→>]*)(?:\s*(?:→|->)\s*([1-5]\d\d)|\s*\(\s*([1-5]\d\d)\s*\)|\s+([1-5]\d\d))?(?!\d)(?:\s*(?:—|–|-|:|\.|,|;)\s*|\s+|$)(.*)$/;
+/**
+ * A standalone 2xx–5xx number: a status the line NAMES, wherever it was
+ * written. Not after `:` (a port) or `.` (a version), not followed by a digit
+ * or `.digit`; 1xx is left out, being no status a criterion asserts.
+ */
+const STATUS_IN_TEXT = /(?<![\d.:])[2-5]\d\d(?!\d)(?!\.\d)/g;
 
 /**
  * THE LINE GRAMMAR a person types, one criterion per line — deterministic,
@@ -163,14 +168,19 @@ export function parseChecklistLines(text: string): {
     // A trailing `:` ends the path, so `POST /api/notes: creates one` separates
     // like a dash; a `:name` segment inside the path is untouched.
     const path = http?.[2]!.replace(/:$/, '');
-    const status = http ? http[3] ?? http[4] : undefined;
-    const rest = http ? http[5]!.trim() : '';
-    const named = http && status === undefined ? STATUS_IN_TEXT.exec(rest)?.[0] : undefined;
-    if (named) {
+    const status = http ? http[3] ?? http[4] ?? http[5] : undefined;
+    const rest = http ? http[6]!.trim() : '';
+    const named = http ? [...rest.matchAll(STATUS_IN_TEXT)].map((match) => match[0]).find((value) => value !== status) : undefined;
+    if (named && status === undefined) {
       errors.push({ line: index + 1, message:
         `this HTTP criterion names ${named} but not where its status is read, so it would accept any 2xx. ` +
         `If ${named} is the expected status, write it right after the path ("${http![1]} ${path} ${named} — ..."); ` +
         'otherwise drop the method to make it a review criterion' });
+      return;
+    }
+    if (named) {
+      errors.push({ line: index + 1, message:
+        `this HTTP criterion checks ${status} but also names ${named}; write one criterion per expected status` });
       return;
     }
     const candidate = http

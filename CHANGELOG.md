@@ -34,8 +34,8 @@ corrections of the 2026-09-24 and 2026-09-25 code reviews.
   configurable with `ATOMA_MCP_MAX_REQUEST_MS`.
 - Validators see only the worker's attested calls, with browser observations
   always kept and the viewport they were laid out at.
-- Approved criteria that name a status where it is not read are refused
-  instead of becoming "any 2xx" checks.
+- Approved criteria that name a status where it is not read, or a second
+  status, are refused instead of becoming "any 2xx" checks.
 - A deepening keeps the project's document search.
 - Runner logs and publication errors served to tenants no longer carry host
   paths.

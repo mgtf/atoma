@@ -92,9 +92,10 @@ Neighbours:
   (`approvedChecklistInputSchema`, `acceptanceSpecSchema`) is STRICT, because
   a criterion the user approved and the run lost is the contract's named
   failure. `parseChecklistLines` is the ONE line grammar for console, CLI and
-  MCP; it reads a status right after the path (`404`, `→ 404`, `(404)`) and
-  REFUSES an http line naming one anywhere else, which would be a silent 2xx
-  check. The whole encoded list is bounded at the door, not at launch. The
+  MCP; it reads a status right after the path (`404`, `→ 404`, `(404)`, with
+  or without a space, before punctuation) and REFUSES an http line naming one
+  anywhere else, which would be a silent 2xx check, or naming a second status,
+  which its one check would never exercise. The whole encoded list is bounded at the door, not at launch. The
   module stays browser-safe: the digest and the env transport live in
   `src/run/acceptanceSpec.ts`, because the client imports this directory.
 

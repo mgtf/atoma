@@ -77,23 +77,57 @@ describe('the line grammar', () => {
       'GET /api/notes/:id → 404',
       'GET /api/notes/:id -> 404: unknown id',
       'GET /api/notes/:id (404) unknown id',
+      // As people end a sentence or skip the space (2026-09-25 adversarial review).
+      'GET /api/notes/:id 404.',
+      'GET /api/notes/:id → 404.',
+      'GET /api/notes/:id→404',
+      'GET /api/notes/:id(404)',
+      'DELETE /api/notes/:id: 404 when it does not exist',
     ].join('\n'));
     expect(errors).toEqual([]);
     expect(items.map((item) => item.check)).toEqual([
-      { kind: 'http', method: 'GET', path: '/api/notes/:id', status: 404 },
-      { kind: 'http', method: 'GET', path: '/api/notes/:id', status: 404 },
-      { kind: 'http', method: 'GET', path: '/api/notes/:id', status: 404 },
+      ...Array.from({ length: 7 }, () => ({ kind: 'http', method: 'GET', path: '/api/notes/:id', status: 404 })),
+      { kind: 'http', method: 'DELETE', path: '/api/notes/:id', status: 404 },
     ]);
   });
 
   it('refuses an http line that names a status where it is not read, instead of accepting any 2xx', () => {
     // Read as written, each would be a 2xx check shown OBSERVED on the happy
     // path, for an error the run never provoked (2026-09-25 review, 1.5).
-    for (const line of ['POST /api/notes returns 400 for invalid input', 'GET /api/notes/:id — 404 for an unknown id']) {
+    for (const line of [
+      'POST /api/notes returns 400 for invalid input',
+      'POST /api/notes returns 400.',
+      'GET /api/notes/:id — 404 for an unknown id',
+    ]) {
       const { items, errors } = parseChecklistLines(line);
       expect(items).toEqual([]);
       expect(errors[0]?.message).toMatch(/names \d{3} but not where its status is read/);
     }
+  });
+
+  it('refuses a second status in the text, which the one check would never exercise', () => {
+    const { items, errors } = parseChecklistLines('POST /api/notes 201 — and 400 when the title is missing');
+    expect(items).toEqual([]);
+    expect(errors[0]?.message).toMatch(/checks 201 but also names 400; write one criterion per expected status/);
+    expect(parseChecklistLines('POST /api/notes 201 — creates a note and returns 201').errors).toEqual([]);
+  });
+
+  it('does not read a count, a port or a version in the text as a status', () => {
+    const { items, errors } = parseChecklistLines([
+      'GET /api/items returns the first 100 items',
+      'GET /api/items returns 300 items at most',
+      'GET / serves the page on localhost:300',
+      'GET /api/report 2024 figures',
+      'GET /api/v2/items lists items in schema 2.500.1',
+    ].join('\n'));
+    // `300 items` is a count the grammar cannot tell from a status: refused, not guessed.
+    expect(errors.map((error) => error.line)).toEqual([2]);
+    expect(items.map((item) => item.check)).toEqual([
+      { kind: 'http', method: 'GET', path: '/api/items' },
+      { kind: 'http', method: 'GET', path: '/' },
+      { kind: 'http', method: 'GET', path: '/api/report' },
+      { kind: 'http', method: 'GET', path: '/api/v2/items' },
+    ]);
   });
 
   it('refuses at the door a list the child could not be handed (review 2.3)', () => {
