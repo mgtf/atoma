@@ -873,22 +873,24 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
     // `run.finished` carrying status `cancelled` are DIFFERENT facts at
     // different times — the ask and the actual end — so both are journaled.
     onRunFinished: async (event) => {
-      try {
-        await PREVIEW_RUNTIME?.service.runFinished(event);
-      } finally {
-        emit({
-          kind: 'run.finished',
-          actorType: 'principal',
-          actorId: event.principalId,
-          orgId: event.orgId,
-          projectId: event.projectId,
-          runId: event.projectRunId,
-          summary: `Run ${event.status}: ${eventLabel(event.goal, 120)}`,
-          // `goal` and `status` are what the localised push copy renders from:
-          // `summary` is one English line and could never become French.
-          detail: { status: event.status, goal: eventLabel(event.goal, 120) },
-        });
-      }
+      // Journal FIRST: the row, its push, MCP `resources/updated` and the
+      // resident analyst must not queue behind a preview teardown, which is up
+      // to seven serial launcher calls (2026-09-25 review, 2.12). Retiring the
+      // in-flight snapshot after it is safe: every open, join and heartbeat
+      // re-checks the run's status on its own.
+      emit({
+        kind: 'run.finished',
+        actorType: 'principal',
+        actorId: event.principalId,
+        orgId: event.orgId,
+        projectId: event.projectId,
+        runId: event.projectRunId,
+        summary: `Run ${event.status}: ${eventLabel(event.goal, 120)}`,
+        // `goal` and `status` are what the localised push copy renders from:
+        // `summary` is one English line and could never become French.
+        detail: { status: event.status, goal: eventLabel(event.goal, 120) },
+      });
+      await PREVIEW_RUNTIME?.service.runFinished(event);
     },
   });
   // A previous process that died mid-run left rows only its in-memory
