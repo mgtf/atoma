@@ -636,6 +636,17 @@ précédentes conservent le constat initial.
 | 2.13 | La carte de run dépliée du client GL affiche les pins par tier. | `d945421` |
 | D1–D11 | README, `AGENTS.md`, document de checklist, commentaires, CHANGELOG. | `3cdc6f9`, `7896595` |
 
+Une revue adverse de ces corrections, avant mise en production, a trouvé un
+défaut majeur et six mineurs, corrigés dans la même branche :
+
+| Constat | Correction | Commit |
+|---|---|---|
+| Grammaire (majeur) : `GET /x 404.`, `:id→404`, `:id(404)` perdaient leur statut ; `201 — et 400 si…` n'en vérifiait qu'un. | Ces formes sont lues ; une ligne qui nomme un second statut est refusée ; nombres, ports et versions ignorés. | `94aec19` |
+| Un GET reprenant un appel déjà répondu épinglait sa session jusqu'au plafond. | Épinglage seulement tant que la réponse est due, depuis le début de l'appel d'origine. | `6137036` |
+| Rédaction : disposition du launcher manquée, remplacement sans frontière, erreurs de run et de publication non rédigées. | Un module (`src/projects/hostPaths.ts`) pour le lecteur MCP et le service projets. | `1a3770d` |
+| Sans deadline, le `TimeoutError` d'un appelant laissait l'acceptation sans borne ; raison fausse d'une synthèse abandonnée. | `TimeoutError` = deadline seulement avec `deadlineAt` ; raison réelle, journalisée. | `5492edf` |
+| Carte Runs : un partiel supplanté promettait la continuation ; libellés CHANGELOG, analyste et rerun. | Copie `run.partial.next.superseded`, sans contrôle ; formulations. | `c252885` |
+
 Reste ouvert : **D12** (compilation des recettes), dont le comportement est
 modifié en parallèle par un autre chantier. Les décisions
 4.E (visibilité des payeurs) et 4.F (persistance des listes rédigées)
