@@ -1864,12 +1864,13 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       `Preserve evidence provenance and unresolved failures; never claim an unwritten artifact exists.`,
       `Return JSON: {"output": <any>, "summary": "<one sentence>"}`,
     ].join('\n');
-    const resp = await synthesizeOrKeep(ctx, landed, (signal) => ctx.llm.complete(
+    const synthesis = await synthesizeOrKeep(ctx, landed, (signal) => ctx.llm.complete(
       this.toLlmRequest('execute', { userContent, params: this.params, signal })
     ));
-    if (!resp) {
-      return keptWithoutSynthesis(subResults, { tier: 2, name: this.name, viaFallback: false }, landed);
+    if (!('response' in synthesis)) {
+      return keptWithoutSynthesis(subResults, { tier: 2, name: this.name, viaFallback: false }, synthesis.keptBecause);
     }
+    const resp = synthesis.response;
     const { output, summary } = parsePayloadTolerant(resp.text);
     return {
       output,

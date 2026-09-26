@@ -37,7 +37,9 @@ Neighbours:
   (since 2026-09-15): the one registry (`atoma_registry_list`, `_show`,
   `_history`) and the one skill catalog (`atoma_skills_list`, `_show`) every
   run reads and earns on; below `platform` the payload's `store` and
-  `skillsDir` are basenames, never host paths (`commonsForTier`);
+  `skillsDir` are basenames, never host paths (`commonsForTier`), and a
+  runner log is served through `src/projects/hostPaths.ts`, the redaction
+  the projects service applies to run and publication errors;
   `member` starts, cancels and publishes its runs; `admin` reads the
   organisation's members and sets its model defaults; `platform` — the
   platform-admin flag, or the operator on the ungated loopback — everything

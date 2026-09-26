@@ -558,7 +558,7 @@ describe('deadline landing across dispatch and depth acceptance', () => {
     const accepted = vi.fn();
     ctx.llm.enqueue({ text: jsonText({ approved: true, reasoning: 'Accepted completed work' }), stopReason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 } });
     const plan = makePlan({ subtasks: [{ description: 'completed' }, { description: 'interrupted' }], aggregation: { mode } });
-    const out = await runDepthTask({ mode: 'deep', task, floor, ctx: { ...ctx, signal: controller.signal },
+    const out = await runDepthTask({ mode: 'deep', task, floor, ctx: { ...ctx, signal: controller.signal, deadlineAt: Date.now() + 30 * 60_000 },
       restart: vi.fn(), onTopology: vi.fn(), onAcceptance: accepted,
       createExecutor: () => ({ actor: new Actor(), handle: async (_task, current) => {
         const dispatch = await dispatchWithAggregation(plan.subtasks, plan, current, async (_subtask, idx) => {
@@ -590,7 +590,7 @@ it('retains deadline work as refused partial if final acceptance itself expires'
   });
   try {
     const out = await runDepthTask({ mode: 'short', task, floor,
-      ctx: { ...ctx, signal: controller.signal }, restart: vi.fn(), onTopology: vi.fn(), onAcceptance: vi.fn(),
+      ctx: { ...ctx, signal: controller.signal, deadlineAt: Date.now() + 5_000 }, restart: vi.fn(), onTopology: vi.fn(), onAcceptance: vi.fn(),
       createExecutor: () => ({ actor: new Actor(), handle: async () => {
         controller.abort(new DOMException('Execution deadline', 'TimeoutError'));
         return markLanded(result, [{ description: 'unfinished' }]);
@@ -599,6 +599,22 @@ it('retains deadline work as refused partial if final acceptance itself expires'
     expect(out.unfinishedPhases).toEqual(['unfinished']);
     expect(out.refusal).toContain('landing budget');
   } finally { timeout.mockRestore(); }
+});
+
+it('honours a library caller\'s own timeout during the verdict when there is no run deadline', async () => {
+  // Read as the run deadline, it left a complete result's acceptance with no
+  // bound at all: no deadline means no finalization window (2026-09-25
+  // adversarial review).
+  const ctx = context();
+  const controller = new AbortController();
+  ctx.llm.enqueue(() => {
+    controller.abort(new DOMException('Caller timeout', 'TimeoutError'));
+    return new Promise(() => {}); // A transport that ignores abort.
+  });
+  await expect(runDepthTask({ mode: 'short', task, floor: [],
+    ctx: { ...ctx, signal: controller.signal }, restart: vi.fn(), onTopology: vi.fn(),
+    onAcceptance: vi.fn(), createExecutor: () => ({ actor: new Actor(), handle: async () => result }) }))
+    .rejects.toThrow('Caller timeout');
 });
 
 it('never converts an explicit cancellation into a deadline landing', async () => {

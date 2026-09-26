@@ -154,8 +154,12 @@ load-bearing.
   deadline + 45s ceiling, inside the runner watchdog's 60s grace. A library
   context without a deadline retains the post-approval cap. A synthesis that
   cannot finish — failed while landing, or cut by the deadline over complete
-  sub-results — KEEPS them, landed (`synthesizeOrKeep`); cancellation and
-  deepening rethrow. Sequential aggregation makes no call and needs none.
+  sub-results — KEEPS them, landed (`synthesizeOrKeep`), and names what
+  happened in the unfinished step; cancellation and deepening rethrow.
+  Sequential aggregation makes no call and needs none. A `TimeoutError` is
+  the run deadline only beside a `ctx.deadlineAt` (`abortedByDeadline`):
+  without one it is a library caller's own timeout, honoured as a
+  cancellation, never a window to finalize in.
 
 ## Verification and ground truth
 

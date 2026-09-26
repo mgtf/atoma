@@ -186,24 +186,30 @@ export function markLanded(result: Result, unfinished: readonly Subtask[]): Resu
  * complete sub-results rejected `execute`, and a landed one that failed had no
  * fallback — either way the run recorded `failed` and seeded nothing.
  *
- * Returns the response, or `null` when the caller must KEEP the sub-results
- * without synthesis (`keptWithoutSynthesis`): the call failed while landing,
- * or the run deadline fell during it. Explicit cancellation and deepening are
- * interruptions and rethrow; any other error before the deadline is an error.
- * Bounded by `withinSignal` because a transport may ignore abort.
+ * Returns the response, or why the caller must KEEP the sub-results without
+ * synthesis (`keptWithoutSynthesis`): the call failed or ran out of window
+ * while landing, or the run deadline fell during it. Explicit cancellation
+ * and deepening are interruptions and rethrow; any other error before the
+ * deadline is an error. Bounded by `withinSignal` because a transport may
+ * ignore abort.
  */
 export async function synthesizeOrKeep(
   ctx: RunContext,
   landed: boolean,
   call: (signal: AbortSignal) => Promise<LlmCompletionResponse>
-): Promise<LlmCompletionResponse | null> {
+): Promise<{ readonly response: LlmCompletionResponse } | { readonly keptBecause: string }> {
   const signal = landed ? landingSignal(ctx.deadlineAt) : ctx.signal;
   try {
-    return await withinSignal(call(signal), signal);
+    return { response: await withinSignal(call(signal), signal) };
   } catch (error) {
-    if (ctx.signal.aborted && !abortedByDeadline(ctx.signal)) throw error;
-    if (landed || abortedByDeadline(ctx.signal)) return null;
-    throw error;
+    if (ctx.signal.aborted && !abortedByDeadline(ctx)) throw error;
+    if (!landed && !abortedByDeadline(ctx)) throw error;
+    // Say what actually happened: a landing synthesis may also fail outright.
+    const keptBecause = !landed ? 'the run deadline fell during it'
+      : signal.aborted ? 'its landing window closed'
+      : `it failed while landing: ${(error instanceof Error ? error.message : String(error)).slice(0, 160)}`;
+    ctx.logger.warn(`[synthesis] not completed (${keptBecause}); keeping the sub-results as they are`);
+    return { keptBecause };
   }
 }
 
@@ -215,10 +221,9 @@ export async function synthesizeOrKeep(
 export function keptWithoutSynthesis(
   subResults: readonly Result[],
   producedBy: Result['producedBy'],
-  landed: boolean
+  why: string
 ): Result {
   const evidence = subResults.flatMap((result) => result.evidence ?? []);
-  const why = landed ? 'its landing window closed' : 'the run deadline fell during it';
   return {
     output: subResults.map((result) => result.output),
     summary: `${subResults.length} sub-results kept without synthesis (${why}): ${subResults

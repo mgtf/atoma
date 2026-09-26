@@ -203,14 +203,18 @@ export function finalizationSignal(deadlineAt?: number): AbortSignal | undefined
 }
 
 /**
- * Did the RUN DEADLINE abort this signal — as opposed to an explicit
+ * Did the RUN DEADLINE abort this context's signal — as opposed to an explicit
  * cancellation or a deepening, which are interruptions and never a landing?
  * The runner's deadline is `AbortSignal.timeout`, whose reason is a
- * `TimeoutError` DOMException (an `Error` on Node 24).
+ * `TimeoutError` DOMException (an `Error` on Node 24), and it always states
+ * `deadlineAt`. Without one there is no run deadline: a library caller's own
+ * `AbortSignal.timeout` is that caller asking to stop, so it is honoured as a
+ * cancellation, never a licence to finalize unbounded (2026-09-25 adversarial
+ * review).
  */
-export function abortedByDeadline(signal: AbortSignal | undefined): boolean {
-  if (!signal?.aborted) return false;
-  const reason: unknown = signal.reason;
+export function abortedByDeadline(ctx: { readonly signal?: AbortSignal; readonly deadlineAt?: number }): boolean {
+  if (ctx.deadlineAt === undefined || !ctx.signal?.aborted) return false;
+  const reason: unknown = ctx.signal.reason;
   return reason instanceof Error && reason.name === 'TimeoutError';
 }
 

@@ -4,6 +4,7 @@ import { openDb } from '../src/registry/db.js';
 import { L2Atom } from '../src/atoms/L2Atom.js';
 import { makeCtx, jsonText, jsonTextPair } from './helpers.js';
 import { TRUST_THRESHOLD_SUCCESSES } from '../src/atoms/cost.js';
+import { keptWithoutSynthesis, synthesizeOrKeep } from '../src/atoms/dispatch.js';
 
 /**
  * Phase 2/3 — `llm-synthesize` aggregation mode.
@@ -136,7 +137,7 @@ describe('L2.execute — llm-synthesize aggregation', () => {
 });
 
 describe('a synthesis the run deadline interrupts keeps its sub-results (2026-09-25 review, 1.2c)', () => {
-  function synthesisRun(abortWith: unknown) {
+  function synthesisRun(abortWith: unknown, deadlineAt: number | null = Date.now() + 60_000) {
     const reg = new AtomRegistry(openDb(':memory:'));
     const a = reg.create(1, seed);
     const b = reg.create(1, seed);
@@ -146,7 +147,7 @@ describe('a synthesis the run deadline interrupts keeps its sub-results (2026-09
     }
     const l2 = L2Atom.fromType(reg.create(2, seed), reg);
     const controller = new AbortController();
-    const ctx = { ...makeCtx(), signal: controller.signal };
+    const ctx = { ...makeCtx(), signal: controller.signal, ...(deadlineAt === null ? {} : { deadlineAt }) };
     ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'skip' }));
     ctx.llm.enqueueText(jsonTextPair(
       { strategy: 'reuse', target: a.name, reasoning: 'pf' },
@@ -177,5 +178,26 @@ describe('a synthesis the run deadline interrupts keeps its sub-results (2026-09
     const { l2, ctx } = synthesisRun(new Error('Cancelled by operator'));
     const plan = await l2.plan({ description: 'full app' }, ctx);
     await expect(l2.execute({ description: 'full app' }, plan, ctx)).rejects.toThrow('Cancelled by operator');
+  });
+
+  it('honours a library caller\'s own timeout as a cancellation when there is no run deadline', async () => {
+    const { l2, ctx } = synthesisRun(new DOMException('Caller timeout', 'TimeoutError'), null);
+    const plan = await l2.plan({ description: 'full app' }, ctx);
+    await expect(l2.execute({ description: 'full app' }, plan, ctx)).rejects.toThrow('Caller timeout');
+  });
+});
+
+describe('a landed synthesis says why it kept its sub-results (2026-09-25 adversarial review)', () => {
+  it('names the failure, not a closed window, when the landing synthesis call errors', async () => {
+    const warnings: string[] = [];
+    const ctx = { ...makeCtx(), deadlineAt: Date.now() + 60_000 };
+    const logged = { ...ctx, logger: { ...ctx.logger, warn: (message: string) => { warnings.push(message); } } };
+    const kept = await synthesizeOrKeep(logged, true, () => Promise.reject(new Error('provider 529 overloaded')));
+    expect(kept).toEqual({ keptBecause: 'it failed while landing: provider 529 overloaded' });
+    expect(warnings).toEqual([expect.stringContaining('it failed while landing: provider 529 overloaded')]);
+    const producedBy = { tier: 2 as const, name: 'Cell1', viaFallback: false };
+    const sub = { output: 'a', summary: 's', trace: [], producedBy };
+    expect(keptWithoutSynthesis([sub, sub], producedBy, (kept as { keptBecause: string }).keptBecause).unfinishedPhases)
+      .toEqual(['synthesis of 2 sub-results (it failed while landing: provider 529 overloaded)']);
   });
 });
