@@ -1189,5 +1189,8 @@
   "run.partial.next.imported": "يبدأ هذا المشروع كل عملية run من مستودعه على GitHub، ولم تُنشر هذه التغييرات هناك. ابدأ run جديدًا لإعادة المحاولة.",
   "run.partial.action.continue": "متابعة هذا المشروع",
   "run.partial.action.retry": "إعادة المحاولة",
-  "run.partial.details": "التفاصيل التقنية"
+  "run.partial.details": "التفاصيل التقنية",
+  "projects.runPartial.rerun": "لم يكتمل run المقارنة المُعاد. ويظل بجوار المشروع؛ أما run التالي للمشروع فيتابع عمل المشروع نفسه.",
+  "run.partial.next.rerun": "يظل run المقارنة المُعاد هذا بجوار المشروع لأغراض المقارنة: يتابع run التالي للمشروع عمل المشروع نفسه، لا عمل هذا run.",
+  "run.partial.next.superseded": "اكتمل منذ ذلك الحين run لاحق لهذا المشروع، لذا يتابع run التالي للمشروع انطلاقًا من ذلك run، لا من هذا run."
 }

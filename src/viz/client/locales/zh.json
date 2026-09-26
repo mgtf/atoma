@@ -1189,5 +1189,8 @@
   "run.partial.next.imported": "此项目的每次 run 都从其 GitHub 仓库开始，而这些更改尚未发布到该仓库。启动新的 run 以重试。",
   "run.partial.action.continue": "继续此项目",
   "run.partial.action.retry": "重试",
-  "run.partial.details": "技术详情"
+  "run.partial.details": "技术详情",
+  "projects.runPartial.rerun": "对比重跑，尚未完成。它会与项目并列保留；项目的下一次run将继续其自身工作。",
+  "run.partial.next.rerun": "此对比重跑会与项目并列保留，以供比较：项目的下一次run将继续项目自身的工作，而不是本次重跑。",
+  "run.partial.next.superseded": "此后，该项目较新的run已完成，因此项目的下一次run将从该次run继续，而不是从本次run继续。"
 }

@@ -1189,5 +1189,8 @@
   "run.partial.next.imported": "Proyek ini memulai setiap run dari repositori GitHub-nya, dan perubahan ini tidak dipublikasikan di sana. Mulai run baru untuk mencoba lagi.",
   "run.partial.action.continue": "Lanjutkan proyek ini",
   "run.partial.action.retry": "Coba lagi",
-  "run.partial.details": "Detail teknis"
+  "run.partial.details": "Detail teknis",
+  "projects.runPartial.rerun": "run ulang perbandingan, belum selesai. run ini tetap berada di samping proyek; run proyek berikutnya melanjutkan pekerjaannya sendiri.",
+  "run.partial.next.rerun": "run ulang perbandingan ini tetap berada di samping proyek untuk perbandingan: run proyek berikutnya melanjutkan pekerjaan proyek sendiri, bukan run ini.",
+  "run.partial.next.superseded": "run proyek ini yang lebih baru telah selesai, sehingga run proyek berikutnya melanjutkan dari run tersebut, bukan dari run ini."
 }

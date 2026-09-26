@@ -1189,5 +1189,8 @@
   "run.partial.next.imported": "Este proyecto inicia cada run desde su repositorio de GitHub, y estos cambios no se publicaron allí. Inicia un nuevo run para intentarlo de nuevo.",
   "run.partial.action.continue": "Continuar este proyecto",
   "run.partial.action.retry": "Intentar de nuevo",
-  "run.partial.details": "Detalles técnicos"
+  "run.partial.details": "Detalles técnicos",
+  "projects.runPartial.rerun": "Run de comparación repetido, no finalizado. Permanece junto al proyecto; el siguiente run del proyecto continúa con su propio trabajo.",
+  "run.partial.next.rerun": "Este run de comparación repetido permanece junto al proyecto para compararlo: el siguiente run del proyecto continúa con el trabajo del propio proyecto, no con este.",
+  "run.partial.next.superseded": "Desde entonces, ha finalizado un run posterior de este proyecto, por lo que el siguiente run del proyecto continúa a partir de aquel, no de este."
 }

@@ -1189,5 +1189,8 @@
   "run.partial.next.imported": "Ce projet démarre chaque run depuis son dépôt GitHub, et ces modifications n’y ont pas été publiées. Démarre un nouveau run pour réessayer.",
   "run.partial.action.continue": "Continuer ce projet",
   "run.partial.action.retry": "Réessayer",
-  "run.partial.details": "Détails techniques"
+  "run.partial.details": "Détails techniques",
+  "projects.runPartial.rerun": "Run de comparaison relancé, non terminé. Il reste à côté du projet ; le prochain run du projet poursuit son propre travail.",
+  "run.partial.next.rerun": "Ce run de comparaison relancé reste à côté du projet à des fins de comparaison : le prochain run du projet poursuit le travail propre au projet, pas celui de ce run.",
+  "run.partial.next.superseded": "Un run ultérieur de ce projet s’est terminé depuis. Le prochain run du projet reprend donc à partir de celui-là, et non de celui-ci."
 }
