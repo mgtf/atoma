@@ -56,7 +56,12 @@ export type RunLeaseAcquirer = (runId: string) => Promise<RunLease>;
 export class RunLockBusyError extends Error {
   constructor(
     message: string,
-    readonly owner?: RunLockOwner
+    readonly owner?: RunLockOwner,
+    /**
+     * `wedged`: the holder's server died and its run cannot be verified or
+     * reaped — the slot will not free itself without an operator.
+     */
+    readonly condition: 'held' | 'wedged' = 'held'
   ) {
     super(message);
     this.name = 'RunLockBusyError';
@@ -307,7 +312,8 @@ export async function acquireRunLease(
         if (childIdentity === 'unverifiable' || childIdentity === 'gone') {
           throw new RunLockBusyError(
             `the previous MCP server died while run ${stale.runId} left process group ${stale.childPgid}, but its birth identity cannot be verified; refusing to signal a possibly recycled group`,
-            stale
+            stale,
+            'wedged'
           );
         }
         if (childIdentity === 'match') {
@@ -315,7 +321,8 @@ export async function acquireRunLease(
           if (!gone) {
             throw new RunLockBusyError(
               `the previous MCP server died while run ${stale.runId} survived (process group ${stale.childPgid}); cleanup did not reach ESRCH after ${RUN_KILL_GRACE_MS + RUN_KILL_CONFIRM_MS}ms`,
-              stale
+              stale,
+              'wedged'
             );
           }
           // A surviving run was just DESTROYED to free the slot. Carry the

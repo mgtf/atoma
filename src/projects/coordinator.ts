@@ -240,10 +240,22 @@ export class ProjectRunBusy extends Error {
  * maintenance is the documented resource trade (`src/supervisor/AGENTS.md`);
  * saying so is what makes "retry in a few minutes" an honest answer.
  */
-export function tenantBusyMessage(owner: { readonly runId: string } | undefined): string {
+export function tenantBusyMessage(owner: { readonly runId: string } | undefined, condition: 'held' | 'wedged' = 'held'): string {
+  if (condition === 'wedged') {
+    return 'the run slot is held by a run the instance could not clean up; an operator has to release it before a new run can start';
+  }
   const holder = owner?.runId ?? '';
-  if (holder.startsWith('analyst:') || holder.startsWith('mender:')) {
+  if (holder.startsWith('analyst:')) {
     return 'the platform is reviewing a finished run and holds the one run slot for a few minutes; start this run again shortly';
+  }
+  if (holder.startsWith('mender:')) {
+    return 'the platform is preparing a fix for a finished run and holds the one run slot; start this run again later';
+  }
+  if (holder.startsWith('deployment:')) {
+    return 'the instance is being updated; start this run again in a few minutes';
+  }
+  if (holder.startsWith('maintenance:')) {
+    return 'the instance is running scheduled maintenance; start this run again shortly';
   }
   return 'another run is in progress on this instance; start this run again when it finishes';
 }
@@ -1260,7 +1272,7 @@ export class ProjectRunCoordinator {
         const retry = findRetry();
         if (retry) return retry;
         process.stderr.write(`[atoma projects] run refused, slot busy: ${error.message}\n`);
-        throw new ProjectRunBusy(tenantBusyMessage(error.owner));
+        throw new ProjectRunBusy(tenantBusyMessage(error.owner, error.condition));
       }
       throw error;
     }

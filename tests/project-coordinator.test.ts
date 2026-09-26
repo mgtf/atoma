@@ -1085,6 +1085,11 @@ describe('ProjectRunCoordinator', () => {
     expect(refusal?.message).toMatch(/reviewing a finished run .* start this run again shortly/);
     expect(refusal?.message).not.toMatch(/2463864|cc922a60|analyst:|pid/);
     expect(tenantBusyMessage({ runId: 'project:abc' })).toMatch(/another run is in progress/);
+    // Every holder the host has, told apart; a slot that will not free itself says so.
+    expect(tenantBusyMessage({ runId: 'mender:cc922a60' })).toMatch(/preparing a fix/);
+    expect(tenantBusyMessage({ runId: 'deployment:4242' })).toMatch(/being updated/);
+    expect(tenantBusyMessage({ runId: 'maintenance:retention' })).toMatch(/scheduled maintenance/);
+    expect(tenantBusyMessage({ runId: 'project:abc' }, 'wedged')).toMatch(/an operator has to release it/);
   });
 });
 

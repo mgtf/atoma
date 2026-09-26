@@ -249,6 +249,29 @@ describe('MCP cross-process run lease', () => {
     }
   });
 
+  it.skipIf(process.platform === 'win32')('marks a slot whose dead holder left an unverifiable run as wedged, not merely held', async () => {
+    // The caller tells a tenant "an operator has to release it" rather than
+    // "start again when it finishes": this slot never frees itself.
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: ['ignore', 'ignore', 'ignore'] });
+    if (!child.pid) throw new Error('child pid unavailable');
+    await new Promise<void>((resolveSpawn, rejectSpawn) => { child.once('spawn', resolveSpawn); child.once('error', rejectSpawn); });
+    try {
+      const db = inspect();
+      db.prepare(
+        `INSERT INTO mcp_run_lease
+         (singleton, token, run_id, owner_pid, child_pgid, acquired_at, owner_fingerprint, child_fingerprint)
+         VALUES (1, 'dead-owner', 'project:orphan', 99999999, ?, ?, NULL, NULL)`
+      ).run(child.pid, new Date().toISOString());
+      db.close();
+      await expect(acquireRunLease('next-run', lockPath)).rejects.toMatchObject({ condition: 'wedged' });
+      let plain: unknown;
+      try { acquireRunLeaseWithoutRecovery('maintenance:check', lockPath).release(); } catch (error) { plain = error; }
+      expect(plain).toMatchObject({ condition: 'held' });
+    } finally {
+      forceKillTestProcessTree(child.pid);
+    }
+  });
+
   it('records the detached child and never deletes a successor lease', async () => {
     const lease = await acquireRunLease('run-one', lockPath);
     lease.attachChild(4242);
