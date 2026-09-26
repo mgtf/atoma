@@ -459,7 +459,9 @@ export const STATIC_PORTABLE_DOC_GUIDANCE = [
   ...PORT_PLACEHOLDER_LINES,
   `The URL start_static_server returned belongs in run evidence/results only,`,
   `never in README or docs: a README that records measurements names the page`,
-  `and the widths, not the port it was served on.`,
+  `and the widths, not the port it was served on. The review flags ANY numeric`,
+  `loopback port in docs, a conventional one such as \`localhost:8000\` too, unless`,
+  `the task itself requires that fixed port: write \`localhost:<port>\`.`,
 ].join('\n');
 
 /** Durable HTTP docs must not capture the one port assigned to this run. */

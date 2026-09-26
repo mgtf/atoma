@@ -42,9 +42,15 @@ export function describeInvalidArguments(argumentsJson: string): string {
     parsed = JSON.parse(argumentsJson);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const position = /position (\d+)/.exec(message);
+    // Anchored: V8's "Unexpected token" form carries no position but echoes
+    // input, which may itself contain the words "position 12".
+    const position = / in JSON at position (\d+)/.exec(message);
     const at = position ? Number(position[1]) : -1;
-    const near = at >= 0 ? `, near ${JSON.stringify(argumentsJson.slice(Math.max(0, at - 40), at + 40))}` : '';
+    // A raw control character shows as <U+000A>, never as `\n`: that spelling
+    // is the correct escape the hint asks for, and would read as present.
+    const visible = (text: string): string => [...text]
+      .map((char) => (char.charCodeAt(0) < 0x20 ? `<U+${char.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}>` : char)).join('');
+    const near = at >= 0 ? `, near ${JSON.stringify(visible(argumentsJson.slice(Math.max(0, at - 40), at + 40)))}` : '';
     const control = at >= 0 && at < argumentsJson.length && argumentsJson.charCodeAt(at) < 0x20
       ? ' The character there is a raw control character: inside a string value write it escaped (a newline is \\n in the arguments JSON).'
       : '';

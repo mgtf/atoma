@@ -50,7 +50,7 @@ export function observedLayoutsBlock(ctx: RunContext): string {
   if (layouts.size === 0) return '';
   return 'BROWSER LAYOUTS OBSERVED IN THIS ATTEMPT (mechanical, from the attested observations): ' +
     [...layouts].map(([document, sizes]) => `${document} at ${[...sizes].join(', ')}`).join('; ') +
-    '. No page was laid out at any other size in this attempt, whatever a summary or a README claims.';
+    '. validate_html laid pages out at no other size in this attempt.';
 }
 
 /** Root proof is stricter than phase proof: no binding or unreadable bytes never cover. */

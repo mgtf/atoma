@@ -990,7 +990,8 @@ describe('Codex L1 host-side action loop', () => {
     // (production run c4c270f9, eight blind whole-file retries).
     const error = observe.mock.calls[0]?.[0].error as string;
     expect(error).toMatch(/JSON\.parse: .*position \d+/);
-    expect(error).toContain('near "{\\"path\\":\\"proof.txt\\",\\"content\\":\\"hello\\nworld');
+    // The raw newline reads as <U+000A>, never as the `\n` escape it should have been.
+    expect(error).toContain('near "{\\"path\\":\\"proof.txt\\",\\"content\\":\\"hello<U+000A>world');
     expect(error).toContain('raw control character');
     expect(inputs[1]).toContain('raw control character');
     expect(result.usage).toMatchObject({ inputTokens: 24, outputTokens: 9 });
@@ -1001,6 +1002,8 @@ describe('Codex L1 host-side action loop', () => {
     const action = JSON.parse(example) as { argumentsJson: string };
     expect(JSON.parse(action.argumentsJson)).toEqual({ path: 'a.txt', content: 'line one\nline two' });
     expect(describeInvalidArguments('[1]')).toMatch(/decodes to an array, not an object/);
+    // "position" inside echoed input is not the parser's position.
+    expect(describeInvalidArguments('position 12 x')).not.toContain('near');
   });
   it('bounds repeated invalid arguments by the existing tool budget', async () => {
     const execute = vi.fn();
