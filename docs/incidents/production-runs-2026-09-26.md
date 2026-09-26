@@ -124,3 +124,35 @@ position. Known limit kept: a task-augmented caller gets no progress on its
 - **O3** — R2's single-line page is I4's customer-visible cost.
 - **O4** — R7 published five scratch probe files (`probe-*.csv`,
   `probe-schema.json`) into the customer's repository.
+- **O5** — R8's cell validator judged the page on a `read_file` of
+  `index.html` taken before the rewrite ("appears to embed CSS/JS inline");
+  the evidence block calls such lines historical, and a cheap validator still
+  read one as the current state.
+
+## Second round, on revision `18371ce`
+
+| Run | Checks | Outcome | Duration | Cost |
+|---|---|---|---|---|
+| R8 `74fe5cec` | I4: dashboard rewritten into formatted files, sample CSV, README | failed at the 30-minute budget | 1804 s | $0.397 |
+| R9 `fbdaeb59` | I5: estimator verified at 375 and 1280 px | delivered | 501 s | $0.099 |
+| R10 `2ee46cd5` | I6/I7: continuation of partial `5a5f1e27` | delivered | 442 s | $0.087 |
+
+- **I3 closed.** All three starts were made WITHOUT task augmentation and
+  each call stayed open to its terminal result, R8 for thirty minutes; none
+  was cut at 300 s.
+- **I4 closed.** R8 had ONE refused write, whose observation named the cause
+  (an unescaped quote in a CSS font list, position 352); the next write went
+  through 33 s later. The first round's R2 had eight blind retries.
+- **I5 closed.** R9's acceptor read "index.html at 800x600, 1280x900,
+  375x900" and approved on smokes whose `innerWidth` was 375 and 1280.
+- **I7 closed.** R10 delivered the very bytes R5 was refused for: `index.html`
+  and `README.md` carry the same digests. The refusal was the dropped
+  assertion, not the work.
+- **I8 — the README's own example could not be verified.** R8 failed because
+  its cell kept rejecting "uploading a CSV replaces the data": the page did
+  it, and nothing could show it. A click on a file input opens a native
+  chooser a headless page cannot answer, and `validate_html` had no other
+  way in. Every attempt re-tried the upload until the deadline; no phase was
+  accepted, so nothing landed. Fixed after the round: an `upload`
+  interaction attaches a workspace file to the input, firing its input and
+  change events, resolved inside the sandbox and refused through a symlink.

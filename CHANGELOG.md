@@ -22,6 +22,9 @@ corrections of the 2026-09-24 and 2026-09-25 code reviews.
   log) and persisted Git publication destinations.
 - `validate_html` lays a page out at a requested viewport.
 
+- Browser checks can attach a workspace file to a file input, so a page that
+  uploads a CSV can be verified.
+
 ### Fixed
 
 - A rerun row naming a model the catalogue later retires no longer breaks its
