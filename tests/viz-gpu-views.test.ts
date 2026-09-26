@@ -5127,6 +5127,18 @@ describe('drawRuns behavior', () => {
     expect(collapsed.atomButtons.some((button) => button.label === 'Ammonia')).toBe(false);
   });
 
+  it('shows the models a run was launched with, once expanded (2026-09-25 review, 2.13)', () => {
+    const run = { ...makeRun(eventsWithRoles()), tierModels: { l1: 'own:openai:gpt-5.6-luna', l2: 'own:openai:gpt-5.6-terra', l3: 'own:openai:gpt-5.6-sol' } };
+    const expanded = createRecordingCtx();
+    drawRuns(expanded, makeSnapshot({ runSummaryExpanded: true }, { run }), WIDTH, HEIGHT);
+    const texts = expanded.texts.map((entry) => String(entry.value));
+    expect(texts).toContain(t('summary.tierModels').toUpperCase());
+    expect(texts).toContain('L2 · own:openai:gpt-5.6-terra');
+    const collapsed = createRecordingCtx();
+    drawRuns(collapsed, makeSnapshot({ runSummaryExpanded: false }, { run }), WIDTH, HEIGHT);
+    expect(collapsed.texts.map((entry) => String(entry.value))).not.toContain('L2 · own:openai:gpt-5.6-terra');
+  });
+
   it('keeps atom lanes in the single-pane left column regardless of expansion', () => {
     // Below RUNS_TWO_PANE_MIN_WIDTH there is no RUN summary card to hide them
     // in, so the left column keeps the row it always had.

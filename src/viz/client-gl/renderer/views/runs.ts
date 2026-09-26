@@ -1460,6 +1460,27 @@ function drawRunSummaryCard(
       }
       cursor += 6;
     }
+    // The models the run was LAUNCHED with, per tier — what a comparison rerun
+    // is compared against. Recorded on every trace since 7374572 and, until
+    // 2026-09-26, shown only by the frozen MUI client (2026-09-25 review, 2.13).
+    if (run.tierModels) {
+      ctx.text(block, snapshot.t('summary.tierModels').toUpperCase(), padX, cursor, {
+        size: 9,
+        weight: '700',
+        color: GPU_COLORS.muted,
+      });
+      cursor += 16;
+      for (const tier of ['l1', 'l2', 'l3'] as const) {
+        const line = ctx.text(block, `${tier.toUpperCase()} · ${run.tierModels[tier]}`, padX, cursor, {
+          size: RUNS_FACTS_SIZE,
+          color: GPU_COLORS.text,
+          width: innerWidth,
+          singleLine: true,
+        });
+        cursor += line.height + 2;
+      }
+      cursor += 6;
+    }
     // Atoms used ride below the metrics, expansion-only: this card's
     // collapsed height is a verdict-plus-metrics glance, not a registry dump.
     if (atoms.size) {
