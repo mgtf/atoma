@@ -852,7 +852,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
             skills.ownerNs,
             // The atom that runs it, which under the shared catalog is not
             // the atom whose namespace supplied it.
-            l1Type.name,
+            l1Type,
             subTask,
             ctx
           );
@@ -1112,7 +1112,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
   private async runScriptSkillDirect(
     skill: Skill,
     l1Name: SkillNamespace,
-    executorName: string,
+    executor: { readonly atomId: string; readonly name: string },
     subTask: Task,
     ctx: RunContext
   ): Promise<Result | null> {
@@ -1120,9 +1120,10 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       (await this.lifecycle()?.runScriptSkillDirect(
         skill,
         l1Name,
-        executorName,
+        executor.name,
         subTask,
-        ctx
+        ctx,
+        executor.atomId
       )) ?? null
     );
   }
@@ -1302,6 +1303,9 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         op: 'inject',
         l1Name: this.displayNameForNamespace(skillCtx.l1Name),
         l1AtomId: skillCtx.l1Name,
+        // A branched instance is another atom than the home namespace: name
+        // who RUNS the recipe, as every other skill event does (review 2.8).
+        ...skillEventExecutor(skillCtx.l1Name, child),
         skillId: match.skill.id,
         actorName: this.name,
         actorTier: 2,

@@ -1281,8 +1281,11 @@ export class SkillLifecycle {
      */
     executorName: string,
     subTask: Task,
-    ctx: RunContext
+    ctx: RunContext,
+    /** Identity of that executor, so a demotion names who ran the script too. */
+    executorAtomId?: string
   ): Promise<Result | null> {
+    const executor = executorAtomId ? { atomId: executorAtomId, name: executorName } : undefined;
     if (!skill.language) return null;
     if (!scriptDeclaresEnvelope(skill.body)) {
       ctx.logger.debug(
@@ -1341,7 +1344,7 @@ export class SkillLifecycle {
           `[${this.host.name}] direct dispatch of ${skill.id} failed (exit=${res?.exitCode ?? '?'}; stderr=${(res?.stderr ?? '').slice(0, 200)}) — falling back to the LLM loop`
         );
         ctx.recordRunStat?.('dispatch-fallback');
-        this.noteDirectFailure(l1Name, skill, ctx);
+        this.noteDirectFailure(l1Name, skill, ctx, executor);
         return null;
       }
       const envelope = parseScriptEnvelope(res.stdout);
@@ -1350,7 +1353,7 @@ export class SkillLifecycle {
           `[${this.host.name}] direct dispatch of ${skill.id}: stdout carried no {"output","summary"} envelope — falling back to the LLM loop`
         );
         ctx.recordRunStat?.('dispatch-fallback');
-        this.noteDirectFailure(l1Name, skill, ctx);
+        this.noteDirectFailure(l1Name, skill, ctx, executor);
         return null;
       }
       // DELIVERABLE GATE. The envelope parse is the only thing standing
@@ -1516,7 +1519,12 @@ export class SkillLifecycle {
    * deliberately do NOT come through this method; only the two contract
    * branches (non-zero exit / missing envelope) do.
    */
-  noteDirectFailure(l1Name: SkillNamespace, skill: Skill, ctx: RunContext): void {
+  noteDirectFailure(
+    l1Name: SkillNamespace,
+    skill: Skill,
+    ctx: RunContext,
+    executor?: { readonly atomId: string; readonly name: string }
+  ): void {
     const streak = this.skills.markDirectFailure(l1Name, skill.id);
     if (streak < demoteAfter()) return;
     const demoted = this.skills.demoteToLlm(l1Name, skill.id);
@@ -1553,6 +1561,7 @@ export class SkillLifecycle {
       op: 'demote',
       l1Name: this.displayName(l1Name),
       l1AtomId: l1Name,
+      ...skillEventExecutor(l1Name, executor),
       skillId: skill.id,
       actorName: this.host.name,
       actorTier: 2,

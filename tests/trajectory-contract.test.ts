@@ -424,3 +424,45 @@ describe('on five real traces reduced to the fields it reads', () => {
     expect(referenceSamples(reference, { l1Name: 'Dopamine', skillId: null, keyedBy: 'atom' })).toHaveLength(0);
   });
 });
+
+describe('a direct dispatch opens no execution (2026-09-25 review, 2.8)', () => {
+  let n = 0;
+  const id = (prefix: string) => `${prefix}-${++n}`;
+  const skill = (op: string, l1Name: string, skillId: string, extra: Record<string, unknown> = {}) =>
+    ({ kind: 'skill', id: id('skill'), op, l1Name, skillId, ...extra });
+  const execution = (actor: string, exec: string, tools: string[], branchId: string) => [
+    ...tools.map((name) => ({ kind: 'tool', id: id('tool'), llmEventId: exec, name, actor: { name: actor, tier: 1 }, branchId })),
+    { kind: 'llm', id: exec, actor: { name: actor, tier: 1 }, branchId },
+  ];
+  const trust = (child: string, branchId: string) =>
+    ({ kind: 'trust', id: id('trust'), subject: 'RESULT', child: { name: child, tier: 1 }, branchId });
+  const branch = (branchId: string, parentBranchId?: string) =>
+    ({ kind: 'branch', id: id('branch'), op: 'start', branchId, ...(parentBranchId ? { parentBranchId } : {}) });
+  const derive = (events: unknown[]) =>
+    deriveTrajectorySignatures('run', events as Parameters<typeof deriveTrajectorySignatures>[1]);
+
+  it('does not hand a direct dispatch\'s skill to the executor\'s next, unrelated execution', () => {
+    const signatures = derive([
+      branch('L2'),
+      skill('direct', 'Ammonia', 'script-a', { executorName: 'CarbonDioxide', branchId: 'L2' }),
+      skill('success', 'Ammonia', 'script-a', { executorName: 'CarbonDioxide', branchId: 'L2' }),
+      branch('sub2', 'L2'),
+      ...execution('CarbonDioxide', 'x2', ['write_file', 'run_shell'], 'sub2'),
+      trust('CarbonDioxide', 'sub2'),
+    ]);
+    expect(signatures).toHaveLength(1);
+    expect(signatures[0]!.key).toMatchObject({ l1Name: 'CarbonDioxide', skillId: null, keyedBy: 'atom' });
+  });
+
+  it('never credits a rejected execution with a later direct success', () => {
+    const signatures = derive([
+      branch('L2'),
+      branch('sub1', 'L2'),
+      ...execution('CarbonDioxide', 'x1', ['write_file', 'validate_html'], 'sub1'),
+      skill('direct', 'Ammonia', 'script-a', { executorName: 'CarbonDioxide', branchId: 'L2' }),
+      skill('success', 'Ammonia', 'script-a', { executorName: 'CarbonDioxide', branchId: 'L2' }),
+    ]);
+    expect(signatures).toHaveLength(1);
+    expect(signatures[0]!.credited).toBe(false);
+  });
+});

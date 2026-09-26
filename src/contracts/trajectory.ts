@@ -243,6 +243,11 @@ export function deriveTrajectorySignatures(
     );
   };
 
+  // Direct dispatches awaiting their own `success`, which credits nothing.
+  const directs = new Set<string>();
+  const directKey = (l1Name: string, skillId: string, branchId: string | null): string =>
+    JSON.stringify([l1Name, skillId, branchId]);
+
   const credit = (l1Name: string, branchId: string | null, skillId: string | null): void => {
     const queue = awaiting.get(l1Name);
     if (!queue || queue.length === 0) return;
@@ -325,11 +330,19 @@ export function deriveTrajectorySignatures(
         const l1Name = event.executorName ?? event.l1Name;
         const skillId = event.skillId;
         if (!l1Name || !skillId) return;
-        if (event.op === 'inject' || event.op === 'direct') {
+        if (event.op === 'inject') {
           const queue = pending.get(l1Name) ?? [];
           queue.push({ skillId, branchId: event.branchId ?? null });
           pending.set(l1Name, queue);
+        } else if (event.op === 'direct') {
+          // A DIRECT dispatch runs a compiled script with no model call, so it
+          // opens no execution: pending, it was handed to the executor's NEXT
+          // unrelated execution, and its `success` credited whatever execution
+          // was still open — a rejected one included (2026-09-25 review, 2.8).
+          directs.add(directKey(l1Name, skillId, event.branchId ?? null));
         } else if (event.op === 'success') {
+          const key = directKey(l1Name, skillId, event.branchId ?? null);
+          if (directs.delete(key)) return;
           credit(l1Name, event.branchId ?? null, skillId);
         }
         return;
