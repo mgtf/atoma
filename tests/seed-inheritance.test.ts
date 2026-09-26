@@ -80,6 +80,20 @@ describe('inheritProbeManifest', () => {
     const once = inheritProbeManifest(JSON.stringify(INHERITED)).text!;
     expect(inheritProbeManifest(once)).toMatchObject({ text: once, dropped: 0 });
   });
+
+  it('keeps a harness entry that recorded its bound port, without the run-varying stdout (review 2.9)', () => {
+    // The HTTP writer contract makes this entry MANDATORY, and the reader
+    // compares it on its exit code alone: it is replayable, and it is the
+    // anchor a compiled verifier replays against.
+    const harness = { cmd: 'node test-api.js', exitCode: 0, stdout: 'LISTENING_ON_PORT=41234\nall green\n' };
+    const out = inheritProbeManifest(JSON.stringify({ version: 1, entries: [INHERITED.entries[0], harness] }));
+    expect(out).toMatchObject({ kept: 2, dropped: 0, repaired: 1 });
+    const doc = JSON.parse(out.text!) as { entries: unknown[] };
+    expect(doc.entries[1]).toEqual({ cmd: 'node test-api.js', exitCode: 0 });
+    expect(validateProbeManifest(out.text!)).toEqual([]);
+    // And the repaired document is stable.
+    expect(inheritProbeManifest(out.text!)).toMatchObject({ text: out.text, repaired: 0, dropped: 0 });
+  });
 });
 
 describe('seedWorkspace', () => {

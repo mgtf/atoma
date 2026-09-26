@@ -30,7 +30,9 @@ Neighbours:
 - A SEEDED workspace inherits the manifest as a replay baseline, filtered by
   `inheritProbeManifest`: an entry `probeEntryProblems` rejects is dropped, one
   by one (HTTP included — a seeded HTTP list is several runs' appends, not one
-  sequence), and a clean manifest is copied byte for byte. That per-entry
+  sequence), except a shell entry whose only flaw is a port-bearing stdout,
+  which is REPAIRED (stdout omitted: the reader compares its exit code), and a
+  clean manifest is copied byte for byte. That per-entry
   function is the one definition of a well-formed entry; `validateProbeManifest`
   is built on it. Do not stamp provenance into entries: web entries and
   compiled verifiers rewrite them whole, so a stamp depends on its writers.

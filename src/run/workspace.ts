@@ -109,6 +109,8 @@ export interface SeedReport {
   readonly manifest: 'absent' | 'kept' | 'filtered' | 'removed';
   readonly kept: number;
   readonly dropped: number;
+  /** Kept entries whose port-bearing stdout was omitted to keep them replayable. */
+  readonly repaired?: number;
   readonly problems: readonly string[];
 }
 
@@ -148,11 +150,12 @@ export function seedWorkspace(seedRoot: string, workspaceRoot: string): SeedRepo
     rmSync(manifestPath, { force: true });
     return { entries, manifest: 'removed', kept: 0, dropped: inherited.dropped, problems };
   }
-  if (inherited.dropped === 0) {
+  if (inherited.dropped === 0 && inherited.repaired === 0) {
     return { entries, manifest: 'kept', kept: inherited.kept, dropped: 0, problems: [] };
   }
   writeFileSync(manifestPath, inherited.text);
-  return { entries, manifest: 'filtered', kept: inherited.kept, dropped: inherited.dropped, problems };
+  return { entries, manifest: 'filtered', kept: inherited.kept, dropped: inherited.dropped,
+    ...(inherited.repaired > 0 ? { repaired: inherited.repaired } : {}), problems };
 }
 
 /** The launch-log line for a seed manifest that changed, or null when none did. */
@@ -161,5 +164,5 @@ export function describeSeedManifest(report: SeedReport): string | null {
   const detail = report.problems.length > 0 ? ` — ${report.problems.join('; ')}` : '';
   return report.manifest === 'removed'
     ? `seed ${PROBE_MANIFEST_FILENAME}: not inherited, nothing replayable (${report.dropped} entries dropped)${detail}`
-    : `seed ${PROBE_MANIFEST_FILENAME}: kept ${report.kept} entries, dropped ${report.dropped} unreplayable${detail}`;
+    : `seed ${PROBE_MANIFEST_FILENAME}: kept ${report.kept} entries${report.repaired ? ` (${report.repaired} without their run-varying stdout)` : ''}, dropped ${report.dropped} unreplayable${detail}`;
 }

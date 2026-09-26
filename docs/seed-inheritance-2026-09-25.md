@@ -61,7 +61,10 @@ learn what the workspace is. Excluding it keeps nothing and costs all of that.
   runs keep the empty directory decided on 2026-09-13.
 
 No reader changed. Every reader sees what it saw before, minus entries no
-reader could replay.
+reader could replay. One entry is repaired rather than dropped: a harness
+shell entry whose recorded stdout carries the bound port keeps its `cmd` and
+`exitCode` — exactly what the reader compares for it — because dropping it
+lost a compiled verifier's replay anchor (2026-09-25 review, 2.9).
 
 ## The review, and what it changed
 

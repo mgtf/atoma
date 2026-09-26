@@ -542,6 +542,8 @@ export interface InheritedProbeManifest {
   readonly text: string | null;
   readonly kept: number;
   readonly dropped: number;
+  /** Kept entries REPAIRED on the way: a run-varying port-bearing stdout omitted. */
+  readonly repaired: number;
   /** The first problems of the dropped entries, for the launch log. */
   readonly problems: readonly string[];
   /** The document itself did not parse as a version-1 manifest. */
@@ -566,9 +568,18 @@ export interface InheritedProbeManifest {
  * whose shape it does not recognise, so dropping only the malformed one
  * changes nothing a replayer would have done.
  */
+/** The entry with its run-varying stdout omitted, when that stdout names a bound port. */
+function portBearingStdoutRepair(entry: unknown): Record<string, unknown> | null {
+  if (!isPlainRecord(entry) || typeof entry['stdout'] !== 'string' || !PORT_BEARING_STDOUT_RE.test(entry['stdout'])) {
+    return null;
+  }
+  const { stdout: _stdout, ...rest } = entry;
+  return rest;
+}
+
 export function inheritProbeManifest(raw: string): InheritedProbeManifest {
   const none = (unreadable: boolean): InheritedProbeManifest => ({
-    text: null, kept: 0, dropped: 0, problems: [], unreadable,
+    text: null, kept: 0, dropped: 0, repaired: 0, problems: [], unreadable,
   });
   let parsed: unknown;
   try {
@@ -582,19 +593,28 @@ export function inheritProbeManifest(raw: string): InheritedProbeManifest {
   const entries = parsed['entries'] as unknown[];
   const kept: unknown[] = [];
   const problems: string[] = [];
+  let repaired = 0;
   entries.forEach((entry, i) => {
     const found = probeEntryProblems(entry, i);
-    if (found.length === 0) kept.push(entry);
-    else problems.push(...found);
+    if (found.length === 0) { kept.push(entry); return; }
+    // A hand-written harness entry whose stdout carries the bound port is
+    // REPLAYABLE on its exit code, which is exactly what the reader contract
+    // compares for such an entry, and it is the anchor a compiled verifier
+    // replays against. Omitting the stdout repairs it; dropping it lost the
+    // anchor (2026-09-25 review, 2.9).
+    const repair = portBearingStdoutRepair(entry);
+    if (repair && probeEntryProblems(repair, i).length === 0) { kept.push(repair); repaired += 1; return; }
+    problems.push(...found);
   });
   const dropped = entries.length - kept.length;
   if (kept.length === 0) {
-    return { text: null, kept: 0, dropped, problems: problems.slice(0, 4), unreadable: false };
+    return { text: null, kept: 0, dropped, repaired: 0, problems: problems.slice(0, 4), unreadable: false };
   }
   return {
-    text: dropped === 0 ? raw : `${JSON.stringify({ ...parsed, version: 1, entries: kept }, null, 2)}\n`,
+    text: dropped === 0 && repaired === 0 ? raw : `${JSON.stringify({ ...parsed, version: 1, entries: kept }, null, 2)}\n`,
     kept: kept.length,
     dropped,
+    repaired,
     problems: problems.slice(0, 4),
     unreadable: false,
   };
