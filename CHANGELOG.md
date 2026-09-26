@@ -42,6 +42,17 @@ corrections of the 2026-09-24 and 2026-09-25 code reviews.
 - A deepening keeps the project's document search.
 - Runner logs, run errors and publication errors served to tenants no longer
   carry host paths.
+- A run start over MCP without task augmentation sends progress to a caller
+  that asked for it, so clients that give up on a silent call no longer cut
+  runs past five minutes.
+- A validator reads what a browser check asserted, not only what it returned,
+  and the delivery review names the sizes each page was laid out at.
+- The static-web worker is told to write `<port>` in documentation, the rule
+  its README is judged by.
+- A Codex tool call with invalid arguments is told the parser's error and
+  where it stands; the protocol shows how to encode a multi-line file.
+- A run refused because the one run slot is busy says why, without host
+  details.
 
 ## v0.4.0 — 2026-09-17
 

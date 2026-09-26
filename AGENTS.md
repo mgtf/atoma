@@ -458,6 +458,7 @@ The frozen record contains the full dated reasoning behind these rules:
 - [what a seeded run inherits: the probe manifest and the deepening restart — 2026-09-25](docs/seed-inheritance-2026-09-25.md)
 - [the acceptance checklist: a run says what it will prove — 2026-09-25](docs/acceptance-checklist-2026-09-25.md)
 - [the acceptance checklist on its first real runs: stale local builds, compound items — 2026-09-25](docs/incidents/checklist-first-runs-2026-09-25.md)
+- [production runs over the README use cases: seven runs, seven incidents — 2026-09-26](docs/incidents/production-runs-2026-09-26.md)
 - [external code review](docs/code-review-2026-08-14.md)
 - [code review 2026-08-18](docs/code-review-2026-08-18.md)
 - [supervisor-held proof attestation (A1) design review 2026-08-22](docs/supervisor-attestation-a1-review-2026-08-22.md)
