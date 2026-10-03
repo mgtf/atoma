@@ -110,6 +110,13 @@ describe('L2.execute — sequential dispatch', () => {
     const planPhase1 = ctx.llm.calls[2]!.userContent;
     const planPhase2 = ctx.llm.calls[4]!.userContent;
     const planPhase3 = ctx.llm.calls[6]!.userContent;
+    // Every sequential phase and its validator can see how much of the
+    // schedule remains, so evidence recovery can preserve later phases.
+    expect(planPhase1).toContain('"atomaSequentialSchedule"');
+    expect(planPhase1).toContain('"totalPhases":3');
+    expect(planPhase1).toContain('phase-2: extend');
+    expect(planPhase1).toContain('phase-3: smoke');
+    expect(planPhase3).toContain('"remainingPhases":[]');
     // Phase 1 has no prior step → no threading marker in its inputs.
     expect(planPhase1).not.toContain('"previousStepSummary":');
     // Phase 2 sees phase 1's summary; phase 3 sees phase 2's summary.
@@ -171,6 +178,7 @@ describe('L2.execute — sequential dispatch', () => {
     for (const call of ctx.llm.calls) {
       expect(call.userContent).not.toContain('"previousStepSummary":');
       expect(call.userContent).not.toContain('"previousStepOutputs"');
+      expect(call.userContent).not.toContain('"atomaSequentialSchedule"');
     }
   });
 });

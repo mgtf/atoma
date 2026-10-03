@@ -85,21 +85,36 @@ export async function dispatchWithAggregation(
         return { results: out, unfinished: subtasks.slice(idx) };
       }
       const baseSubtask = subtasks[idx]!;
-      const subtask =
-        previousSummary !== undefined
-          ? {
-              ...baseSubtask,
-              inputs: {
-                ...(baseSubtask.inputs ?? {}),
+      // Give the phase (and its result validator) the schedule it is spending
+      // from. A validator can then consolidate recorded probes instead of
+      // unknowingly consuming later phases, while contradictions still take
+      // the normal validation path.
+      const schedule = {
+        phase: idx + 1,
+        totalPhases: subtasks.length,
+        remainingPhases: subtasks.slice(idx + 1).map((item) => item.description),
+        recordedProbeCountFromCompletedPhases: out.reduce(
+          (count, item) => count + (item.evidence?.length ?? 0),
+          0
+        ),
+      };
+      const subtask = {
+        ...baseSubtask,
+        inputs: {
+          ...(baseSubtask.inputs ?? {}),
+          atomaSequentialSchedule: schedule,
+          ...(previousSummary !== undefined
+            ? {
                 previousStepSummary: previousSummary,
                 previousStepResult: previousResult,
                 previousStepIndex: idx - 1,
                 ...(previousOutputs && previousOutputs.length > 0
                   ? { previousStepOutputs: previousOutputs }
                   : {}),
-              },
-            }
-          : baseSubtask;
+              }
+            : {}),
+        },
+      };
       let r: Result;
       try {
         r = await runOne(subtask, idx);
